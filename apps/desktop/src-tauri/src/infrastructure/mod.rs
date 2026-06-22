@@ -1,4 +1,10 @@
+pub mod acp;
+pub mod agent_catalog;
+pub mod agent_session_registry;
 pub mod git_cli_branch_provider;
 pub mod git_cli_remote_provider;
 pub mod git_cli_worktree_provider;
 pub mod json_project_repository;
+pub mod noop_acp_session_store;
+pub mod permission_broker;
+pub mod tauri_run_event_sink;

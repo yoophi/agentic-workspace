@@ -1,20 +1,29 @@
 use serde::Deserialize;
-use tauri::AppHandle;
+use std::sync::Arc;
+use tauri::{AppHandle, State};
 
 use crate::{
-    application::{git_branch_service, git_remote_service, git_worktree_service, project_service},
+    application::{
+        cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
+        git_worktree_service, project_service, start_agent_run::StartAgentRunUseCase,
+    },
     domain::{
+        agent::AgentDescriptor,
         git_branch::GitBranch,
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
         project::{Project, ProjectDraft},
+        run::{AgentRun, AgentRunRequest},
     },
     infrastructure::{
-        git_cli_branch_provider::GitCliBranchProvider,
+        acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
+        agent_session_registry::AppState, git_cli_branch_provider::GitCliBranchProvider,
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
         json_project_repository::JsonProjectRepository,
+        noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
     },
+    ports::agent_catalog::AgentCatalog,
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -85,4 +94,53 @@ pub fn create_git_worktree(
 #[tauri::command]
 pub fn delete_git_worktree(working_directory: String, path: String) -> Result<(), String> {
     git_worktree_service::delete_git_worktree(&GitCliWorktreeProvider, working_directory, path)
+}
+
+#[tauri::command]
+pub fn list_agents() -> Vec<AgentDescriptor> {
+    ConfigurableAgentCatalog::from_env().list_agents()
+}
+
+#[tauri::command]
+pub async fn start_agent_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut request: AgentRunRequest,
+) -> Result<AgentRun, String> {
+    if request.run_id.as_deref().is_none_or(str::is_empty) {
+        request.run_id = Some(uuid::Uuid::new_v4().to_string());
+    }
+    request.workspace_id = None;
+    request.checkout_id = None;
+    request.resume_session_id = None;
+    request.resume_policy = None;
+    request.ralph_loop = None;
+
+    let sink = TauriRunEventSink::new(app, state.inner().clone());
+    let registry = state.inner().clone();
+    let permissions = state.permissions();
+    let runner = AcpAgentRunner::new(
+        ConfigurableAgentCatalog::from_env(),
+        permissions,
+        Arc::new(NoopAcpSessionStore),
+    );
+
+    StartAgentRunUseCase::new(registry)
+        .execute(runner, sink, request, None)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn cancel_agent_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    run_id: String,
+) -> Result<(), String> {
+    let sink = TauriRunEventSink::new(app, state.inner().clone());
+    let registry = state.inner().clone();
+    CancelAgentRunUseCase::new(registry)
+        .execute(sink, run_id)
+        .await;
+    Ok(())
 }
