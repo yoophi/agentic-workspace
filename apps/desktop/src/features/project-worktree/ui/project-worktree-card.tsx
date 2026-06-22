@@ -1,6 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  BotIcon,
   GitBranchPlusIcon,
   GitCommitIcon,
   RefreshCwIcon,
@@ -47,6 +48,7 @@ import {
 
 type ProjectWorktreeCardProps = {
   workingDirectory: string;
+  onOpenWorktree?: (worktree: GitWorktree) => void;
 };
 
 const emptyForm: GitWorktreeCreateInput = {
@@ -55,7 +57,10 @@ const emptyForm: GitWorktreeCreateInput = {
   reference: "",
 };
 
-export function ProjectWorktreeCard({ workingDirectory }: ProjectWorktreeCardProps) {
+export function ProjectWorktreeCard({
+  workingDirectory,
+  onOpenWorktree,
+}: ProjectWorktreeCardProps) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<GitWorktreeCreateInput>(emptyForm);
   const [deletingPath, setDeletingPath] = useState<string | null>(null);
@@ -241,7 +246,18 @@ export function ProjectWorktreeCard({ workingDirectory }: ProjectWorktreeCardPro
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="flex justify-end">
+                      <div className="flex justify-end gap-1">
+                        {onOpenWorktree && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => onOpenWorktree(worktree)}
+                            aria-label={`${worktree.path} worktree 작업 화면 열기`}
+                          >
+                            <BotIcon />
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           variant="ghost"
