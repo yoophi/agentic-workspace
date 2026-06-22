@@ -1,10 +1,16 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { HashRouter } from "react-router-dom";
 import { App } from "./app/App";
-import "./app/styles.css";
+import { QueryProvider } from "./app/providers/query-provider";
+import "./index.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <QueryProvider>
+      <HashRouter>
+        <App />
+      </HashRouter>
+    </QueryProvider>
   </React.StrictMode>,
 );
