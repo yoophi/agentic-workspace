@@ -1,0 +1,7 @@
+[
+  {
+    "id": "permission-smoke",
+    "label": "Permission Smoke",
+    "command": "node apps/desktop/scripts/acp-permission-smoke-agent.mjs"
+  }
+]
