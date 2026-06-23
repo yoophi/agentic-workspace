@@ -22,11 +22,18 @@ import {
 } from "@/entities/agent-run/api/agent-run-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
-  eventGroups,
   appendOneTimelineItem,
+  eventGroups,
   toTimelineItem,
 } from "@/entities/agent-run/model";
-import type { EventGroup, TimelineItem } from "@/entities/agent-run/model";
+import type { EventGroup, RunEvent, TimelineItem } from "@/entities/agent-run/model";
+import {
+  addUserMessage,
+  moveQueuedPrompt as reorderQueuedPrompt,
+  removeUserMessage,
+  updateQueuedPrompt,
+} from "@/features/agent-run/model/run-panel-state";
+import type { QueuedPrompt, UsageContext } from "@/features/agent-run/model/run-panel-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -73,16 +80,6 @@ type AgentRunPanelProps = {
 
 const defaultPrompt = "";
 
-type QueuedPrompt = {
-  id: string;
-  text: string;
-};
-
-type UsageContext = {
-  used: number;
-  size: number;
-};
-
 export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [prompt, setPrompt] = useState(defaultPrompt);
@@ -119,18 +116,18 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listenRunEvents((envelope) => {
+      if (envelope.runId !== activeRunIdRef.current) {
+        return;
+      }
+
       if (envelope.event.type === "usage") {
         setUsageContext({ used: envelope.event.used, size: envelope.event.size });
         return;
       }
 
       setItems((currentItems) =>
-        appendOneTimelineItem(currentItems, toTimelineItem(envelope.runId, envelope.event)),
+        addRunEventItem(currentItems, envelope.runId, envelope.event),
       );
-
-      if (envelope.runId !== activeRunIdRef.current) {
-        return;
-      }
 
       if (envelope.event.type === "error") {
         setIsAwaitingPromptResponse(false);
@@ -183,7 +180,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
     setItems((currentItems) =>
-      appendOneTimelineItem(currentItems, toTimelineItem(activeRunId, { type: "userMessage", text: nextPrompt.text })),
+      addUserMessage(currentItems, activeRunId, nextPrompt.text),
     );
     void sendPromptToRun(activeRunId, nextPrompt.text).catch((caughtError) => {
       setQueuedPrompts((current) => [nextPrompt, ...current]);
@@ -196,15 +193,9 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   const visibleItems = useMemo(
     () => {
       const timelineItems = items.filter((item) => item.group !== "usage");
-      return filter === "all" || filter === "usage"
-        ? timelineItems
-        : timelineItems.filter((item) => item.group === filter);
+      return filter === "all" ? timelineItems : timelineItems.filter((item) => item.group === filter);
     },
     [filter, items],
-  );
-  const visibleEventGroups = useMemo(
-    () => eventGroups.filter((group) => group.id !== "usage"),
-    [],
   );
   const usagePercent =
     usageContext && usageContext.size > 0
@@ -230,7 +221,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     setIsRunning(true);
     setIsAwaitingPromptResponse(true);
     setPrompt(defaultPrompt);
-    setItems([toTimelineItem(runId, { type: "userMessage", text: goal })]);
+    setItems((currentItems) => addUserMessage(currentItems, runId, goal));
 
     try {
       await startAgentRun({
@@ -244,6 +235,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     } catch (caughtError) {
       setError(String(caughtError));
       setPrompt(goal);
+      setItems((currentItems) => removeUserMessage(currentItems, runId, goal));
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
       activeRunIdRef.current = null;
@@ -262,22 +254,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   }
 
   function moveQueuedPrompt(fromIndex: number, toIndex: number) {
-    setQueuedPrompts((current) => {
-      if (
-        fromIndex === toIndex ||
-        fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= current.length ||
-        toIndex >= current.length
-      ) {
-        return current;
-      }
-
-      const next = [...current];
-      const [movedPrompt] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, movedPrompt);
-      return next;
-    });
+    setQueuedPrompts((current) => reorderQueuedPrompt(current, fromIndex, toIndex));
   }
 
   function openQueuedPromptEditor(queuedPrompt: QueuedPrompt) {
@@ -296,13 +273,13 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
       return;
     }
 
-    setQueuedPrompts((current) =>
-      current.map((queuedPrompt) =>
-        queuedPrompt.id === editingPrompt.id
-          ? { ...queuedPrompt, text: nextText }
-          : queuedPrompt,
-      ),
-    );
+    setQueuedPrompts((current) => {
+      const result = updateQueuedPrompt(current, editingPrompt.id, nextText);
+      if (!result.updated) {
+        setError("편집하려던 prompt가 이미 전송되었거나 queue에서 제거되었습니다.");
+      }
+      return result.queue;
+    });
     closeQueuedPromptEditor();
   }
 
@@ -389,7 +366,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
 
               <div className="flex flex-col rounded-lg border bg-background">
                 <div className="flex flex-wrap gap-1.5 border-b p-3" role="tablist" aria-label="ACP event filter">
-                  {visibleEventGroups.map((group) => (
+                  {eventGroups.map((group) => (
                     <Button
                       key={group.id}
                       type="button"
@@ -671,6 +648,10 @@ function RunEventItem({ item }: { item: TimelineItem }) {
       </div>
     </Message>
   );
+}
+
+function addRunEventItem(items: TimelineItem[], runId: string, event: RunEvent) {
+  return appendOneTimelineItem(items, toTimelineItem(runId, event));
 }
 
 function LifecycleStep({ item }: { item: TimelineItem }) {

@@ -8,6 +8,7 @@
     "dev": "turbo run dev --filter=@acp/desktop",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
+    "test": "turbo run test",
     "preview": "turbo run preview --filter=@acp/desktop",
     "tauri": "turbo run tauri --filter=@acp/desktop --",
     "tauri:dev": "turbo run tauri:dev --filter=@acp/desktop --"

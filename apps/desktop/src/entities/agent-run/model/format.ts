@@ -139,7 +139,6 @@ export const eventGroups: Array<{ id: EventGroup | "all"; label: string }> = [
   { id: "assistant/message", label: "Message" },
   { id: "thought", label: "Thought" },
   { id: "tool_call/tool_result", label: "Tool" },
-  { id: "usage", label: "Usage" },
   { id: "permission", label: "Permission" },
   { id: "terminal", label: "Terminal" },
   { id: "lifecycle", label: "Lifecycle" },
