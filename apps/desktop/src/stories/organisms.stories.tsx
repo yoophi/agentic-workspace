@@ -100,3 +100,18 @@ export const AgentRun: Story = {
     <AgentRunPanel workingDirectory="/Users/yoophi/project/acp-minimal-app" />
   ),
 };
+
+export const AgentRunNarrowLongPath: Story = {
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+  },
+  render: () => (
+    <div className="mx-auto h-[720px] max-w-sm">
+      <AgentRunPanel
+        workingDirectory="/Users/yoophi/project/worktrees/acp-minimal-app/feature/really-long-worktree-name-for-layout-validation"
+      />
+    </div>
+  ),
+};
