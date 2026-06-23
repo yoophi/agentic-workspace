@@ -6,6 +6,7 @@ use agent_client_protocol::schema::{
     },
 };
 use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::{fs, future::Future, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -18,12 +19,15 @@ use crate::{
     domain::{
         acp_session::AcpSessionRecord,
         events::{LifecycleStatus, RunEvent},
-        run::{AgentRunRequest, RalphLoopRequest, ResumePolicy},
+        run::{AgentRunRequest, PermissionMode, RalphLoopRequest, ResumePolicy},
     },
     infrastructure::acp::{
         client::{AcpClient, lifecycle},
         transport::{RpcPeer, read_loop},
-        util::{RpcError, display_command, expand_tilde, normalize_path, rpc_to_anyhow},
+        util::{
+            RpcError, display_command, enriched_path, expand_tilde, normalize_path,
+            resolve_program, rpc_to_anyhow,
+        },
     },
     ports::{
         acp_session_store::AcpSessionStore,
@@ -100,9 +104,13 @@ where
             ),
         );
 
-        let mut child = Command::new(&agent_argv[0])
+        // GUI 앱의 제한된 PATH로는 npx/node 등을 찾지 못하므로, 로그인 셸에서
+        // 보강한 PATH로 프로그램을 절대경로로 resolve하고 자식 환경에도 주입한다.
+        let program = resolve_program(&agent_argv[0]);
+        let mut child = Command::new(&program)
             .args(&agent_argv[1..])
             .current_dir(&workspace)
+            .env("PATH", enriched_path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -124,7 +132,7 @@ where
         let client = Arc::new(AcpClient::new(
             run_id.clone(),
             workspace.clone(),
-            request.auto_allow.unwrap_or(true),
+            request.auto_allow.unwrap_or(false),
             self.permissions.clone(),
             sink.clone(),
         ));
@@ -168,7 +176,7 @@ where
         );
 
         let resume_policy = request.resume_policy.unwrap_or_default();
-        let session_id = if let Some(session_id) =
+        let session_setup = if let Some(session_id) =
             resume_session_id(request.resume_session_id.as_deref(), resume_policy)
         {
             sink.emit(
@@ -177,14 +185,28 @@ where
                     message: format!("resuming ACP session {session_id}"),
                 },
             );
-            session_id
+            AcpCreatedSession {
+                session_id,
+                response: Value::Null,
+            }
         } else {
             create_agent_session(&peer, &workspace).await?
         };
+        let session_id = session_setup.session_id;
         sink.emit(
             &run_id,
             lifecycle(LifecycleStatus::SessionCreated, session_id.clone()),
         );
+        apply_permission_mode(
+            &peer,
+            &run_id,
+            &session_id,
+            &request.agent_id,
+            request.permission_mode.unwrap_or_default(),
+            &session_setup.response,
+            &sink,
+        )
+        .await?;
         let session_record = AcpSessionRecord::from_request_with_agent_command(
             &run_id,
             &session_id,
@@ -201,6 +223,7 @@ where
             workspace,
             peer,
             resume_policy,
+            permission_mode: request.permission_mode.unwrap_or_default(),
             session_record,
             session_store: self.session_store.clone(),
             in_flight: Mutex::new(()),
@@ -458,6 +481,7 @@ pub struct AcpSession {
     session_id: Mutex<String>,
     workspace: PathBuf,
     resume_policy: ResumePolicy,
+    permission_mode: PermissionMode,
     session_record: AcpSessionRecord,
     session_store: Arc<dyn AcpSessionStore>,
     in_flight: Mutex<()>,
@@ -508,11 +532,22 @@ impl SessionHandle for AcpSession {
                                 .into(),
                         },
                     );
-                    let new_id = create_agent_session(&self.peer, &self.workspace).await?;
+                    let new_session = create_agent_session(&self.peer, &self.workspace).await?;
+                    let new_id = new_session.session_id;
                     sink.emit(
                         &self.run_id,
                         lifecycle(LifecycleStatus::SessionCreated, new_id.clone()),
                     );
+                    apply_permission_mode(
+                        &self.peer,
+                        &self.run_id,
+                        &new_id,
+                        &self.session_record.agent_id,
+                        self.permission_mode,
+                        &new_session.response,
+                        &sink,
+                    )
+                    .await?;
                     let mut record = self.session_record.clone();
                     record.session_id.clone_from(&new_id);
                     self.session_store.record_session(record).await?;
@@ -552,12 +587,164 @@ fn should_reissue_missing_session(resume_policy: ResumePolicy) -> bool {
     !matches!(resume_policy, ResumePolicy::ResumeRequired)
 }
 
-async fn create_agent_session(peer: &RpcPeer, workspace: &PathBuf) -> Result<String> {
+struct AcpCreatedSession {
+    session_id: String,
+    response: Value,
+}
+
+async fn create_agent_session(peer: &RpcPeer, workspace: &PathBuf) -> Result<AcpCreatedSession> {
+    let params = serde_json::to_value(NewSessionRequest::new(workspace.clone()))?;
     let response = peer
-        .request_typed(NewSessionRequest::new(workspace.clone()))
+        .request("session/new", params)
         .await
         .map_err(rpc_to_anyhow)?;
-    Ok(response.session_id.to_string())
+    let session_id = response
+        .get("sessionId")
+        .or_else(|| response.get("session_id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow!("session/new response missing sessionId"))?
+        .to_string();
+
+    Ok(AcpCreatedSession {
+        session_id,
+        response,
+    })
+}
+
+async fn apply_permission_mode<S>(
+    peer: &RpcPeer,
+    run_id: &str,
+    session_id: &str,
+    agent_id: &str,
+    permission_mode: PermissionMode,
+    session_response: &Value,
+    sink: &S,
+) -> Result<()>
+where
+    S: RunEventSink,
+{
+    let candidates = permission_mode_candidates(agent_id, permission_mode);
+    let selected_config_mode = candidates
+        .iter()
+        .find(|candidate| session_config_option_supports(session_response, "mode", candidate));
+    let selected_session_mode = candidates
+        .iter()
+        .find(|candidate| session_modes_support(session_response, candidate));
+    let Some(selected_mode) = selected_config_mode.or(selected_session_mode) else {
+        sink.emit(
+            run_id,
+            RunEvent::Diagnostic {
+                message: format!(
+                    "permission mode {:?} is not advertised by agent {agent_id}; continuing with the agent default",
+                    permission_mode
+                ),
+            },
+        );
+        return Ok(());
+    };
+
+    if selected_config_mode.is_some() {
+        peer.request(
+            "session/set_config_option",
+            json!({
+                "sessionId": session_id,
+                "configId": "mode",
+                "value": selected_mode,
+            }),
+        )
+        .await
+        .map_err(rpc_to_anyhow)?;
+    } else {
+        peer.request(
+            "session/set_mode",
+            json!({
+                "sessionId": session_id,
+                "modeId": selected_mode,
+            }),
+        )
+        .await
+        .map_err(rpc_to_anyhow)?;
+    }
+
+    sink.emit(
+        run_id,
+        RunEvent::Diagnostic {
+            message: format!(
+                "permission mode {:?} applied as agent mode {selected_mode}",
+                permission_mode
+            ),
+        },
+    );
+    Ok(())
+}
+
+fn permission_mode_candidates(
+    agent_id: &str,
+    permission_mode: PermissionMode,
+) -> Vec<&'static str> {
+    match agent_id {
+        "claude-code" => match permission_mode {
+            PermissionMode::Default => vec!["default"],
+            PermissionMode::Auto => vec!["auto"],
+            PermissionMode::ReadOnly => vec!["default"],
+            PermissionMode::Plan => vec!["plan"],
+            PermissionMode::AcceptEdits => vec!["acceptEdits"],
+            PermissionMode::DangerouslySkipAllPermissions => vec!["bypassPermissions"],
+        },
+        "codex" => match permission_mode {
+            PermissionMode::Default | PermissionMode::Auto | PermissionMode::AcceptEdits => {
+                vec!["agent"]
+            }
+            PermissionMode::ReadOnly | PermissionMode::Plan => vec!["read-only"],
+            PermissionMode::DangerouslySkipAllPermissions => vec!["agent-full-access"],
+        },
+        _ => match permission_mode {
+            PermissionMode::Default => vec!["default", "agent"],
+            PermissionMode::Auto => vec!["auto", "agent"],
+            PermissionMode::ReadOnly => vec!["read-only", "default"],
+            PermissionMode::Plan => vec!["plan", "read-only"],
+            PermissionMode::AcceptEdits => vec!["acceptEdits", "agent"],
+            PermissionMode::DangerouslySkipAllPermissions => {
+                vec!["bypassPermissions", "agent-full-access"]
+            }
+        },
+    }
+}
+
+fn session_config_option_supports(response: &Value, config_id: &str, value: &str) -> bool {
+    response
+        .get("configOptions")
+        .or_else(|| response.get("config_options"))
+        .and_then(Value::as_array)
+        .is_some_and(|options| {
+            options.iter().any(|option| {
+                option.get("id").and_then(Value::as_str) == Some(config_id)
+                    && option
+                        .get("options")
+                        .and_then(Value::as_array)
+                        .is_some_and(|values| {
+                            values.iter().any(|option_value| {
+                                option_value.get("value").and_then(Value::as_str) == Some(value)
+                            })
+                        })
+            })
+        })
+}
+
+fn session_modes_support(response: &Value, mode_id: &str) -> bool {
+    response
+        .get("modes")
+        .and_then(|modes| {
+            modes
+                .get("availableModes")
+                .or_else(|| modes.get("available_modes"))
+        })
+        .and_then(Value::as_array)
+        .is_some_and(|modes| {
+            modes
+                .iter()
+                .any(|mode| mode.get("id").and_then(Value::as_str) == Some(mode_id))
+        })
 }
 
 fn initialize_request() -> InitializeRequest {

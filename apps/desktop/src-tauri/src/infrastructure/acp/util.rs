@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::{
     env,
     path::{Path, PathBuf},
+    sync::OnceLock,
 };
 
 pub fn expand_tilde(path: &str) -> PathBuf {
@@ -82,6 +83,85 @@ pub fn select_lines(content: &str, start: usize, limit: Option<usize>) -> String
         }
     }
     selected
+}
+
+/// macOS GUI 앱은 Finder/Launchpad에서 실행될 때 로그인 셸을 거치지 않아
+/// PATH가 최소값(`/usr/bin:/bin:/usr/sbin:/sbin`)으로 제한된다. 그 결과
+/// `npx`·`node` 등 버전 매니저(nvm·fnm·asdf·volta)나 Homebrew가 설치한
+/// 비표준 경로의 실행 파일을 spawn하지 못한다.
+///
+/// 사용자의 로그인 셸에서 실제 PATH를 한 번 조회해 캐시한 뒤, 현재 PATH와
+/// 병합해 돌려준다. 셸 설정(`.zshrc`/`.zprofile` 등)에 정의된 모든 경로가
+/// 자동으로 포함된다.
+pub fn enriched_path() -> &'static str {
+    static CACHE: OnceLock<String> = OnceLock::new();
+    CACHE.get_or_init(build_enriched_path)
+}
+
+fn build_enriched_path() -> String {
+    let mut dirs: Vec<String> = Vec::new();
+    let push_unique = |dirs: &mut Vec<String>, value: &str| {
+        for part in value.split(':') {
+            if !part.is_empty() && !dirs.iter().any(|existing| existing == part) {
+                dirs.push(part.to_string());
+            }
+        }
+    };
+
+    // 로그인 셸에서 가져온 PATH를 앞쪽에 둬 사용자가 의도한 우선순위를 따른다.
+    if let Some(login_path) = login_shell_path() {
+        push_unique(&mut dirs, &login_path);
+    }
+    if let Ok(current) = env::var("PATH") {
+        push_unique(&mut dirs, &current);
+    }
+    // 셸 조회가 실패한 경우를 대비한 흔한 fallback 위치.
+    for fallback in ["/opt/homebrew/bin", "/usr/local/bin"] {
+        push_unique(&mut dirs, fallback);
+    }
+
+    dirs.join(":")
+}
+
+/// 로그인 + 인터랙티브 셸을 실행해 PATH를 출력시킨다. 인터랙티브(`-i`)로
+/// 띄워야 nvm 등 `.zshrc`/`.bashrc`에 정의된 PATH 변경이 적용된다.
+fn login_shell_path() -> Option<String> {
+    let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let output = std::process::Command::new(&shell)
+        .args(["-ilc", "printf '%s' \"$PATH\""])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    (!path.is_empty()).then_some(path)
+}
+
+/// `program`을 enriched PATH 안에서 실제 실행 파일의 절대경로로 변환한다.
+/// 이미 경로 구분자(`/`)를 포함하면 그대로 둔다. 후보를 찾지 못하면 원본을
+/// 돌려줘 호출부의 에러 메시지가 일관되게 유지되도록 한다.
+pub fn resolve_program(program: &str) -> String {
+    if program.contains('/') {
+        return program.to_string();
+    }
+    for dir in enriched_path().split(':') {
+        if dir.is_empty() {
+            continue;
+        }
+        let candidate = Path::new(dir).join(program);
+        if is_executable(&candidate) {
+            return candidate.to_string_lossy().into_owned();
+        }
+    }
+    program.to_string()
+}
+
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
 }
 
 pub fn display_command(command: &str, args: &[String]) -> String {

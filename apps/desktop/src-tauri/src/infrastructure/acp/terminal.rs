@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::{
     domain::events::RunEvent,
-    infrastructure::acp::util::{display_command, string_param},
+    infrastructure::acp::util::{display_command, enriched_path, resolve_program, string_param},
 };
 
 struct TerminalState {
@@ -58,9 +58,13 @@ impl TerminalHandler {
         } else {
             workspace
         };
-        let mut cmd = Command::new(command);
+        // 에이전트와 동일하게 보강한 PATH로 프로그램을 resolve하고 주입한다.
+        // ACP가 명시적으로 env를 보내면 아래 루프에서 덮어쓰도록 둔다.
+        let program = resolve_program(command);
+        let mut cmd = Command::new(&program);
         cmd.args(&args)
             .current_dir(&working_dir)
+            .env("PATH", enriched_path())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
