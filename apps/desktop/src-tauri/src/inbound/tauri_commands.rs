@@ -23,6 +23,7 @@ use crate::{
         git_cli_worktree_provider::GitCliWorktreeProvider,
         json_project_repository::JsonProjectRepository,
         noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
+        window_manager,
     },
     ports::{
         agent_catalog::AgentCatalog,
@@ -106,8 +107,19 @@ pub fn list_agents() -> Vec<AgentDescriptor> {
 }
 
 #[tauri::command]
+pub fn open_worktree_window(
+    app: AppHandle,
+    project_id: String,
+    worktree_path: String,
+    mode: String,
+) -> Result<(), String> {
+    window_manager::open_session_window(&app, &project_id, &worktree_path, &mode)
+}
+
+#[tauri::command]
 pub async fn start_agent_run(
     app: AppHandle,
+    window: tauri::Window,
     state: State<'_, AppState>,
     mut request: AgentRunRequest,
 ) -> Result<AgentRun, String> {
@@ -120,7 +132,9 @@ pub async fn start_agent_run(
     request.resume_policy = None;
     request.ralph_loop = None;
 
-    let sink = TauriRunEventSink::new(app, state.inner().clone());
+    // 호출한 창을 run의 owner로 등록하고, 이벤트도 그 창에만 전달한다.
+    let owner_label = window.label().to_string();
+    let sink = TauriRunEventSink::with_target(app, state.inner().clone(), owner_label.clone());
     let registry = state.inner().clone();
     let permissions = state.permissions();
     let runner = AcpAgentRunner::new(
@@ -130,7 +144,7 @@ pub async fn start_agent_run(
     );
 
     StartAgentRunUseCase::new(registry)
-        .execute(runner, sink, request, None)
+        .execute(runner, sink, request, Some(owner_label))
         .await
         .map_err(String::from)
 }
@@ -138,11 +152,13 @@ pub async fn start_agent_run(
 #[tauri::command]
 pub async fn send_prompt_to_run(
     app: AppHandle,
+    window: tauri::Window,
     state: State<'_, AppState>,
     run_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    let sink = TauriRunEventSink::new(app, state.inner().clone());
+    let sink =
+        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
     let registry = state.inner().clone();
     SendPromptUseCase::new(registry)
         .execute(sink, run_id, prompt)
@@ -153,10 +169,12 @@ pub async fn send_prompt_to_run(
 #[tauri::command]
 pub async fn cancel_agent_run(
     app: AppHandle,
+    window: tauri::Window,
     state: State<'_, AppState>,
     run_id: String,
 ) -> Result<(), String> {
-    let sink = TauriRunEventSink::new(app, state.inner().clone());
+    let sink =
+        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
     let registry = state.inner().clone();
     CancelAgentRunUseCase::new(registry)
         .execute(sink, run_id)

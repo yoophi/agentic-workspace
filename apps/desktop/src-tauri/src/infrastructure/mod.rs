@@ -8,3 +8,4 @@ pub mod json_project_repository;
 pub mod noop_acp_session_store;
 pub mod permission_broker;
 pub mod tauri_run_event_sink;
+pub mod window_manager;
