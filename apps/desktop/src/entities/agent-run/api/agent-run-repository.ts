@@ -24,6 +24,10 @@ export async function cancelAgentRun(runId: string) {
   return invoke<void>("cancel_agent_run", { runId });
 }
 
+export async function respondAgentPermission(permissionId: string, optionId: string) {
+  return invoke<void>("respond_agent_permission", { permissionId, optionId });
+}
+
 export function listenRunEvents(callback: (event: RunEventEnvelope) => void) {
   return listen<RunEventEnvelope>("agent-run-event", (event) => callback(event.payload));
 }

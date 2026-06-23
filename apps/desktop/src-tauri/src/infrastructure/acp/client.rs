@@ -372,8 +372,7 @@ fn current_time_millis() -> u128 {
 mod tests {
     use super::*;
     use crate::{
-        infrastructure::permission_broker::PermissionBroker,
-        ports::event_sink::RunEventSink,
+        infrastructure::permission_broker::PermissionBroker, ports::event_sink::RunEventSink,
     };
     use std::sync::{Arc, Mutex as StdMutex};
 
@@ -438,7 +437,10 @@ mod tests {
                 title,
                 locations,
             } => {
-                assert_eq!(tool_call_id.as_deref(), Some("call_bDJJJUTgrC12AVAT23JZpXZu"));
+                assert_eq!(
+                    tool_call_id.as_deref(),
+                    Some("call_bDJJJUTgrC12AVAT23JZpXZu")
+                );
                 assert_eq!(status, "in_progress");
                 assert_eq!(title, "Read package.json");
                 assert_eq!(locations, &[path.to_string()]);
@@ -453,7 +455,10 @@ mod tests {
                 title,
                 locations,
             } => {
-                assert_eq!(tool_call_id.as_deref(), Some("call_bDJJJUTgrC12AVAT23JZpXZu"));
+                assert_eq!(
+                    tool_call_id.as_deref(),
+                    Some("call_bDJJJUTgrC12AVAT23JZpXZu")
+                );
                 assert_eq!(status, "completed");
                 assert_eq!(title, "id=call_bDJJJUTgrC12AVAT23JZpXZu");
                 assert_eq!(locations, &[path.to_string()]);

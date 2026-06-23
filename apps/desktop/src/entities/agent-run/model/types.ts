@@ -12,7 +12,16 @@ export type AgentRunRequest = {
   agentCommand?: string;
   stdioBufferLimitMb?: number;
   autoAllow?: boolean;
+  permissionMode?: PermissionMode;
 };
+
+export type PermissionMode =
+  | "default"
+  | "auto"
+  | "readOnly"
+  | "plan"
+  | "acceptEdits"
+  | "dangerouslySkipAllPermissions";
 
 export type AgentRun = {
   id: string;

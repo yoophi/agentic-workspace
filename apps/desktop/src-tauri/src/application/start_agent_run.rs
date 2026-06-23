@@ -319,6 +319,7 @@ mod tests {
             agent_command: None,
             stdio_buffer_limit_mb: None,
             auto_allow: None,
+            permission_mode: None,
             run_id: Some("run-1".into()),
             resume_session_id: None,
             resume_policy: None,

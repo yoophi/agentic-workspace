@@ -24,7 +24,10 @@ use crate::{
         json_project_repository::JsonProjectRepository,
         noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
     },
-    ports::agent_catalog::AgentCatalog,
+    ports::{
+        agent_catalog::AgentCatalog,
+        permission::{PermissionDecision, PermissionDecisionPort},
+    },
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -159,4 +162,17 @@ pub async fn cancel_agent_run(
         .execute(sink, run_id)
         .await;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn respond_agent_permission(
+    state: State<'_, AppState>,
+    permission_id: String,
+    option_id: String,
+) -> Result<(), String> {
+    state
+        .permissions()
+        .respond(&permission_id, PermissionDecision { option_id })
+        .await
+        .map_err(|err| err.to_string())
 }

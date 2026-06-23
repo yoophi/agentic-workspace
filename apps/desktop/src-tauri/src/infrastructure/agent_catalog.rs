@@ -39,7 +39,7 @@ impl AgentCatalog for StaticAgentCatalog {
             AgentDescriptor {
                 id: "codex".into(),
                 label: "Codex".into(),
-                command: "npx -y @zed-industries/codex-acp".into(),
+                command: "npx -y @agentclientprotocol/codex-acp".into(),
             },
             AgentDescriptor {
                 id: "claude-code".into(),

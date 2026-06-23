@@ -21,6 +21,18 @@ pub struct RalphLoopRequest {
     pub delay_ms: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PermissionMode {
+    #[default]
+    Default,
+    Auto,
+    ReadOnly,
+    Plan,
+    AcceptEdits,
+    DangerouslySkipAllPermissions,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunRequest {
@@ -32,6 +44,7 @@ pub struct AgentRunRequest {
     pub agent_command: Option<String>,
     pub stdio_buffer_limit_mb: Option<usize>,
     pub auto_allow: Option<bool>,
+    pub permission_mode: Option<PermissionMode>,
     pub run_id: Option<String>,
     pub resume_session_id: Option<String>,
     pub resume_policy: Option<ResumePolicy>,

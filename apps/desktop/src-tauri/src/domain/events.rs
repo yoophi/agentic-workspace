@@ -9,7 +9,11 @@ pub struct RunEventEnvelope {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "type")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "type"
+)]
 pub enum RunEvent {
     Lifecycle {
         status: LifecycleStatus,
