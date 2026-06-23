@@ -37,6 +37,13 @@ function buildItem(
   event: RunEvent,
 ): TimelineItem {
   switch (event.type) {
+    case "userMessage":
+      return {
+        ...base,
+        group: "user/message",
+        title: "user/message",
+        body: event.text,
+      };
     case "agentMessage":
       return {
         ...base,
@@ -128,6 +135,7 @@ function buildItem(
 
 export const eventGroups: Array<{ id: EventGroup | "all"; label: string }> = [
   { id: "all", label: "All" },
+  { id: "user/message", label: "User" },
   { id: "assistant/message", label: "Message" },
   { id: "thought", label: "Thought" },
   { id: "tool_call/tool_result", label: "Tool" },

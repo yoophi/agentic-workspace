@@ -27,6 +27,7 @@ export type RunEventEnvelope = {
 
 export type RunEvent =
   | { type: "lifecycle"; status: LifecycleStatus; message: string }
+  | { type: "userMessage"; text: string }
   | { type: "agentMessage"; text: string }
   | { type: "thought"; text: string }
   | { type: "plan"; entries: PlanEntry[] }
@@ -68,6 +69,7 @@ export type PermissionOption = {
 };
 
 export type EventGroup =
+  | "user/message"
   | "assistant/message"
   | "thought"
   | "tool_call/tool_result"
