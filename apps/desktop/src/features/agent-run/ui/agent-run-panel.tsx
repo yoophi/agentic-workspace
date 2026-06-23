@@ -1,6 +1,15 @@
+import type { ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BotIcon, PlayIcon, SquareIcon, XIcon } from "lucide-react";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  BotIcon,
+  PencilIcon,
+  PlayIcon,
+  SquareIcon,
+  XIcon,
+} from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -14,11 +23,19 @@ import {
 } from "@/entities/agent-run/api/agent-run-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
-  eventGroups,
   appendOneTimelineItem,
+  eventGroups,
   toTimelineItem,
 } from "@/entities/agent-run/model";
+import type { TimelineRunEvent } from "@/entities/agent-run/model";
 import type { EventGroup, PermissionMode, RunEvent, TimelineItem } from "@/entities/agent-run/model";
+import {
+  addUserMessage,
+  moveQueuedPrompt as reorderQueuedPrompt,
+  removeUserMessage,
+  updateQueuedPrompt,
+} from "@/features/agent-run/model/run-panel-state";
+import type { QueuedPrompt, UsageContext } from "@/features/agent-run/model/run-panel-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -31,13 +48,14 @@ import {
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Message, MessageAvatar } from "@/components/ui/message";
+import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import {
   PromptInput,
   PromptInputAction,
@@ -54,10 +72,12 @@ import {
 } from "@/components/ui/select";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import { SystemMessage } from "@/components/ui/system-message";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 type AgentRunPanelProps = {
   workingDirectory: string;
+  scrollHeader?: ReactNode;
 };
 
 const defaultPrompt = "";
@@ -99,14 +119,10 @@ const permissionModeOptions: Array<{
   },
 ];
 
-type QueuedPrompt = {
-  id: string;
-  text: string;
-};
-
-export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
+export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [pendingPermissionMode, setPendingPermissionMode] = useState<PermissionMode | null>(null);
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -115,6 +131,12 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
   const [filter, setFilter] = useState<EventGroup | "all">("all");
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState<QueuedPrompt | null>(null);
+  const [editingPromptText, setEditingPromptText] = useState("");
+  const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
+  const [answeredPermissionIds, setAnsweredPermissionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const endRef = useRef<HTMLDivElement | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
 
@@ -138,15 +160,21 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     let disposed = false;
     let unlisten: (() => void) | undefined;
     void listenRunEvents((envelope) => {
-      setItems((currentItems) =>
-        appendOneTimelineItem(currentItems, toTimelineItem(envelope.runId, envelope.event)),
-      );
-
       if (envelope.runId !== activeRunIdRef.current) {
         return;
       }
 
-      if (envelope.event.type === "error") {
+      if (envelope.event.type === "usage") {
+        setUsageContext({ used: envelope.event.used, size: envelope.event.size });
+        return;
+      }
+
+      const timelineEvent: TimelineRunEvent = envelope.event;
+      setItems((currentItems) =>
+        addRunEventItem(currentItems, envelope.runId, timelineEvent),
+      );
+
+      if (timelineEvent.type === "error") {
         setIsAwaitingPromptResponse(false);
         setQueuedPrompts([]);
         setIsRunning(false);
@@ -155,14 +183,14 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
         return;
       }
 
-      if (envelope.event.type === "lifecycle") {
-        if (envelope.event.status === "promptSent") {
+      if (timelineEvent.type === "lifecycle") {
+        if (timelineEvent.status === "promptSent") {
           setIsAwaitingPromptResponse(true);
         }
-        if (envelope.event.status === "promptCompleted") {
+        if (timelineEvent.status === "promptCompleted") {
           setIsAwaitingPromptResponse(false);
         }
-        if (["completed", "cancelled"].includes(envelope.event.status)) {
+        if (["completed", "cancelled"].includes(timelineEvent.status)) {
           setIsAwaitingPromptResponse(false);
           setQueuedPrompts([]);
           setIsRunning(false);
@@ -196,8 +224,14 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     const nextPrompt = queuedPrompts[0];
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
+    setItems((currentItems) =>
+      addUserMessage(currentItems, activeRunId, nextPrompt.text),
+    );
     void sendPromptToRun(activeRunId, nextPrompt.text).catch((caughtError) => {
       setQueuedPrompts((current) => [nextPrompt, ...current]);
+      setItems((currentItems) =>
+        removeUserMessage(currentItems, activeRunId, nextPrompt.text),
+      );
       setIsAwaitingPromptResponse(false);
       setError(String(caughtError));
     });
@@ -208,7 +242,14 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     () => (filter === "all" ? items : items.filter((item) => item.group === filter)),
     [filter, items],
   );
-  const pendingPermission = useMemo(() => findPendingPermission(items), [items]);
+  const usagePercent =
+    usageContext && usageContext.size > 0
+      ? Math.min(100, Math.round((usageContext.used / usageContext.size) * 100))
+      : null;
+  const pendingPermission = useMemo(
+    () => findPendingPermission(items, answeredPermissionIds),
+    [answeredPermissionIds, items],
+  );
   const canStartRun = Boolean(selectedAgentId && prompt.trim() && !isRunning);
   const canQueuePrompt = Boolean(activeRunId && isRunning && prompt.trim());
   const canCancel = Boolean(activeRunId && isRunning);
@@ -223,11 +264,14 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     setError(null);
     setItems([]);
     setQueuedPrompts([]);
+    setUsageContext(null);
+    setAnsweredPermissionIds(new Set());
     activeRunIdRef.current = runId;
     setActiveRunId(runId);
     setIsRunning(true);
     setIsAwaitingPromptResponse(true);
     setPrompt(defaultPrompt);
+    setItems((currentItems) => addUserMessage(currentItems, runId, goal));
 
     try {
       await startAgentRun({
@@ -241,6 +285,7 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     } catch (caughtError) {
       setError(String(caughtError));
       setPrompt(goal);
+      setItems((currentItems) => removeUserMessage(currentItems, runId, goal));
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
       activeRunIdRef.current = null;
@@ -256,6 +301,44 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
 
     setQueuedPrompts((current) => [...current, { id: crypto.randomUUID(), text: nextPrompt }]);
     setPrompt(defaultPrompt);
+  }
+
+  function moveQueuedPrompt(fromIndex: number, toIndex: number) {
+    setQueuedPrompts((current) => reorderQueuedPrompt(current, fromIndex, toIndex));
+  }
+
+  function openQueuedPromptEditor(queuedPrompt: QueuedPrompt) {
+    setEditingPrompt(queuedPrompt);
+    setEditingPromptText(queuedPrompt.text);
+  }
+
+  function closeQueuedPromptEditor() {
+    setEditingPrompt(null);
+    setEditingPromptText("");
+  }
+
+  function saveQueuedPromptEdit() {
+    const nextText = editingPromptText.trim();
+    if (!editingPrompt || !nextText) {
+      return;
+    }
+
+    setQueuedPrompts((current) => {
+      const result = updateQueuedPrompt(current, editingPrompt.id, nextText);
+      if (!result.updated) {
+        setError("편집하려던 prompt가 이미 전송되었거나 queue에서 제거되었습니다.");
+      }
+      return result.queue;
+    });
+    closeQueuedPromptEditor();
+  }
+
+  function changePermissionMode(nextMode: PermissionMode) {
+    if (nextMode === "dangerouslySkipAllPermissions") {
+      setPendingPermissionMode(nextMode);
+      return;
+    }
+    setPermissionMode(nextMode);
   }
 
   async function cancel() {
@@ -277,229 +360,389 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
   }
 
   async function respondToPermission(permissionId: string, optionId: string) {
+    if (!activeRunId) {
+      setError("응답할 active run이 없습니다.");
+      return;
+    }
+
+    setAnsweredPermissionIds((current) => new Set(current).add(permissionId));
     try {
-      await respondAgentPermission(permissionId, optionId);
+      await respondAgentPermission(activeRunId, permissionId, optionId);
     } catch (caughtError) {
+      setAnsweredPermissionIds((current) => {
+        const next = new Set(current);
+        next.delete(permissionId);
+        return next;
+      });
       setError(String(caughtError));
     }
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex flex-col gap-1.5">
-            <CardTitle className="flex items-center gap-2">
-              <BotIcon />
-              Agentic coding
-            </CardTitle>
-            <CardDescription>
-              선택한 worktree를 작업 디렉토리로 사용해 ACP agent를 실행합니다.
-            </CardDescription>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Agent</span>
-            <Select
-              value={selectedAgentId}
-              onValueChange={setSelectedAgentId}
-              disabled={isRunning || agentsQuery.isLoading}
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="Agent 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {agents.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="grid min-h-[680px] grid-rows-[auto_minmax(0,1fr)_auto] gap-4">
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={isRunning ? "default" : "secondary"}>
-              {isRunning ? "Running" : "Idle"}
-            </Badge>
-            <span className="break-all font-mono text-xs text-muted-foreground">
-              cwd={workingDirectory}
-            </span>
-          </div>
-          {selectedAgent && (
-            <span className="break-all font-mono text-xs text-muted-foreground">
-              command={selectedAgent.command}
-            </span>
-          )}
-          {error && (
-            <SystemMessage variant="error" fill>
-              {error}
-            </SystemMessage>
-          )}
-        </div>
+    <div className="flex h-full min-h-0 flex-col gap-4">
+      <div className="min-h-0 flex-1 overflow-auto pr-1">
+        <div className="flex flex-col gap-4">
+          {scrollHeader}
 
-        <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] rounded-lg border bg-background">
-          <div className="flex flex-wrap gap-1.5 border-b p-3" role="tablist" aria-label="ACP event filter">
-            {eventGroups.map((group) => (
-              <Button
-                key={group.id}
-                type="button"
-                size="sm"
-                variant={filter === group.id ? "default" : "outline"}
-                onClick={() => setFilter(group.id)}
-              >
-                {group.label}
-              </Button>
-            ))}
-          </div>
-          <div className="min-h-0 overflow-auto p-4" role="log" aria-live="polite">
-            {visibleItems.length === 0 ? (
-              <div className="grid min-h-[320px] place-items-center rounded-lg border border-dashed bg-muted/30 text-sm text-muted-foreground">
-                ACP 응답이 아직 없습니다.
-              </div>
-            ) : (
-              <div className="flex flex-col gap-3">
-                {visibleItems.map((item) => (
-                  <RunEventItem key={item.id} item={item} />
-                ))}
-              </div>
-            )}
-            <div ref={endRef} />
-          </div>
-        </div>
-
-        <PromptInput
-          value={prompt}
-          onValueChange={setPrompt}
-          onSubmit={() => {
-            if (isRunning) {
-              enqueuePrompt();
-              return;
-            }
-            if (canStartRun) {
-              void run();
-            }
-          }}
-          isLoading={isRunning}
-          className="rounded-lg"
-        >
-          <div className="flex flex-wrap items-center gap-2 border-b px-2 py-2">
-            <span className="text-xs font-medium text-muted-foreground">Permission mode</span>
-            <Select
-              value={permissionMode}
-              onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-              disabled={isRunning}
-            >
-              <SelectTrigger className="h-8 w-52">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {permissionModeOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
-            </span>
-          </div>
-          <PromptInputTextarea placeholder="선택한 worktree에서 실행할 작업을 입력하세요." />
-          {queuedPrompts.length > 0 && (
-            <div className="flex flex-col gap-2 px-2 pb-2">
-              <div className="text-xs text-muted-foreground">대기 중인 prompt {queuedPrompts.length}개</div>
-              <div className="flex flex-col gap-2">
-                {queuedPrompts.map((queuedPrompt, index) => (
-                  <div
-                    key={queuedPrompt.id}
-                    className="flex items-start justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
+          <Card>
+            <CardHeader>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col gap-1.5">
+                  <CardTitle className="flex items-center gap-2">
+                    <BotIcon />
+                    Agentic coding
+                  </CardTitle>
+                  <CardDescription>
+                    선택한 worktree를 작업 디렉토리로 사용해 ACP agent를 실행합니다.
+                  </CardDescription>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <span className="text-sm font-medium">Agent</span>
+                  <Select
+                    value={selectedAgentId}
+                    onValueChange={setSelectedAgentId}
+                    disabled={isRunning || agentsQuery.isLoading}
                   >
-                    <div className="min-w-0 flex-1 text-sm">
-                      <span className="mr-2 text-xs text-muted-foreground">#{index + 1}</span>
-                      <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      onClick={() => {
-                        setQueuedPrompts((current) =>
-                          current.filter((item) => item.id !== queuedPrompt.id),
-                        );
-                      }}
-                    >
-                      <XIcon className="size-4" />
-                    </Button>
-                  </div>
-                ))}
+                    <SelectTrigger className="w-full sm:w-56">
+                      <SelectValue placeholder="Agent 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {agents.map((agent) => (
+                          <SelectItem key={agent.id} value={agent.id}>
+                            {agent.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-            </div>
-          )}
-          <div className="flex items-center justify-between gap-3 px-2 pb-1">
-            <span className="text-xs text-muted-foreground">
-              {isRunning
-                ? isAwaitingPromptResponse
-                  ? "현재 prompt 처리 중입니다. Enter로 다음 prompt를 queue에 추가합니다."
-                  : "다음 prompt를 바로 보낼 수 있습니다. Enter로 queue에 추가합니다."
-                : "Enter로 실행, Shift+Enter로 줄바꿈"}
-            </span>
-            <PromptInputActions>
-              {isRunning ? (
-                <>
-                  <PromptInputAction tooltip="Queue prompt">
-                    <Button type="button" size="sm" disabled={!canQueuePrompt} onClick={enqueuePrompt}>
-                      <PlayIcon data-icon="inline-start" />
-                      Queue
-                    </Button>
-                  </PromptInputAction>
-                  <PromptInputAction tooltip="Cancel run">
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant={isRunning ? "default" : "secondary"}>
+                    {isRunning ? "Running" : "Idle"}
+                  </Badge>
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    cwd={workingDirectory}
+                  </span>
+                </div>
+                {selectedAgent && (
+                  <span className="break-all font-mono text-xs text-muted-foreground">
+                    command={selectedAgent.command}
+                  </span>
+                )}
+                {error && (
+                  <SystemMessage variant="error" fill>
+                    {error}
+                  </SystemMessage>
+                )}
+              </div>
+
+              <div className="flex flex-col rounded-lg border bg-background">
+                <div className="flex flex-wrap gap-1.5 border-b p-3" role="tablist" aria-label="ACP event filter">
+                  {eventGroups.map((group) => (
                     <Button
+                      key={group.id}
                       type="button"
-                      variant="destructive"
                       size="sm"
-                      disabled={!canCancel}
-                      onClick={() => void cancel()}
+                      variant={filter === group.id ? "default" : "outline"}
+                      onClick={() => setFilter(group.id)}
                     >
-                      <SquareIcon data-icon="inline-start" />
-                      Cancel
+                      {group.label}
                     </Button>
-                  </PromptInputAction>
-                </>
-              ) : (
-                <PromptInputAction tooltip="Start run">
-                  <Button type="button" size="sm" disabled={!canStartRun} onClick={() => void run()}>
+                  ))}
+                </div>
+                <div className="p-4" role="log" aria-live="polite">
+                  {visibleItems.length === 0 ? (
+                    <div className="grid min-h-[320px] place-items-center rounded-lg border border-dashed bg-muted/30 text-sm text-muted-foreground">
+                      ACP 응답이 아직 없습니다.
+                    </div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {visibleItems.map((item) => (
+                        <RunEventItem key={item.id} item={item} />
+                      ))}
+                    </div>
+                  )}
+                  <div ref={endRef} />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {usageContext && (
+        <div className="shrink-0 rounded-lg border bg-background px-3 py-2">
+          <div className="flex items-center justify-between gap-3 text-xs">
+            <span className="font-medium text-muted-foreground">Context</span>
+            <span className="font-mono text-muted-foreground">
+              {usageContext.used}/{usageContext.size}
+              {usagePercent !== null ? ` (${usagePercent}%)` : ""}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+            <div
+              className="h-full rounded-full bg-primary transition-[width]"
+              style={{ width: `${usagePercent ?? 0}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      <PromptInput
+        value={prompt}
+        onValueChange={setPrompt}
+        onSubmit={() => {
+          if (isRunning) {
+            enqueuePrompt();
+            return;
+          }
+          if (canStartRun) {
+            void run();
+          }
+        }}
+        isLoading={isRunning}
+        className="shrink-0 rounded-lg"
+      >
+        <div className="flex flex-wrap items-center gap-2 border-b px-2 py-2">
+          <span className="text-xs font-medium text-muted-foreground">Permission mode</span>
+          <Select
+            value={permissionMode}
+            onValueChange={(value) => changePermissionMode(value as PermissionMode)}
+            disabled={isRunning}
+          >
+            <SelectTrigger className="h-8 w-full sm:w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {permissionModeOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+            {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
+          </span>
+        </div>
+        <PromptInputTextarea placeholder="선택한 worktree에서 실행할 작업을 입력하세요." />
+        {queuedPrompts.length > 0 && (
+          <div className="flex flex-col gap-2 px-2 pb-2">
+            <div className="text-xs text-muted-foreground">대기 중인 prompt {queuedPrompts.length}개</div>
+            <div className="flex max-h-32 flex-col gap-2 overflow-auto pr-1">
+              {queuedPrompts.map((queuedPrompt, index) => (
+                <div
+                  key={queuedPrompt.id}
+                  className="flex items-start justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
+                >
+                  <div className="min-w-0 flex-1 text-sm">
+                    <span className="mr-2 text-xs text-muted-foreground">#{index + 1}</span>
+                    <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <PromptInputAction tooltip="Edit prompt" side="left">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label={`${index + 1}번 prompt 편집`}
+                        onClick={() => openQueuedPromptEditor(queuedPrompt)}
+                      >
+                        <PencilIcon className="size-4" />
+                      </Button>
+                    </PromptInputAction>
+                    <PromptInputAction tooltip="Move up" side="left">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        disabled={index === 0}
+                        aria-label={`${index + 1}번 prompt 위로 이동`}
+                        onClick={() => moveQueuedPrompt(index, index - 1)}
+                      >
+                        <ArrowUpIcon className="size-4" />
+                      </Button>
+                    </PromptInputAction>
+                    <PromptInputAction tooltip="Move down" side="left">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        disabled={index === queuedPrompts.length - 1}
+                        aria-label={`${index + 1}번 prompt 아래로 이동`}
+                        onClick={() => moveQueuedPrompt(index, index + 1)}
+                      >
+                        <ArrowDownIcon className="size-4" />
+                      </Button>
+                    </PromptInputAction>
+                    <PromptInputAction tooltip="Remove prompt" side="left">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label={`${index + 1}번 prompt 제거`}
+                        onClick={() => {
+                          setQueuedPrompts((current) =>
+                            current.filter((item) => item.id !== queuedPrompt.id),
+                          );
+                        }}
+                      >
+                        <XIcon className="size-4" />
+                      </Button>
+                    </PromptInputAction>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="flex flex-col gap-3 px-2 pb-1 sm:flex-row sm:items-center sm:justify-between">
+          <span className="min-w-0 text-xs text-muted-foreground">
+            {isRunning
+              ? isAwaitingPromptResponse
+                ? "현재 prompt 처리 중입니다. Enter로 다음 prompt를 queue에 추가합니다."
+                : "다음 prompt를 바로 보낼 수 있습니다. Enter로 queue에 추가합니다."
+              : "Enter로 실행, Shift+Enter로 줄바꿈"}
+          </span>
+          <PromptInputActions className="justify-end">
+            {isRunning ? (
+              <>
+                <PromptInputAction tooltip="Queue prompt">
+                  <Button type="button" size="sm" disabled={!canQueuePrompt} onClick={enqueuePrompt}>
                     <PlayIcon data-icon="inline-start" />
-                    Run
+                    Queue
                   </Button>
                 </PromptInputAction>
-              )}
-            </PromptInputActions>
+                <PromptInputAction tooltip="Cancel run">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    disabled={!canCancel}
+                    onClick={() => void cancel()}
+                  >
+                    <SquareIcon data-icon="inline-start" />
+                    Cancel
+                  </Button>
+                </PromptInputAction>
+              </>
+            ) : (
+              <PromptInputAction tooltip="Start run">
+                <Button type="button" size="sm" disabled={!canStartRun} onClick={() => void run()}>
+                  <PlayIcon data-icon="inline-start" />
+                  Run
+                </Button>
+              </PromptInputAction>
+            )}
+          </PromptInputActions>
+        </div>
+      </PromptInput>
+
+      <Dialog
+        open={Boolean(editingPrompt)}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeQueuedPromptEditor();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Prompt 편집</DialogTitle>
+            <DialogDescription>
+              Queue에 대기 중인 prompt 내용을 수정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-2">
+            <Textarea
+              value={editingPromptText}
+              onChange={(event) => setEditingPromptText(event.target.value)}
+              className="max-h-[50svh] min-h-48 resize-y font-mono text-sm"
+              placeholder="Queue에 저장할 prompt를 입력하세요."
+              autoFocus
+            />
+            <span className="text-xs text-muted-foreground">
+              저장하면 현재 queue 항목만 갱신됩니다.
+            </span>
           </div>
-        </PromptInput>
-      </CardContent>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                취소
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              disabled={!editingPromptText.trim()}
+              onClick={saveQueuedPromptEdit}
+            >
+              저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <PermissionRequestDialog
         permission={pendingPermission}
         onSelect={(permissionId, optionId) => void respondToPermission(permissionId, optionId)}
       />
-    </Card>
+      <Dialog
+        open={pendingPermissionMode === "dangerouslySkipAllPermissions"}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingPermissionMode(null);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Danger full access 사용</DialogTitle>
+            <DialogDescription>
+              이 모드는 지원하는 agent에서 파일 수정과 command 실행 권한 요청을 건너뛸 수 있습니다. 격리된 worktree에서만 사용하세요.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-wrap">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setPendingPermissionMode(null)}
+            >
+              취소
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => {
+                setPermissionMode("dangerouslySkipAllPermissions");
+                setPendingPermissionMode(null);
+              }}
+            >
+              사용
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 
-function findPendingPermission(items: TimelineItem[]) {
+function findPendingPermission(items: TimelineItem[], answeredPermissionIds: Set<string>) {
   const pending = new Map<string, Extract<RunEvent, { type: "permission" }>>();
   for (const item of items) {
     if (item.event.type !== "permission" || !item.event.permissionId) {
       continue;
     }
-    if (item.event.requiresResponse) {
+    if (item.event.requiresResponse && !answeredPermissionIds.has(item.event.permissionId)) {
       pending.set(item.event.permissionId, item.event);
     } else {
       pending.delete(item.event.permissionId);
@@ -587,6 +830,16 @@ function RunEventItem({ item }: { item: TimelineItem }) {
     );
   }
 
+  if (item.group === "user/message") {
+    return (
+      <Message className="justify-end">
+        <MessageContent className="min-w-0 max-w-[80%] whitespace-pre-wrap break-words bg-primary text-primary-foreground">
+          {item.body}
+        </MessageContent>
+      </Message>
+    );
+  }
+
   return (
     <Message className={cn(item.group === "thought" && "opacity-80")}>
       <MessageAvatar src="" alt={item.group} fallback={item.group === "assistant/message" ? "AI" : "•"} />
@@ -601,6 +854,10 @@ function RunEventItem({ item }: { item: TimelineItem }) {
       </div>
     </Message>
   );
+}
+
+function addRunEventItem(items: TimelineItem[], runId: string, event: TimelineRunEvent) {
+  return appendOneTimelineItem(items, toTimelineItem(runId, event));
 }
 
 function LifecycleStep({ item }: { item: TimelineItem }) {
