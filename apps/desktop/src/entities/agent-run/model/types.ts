@@ -82,7 +82,6 @@ export type EventGroup =
   | "assistant/message"
   | "thought"
   | "tool_call/tool_result"
-  | "usage"
   | "permission"
   | "terminal"
   | "lifecycle"

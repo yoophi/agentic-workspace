@@ -1,6 +1,8 @@
 import type { EventGroup, RunEvent, TimelineItem } from "./types";
 
-export function toTimelineItem(runId: string, event: RunEvent): TimelineItem {
+export type TimelineRunEvent = Exclude<RunEvent, { type: "usage" }>;
+
+export function toTimelineItem(runId: string, event: TimelineRunEvent): TimelineItem {
   const normalizedEvent = normalizeRunEvent(event);
   const createdAt = Date.now();
   const base = {
@@ -15,12 +17,12 @@ export function toTimelineItem(runId: string, event: RunEvent): TimelineItem {
   return buildItem(base, normalizedEvent);
 }
 
-function normalizeRunEvent(event: RunEvent): RunEvent {
+function normalizeRunEvent(event: TimelineRunEvent): TimelineRunEvent {
   if (event.type !== "tool") {
     return event;
   }
 
-  const rawEvent = event as RunEvent & { tool_call_id?: string };
+  const rawEvent = event as TimelineRunEvent & { tool_call_id?: string };
   const toolCallId = event.toolCallId ?? rawEvent.tool_call_id;
   if (!toolCallId) {
     return event;
@@ -34,7 +36,7 @@ function normalizeRunEvent(event: RunEvent): RunEvent {
 
 function buildItem(
   base: Pick<TimelineItem, "id" | "runId" | "createdAt" | "event">,
-  event: RunEvent,
+  event: TimelineRunEvent,
 ): TimelineItem {
   switch (event.type) {
     case "userMessage":
@@ -69,13 +71,6 @@ function buildItem(
           .filter(Boolean)
           .join("\n"),
         tone: event.status === "failed" ? "danger" : event.status === "completed" ? "success" : "info",
-      };
-    case "usage":
-      return {
-        ...base,
-        group: "usage",
-        title: "usage",
-        body: `context ${event.used}/${event.size}`,
       };
     case "permission":
       return {
@@ -161,7 +156,7 @@ export function appendOneTimelineItem(items: TimelineItem[], item: TimelineItem)
     if (matchingIndex >= 0) {
       const current = items[matchingIndex];
       const currentEvent = current.event.type === "tool" ? current.event : undefined;
-      const nextEvent: Extract<RunEvent, { type: "tool" }> = {
+      const nextEvent: Extract<TimelineRunEvent, { type: "tool" }> = {
         ...item.event,
         toolCallId: item.event.toolCallId || currentEvent?.toolCallId,
         title: shouldKeepCurrentToolTitle(item.event, currentEvent)
@@ -231,7 +226,7 @@ export function appendOneTimelineItem(items: TimelineItem[], item: TimelineItem)
   ];
 }
 
-function findMatchingToolIndex(items: TimelineItem[], event: Extract<RunEvent, { type: "tool" }>) {
+function findMatchingToolIndex(items: TimelineItem[], event: Extract<TimelineRunEvent, { type: "tool" }>) {
   if (!event.toolCallId) {
     return -1;
   }
@@ -250,8 +245,8 @@ function findMatchingToolIndex(items: TimelineItem[], event: Extract<RunEvent, {
 }
 
 function shouldKeepCurrentToolTitle(
-  incoming: Extract<RunEvent, { type: "tool" }>,
-  current?: Extract<RunEvent, { type: "tool" }>,
+  incoming: Extract<TimelineRunEvent, { type: "tool" }>,
+  current?: Extract<TimelineRunEvent, { type: "tool" }>,
 ) {
   if (!current?.title) {
     return false;
