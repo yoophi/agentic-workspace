@@ -16,6 +16,10 @@ import {
   updateProject,
 } from "@/entities/project/api/project-repository";
 import {
+  buildProjectWorktreeRoute,
+  readWorktreePath,
+} from "@/app/model/session-route";
+import {
   listGitWorktrees,
   openWorktreeWindow,
 } from "@/entities/project/api/git-worktree-repository";
@@ -104,9 +108,7 @@ export function App() {
     mode: OpenWorktreeMode,
   ) {
     if (mode === "current") {
-      navigate(
-        `/projects/${project.id}/worktrees?worktreePath=${encodeURIComponent(worktree.path)}`,
-      );
+      navigate(buildProjectWorktreeRoute(project.id, worktree.path));
       return;
     }
 
@@ -285,7 +287,7 @@ function ProjectWorktreeSessionRoute({
   const { projectId } = useParams();
   const [searchParams] = useSearchParams();
   const project = projects.find((project) => project.id === projectId);
-  const decodedWorktreePath = searchParams.get("worktreePath") ?? "";
+  const decodedWorktreePath = readWorktreePath(searchParams);
   const worktreesQuery = useQuery({
     queryKey: project
       ? projectQueryKeys.gitWorktrees(project.workingDirectory)
