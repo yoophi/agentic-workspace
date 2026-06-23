@@ -75,6 +75,9 @@
 - permission 응답은 run id와 owner window를 확인하도록 좁혔고, wrong-run 응답이 waiter를 제거하지 않는지 Rust unit test로 확인했다.
 - permission dialog는 응답 선택 직후 optimistic하게 닫히며, command 실패 시 다시 열릴 수 있도록 answered set에서 제거한다.
 - `dangerouslySkipAllPermissions` 선택 시 확인 dialog를 거치도록 했다.
+- 실제 Tauri 앱에서 Codex ACP run을 시작해 `pwd` shell command tool call이 완료되고 usage bar가 갱신되는 것을 확인했다.
+- 실제 Tauri 앱에서 `/tmp/acp-permission-roundtrip-test.txt`를 생성하는 shell command tool call이 완료되는 것을 확인했고, 검증 후 임시 파일은 제거했다.
+- 위 두 실제 agent/tool 호출은 default permission mode에서 permission dialog를 표시하지 않아 permission response round-trip 검증 항목은 아직 남아 있다.
 - login shell PATH 조회는 2초 timeout을 둬 느린 shell init에 무기한 막히지 않도록 했다.
 - icon asset은 `apps/desktop/src-tauri/icons/README.md`에 source PNG와 `tauri icon` 재생성 절차를 문서화했다.
 - 실제 Tauri multi-window/tab, permission request round-trip, packaged/Finder 실행 PATH 동작은 아직 수동 검증이 필요하다.
