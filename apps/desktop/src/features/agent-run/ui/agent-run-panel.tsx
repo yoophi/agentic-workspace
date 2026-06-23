@@ -8,6 +8,7 @@ import {
   cancelAgentRun,
   listenRunEvents,
   listAgents,
+  listProviderSessions,
   sendPromptToRun,
   startAgentRun,
 } from "@/entities/agent-run/api/agent-run-repository";
@@ -17,7 +18,7 @@ import {
   appendOneTimelineItem,
   toTimelineItem,
 } from "@/entities/agent-run/model";
-import type { EventGroup, TimelineItem } from "@/entities/agent-run/model";
+import type { EventGroup, ProviderSession, TimelineItem } from "@/entities/agent-run/model";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -60,6 +61,8 @@ type QueuedPrompt = {
 
 export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [sessionMode, setSessionMode] = useState<"new" | "reuse">("new");
+  const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -77,11 +80,23 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
   });
   const agents = agentsQuery.data ?? [];
 
+  const sessionsQuery = useQuery({
+    queryKey: agentRunQueryKeys.sessions(selectedAgentId, workingDirectory),
+    queryFn: () => listProviderSessions(selectedAgentId, workingDirectory),
+    enabled: sessionMode === "reuse" && Boolean(selectedAgentId),
+  });
+  const sessions = sessionsQuery.data ?? [];
+
   useEffect(() => {
     if (!selectedAgentId && agents[0]) {
       setSelectedAgentId(agents[0].id);
     }
   }, [agents, selectedAgentId]);
+
+  // agent를 바꾸면 이전 provider의 세션 선택은 더 이상 유효하지 않다.
+  useEffect(() => {
+    setSelectedSessionId("");
+  }, [selectedAgentId]);
 
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
@@ -161,7 +176,12 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     () => (filter === "all" ? items : items.filter((item) => item.group === filter)),
     [filter, items],
   );
-  const canStartRun = Boolean(selectedAgentId && prompt.trim() && !isRunning);
+  const canStartRun = Boolean(
+    selectedAgentId &&
+      prompt.trim() &&
+      !isRunning &&
+      (sessionMode === "new" || selectedSessionId),
+  );
   const canQueuePrompt = Boolean(activeRunId && isRunning && prompt.trim());
   const canCancel = Boolean(activeRunId && isRunning);
 
@@ -181,6 +201,8 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
     setIsAwaitingPromptResponse(true);
     setPrompt(defaultPrompt);
 
+    const reuseSession = sessionMode === "reuse" && Boolean(selectedSessionId);
+
     try {
       await startAgentRun({
         runId,
@@ -189,6 +211,9 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
         cwd: workingDirectory,
         stdioBufferLimitMb: 50,
         autoAllow: true,
+        ...(reuseSession
+          ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
+          : {}),
       });
     } catch (caughtError) {
       setError(String(caughtError));
@@ -241,26 +266,86 @@ export function AgentRunPanel({ workingDirectory }: AgentRunPanelProps) {
               선택한 worktree를 작업 디렉토리로 사용해 ACP agent를 실행합니다.
             </CardDescription>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Agent</span>
-            <Select
-              value={selectedAgentId}
-              onValueChange={setSelectedAgentId}
-              disabled={isRunning || agentsQuery.isLoading}
-            >
-              <SelectTrigger className="w-56">
-                <SelectValue placeholder="Agent 선택" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {agents.map((agent) => (
-                    <SelectItem key={agent.id} value={agent.id}>
-                      {agent.label}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">Agent</span>
+              <Select
+                value={selectedAgentId}
+                onValueChange={setSelectedAgentId}
+                disabled={isRunning || agentsQuery.isLoading}
+              >
+                <SelectTrigger className="w-56">
+                  <SelectValue placeholder="Agent 선택" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {agents.map((agent) => (
+                      <SelectItem key={agent.id} value={agent.id}>
+                        {agent.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium">세션</span>
+              <div className="flex gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={sessionMode === "new" ? "default" : "outline"}
+                  disabled={isRunning}
+                  onClick={() => setSessionMode("new")}
+                >
+                  새 세션
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={sessionMode === "reuse" ? "default" : "outline"}
+                  disabled={isRunning}
+                  onClick={() => setSessionMode("reuse")}
+                >
+                  기존 세션 재사용
+                </Button>
+              </div>
+              {sessionMode === "reuse" && (
+                <Select
+                  value={selectedSessionId}
+                  onValueChange={setSelectedSessionId}
+                  disabled={isRunning || sessionsQuery.isLoading || sessions.length === 0}
+                >
+                  <SelectTrigger className="w-56">
+                    <SelectValue
+                      placeholder={
+                        sessionsQuery.isLoading
+                          ? "세션 불러오는 중…"
+                          : sessions.length === 0
+                            ? "재사용 가능한 세션 없음"
+                            : "재개할 세션 선택"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectGroup>
+                      {sessions.map((session) => (
+                        <SelectItem key={session.id} value={session.id}>
+                          {formatSessionLabel(session)}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </SelectContent>
+                </Select>
+              )}
+              {sessionMode === "reuse" &&
+                !sessionsQuery.isLoading &&
+                sessions.length === 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    이 worktree에서 해당 agent의 기존 세션을 찾지 못했습니다.
+                  </span>
+                )}
+            </div>
           </div>
         </div>
       </CardHeader>
@@ -518,6 +603,18 @@ function ToolStep({ item }: { item: TimelineItem }) {
     </Steps>
     </div>
   );
+}
+
+function formatSessionLabel(session: ProviderSession) {
+  const title = session.title?.trim() || session.id.slice(0, 8);
+  const parts = [title, `${session.messageCount} msgs`];
+  if (session.updatedAt) {
+    const when = new Date(session.updatedAt);
+    if (!Number.isNaN(when.getTime())) {
+      parts.push(when.toLocaleString());
+    }
+  }
+  return parts.join(" · ");
 }
 
 function lifecycleStatusLabel(status: string) {

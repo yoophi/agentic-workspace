@@ -5,8 +5,8 @@ use tauri::{AppHandle, State};
 use crate::{
     application::{
         cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
-        git_worktree_service, project_service, send_prompt::SendPromptUseCase,
-        start_agent_run::StartAgentRunUseCase,
+        git_worktree_service, list_provider_sessions::ListProviderSessionsUseCase,
+        project_service, send_prompt::SendPromptUseCase, start_agent_run::StartAgentRunUseCase,
     },
     domain::{
         agent::AgentDescriptor,
@@ -14,11 +14,14 @@ use crate::{
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
         project::{Project, ProjectDraft},
+        provider_session::{ProviderSession, SessionScope},
         run::{AgentRun, AgentRunRequest},
     },
     infrastructure::{
         acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
-        agent_session_registry::AppState, git_cli_branch_provider::GitCliBranchProvider,
+        agent_session_registry::AppState,
+        fs_provider_session_repository::FsProviderSessionRepository,
+        git_cli_branch_provider::GitCliBranchProvider,
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
         json_project_repository::JsonProjectRepository,
@@ -102,6 +105,22 @@ pub fn list_agents() -> Vec<AgentDescriptor> {
     ConfigurableAgentCatalog::from_env().list_agents()
 }
 
+/// 선택한 provider(`agent_id`)가 로컬에 남긴 네이티브 세션을 조회한다.
+/// `cwd`가 주어지면 해당 작업 디렉터리의 세션만, 없으면 전체를 돌려준다.
+#[tauri::command]
+pub fn list_provider_sessions(
+    agent_id: String,
+    cwd: Option<String>,
+) -> Result<Vec<ProviderSession>, String> {
+    let scope = match cwd {
+        Some(path) if !path.trim().is_empty() => SessionScope::Path(path.into()),
+        _ => SessionScope::All,
+    };
+    ListProviderSessionsUseCase::new(FsProviderSessionRepository::new())
+        .execute(&agent_id, &scope, Some(50))
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub async fn start_agent_run(
     app: AppHandle,
@@ -113,8 +132,6 @@ pub async fn start_agent_run(
     }
     request.workspace_id = None;
     request.checkout_id = None;
-    request.resume_session_id = None;
-    request.resume_policy = None;
     request.ralph_loop = None;
 
     let sink = TauriRunEventSink::new(app, state.inner().clone());

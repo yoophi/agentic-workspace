@@ -5,11 +5,16 @@ import type {
   AgentDescriptor,
   AgentRun,
   AgentRunRequest,
+  ProviderSession,
   RunEventEnvelope,
 } from "@/entities/agent-run/model/types";
 
 export async function listAgents() {
   return invoke<AgentDescriptor[]>("list_agents");
+}
+
+export async function listProviderSessions(agentId: string, cwd?: string) {
+  return invoke<ProviderSession[]>("list_provider_sessions", { agentId, cwd });
 }
 
 export async function startAgentRun(request: AgentRunRequest) {

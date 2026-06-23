@@ -4,6 +4,8 @@ export type AgentDescriptor = {
   command: string;
 };
 
+export type ResumePolicy = "fresh" | "resumeIfAvailable" | "resumeRequired";
+
 export type AgentRunRequest = {
   runId?: string;
   goal: string;
@@ -12,6 +14,23 @@ export type AgentRunRequest = {
   agentCommand?: string;
   stdioBufferLimitMb?: number;
   autoAllow?: boolean;
+  resumeSessionId?: string;
+  resumePolicy?: ResumePolicy;
+};
+
+/** provider가 로컬에 남긴 네이티브 세션 한 건의 요약(백엔드 camelCase와 일치). */
+export type ProviderSession = {
+  agentId: string;
+  id: string;
+  cwd: string | null;
+  title: string | null;
+  file: string;
+  messageCount: number;
+  createdAt: string | null;
+  updatedAt: string | null;
+  model: string | null;
+  branch: string | null;
+  source: string | null;
 };
 
 export type AgentRun = {

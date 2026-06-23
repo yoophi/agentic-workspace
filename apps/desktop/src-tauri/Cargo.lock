@@ -8,6 +8,7 @@ version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
+ "chrono",
  "libc",
  "serde",
  "serde_json",
@@ -17,6 +18,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tokio",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

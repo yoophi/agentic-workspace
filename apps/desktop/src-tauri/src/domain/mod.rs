@@ -9,4 +9,5 @@ pub mod git_worktree;
 pub mod git_worktree_provider;
 pub mod project;
 pub mod project_repository;
+pub mod provider_session;
 pub mod run;
