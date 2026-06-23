@@ -25,10 +25,7 @@ use crate::{
         noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
         window_manager,
     },
-    ports::{
-        agent_catalog::AgentCatalog,
-        permission::{PermissionDecision, PermissionDecisionPort},
-    },
+    ports::{agent_catalog::AgentCatalog, permission::PermissionDecision},
 };
 
 #[derive(Debug, Clone, Deserialize)]
@@ -184,13 +181,22 @@ pub async fn cancel_agent_run(
 
 #[tauri::command]
 pub async fn respond_agent_permission(
+    window: tauri::Window,
     state: State<'_, AppState>,
+    run_id: String,
     permission_id: String,
     option_id: String,
 ) -> Result<(), String> {
+    let owner = state
+        .owner_of(&run_id)
+        .await
+        .ok_or_else(|| format!("unknown or finished run: {run_id}"))?;
+    if owner != window.label() {
+        return Err("permission response was sent from a non-owner window".to_string());
+    }
     state
         .permissions()
-        .respond(&permission_id, PermissionDecision { option_id })
+        .respond_for_run(&run_id, &permission_id, PermissionDecision { option_id })
         .await
         .map_err(|err| err.to_string())
 }
