@@ -68,6 +68,7 @@
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml window_manager -- --nocapture` 통과.
 - Tauri dev 앱을 native rebuild와 함께 재실행했다.
 - worktree session route는 `worktreePath` query string 기반으로 변경했고, `/`, 공백, 한글, `#`, `%` 인코딩을 Rust unit test로 고정했다.
+- 현재 창 session route도 frontend helper로 분리했고, 동일한 특수문자 worktree path round-trip을 Vitest로 고정했다.
 - session label은 SHA-256 prefix 기반으로 변경했고 route-safe/stable 속성을 Rust unit test로 고정했다.
 - permission 응답은 run id와 owner window를 확인하도록 좁혔고, wrong-run 응답이 waiter를 제거하지 않는지 Rust unit test로 확인했다.
 - permission dialog는 응답 선택 직후 optimistic하게 닫히며, command 실패 시 다시 열릴 수 있도록 answered set에서 제거한다.
