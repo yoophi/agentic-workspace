@@ -45,11 +45,8 @@
 
 ## 남은 작업
 
-- 실제 Tauri 앱에서 worktree session 열기 dropdown의 세 가지 경로를 확인한다.
-  - 현재 창에서 열기
-  - 새 창에서 열기
+- 실제 Tauri 앱에서 worktree session 열기 dropdown의 남은 경로를 확인한다.
   - macOS 새 탭에서 열기
-- 경로에 `/`, 공백, 한글, `#`, `%`가 포함된 worktree path를 실제 Tauri window에서 열어 query-string 기반 route 복원이 정확한지 확인한다.
 - 같은 worktree를 새 창/탭으로 다시 열 때 새 window를 만들지 않고 기존 session window가 focus되는지 확인한다.
 - 서로 다른 두 session window에서 agent run을 동시에 시작해 이벤트, usage, permission dialog, cancel 상태가 서로 섞이지 않는지 확인한다.
 - permission 요청이 필요한 agent/tool 호출을 실제로 실행해 다음 상태를 확인한다.
@@ -68,6 +65,10 @@
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml window_manager -- --nocapture` 통과.
 - Tauri dev 앱을 native rebuild와 함께 재실행했다.
 - `ACP_OPEN_DEVTOOLS`를 설정하지 않은 dev 실행에서 DevTools가 자동으로 열리지 않는 것을 실제 Tauri 창으로 확인했다.
+- 실제 Tauri 앱에서 worktree session 열기 dropdown에 `새 창에서 열기`, `새 탭에서 열기`, `현재 창에서 열기` 세 항목이 표시되는 것을 확인했다.
+- 실제 Tauri 앱에서 `현재 창에서 열기`를 선택했을 때 main window가 worktree session 화면으로 전환되고 `cwd`가 선택 worktree로 표시되는 것을 확인했다.
+- 실제 Tauri 앱에서 `새 창에서 열기`를 선택했을 때 `ACP Worktree Session` window가 추가되고 session 화면이 표시되는 것을 확인했다.
+- `/private/tmp/작업 tree/a#b%c` 임시 worktree를 실제 Tauri 앱 목록에 표시한 뒤 `새 창에서 열기`로 열었고, session window에서 `cwd=/private/tmp/작업 tree/a#b%c`로 복원되는 것을 확인했다. 검증 후 임시 worktree는 제거했다.
 - worktree session route는 `worktreePath` query string 기반으로 변경했고, `/`, 공백, 한글, `#`, `%` 인코딩을 Rust unit test로 고정했다.
 - 현재 창 session route도 frontend helper로 분리했고, 동일한 특수문자 worktree path round-trip을 Vitest로 고정했다.
 - session label은 SHA-256 prefix 기반으로 변경했고 route-safe/stable 속성을 Rust unit test로 고정했다.
