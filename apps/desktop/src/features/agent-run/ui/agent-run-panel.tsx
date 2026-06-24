@@ -72,6 +72,7 @@ import {
 import type { QueuedPrompt, UsageContext } from "@/features/agent-run/model/run-panel-state";
 import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
+import { WorktreeChangesPanel } from "@/features/worktree-changes/ui/worktree-changes-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1185,6 +1186,11 @@ export function AgentRunPanel({
                 onResume={() => void setGoalStatus("active")}
                 onComplete={() => void setGoalStatus("complete")}
                 onClear={() => void clearCurrentGoal()}
+              />
+
+              <WorktreeChangesPanel
+                workingDirectory={workingDirectory}
+                isRunning={isRunning}
               />
 
               <div className="flex flex-col rounded-lg border bg-background">

@@ -6,3 +6,4 @@ pub mod provider_session_repository;
 pub mod session_handle;
 pub mod session_launcher;
 pub mod session_registry;
+pub mod worktree_change_provider;
