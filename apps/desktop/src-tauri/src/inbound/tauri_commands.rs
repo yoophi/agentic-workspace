@@ -7,7 +7,7 @@ use crate::{
         cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
         git_worktree_service, list_provider_sessions::ListProviderSessionsUseCase, project_service,
         saved_prompt_service, send_prompt::SendPromptUseCase,
-        start_agent_run::StartAgentRunUseCase,
+        set_permission_mode::SetPermissionModeUseCase, start_agent_run::StartAgentRunUseCase,
     },
     domain::{
         agent::AgentDescriptor,
@@ -16,7 +16,7 @@ use crate::{
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
         project::{Project, ProjectDraft},
         provider_session::{ProviderSession, SessionScope},
-        run::{AgentRun, AgentRunRequest, RalphLoopRequest},
+        run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
         saved_prompt::{SavedPrompt, SavedPromptDraft},
     },
     infrastructure::{
@@ -297,6 +297,23 @@ pub async fn send_prompt_to_run(
 }
 
 #[tauri::command]
+pub async fn set_run_permission_mode(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    run_id: String,
+    permission_mode: PermissionMode,
+) -> Result<(), String> {
+    let sink =
+        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
+    let registry = state.inner().clone();
+    SetPermissionModeUseCase::new(registry)
+        .execute(sink, run_id, permission_mode)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
 pub async fn cancel_agent_run(
     app: AppHandle,
     window: tauri::Window,
@@ -395,7 +412,10 @@ mod tests {
             loop_settings.max_iterations,
             crate::domain::run::MAX_RALPH_ITERATIONS
         );
-        assert_eq!(loop_settings.delay_ms, crate::domain::run::MAX_RALPH_DELAY_MS);
+        assert_eq!(
+            loop_settings.delay_ms,
+            crate::domain::run::MAX_RALPH_DELAY_MS
+        );
         assert_eq!(loop_settings.prompt_template, "continue");
     }
 

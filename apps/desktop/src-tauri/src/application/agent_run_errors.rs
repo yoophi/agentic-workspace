@@ -43,3 +43,24 @@ impl From<SendPromptError> for String {
         error.to_string()
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum SetPermissionModeError {
+    RunNotActive,
+    Apply(String),
+}
+
+impl fmt::Display for SetPermissionModeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::RunNotActive => f.write_str("agent run is not active"),
+            Self::Apply(message) => f.write_str(message),
+        }
+    }
+}
+
+impl From<SetPermissionModeError> for String {
+    fn from(error: SetPermissionModeError) -> Self {
+        error.to_string()
+    }
+}

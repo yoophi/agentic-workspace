@@ -2,7 +2,7 @@ use std::future::Future;
 
 use anyhow::Result;
 
-use crate::ports::event_sink::RunEventSink;
+use crate::{domain::run::PermissionMode, ports::event_sink::RunEventSink};
 
 /// Behavior the application layer needs from a launched agent session.
 ///
@@ -14,6 +14,17 @@ pub trait SessionHandle: Send + Sync + 'static {
     /// by the agent. Streaming events are emitted through `sink` as
     /// they arrive.
     fn send_prompt<S>(&self, sink: S, text: String) -> impl Future<Output = Result<String>> + Send
+    where
+        S: RunEventSink;
+
+    /// Apply a new permission mode to the already-running session so the
+    /// agent's next tool/command approval policy reflects the change
+    /// without restarting the run. Progress is reported through `sink`.
+    fn set_permission_mode<S>(
+        &self,
+        sink: S,
+        mode: PermissionMode,
+    ) -> impl Future<Output = Result<()>> + Send
     where
         S: RunEventSink;
 }

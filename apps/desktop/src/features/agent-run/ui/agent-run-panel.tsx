@@ -25,6 +25,7 @@ import {
   listProviderSessions,
   respondAgentPermission,
   sendPromptToRun,
+  setRunPermissionMode,
   startAgentRun,
 } from "@/entities/agent-run/api/agent-run-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
@@ -203,6 +204,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   const [sessionMode, setSessionMode] = useState<"new" | "reuse">("new");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [isChangingPermissionMode, setIsChangingPermissionMode] = useState(false);
   const [modelId, setModelId] = useState<(typeof modelOptions)[number]["value"]>(
     "providerDefault",
   );
@@ -501,6 +503,30 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     }
   }
 
+  async function changePermissionMode(nextMode: PermissionMode) {
+    if (nextMode === permissionMode) {
+      return;
+    }
+
+    const previousMode = permissionMode;
+    setPermissionMode(nextMode);
+
+    if (!activeRunId || !isRunning) {
+      return;
+    }
+
+    setError(null);
+    setIsChangingPermissionMode(true);
+    try {
+      await setRunPermissionMode(activeRunId, nextMode);
+    } catch (caughtError) {
+      setPermissionMode(previousMode);
+      setError(String(caughtError));
+    } finally {
+      setIsChangingPermissionMode(false);
+    }
+  }
+
   async function steer() {
     const steerPrompt = prompt.trim();
     const originalPrompt = directPrompt?.trim();
@@ -790,8 +816,8 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
             <span className="text-xs font-medium text-muted-foreground">Permission mode</span>
             <Select
               value={permissionMode}
-              onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-              disabled={isRunning}
+              onValueChange={(value) => void changePermissionMode(value as PermissionMode)}
+              disabled={isChangingPermissionMode}
             >
               <SelectTrigger className="h-8 w-52">
                 <SelectValue />
@@ -807,7 +833,12 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
               </SelectContent>
             </Select>
             <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
+              {isChangingPermissionMode
+                ? "permission mode를 실행 중인 agent에 적용하는 중입니다..."
+                : isRunning
+                  ? "실행 중에 변경하면 이후 승인 요청부터 즉시 적용됩니다."
+                  : permissionModeOptions.find((option) => option.value === permissionMode)
+                      ?.description}
             </span>
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-2 py-2">

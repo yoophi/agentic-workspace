@@ -1,13 +1,13 @@
 use agent_client_protocol::schema::{
+    ProtocolVersion,
     v1::{
         ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
         InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
         StopReason, TextContent,
     },
-    ProtocolVersion,
 };
-use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::{fs, future::Future, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -23,11 +23,11 @@ use crate::{
         run::{AgentRunRequest, ContextSizePreset, PermissionMode, RalphLoopRequest, ResumePolicy},
     },
     infrastructure::acp::{
-        client::{lifecycle, AcpClient},
-        transport::{read_loop, RpcPeer},
+        client::{AcpClient, lifecycle},
+        transport::{RpcPeer, read_loop},
         util::{
-            display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
-            rpc_to_anyhow, RpcError,
+            RpcError, display_command, enriched_path, expand_tilde, normalize_path,
+            resolve_program, rpc_to_anyhow,
         },
     },
     ports::{
@@ -204,12 +204,13 @@ where
             &run_id,
             lifecycle(LifecycleStatus::SessionCreated, session_id.clone()),
         );
+        let permission_mode = request.permission_mode.unwrap_or_default();
         apply_permission_mode(
             &peer,
             &run_id,
             &session_id,
             &request.agent_id,
-            request.permission_mode.unwrap_or_default(),
+            permission_mode,
             &session_setup.response,
             &sink,
         )
@@ -240,7 +241,8 @@ where
             workspace,
             peer,
             resume_policy,
-            permission_mode: request.permission_mode.unwrap_or_default(),
+            permission_mode: Mutex::new(permission_mode),
+            session_response: session_setup.response,
             session_record,
             session_store: self.session_store.clone(),
             in_flight: Mutex::new(()),
@@ -498,7 +500,8 @@ pub struct AcpSession {
     session_id: Mutex<String>,
     workspace: PathBuf,
     resume_policy: ResumePolicy,
-    permission_mode: PermissionMode,
+    permission_mode: Mutex<PermissionMode>,
+    session_response: Value,
     session_record: AcpSessionRecord,
     session_store: Arc<dyn AcpSessionStore>,
     in_flight: Mutex<()>,
@@ -560,7 +563,7 @@ impl SessionHandle for AcpSession {
                         &self.run_id,
                         &new_id,
                         &self.session_record.agent_id,
-                        self.permission_mode,
+                        *self.permission_mode.lock().await,
                         &new_session.response,
                         &sink,
                     )
@@ -583,6 +586,31 @@ impl SessionHandle for AcpSession {
             ),
         );
         Ok(stop_reason)
+    }
+
+    async fn set_permission_mode<S>(&self, sink: S, mode: PermissionMode) -> Result<()>
+    where
+        S: RunEventSink,
+    {
+        sink.emit(
+            &self.run_id,
+            RunEvent::Diagnostic {
+                message: format!("permission mode change requested: {mode:?}"),
+            },
+        );
+        let session_id = self.session_id().await;
+        apply_permission_mode(
+            &self.peer,
+            &self.run_id,
+            &session_id,
+            &self.session_record.agent_id,
+            mode,
+            &self.session_response,
+            &sink,
+        )
+        .await?;
+        *self.permission_mode.lock().await = mode;
+        Ok(())
     }
 }
 
@@ -1070,8 +1098,8 @@ mod tests {
     use anyhow::anyhow;
     use serde_json::json;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     };
 
     #[derive(Clone, Default)]

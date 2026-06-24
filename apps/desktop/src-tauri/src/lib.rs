@@ -9,7 +9,8 @@ use inbound::tauri_commands::{
     delete_git_worktree, delete_project, delete_saved_prompt, list_agents, list_git_branches,
     list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
     list_saved_prompts, open_external_url, open_worktree_window, respond_agent_permission,
-    send_prompt_to_run, start_agent_run, update_project, update_saved_prompt,
+    send_prompt_to_run, set_run_permission_mode, start_agent_run, update_project,
+    update_saved_prompt,
 };
 use infrastructure::agent_session_registry::AppState;
 use tauri::{Manager, WindowEvent};
@@ -63,6 +64,7 @@ pub fn run() {
             start_agent_run,
             cancel_agent_run,
             send_prompt_to_run,
+            set_run_permission_mode,
             respond_agent_permission
         ])
         .run(tauri::generate_context!())

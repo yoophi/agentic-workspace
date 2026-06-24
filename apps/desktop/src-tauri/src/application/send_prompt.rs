@@ -92,6 +92,17 @@ mod tests {
                 FakeBehavior::Err => Err(anyhow!("dispatch exploded")),
             }
         }
+
+        async fn set_permission_mode<S>(
+            &self,
+            _sink: S,
+            _mode: crate::domain::run::PermissionMode,
+        ) -> Result<()>
+        where
+            S: RunEventSink,
+        {
+            Ok(())
+        }
     }
 
     #[derive(Clone, Default)]

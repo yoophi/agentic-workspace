@@ -7,4 +7,5 @@ pub mod list_provider_sessions;
 pub mod project_service;
 pub mod saved_prompt_service;
 pub mod send_prompt;
+pub mod set_permission_mode;
 pub mod start_agent_run;

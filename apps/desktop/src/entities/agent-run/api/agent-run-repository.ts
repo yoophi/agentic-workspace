@@ -4,6 +4,7 @@ import type {
   AgentDescriptor,
   AgentRun,
   AgentRunRequest,
+  PermissionMode,
   ProviderSession,
   RunEventEnvelope,
 } from "@/entities/agent-run/model/types";
@@ -22,6 +23,10 @@ export async function startAgentRun(request: AgentRunRequest) {
 
 export async function sendPromptToRun(runId: string, prompt: string) {
   return invoke<void>("send_prompt_to_run", { runId, prompt });
+}
+
+export async function setRunPermissionMode(runId: string, permissionMode: PermissionMode) {
+  return invoke<void>("set_run_permission_mode", { runId, permissionMode });
 }
 
 export async function cancelAgentRun(runId: string) {
