@@ -45,6 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectWorktreeCardProps = {
   workingDirectory: string;
@@ -213,35 +214,43 @@ export function ProjectWorktreeCard({
           </p>
         ) : (
           <div className="overflow-x-auto">
-            <Table>
+            <Table className="table-fixed">
               <TableHeader>
                 <TableRow>
-                  <TableHead>경로</TableHead>
-                  <TableHead>브랜치</TableHead>
-                  <TableHead>HEAD</TableHead>
-                  <TableHead>상태</TableHead>
+                  <TableHead className="w-[42%]">경로</TableHead>
+                  <TableHead className="w-[18%]">브랜치</TableHead>
+                  <TableHead className="w-[16%]">HEAD</TableHead>
+                  <TableHead className="w-[16%]">상태</TableHead>
                   <TableHead className="w-24 text-right">작업</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {worktrees.map((worktree) => (
                   <TableRow key={worktree.path}>
-                    <TableCell className="max-w-sm break-all font-mono text-xs">
-                      {worktree.path}
+                    <TableCell className="min-w-0 font-mono text-xs">
+                      <EllipsisPopoverText
+                        value={worktree.path}
+                        contentClassName="font-mono text-xs"
+                      />
                     </TableCell>
-                    <TableCell className="max-w-44 truncate">
-                      {worktree.branch || "-"}
+                    <TableCell className="min-w-0">
+                      <EllipsisPopoverText value={worktree.branch || "-"} />
                     </TableCell>
-                    <TableCell className="max-w-36 truncate font-mono text-xs text-muted-foreground">
-                      {worktree.head || "-"}
+                    <TableCell className="min-w-0 font-mono text-xs text-muted-foreground">
+                      <EllipsisPopoverText
+                        value={worktree.head || "-"}
+                        contentClassName="font-mono text-xs"
+                      />
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <WorktreeStatusBadge status={worktree.status} />
                         {worktree.pruneReason && (
-                          <span className="max-w-xs break-words text-xs text-muted-foreground">
-                            {worktree.pruneReason}
-                          </span>
+                          <EllipsisPopoverText
+                            value={worktree.pruneReason}
+                            className="text-xs text-muted-foreground"
+                            contentClassName="text-xs"
+                          />
                         )}
                       </div>
                     </TableCell>

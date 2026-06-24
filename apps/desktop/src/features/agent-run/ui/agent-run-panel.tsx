@@ -74,6 +74,7 @@ import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/st
 import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type AgentRunPanelProps = {
   workingDirectory: string;
@@ -398,14 +399,18 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
                   <Badge variant={isRunning ? "default" : "secondary"}>
                     {isRunning ? "Running" : "Idle"}
                   </Badge>
-                  <span className="break-all font-mono text-xs text-muted-foreground">
-                    cwd={workingDirectory}
-                  </span>
+                  <EllipsisPopoverText
+                    value={`cwd=${workingDirectory}`}
+                    className="max-w-full font-mono text-xs text-muted-foreground"
+                    contentClassName="font-mono text-xs"
+                  />
                 </div>
                 {selectedAgent && (
-                  <span className="break-all font-mono text-xs text-muted-foreground">
-                    command={selectedAgent.command}
-                  </span>
+                  <EllipsisPopoverText
+                    value={`command=${selectedAgent.command}`}
+                    className="font-mono text-xs text-muted-foreground"
+                    contentClassName="font-mono text-xs"
+                  />
                 )}
                 {error && (
                   <SystemMessage variant="error" fill>
@@ -852,7 +857,13 @@ function ToolStep({ item }: { item: TimelineItem }) {
         {locations.map((path) => (
           <StepsItem key={path}>
             <span className="font-medium text-foreground">path</span>{" "}
-            <code className="break-all rounded bg-background px-1.5 py-0.5 font-mono text-xs">{path}</code>
+            <code className="inline-block max-w-full rounded bg-background px-1.5 py-0.5 align-bottom font-mono text-xs">
+              <EllipsisPopoverText
+                value={path}
+                className="font-mono text-xs"
+                contentClassName="font-mono text-xs"
+              />
+            </code>
           </StepsItem>
         ))}
         {!toolCallId && locations.length === 0 && item.body && (

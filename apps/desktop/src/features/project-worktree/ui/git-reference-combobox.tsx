@@ -19,6 +19,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type GitReferenceComboboxProps = {
   workingDirectory: string;
@@ -67,7 +68,11 @@ export function GitReferenceCombobox({
           className="w-full justify-between"
           aria-expanded={isOpen}
         >
-          <span className="truncate">{value || "브랜치 또는 커밋 해시"}</span>
+          <EllipsisPopoverText
+            value={value || "브랜치 또는 커밋 해시"}
+            className="flex-1"
+            focusable={false}
+          />
           <ChevronsUpDownIcon data-icon="inline-end" />
         </Button>
       </PopoverTrigger>
@@ -90,7 +95,12 @@ export function GitReferenceCombobox({
                   value={trimmedSearch}
                   onSelect={() => selectReference(trimmedSearch)}
                 >
-                  <span className="truncate font-mono">{trimmedSearch}</span>
+                  <EllipsisPopoverText
+                    value={trimmedSearch}
+                    className="font-mono"
+                    contentClassName="font-mono text-xs"
+                    focusable={false}
+                  />
                 </CommandItem>
               </CommandGroup>
             )}
@@ -102,7 +112,7 @@ export function GitReferenceCombobox({
                   data-checked={value === branch.name}
                   onSelect={() => selectReference(branch.name)}
                 >
-                  <span className="truncate">{branch.name}</span>
+                  <EllipsisPopoverText value={branch.name} focusable={false} />
                   {branch.isCurrent && <Badge variant="secondary">current</Badge>}
                   {branch.isRemote && <Badge variant="outline">remote</Badge>}
                 </CommandItem>

@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectDetailPageProps = {
   project: Project;
@@ -168,12 +169,12 @@ export function ProjectDetailPage({
             </Empty>
           ) : (
             <div className="overflow-x-auto">
-              <Table>
+              <Table className="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead>이름</TableHead>
-                    <TableHead>Fetch URL</TableHead>
-                    <TableHead>Push URL</TableHead>
+                    <TableHead className="w-[20%]">이름</TableHead>
+                    <TableHead className="w-[40%]">Fetch URL</TableHead>
+                    <TableHead className="w-[40%]">Push URL</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -182,11 +183,17 @@ export function ProjectDetailPage({
                       <TableCell className="font-medium">
                         {remote.name}
                       </TableCell>
-                      <TableCell className="max-w-sm break-all font-mono text-xs text-muted-foreground">
-                        {remote.fetchUrl || "-"}
+                      <TableCell className="min-w-0 font-mono text-xs text-muted-foreground">
+                        <EllipsisPopoverText
+                          value={remote.fetchUrl || "-"}
+                          contentClassName="font-mono text-xs"
+                        />
                       </TableCell>
-                      <TableCell className="max-w-sm break-all font-mono text-xs text-muted-foreground">
-                        {remote.pushUrl || "-"}
+                      <TableCell className="min-w-0 font-mono text-xs text-muted-foreground">
+                        <EllipsisPopoverText
+                          value={remote.pushUrl || "-"}
+                          contentClassName="font-mono text-xs"
+                        />
                       </TableCell>
                     </TableRow>
                   ))}
@@ -217,14 +224,11 @@ function DetailField({
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span className="text-sm font-medium">{label}</span>
-      <span
-        className={cn(
-          "text-sm text-muted-foreground",
-          mono ? "break-all font-mono" : "break-words",
-        )}
-      >
-        {value}
-      </span>
+      <EllipsisPopoverText
+        value={value}
+        className={cn("text-sm text-muted-foreground", mono && "font-mono")}
+        contentClassName={cn(mono && "font-mono text-xs")}
+      />
     </div>
   );
 }

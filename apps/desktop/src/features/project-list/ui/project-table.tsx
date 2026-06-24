@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectTableProps = {
   projects: Project[];
@@ -26,12 +27,12 @@ export function ProjectTable({
 }: ProjectTableProps) {
   return (
     <div className="overflow-x-auto">
-      <Table>
+      <Table className="table-fixed">
         <TableHeader>
           <TableRow>
-            <TableHead>이름</TableHead>
-            <TableHead>작업 디렉토리</TableHead>
-            <TableHead>설명</TableHead>
+            <TableHead className="w-[24%]">이름</TableHead>
+            <TableHead className="w-[34%]">작업 디렉토리</TableHead>
+            <TableHead className="w-[28%]">설명</TableHead>
             <TableHead className="w-36 text-right">작업</TableHead>
           </TableRow>
         </TableHeader>
@@ -48,11 +49,14 @@ export function ProjectTable({
                   {project.name}
                 </Button>
               </TableCell>
-              <TableCell className="max-w-xs truncate font-mono text-xs">
-                {project.workingDirectory}
+              <TableCell className="min-w-0 font-mono text-xs">
+                <EllipsisPopoverText
+                  value={project.workingDirectory}
+                  contentClassName="font-mono text-xs"
+                />
               </TableCell>
-              <TableCell className="max-w-sm truncate text-muted-foreground">
-                {project.description || "설명 없음"}
+              <TableCell className="min-w-0 text-muted-foreground">
+                <EllipsisPopoverText value={project.description || "설명 없음"} />
               </TableCell>
               <TableCell>
                 <div className="flex justify-end gap-1">

@@ -12,6 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectWorktreeSessionPageProps = {
   project: Project;
@@ -91,9 +92,11 @@ function Detail({
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <span className="text-sm font-medium">{label}</span>
-      <span className={mono ? "break-all font-mono text-sm text-muted-foreground" : "break-words text-sm text-muted-foreground"}>
-        {value}
-      </span>
+      <EllipsisPopoverText
+        value={value}
+        className={mono ? "font-mono text-sm text-muted-foreground" : "text-sm text-muted-foreground"}
+        contentClassName={mono ? "font-mono text-xs" : undefined}
+      />
     </div>
   );
 }
