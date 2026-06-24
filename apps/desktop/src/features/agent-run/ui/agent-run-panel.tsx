@@ -5,9 +5,14 @@ import {
   ArrowDownIcon,
   ArrowUpIcon,
   BotIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  Loader2Icon,
   PencilIcon,
   PlayIcon,
+  SettingsIcon,
   SquareIcon,
+  XCircleIcon,
   XIcon,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -1168,9 +1173,7 @@ function ToolStep({ item }: { item: TimelineItem }) {
       <StepsTrigger>
         <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="">{item.title || "tool"}</span>
-          <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", toolStatusClassName(status))}>
-            {toolStatusLabel(status)}
-          </span>
+          <ToolStatusIcon status={status} />
         </span>
       </StepsTrigger>
       <StepsContent>
@@ -1192,6 +1195,49 @@ function ToolStep({ item }: { item: TimelineItem }) {
       </StepsContent>
     </Steps>
     </div>
+  );
+}
+
+function ToolStatusIcon({ status }: { status: string }) {
+  const label = toolStatusLabel(status);
+  const className = "size-4 shrink-0";
+
+  if (status === "completed") {
+    return (
+      <span className="inline-flex size-5 items-center justify-center text-emerald-600 dark:text-emerald-400" role="img" aria-label={label} title={label}>
+        <CheckCircleIcon className={className} aria-hidden />
+      </span>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <span className="inline-flex size-5 items-center justify-center text-destructive" role="img" aria-label={label} title={label}>
+        <XCircleIcon className={className} aria-hidden />
+      </span>
+    );
+  }
+
+  if (status === "in_progress" || status === "running") {
+    return (
+      <span className="inline-flex size-5 items-center justify-center text-primary" role="img" aria-label={label} title={label}>
+        <Loader2Icon className={cn(className, "animate-spin")} aria-hidden />
+      </span>
+    );
+  }
+
+  if (status === "pending") {
+    return (
+      <span className="inline-flex size-5 items-center justify-center text-primary" role="img" aria-label={label} title={label}>
+        <ClockIcon className={className} aria-hidden />
+      </span>
+    );
+  }
+
+  return (
+    <span className="inline-flex size-5 items-center justify-center text-muted-foreground" role="img" aria-label={label} title={label}>
+      <SettingsIcon className={className} aria-hidden />
+    </span>
   );
 }
 
@@ -1227,13 +1273,6 @@ function toolStatusLabel(status: string) {
   if (status === "pending") return "In progress";
   if (status === "running") return "Running";
   return status || "Tool";
-}
-
-function toolStatusClassName(status: string) {
-  if (status === "completed") return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-  if (status === "failed") return "bg-destructive/10 text-destructive";
-  if (status === "in_progress" || status === "pending" || status === "running") return "bg-primary/10 text-primary";
-  return "bg-secondary text-secondary-foreground";
 }
 
 function StreamingMarkdown({ content }: { content: string }) {
