@@ -5,12 +5,12 @@ mod infrastructure;
 mod ports;
 
 use inbound::tauri_commands::{
-    cancel_agent_run, create_git_worktree, create_project, create_saved_prompt,
-    delete_git_worktree, delete_project, delete_saved_prompt, list_agents, list_git_branches,
-    list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
-    list_saved_prompts, open_external_url, open_worktree_window, respond_agent_permission,
-    send_prompt_to_run, set_run_permission_mode, start_agent_run, update_project,
-    update_saved_prompt,
+    cancel_agent_run, clear_goal, create_git_worktree, create_goal, create_project,
+    create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt, get_goal,
+    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_projects,
+    list_provider_sessions, list_saved_prompts, open_external_url, open_worktree_window,
+    respond_agent_permission, send_prompt_to_run, set_run_permission_mode, start_agent_run,
+    update_goal, update_project, update_saved_prompt,
 };
 use infrastructure::agent_session_registry::AppState;
 use tauri::{Manager, WindowEvent};
@@ -52,6 +52,10 @@ pub fn run() {
             create_saved_prompt,
             update_saved_prompt,
             delete_saved_prompt,
+            get_goal,
+            create_goal,
+            update_goal,
+            clear_goal,
             list_git_remotes,
             list_git_branches,
             list_git_worktrees,

@@ -16,6 +16,37 @@ export type RalphLoopRequest = {
   delayMs: number;
 };
 
+export type GoalStatus =
+  | "active"
+  | "paused"
+  | "blocked"
+  | "usageLimited"
+  | "budgetLimited"
+  | "complete";
+
+export type ThreadGoal = {
+  workingDirectory: string;
+  objective: string;
+  status: GoalStatus;
+  tokenBudget?: number | null;
+  tokensUsed: number;
+  timeUsedSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GoalInput = {
+  workingDirectory: string;
+  objective: string;
+  tokenBudget?: number | null;
+};
+
+export type GoalUpdateInput = {
+  objective?: string;
+  status?: GoalStatus;
+  tokenBudget?: number | null;
+};
+
 export type AgentRunRequest = {
   runId?: string;
   goal: string;

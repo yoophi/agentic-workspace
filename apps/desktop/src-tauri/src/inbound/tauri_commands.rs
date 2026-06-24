@@ -5,8 +5,8 @@ use tauri::{AppHandle, State};
 use crate::{
     application::{
         cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
-        git_worktree_service, list_provider_sessions::ListProviderSessionsUseCase, project_service,
-        saved_prompt_service, send_prompt::SendPromptUseCase,
+        git_worktree_service, goal_service, list_provider_sessions::ListProviderSessionsUseCase,
+        project_service, saved_prompt_service, send_prompt::SendPromptUseCase,
         set_permission_mode::SetPermissionModeUseCase, start_agent_run::StartAgentRunUseCase,
     },
     domain::{
@@ -14,6 +14,7 @@ use crate::{
         git_branch::GitBranch,
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
+        goal::{GoalDraft, GoalStatus, GoalUpdate, ThreadGoal},
         project::{Project, ProjectDraft},
         provider_session::{ProviderSession, SessionScope},
         run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
@@ -26,7 +27,7 @@ use crate::{
         git_cli_branch_provider::GitCliBranchProvider,
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
-        json_project_repository::JsonProjectRepository,
+        json_goal_repository::JsonGoalRepository, json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
         noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
         window_manager,
@@ -64,6 +65,42 @@ impl From<ProjectInput> for ProjectDraft {
             name: input.name,
             working_directory: input.working_directory,
             description: input.description,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalInput {
+    working_directory: String,
+    objective: String,
+    token_budget: Option<usize>,
+}
+
+impl From<GoalInput> for GoalDraft {
+    fn from(input: GoalInput) -> Self {
+        Self {
+            working_directory: input.working_directory,
+            objective: input.objective,
+            token_budget: input.token_budget,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalUpdateInput {
+    objective: Option<String>,
+    status: Option<GoalStatus>,
+    token_budget: Option<Option<usize>>,
+}
+
+impl From<GoalUpdateInput> for GoalUpdate {
+    fn from(input: GoalUpdateInput) -> Self {
+        Self {
+            objective: input.objective,
+            status: input.status,
+            token_budget: input.token_budget,
         }
     }
 }
@@ -118,6 +155,34 @@ pub fn update_saved_prompt(
 pub fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), String> {
     let repository = JsonSavedPromptRepository::from_app(&app)?;
     saved_prompt_service::delete_saved_prompt(&repository, id)
+}
+
+#[tauri::command]
+pub fn get_goal(app: AppHandle, working_directory: String) -> Result<Option<ThreadGoal>, String> {
+    let repository = JsonGoalRepository::from_app(&app)?;
+    goal_service::get_goal(&repository, working_directory)
+}
+
+#[tauri::command]
+pub fn create_goal(app: AppHandle, input: GoalInput) -> Result<ThreadGoal, String> {
+    let repository = JsonGoalRepository::from_app(&app)?;
+    goal_service::create_goal(&repository, input.into())
+}
+
+#[tauri::command]
+pub fn update_goal(
+    app: AppHandle,
+    working_directory: String,
+    input: GoalUpdateInput,
+) -> Result<ThreadGoal, String> {
+    let repository = JsonGoalRepository::from_app(&app)?;
+    goal_service::update_goal(&repository, working_directory, input.into())
+}
+
+#[tauri::command]
+pub fn clear_goal(app: AppHandle, working_directory: String) -> Result<(), String> {
+    let repository = JsonGoalRepository::from_app(&app)?;
+    goal_service::clear_goal(&repository, working_directory)
 }
 
 #[tauri::command]

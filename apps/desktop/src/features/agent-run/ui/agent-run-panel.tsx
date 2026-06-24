@@ -1,6 +1,6 @@
 import type { PointerEventHandler, ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
@@ -28,6 +28,12 @@ import {
   setRunPermissionMode,
   startAgentRun,
 } from "@/entities/agent-run/api/agent-run-repository";
+import {
+  clearGoal,
+  createGoal,
+  getGoal,
+  updateGoal,
+} from "@/entities/agent-run/api/goal-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
   appendOneTimelineItem,
@@ -38,9 +44,11 @@ import type { TimelineRunEvent } from "@/entities/agent-run/model";
 import type {
   ContextSizePreset,
   EventGroup,
+  GoalStatus,
   PermissionMode,
   ProviderSession,
   RunEvent,
+  ThreadGoal,
   TimelineItem,
 } from "@/entities/agent-run/model";
 import {
@@ -72,6 +80,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Message, MessageAvatar, MessageContent } from "@/components/ui/message";
 import {
   PromptInput,
@@ -87,7 +96,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
@@ -200,6 +208,7 @@ const contextSizeOptions: Array<{
 ];
 
 export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelProps) {
+  const queryClient = useQueryClient();
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [sessionMode, setSessionMode] = useState<"new" | "reuse">("new");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
@@ -223,6 +232,9 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   const [filter, setFilter] = useState<EventGroup | "all">("all");
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
+  const [goalDraft, setGoalDraft] = useState("");
+  const [goalTokenBudget, setGoalTokenBudget] = useState("");
   const [editingPrompt, setEditingPrompt] = useState<QueuedPrompt | null>(null);
   const [editingPromptText, setEditingPromptText] = useState("");
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
@@ -239,6 +251,35 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     queryFn: listAgents,
   });
   const agents = agentsQuery.data ?? [];
+
+  const goalQueryKey = agentRunQueryKeys.goal(workingDirectory);
+  const goalQuery = useQuery({
+    queryKey: goalQueryKey,
+    queryFn: () => getGoal(workingDirectory),
+  });
+  const activeGoal = goalQuery.data ?? null;
+
+  const createGoalMutation = useMutation({
+    mutationFn: createGoal,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
+    },
+  });
+
+  const updateGoalMutation = useMutation({
+    mutationFn: (input: Parameters<typeof updateGoal>[1]) =>
+      updateGoal(workingDirectory, input),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
+    },
+  });
+
+  const clearGoalMutation = useMutation({
+    mutationFn: () => clearGoal(workingDirectory),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
+    },
+  });
 
   const sessionsQuery = useQuery({
     queryKey: agentRunQueryKeys.sessions(selectedAgentId, workingDirectory),
@@ -567,6 +608,56 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     }
   }
 
+  function openGoalDialog(goal: ThreadGoal | null) {
+    setGoalDraft(goal?.objective ?? "");
+    setGoalTokenBudget(goal?.tokenBudget ? String(goal.tokenBudget) : "");
+    setIsGoalDialogOpen(true);
+  }
+
+  async function saveGoal() {
+    const objective = goalDraft.trim();
+    if (!objective) {
+      return;
+    }
+
+    const tokenBudget = parseOptionalPositiveInteger(goalTokenBudget);
+
+    try {
+      if (activeGoal) {
+        await updateGoalMutation.mutateAsync({
+          objective,
+          tokenBudget,
+          ...(activeGoal.status === "complete" ? { status: "active" as GoalStatus } : {}),
+        });
+      } else {
+        await createGoalMutation.mutateAsync({
+          workingDirectory,
+          objective,
+          tokenBudget,
+        });
+      }
+      setIsGoalDialogOpen(false);
+    } catch (caughtError) {
+      setError(String(caughtError));
+    }
+  }
+
+  async function setGoalStatus(status: GoalStatus) {
+    try {
+      await updateGoalMutation.mutateAsync({ status });
+    } catch (caughtError) {
+      setError(String(caughtError));
+    }
+  }
+
+  async function clearCurrentGoal() {
+    try {
+      await clearGoalMutation.mutateAsync();
+    } catch (caughtError) {
+      setError(String(caughtError));
+    }
+  }
+
   const startPromptResize: PointerEventHandler<HTMLDivElement> = (event) => {
     if (event.button !== 0) {
       return;
@@ -744,6 +835,22 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
                   </SystemMessage>
                 )}
               </div>
+
+              <GoalStatusPanel
+                goal={activeGoal}
+                isLoading={goalQuery.isLoading}
+                isMutating={
+                  createGoalMutation.isPending ||
+                  updateGoalMutation.isPending ||
+                  clearGoalMutation.isPending
+                }
+                onCreate={() => openGoalDialog(null)}
+                onEdit={() => openGoalDialog(activeGoal)}
+                onPause={() => void setGoalStatus("paused")}
+                onResume={() => void setGoalStatus("active")}
+                onComplete={() => void setGoalStatus("complete")}
+                onClear={() => void clearCurrentGoal()}
+              />
 
               <div className="flex flex-col rounded-lg border bg-background">
                 <div className="flex flex-wrap gap-1.5 border-b p-3" role="tablist" aria-label="ACP event filter">
@@ -1150,10 +1257,168 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
         </DialogContent>
       </Dialog>
 
+      <Dialog open={isGoalDialogOpen} onOpenChange={setIsGoalDialogOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>{activeGoal ? "Goal 편집" : "Goal 생성"}</DialogTitle>
+            <DialogDescription>
+              현재 worktree에 저장할 장기 목표를 설정합니다.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">Objective</span>
+              <Textarea
+                value={goalDraft}
+                onChange={(event) => setGoalDraft(event.target.value)}
+                className="min-h-36 resize-y"
+                placeholder="완료 또는 차단될 때까지 이어갈 목표를 입력하세요."
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <span className="text-sm font-medium">Token budget</span>
+              <Input
+                value={goalTokenBudget}
+                onChange={(event) => setGoalTokenBudget(event.target.value)}
+                inputMode="numeric"
+                placeholder="Optional"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button type="button" variant="outline">
+                취소
+              </Button>
+            </DialogClose>
+            <Button
+              type="button"
+              disabled={
+                !goalDraft.trim() ||
+                createGoalMutation.isPending ||
+                updateGoalMutation.isPending
+              }
+              onClick={() => void saveGoal()}
+            >
+              저장
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <PermissionRequestDialog
         permission={pendingPermission}
         onSelect={respondToPermission}
       />
+    </div>
+  );
+}
+
+type GoalStatusPanelProps = {
+  goal: ThreadGoal | null;
+  isLoading: boolean;
+  isMutating: boolean;
+  onCreate: () => void;
+  onEdit: () => void;
+  onPause: () => void;
+  onResume: () => void;
+  onComplete: () => void;
+  onClear: () => void;
+};
+
+function GoalStatusPanel({
+  goal,
+  isLoading,
+  isMutating,
+  onCreate,
+  onEdit,
+  onPause,
+  onResume,
+  onComplete,
+  onClear,
+}: GoalStatusPanelProps) {
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+        <Loader2Icon className="size-4 animate-spin" />
+        Goal 불러오는 중
+      </div>
+    );
+  }
+
+  if (!goal) {
+    return (
+      <div className="flex flex-col gap-2 rounded-md border bg-muted/30 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-sm text-muted-foreground">
+          이 worktree에 설정된 goal이 없습니다.
+        </span>
+        <Button type="button" size="sm" onClick={onCreate} disabled={isMutating}>
+          <PlayIcon data-icon="inline-start" />
+          Goal 생성
+        </Button>
+      </div>
+    );
+  }
+
+  const canPause = goal.status === "active";
+  const canResume = goal.status === "paused" || goal.status === "blocked";
+  const canComplete = goal.status !== "complete";
+
+  return (
+    <div className="flex flex-col gap-3 rounded-md border bg-muted/30 px-3 py-2">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">Goal</span>
+            <Badge variant={goal.status === "active" ? "default" : "secondary"}>
+              {goalStatusLabel(goal.status)}
+            </Badge>
+            {goal.tokenBudget ? (
+              <span className="font-mono text-xs text-muted-foreground">
+                {goal.tokensUsed}/{goal.tokenBudget} tokens
+              </span>
+            ) : null}
+          </div>
+          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
+            {goal.objective}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-1.5">
+          <Button type="button" size="sm" variant="outline" onClick={onEdit} disabled={isMutating}>
+            <PencilIcon data-icon="inline-start" />
+            Edit
+          </Button>
+          {canPause && (
+            <Button type="button" size="sm" variant="outline" onClick={onPause} disabled={isMutating}>
+              <SquareIcon data-icon="inline-start" />
+              Pause
+            </Button>
+          )}
+          {canResume && (
+            <Button type="button" size="sm" variant="outline" onClick={onResume} disabled={isMutating}>
+              <PlayIcon data-icon="inline-start" />
+              Resume
+            </Button>
+          )}
+          {canComplete && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={onComplete}
+              disabled={isMutating}
+            >
+              <CheckCircleIcon data-icon="inline-start" />
+              Complete
+            </Button>
+          )}
+          <Button type="button" size="sm" variant="destructive" onClick={onClear} disabled={isMutating}>
+            <XIcon data-icon="inline-start" />
+            Clear
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1176,6 +1441,33 @@ function findPendingPermission(items: TimelineItem[]) {
 
 function clampPromptPanelHeight(height: number) {
   return Math.min(PROMPT_PANEL_MAX_HEIGHT, Math.max(PROMPT_PANEL_MIN_HEIGHT, height));
+}
+
+function parseOptionalPositiveInteger(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+
+  return parsed;
+}
+
+function goalStatusLabel(status: GoalStatus) {
+  const labels: Record<GoalStatus, string> = {
+    active: "Active",
+    paused: "Paused",
+    blocked: "Blocked",
+    usageLimited: "Usage limited",
+    budgetLimited: "Budget limited",
+    complete: "Complete",
+  };
+
+  return labels[status];
 }
 
 function VirtualizedRunTimeline({ items }: { items: TimelineItem[] }) {
