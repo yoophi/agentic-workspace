@@ -1,4 +1,4 @@
-import type { AgentDescriptor } from "@/entities/agent-run/model/types";
+import type { AgentDescriptor, ThreadGoal } from "@/entities/agent-run/model/types";
 import type { GitBranch } from "@/entities/project/model/git-branch";
 import type { GitRemote } from "@/entities/project/model/git-remote";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
@@ -96,4 +96,15 @@ export const sampleWorktreeChanges: GitWorktreeChanges = {
       group: "untracked",
     },
   ],
+};
+
+export const sampleGoal: ThreadGoal = {
+  workingDirectory: "/Users/yoophi/project/acp-minimal-app",
+  objective: "Codex 스타일 /goal 기능을 완성하고 자동 continuation을 검증한다.",
+  status: "paused",
+  tokenBudget: 120000,
+  tokensUsed: 42000,
+  timeUsedSeconds: 180,
+  createdAt: "2026-06-24T00:00:00Z",
+  updatedAt: "2026-06-24T00:00:00Z",
 };

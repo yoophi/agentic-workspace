@@ -17,7 +17,7 @@ use crate::{
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
         git_worktree_changes::{GitFileDiff, GitWorktreeChanges},
-        goal::{GoalDraft, GoalStatus, GoalUpdate, ThreadGoal},
+        goal::{GoalDraft, GoalProgressUpdate, GoalStatus, GoalUpdate, ThreadGoal},
         project::{Project, ProjectDraft},
         provider_session::{ProviderSession, SessionScope},
         run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
@@ -110,6 +110,22 @@ impl From<GoalUpdateInput> for GoalUpdate {
     }
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalProgressInput {
+    tokens_used: usize,
+    time_used_seconds: u64,
+}
+
+impl From<GoalProgressInput> for GoalProgressUpdate {
+    fn from(input: GoalProgressInput) -> Self {
+        Self {
+            tokens_used: input.tokens_used,
+            time_used_seconds: input.time_used_seconds,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
     let repository = JsonProjectRepository::from_app(&app)?;
@@ -188,6 +204,16 @@ pub fn update_goal(
 pub fn clear_goal(app: AppHandle, working_directory: String) -> Result<(), String> {
     let repository = JsonGoalRepository::from_app(&app)?;
     goal_service::clear_goal(&repository, working_directory)
+}
+
+#[tauri::command]
+pub fn record_goal_progress(
+    app: AppHandle,
+    working_directory: String,
+    input: GoalProgressInput,
+) -> Result<ThreadGoal, String> {
+    let repository = JsonGoalRepository::from_app(&app)?;
+    goal_service::record_goal_progress(&repository, working_directory, input.into())
 }
 
 #[tauri::command]

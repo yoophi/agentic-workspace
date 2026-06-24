@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   GoalInput,
+  GoalProgressInput,
   GoalUpdateInput,
   ThreadGoal,
 } from "@/entities/agent-run/model/types";
@@ -23,4 +24,11 @@ export async function updateGoal(
 
 export async function clearGoal(workingDirectory: string) {
   return invoke<void>("clear_goal", { workingDirectory });
+}
+
+export async function recordGoalProgress(
+  workingDirectory: string,
+  input: GoalProgressInput,
+) {
+  return invoke<ThreadGoal>("record_goal_progress", { workingDirectory, input });
 }

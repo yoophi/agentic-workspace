@@ -9,9 +9,9 @@ use inbound::tauri_commands::{
     create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt,
     get_agent_run_settings, get_goal, list_agents, list_git_branches, list_git_remotes,
     list_git_worktrees, list_projects, list_provider_sessions, list_saved_prompts,
-    open_external_url, open_worktree_window, respond_agent_permission, save_agent_run_settings,
-    send_prompt_to_run, set_run_permission_mode, start_agent_run, update_goal, update_project,
-    update_saved_prompt,
+    open_external_url, open_worktree_window, record_goal_progress, respond_agent_permission,
+    save_agent_run_settings, send_prompt_to_run, set_run_permission_mode, start_agent_run,
+    update_goal, update_project, update_saved_prompt,
     get_worktree_changes, get_worktree_file_diff,
 };
 use infrastructure::agent_session_registry::AppState;
@@ -58,6 +58,7 @@ pub fn run() {
             create_goal,
             update_goal,
             clear_goal,
+            record_goal_progress,
             get_agent_run_settings,
             save_agent_run_settings,
             list_git_remotes,

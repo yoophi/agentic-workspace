@@ -1,7 +1,7 @@
 use chrono::Utc;
 
 use crate::domain::{
-    goal::{GoalDraft, GoalUpdate, ThreadGoal},
+    goal::{GoalDraft, GoalProgressUpdate, GoalStatus, GoalUpdate, ThreadGoal},
     goal_repository::GoalRepository,
 };
 
@@ -86,6 +86,36 @@ pub fn clear_goal(
     }
 
     repository.save_goals(&goals)
+}
+
+pub fn record_goal_progress(
+    repository: &impl GoalRepository,
+    working_directory: String,
+    progress: GoalProgressUpdate,
+) -> Result<ThreadGoal, String> {
+    let working_directory = normalize_required(working_directory, "Working directory")?;
+    let mut goals = repository.load_goals()?;
+    let goal = goals
+        .iter_mut()
+        .find(|goal| goal.working_directory == working_directory)
+        .ok_or_else(|| "Goal not found.".to_owned())?;
+
+    goal.tokens_used = goal.tokens_used.max(progress.tokens_used);
+    goal.time_used_seconds = goal
+        .time_used_seconds
+        .saturating_add(progress.time_used_seconds);
+    if goal
+        .token_budget
+        .is_some_and(|budget| budget > 0 && goal.tokens_used >= budget)
+    {
+        goal.status = GoalStatus::BudgetLimited;
+    }
+    goal.updated_at = now_timestamp();
+
+    let updated_goal = goal.clone();
+    repository.save_goals(&goals)?;
+
+    Ok(updated_goal)
 }
 
 fn normalize_draft(draft: GoalDraft) -> Result<GoalDraft, String> {
@@ -198,5 +228,25 @@ mod tests {
                 .expect("goal lookup should succeed")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn record_goal_progress_tracks_usage_and_budget_limit() {
+        let repository = MemoryGoalRepository::default();
+        create_goal(&repository, draft("first")).expect("goal should be created");
+
+        let goal = record_goal_progress(
+            &repository,
+            "/repo/worktree".into(),
+            GoalProgressUpdate {
+                tokens_used: 120,
+                time_used_seconds: 7,
+            },
+        )
+        .expect("goal progress should be recorded");
+
+        assert_eq!(goal.tokens_used, 120);
+        assert_eq!(goal.time_used_seconds, 7);
+        assert_eq!(goal.status, GoalStatus::BudgetLimited);
     }
 }

@@ -73,6 +73,11 @@ export type GoalUpdateInput = {
   tokenBudget?: number | null;
 };
 
+export type GoalProgressInput = {
+  tokensUsed: number;
+  timeUsedSeconds: number;
+};
+
 export type AgentRunRequest = {
   runId?: string;
   goal: string;

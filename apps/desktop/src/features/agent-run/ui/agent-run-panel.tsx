@@ -34,6 +34,7 @@ import {
   clearGoal,
   createGoal,
   getGoal,
+  recordGoalProgress,
   updateGoal,
 } from "@/entities/agent-run/api/goal-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
@@ -55,6 +56,10 @@ import type {
   ThreadGoal,
   TimelineItem,
 } from "@/entities/agent-run/model";
+import {
+  buildGoalContinuationPrompt,
+  shouldStartGoalContinuation,
+} from "@/features/agent-run/model/goal-continuation";
 import {
   addUserMessage,
   buildSteerPrompt,
@@ -118,6 +123,7 @@ const defaultPrompt = "";
 const RALPH_MAX_ITERATIONS = 100;
 const RALPH_DEFAULT_PROMPT =
   "이전 결과를 바탕으로 목표를 계속 진행하세요. 목표를 모두 달성했다면 더 진행하지 말고 완료를 알려주세요.";
+const GOAL_CONTINUATION_DELAY_MS = 800;
 const PROMPT_PANEL_DEFAULT_HEIGHT = 300;
 const PROMPT_PANEL_MIN_HEIGHT = 180;
 const PROMPT_PANEL_MAX_HEIGHT = 560;
@@ -247,6 +253,10 @@ export function AgentRunPanel({
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
   const [promptPanelHeight, setPromptPanelHeight] = useState(PROMPT_PANEL_DEFAULT_HEIGHT);
   const activeRunIdRef = useRef<string | null>(null);
+  const activeGoalRef = useRef<ThreadGoal | null>(null);
+  const runStartedAtRef = useRef<number | null>(null);
+  const usageContextRef = useRef<UsageContext | null>(null);
+  const goalContinuationPendingRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const promptResizeRef = useRef<{
     pointerId: number;
@@ -301,6 +311,30 @@ export function AgentRunPanel({
       await queryClient.invalidateQueries({ queryKey: goalQueryKey });
     },
   });
+
+  const recordRunGoalProgress = useCallback(async () => {
+    const goal = activeGoalRef.current;
+    if (!goal || !["active", "budgetLimited"].includes(goal.status)) {
+      return;
+    }
+
+    const elapsedSeconds = runStartedAtRef.current
+      ? Math.max(0, Math.round((Date.now() - runStartedAtRef.current) / 1000))
+      : 0;
+    const tokensUsed = usageContextRef.current?.used ?? goal.tokensUsed;
+
+    try {
+      await recordGoalProgress(workingDirectory, {
+        tokensUsed,
+        timeUsedSeconds: elapsedSeconds,
+      });
+      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
+    } catch (caughtError) {
+      setError(String(caughtError));
+    } finally {
+      runStartedAtRef.current = null;
+    }
+  }, [goalQueryKey, queryClient, workingDirectory]);
 
   const sessionsQuery = useQuery({
     queryKey: agentRunQueryKeys.sessions(selectedAgentId, workingDirectory),
@@ -410,6 +444,14 @@ export function AgentRunPanel({
   }, [activeRunId]);
 
   useEffect(() => {
+    activeGoalRef.current = activeGoal;
+  }, [activeGoal]);
+
+  useEffect(() => {
+    usageContextRef.current = usageContext;
+  }, [usageContext]);
+
+  useEffect(() => {
     return () => {
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
@@ -424,6 +466,7 @@ export function AgentRunPanel({
 
       if (envelope.event.type === "usage") {
         setUsageContext({ used: envelope.event.used, size: envelope.event.size });
+        usageContextRef.current = { used: envelope.event.used, size: envelope.event.size };
         return;
       }
 
@@ -440,6 +483,7 @@ export function AgentRunPanel({
         activeRunIdRef.current = null;
         setActiveRunId(null);
         onRunSettled?.();
+        void recordRunGoalProgress();
         return;
       }
 
@@ -458,6 +502,7 @@ export function AgentRunPanel({
           activeRunIdRef.current = null;
           setActiveRunId(null);
           onRunSettled?.();
+          void recordRunGoalProgress();
         }
       }
     });
@@ -465,7 +510,7 @@ export function AgentRunPanel({
     return () => {
       unlisten();
     };
-  }, [onRunSettled]);
+  }, [onRunSettled, recordRunGoalProgress]);
 
   useEffect(() => {
     if (!activeRunId || !isRunning || isAwaitingPromptResponse || queuedPrompts.length === 0) {
@@ -487,6 +532,64 @@ export function AgentRunPanel({
       setError(String(caughtError));
     });
   }, [activeRunId, isAwaitingPromptResponse, isRunning, queuedPrompts]);
+
+  useEffect(() => {
+    const sessionReady = sessionMode === "new" || Boolean(selectedSessionId);
+    if (
+      !shouldStartGoalContinuation({
+        goal: activeGoal,
+        selectedAgentId,
+        isRunning,
+        hasQueuedPrompt: queuedPrompts.length > 0,
+        promptText: prompt,
+        sessionReady,
+      })
+    ) {
+      goalContinuationPendingRef.current = false;
+      return;
+    }
+    if (!activeGoal || goalContinuationPendingRef.current) {
+      return;
+    }
+
+    goalContinuationPendingRef.current = true;
+    const timeoutId = window.setTimeout(() => {
+      goalContinuationPendingRef.current = false;
+      const goal = activeGoalRef.current;
+      if (!goal) {
+        return;
+      }
+
+      const stillReady = sessionMode === "new" || Boolean(selectedSessionId);
+      if (
+        !shouldStartGoalContinuation({
+          goal,
+          selectedAgentId,
+          isRunning: activeRunIdRef.current !== null,
+          hasQueuedPrompt: queuedPrompts.length > 0,
+          promptText: prompt,
+          sessionReady: stillReady,
+        })
+      ) {
+        return;
+      }
+
+      void startRun(buildGoalContinuationPrompt(goal));
+    }, GOAL_CONTINUATION_DELAY_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      goalContinuationPendingRef.current = false;
+    };
+  }, [
+    activeGoal,
+    isRunning,
+    prompt,
+    queuedPrompts.length,
+    selectedAgentId,
+    selectedSessionId,
+    sessionMode,
+  ]);
 
   const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
   const modelOptions = useMemo<SelectOption[]>(() => {
@@ -572,6 +675,8 @@ export function AgentRunPanel({
     setItems([]);
     setQueuedPrompts([]);
     setUsageContext(null);
+    usageContextRef.current = null;
+    runStartedAtRef.current = Date.now();
     setDirectPrompt(goal);
     activeRunIdRef.current = runId;
     setActiveRunId(runId);
@@ -616,6 +721,7 @@ export function AgentRunPanel({
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
       activeRunIdRef.current = null;
+      runStartedAtRef.current = null;
       setActiveRunId(null);
       return false;
     }
@@ -687,6 +793,7 @@ export function AgentRunPanel({
     } catch (caughtError) {
       setError(String(caughtError));
     } finally {
+      await recordRunGoalProgress();
       setQueuedPrompts([]);
       setDirectPrompt(null);
       setIsAwaitingPromptResponse(false);

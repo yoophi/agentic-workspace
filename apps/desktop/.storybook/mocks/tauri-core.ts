@@ -1,6 +1,7 @@
 import {
   sampleAgents,
   sampleBranches,
+  sampleGoal,
   sampleProjects,
   sampleRemotes,
   sampleSavedPrompts,
@@ -8,10 +9,17 @@ import {
   sampleWorktrees,
 } from "../../src/shared/storybook/sample-data";
 import type { SavedPrompt, SavedPromptInput } from "../../src/entities/saved-prompt/model/types";
+import type {
+  GoalInput,
+  GoalProgressInput,
+  GoalUpdateInput,
+  ThreadGoal,
+} from "../../src/entities/agent-run/model/types";
 import { emitMockEvent } from "./tauri-event";
 
 const AGENT_RUN_EVENT = "agent-run-event";
 let storybookSavedPrompts: SavedPrompt[] = [...sampleSavedPrompts];
+let storybookGoal: ThreadGoal | null = sampleGoal;
 
 export async function invoke<T>(command: string, args?: Record<string, unknown>) {
   switch (command) {
@@ -34,6 +42,55 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
       return undefined as T;
     case "list_saved_prompts":
       return storybookSavedPrompts as T;
+    case "get_goal":
+      return storybookGoal as T;
+    case "create_goal": {
+      const input = args?.input as GoalInput | undefined;
+      storybookGoal = {
+        workingDirectory: input?.workingDirectory ?? sampleGoal.workingDirectory,
+        objective: input?.objective ?? "",
+        status: "active",
+        tokenBudget: input?.tokenBudget ?? null,
+        tokensUsed: 0,
+        timeUsedSeconds: 0,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      return storybookGoal as T;
+    }
+    case "update_goal": {
+      const input = args?.input as GoalUpdateInput | undefined;
+      if (storybookGoal) {
+        storybookGoal = {
+          ...storybookGoal,
+          ...(input?.objective !== undefined ? { objective: input.objective } : {}),
+          ...(input?.status !== undefined ? { status: input.status } : {}),
+          ...(input?.tokenBudget !== undefined ? { tokenBudget: input.tokenBudget } : {}),
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return storybookGoal as T;
+    }
+    case "clear_goal":
+      storybookGoal = null;
+      return undefined as T;
+    case "record_goal_progress": {
+      const input = args?.input as GoalProgressInput | undefined;
+      if (storybookGoal) {
+        const tokensUsed = Math.max(storybookGoal.tokensUsed, input?.tokensUsed ?? 0);
+        storybookGoal = {
+          ...storybookGoal,
+          tokensUsed,
+          timeUsedSeconds: storybookGoal.timeUsedSeconds + (input?.timeUsedSeconds ?? 0),
+          status:
+            storybookGoal.tokenBudget && tokensUsed >= storybookGoal.tokenBudget
+              ? "budgetLimited"
+              : storybookGoal.status,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return storybookGoal as T;
+    }
     case "create_saved_prompt": {
       const input = args?.input as SavedPromptInput | undefined;
       const savedPrompt = {

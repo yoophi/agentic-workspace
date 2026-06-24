@@ -37,3 +37,9 @@ pub struct GoalUpdate {
     pub status: Option<GoalStatus>,
     pub token_budget: Option<Option<usize>>,
 }
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct GoalProgressUpdate {
+    pub tokens_used: usize,
+    pub time_used_seconds: u64,
+}
