@@ -27,11 +27,13 @@ export type OpenWorktreeWindowMode = "window" | "tab";
 
 export async function openWorktreeWindow(
   projectId: string,
+  projectName: string,
   worktreePath: string,
   mode: OpenWorktreeWindowMode,
 ) {
   return invoke<void>("open_worktree_window", {
     projectId,
+    projectName,
     worktreePath,
     mode,
   });

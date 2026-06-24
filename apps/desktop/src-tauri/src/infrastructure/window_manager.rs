@@ -32,10 +32,12 @@ fn session_route(project_id: &str, worktree_path: &str) -> String {
 pub fn open_session_window(
     app: &AppHandle,
     project_id: &str,
+    project_name: &str,
     worktree_path: &str,
     mode: &str,
 ) -> Result<(), String> {
     let label = session_label(&new_session_id());
+    let title = session_title(project_name, worktree_path);
 
     #[cfg(target_os = "macos")]
     if mode == "tab" {
@@ -43,12 +45,13 @@ pub fn open_session_window(
             app,
             label,
             project_id.to_string(),
+            title,
             worktree_path.to_string(),
         );
     }
 
     let _ = mode;
-    build_window(app, &label, project_id, worktree_path).map(|_| ())
+    build_window(app, &label, project_id, worktree_path, &title).map(|_| ())
 }
 
 fn build_window(
@@ -56,10 +59,11 @@ fn build_window(
     label: &str,
     project_id: &str,
     worktree_path: &str,
+    title: &str,
 ) -> Result<WebviewWindow, String> {
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, session_url(project_id, worktree_path))
-        .title("ACP Worktree Session")
+        .title(title)
         .inner_size(1100.0, 820.0)
         .min_inner_size(980.0, 680.0);
 
@@ -83,6 +87,7 @@ fn open_as_tab(
     app: &AppHandle,
     label: String,
     project_id: String,
+    title: String,
     worktree_path: String,
 ) -> Result<(), String> {
     use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
@@ -99,7 +104,7 @@ fn open_as_tab(
                     .find(|(existing_label, _)| existing_label.starts_with("session-"))
                     .map(|(_, window)| window);
 
-                let new_win = build_window(&app, &label, &project_id, &worktree_path)?;
+                let new_win = build_window(&app, &label, &project_id, &worktree_path, &title)?;
 
                 // 기존 세션 창이 있으면 그 창에 탭으로 합친다. 없으면 새 창 그대로(첫 탭 그룹).
                 if let Some(base) = base_window {
@@ -120,9 +125,37 @@ fn open_as_tab(
         .map_err(|_| "timed out while creating session tab".to_string())?
 }
 
+fn session_title(project_name: &str, worktree_path: &str) -> String {
+    format!(
+        "{} / {}",
+        non_empty_or(project_name, "Project"),
+        worktree_name(worktree_path)
+    )
+}
+
+fn worktree_name(worktree_path: &str) -> String {
+    worktree_path
+        .trim()
+        .replace('\\', "/")
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .next_back()
+        .unwrap_or("worktree")
+        .to_string()
+}
+
+fn non_empty_or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback
+    } else {
+        trimmed
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{session_label, session_route};
+    use super::{session_label, session_route, session_title};
 
     #[test]
     fn session_route_keeps_worktree_path_out_of_route_segments() {
@@ -151,5 +184,16 @@ mod tests {
     #[test]
     fn different_session_ids_allow_multiple_windows_for_same_worktree() {
         assert_ne!(session_label("session-a"), session_label("session-b"));
+    }
+
+    #[test]
+    fn session_title_uses_project_name_and_worktree_basename() {
+        assert_eq!(
+            session_title(
+                "ACP Minimal App",
+                "/Users/yoophi/project/worktrees/acp-minimal-app/feature-login"
+            ),
+            "ACP Minimal App / feature-login"
+        );
     }
 }

@@ -238,10 +238,11 @@ pub fn list_provider_sessions(
 pub fn open_worktree_window(
     app: AppHandle,
     project_id: String,
+    project_name: String,
     worktree_path: String,
     mode: String,
 ) -> Result<(), String> {
-    window_manager::open_session_window(&app, &project_id, &worktree_path, &mode)
+    window_manager::open_session_window(&app, &project_id, &project_name, &worktree_path, &mode)
 }
 
 #[tauri::command]

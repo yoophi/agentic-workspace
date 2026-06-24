@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Route,
   Routes,
@@ -25,6 +27,7 @@ import {
 } from "@/entities/project/api/git-worktree-repository";
 import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
+import { formatWorktreeWindowTitle } from "@/entities/project/lib/worktree-window-title";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project, ProjectInput } from "@/entities/project/model/types";
 import { DeleteProjectDialog } from "@/features/project-delete/ui/delete-project-dialog";
@@ -113,7 +116,7 @@ export function App() {
       return;
     }
 
-    void openWorktreeWindow(project.id, worktree.path, mode).catch((caughtError) =>
+    void openWorktreeWindow(project.id, project.name, worktree.path, mode).catch((caughtError) =>
       setError(String(caughtError)),
     );
   }
@@ -300,6 +303,18 @@ function ProjectWorktreeSessionRoute({
   const worktree = worktreesQuery.data?.find(
     (worktree) => worktree.path === decodedWorktreePath,
   );
+  const windowTitle =
+    project && worktree
+      ? formatWorktreeWindowTitle(project.name, worktree.path)
+      : "ACP Worktree Session";
+
+  useEffect(() => {
+    if (!standalone) {
+      return;
+    }
+
+    void getCurrentWindow().setTitle(windowTitle);
+  }, [standalone, windowTitle]);
 
   if (project && worktree) {
     return (
