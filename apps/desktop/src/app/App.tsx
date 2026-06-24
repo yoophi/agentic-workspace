@@ -23,6 +23,7 @@ import {
   listGitWorktrees,
   openWorktreeWindow,
 } from "@/entities/project/api/git-worktree-repository";
+import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project, ProjectInput } from "@/entities/project/model/types";
@@ -294,6 +295,7 @@ function ProjectWorktreeSessionRoute({
       : ["git-worktrees", "missing-project"],
     queryFn: () => listGitWorktrees(project?.workingDirectory ?? ""),
     enabled: Boolean(project),
+    ...gitStateRefreshQueryOptions,
   });
   const worktree = worktreesQuery.data?.find(
     (worktree) => worktree.path === decodedWorktreePath,

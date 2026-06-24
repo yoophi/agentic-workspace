@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronsUpDownIcon } from "lucide-react";
 
 import { listGitBranches } from "@/entities/project/api/git-branch-repository";
+import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ export function GitReferenceCombobox({
   const branchesQuery = useQuery({
     queryKey: projectQueryKeys.gitBranches(workingDirectory),
     queryFn: () => listGitBranches(workingDirectory),
+    ...gitStateRefreshQueryOptions,
   });
   const branches = branchesQuery.data ?? [];
   const trimmedSearch = search.trim();

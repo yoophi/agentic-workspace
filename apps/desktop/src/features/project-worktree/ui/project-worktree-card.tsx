@@ -16,6 +16,7 @@ import {
   deleteGitWorktree,
   listGitWorktrees,
 } from "@/entities/project/api/git-worktree-repository";
+import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import type {
   GitWorktree,
@@ -81,6 +82,7 @@ export function ProjectWorktreeCard({
   const worktreesQuery = useQuery({
     queryKey,
     queryFn: () => listGitWorktrees(workingDirectory),
+    ...gitStateRefreshQueryOptions,
   });
   const worktrees = worktreesQuery.data ?? [];
 
