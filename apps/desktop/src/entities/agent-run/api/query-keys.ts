@@ -5,4 +5,6 @@ export const agentRunQueryKeys = {
     ["agent-run-settings", workingDirectory] as const,
   sessions: (agentId: string, cwd: string) =>
     ["provider-sessions", agentId, cwd] as const,
+  worktreeChanges: (workingDirectory: string) =>
+    ["worktree-changes", workingDirectory] as const,
 };

@@ -1,235 +1,270 @@
-use std::{fs, path::PathBuf, process::Command};
+use std::{path::Path, process::Command};
 
-use crate::{
-    domain::worktree_change::{WorktreeChange, WorktreeChangeType},
-    ports::worktree_change_provider::WorktreeChangeProvider,
+use crate::domain::{
+    worktree_change::{WorktreeChange, WorktreeChangeType},
+    worktree_change_provider::WorktreeChangeProvider,
 };
 
-const CONTENT_LIMIT_BYTES: usize = 120_000;
+/// diff/내용 표시 한도(문자 수). 이보다 길면 잘라내고 truncated 플래그를 세운다.
+const MAX_TEXT_LEN: usize = 200_000;
+/// 한 번에 처리할 최대 변경 파일 수. 비정상적으로 큰 변경에서 UI/메모리를 보호한다.
+const MAX_FILES: usize = 500;
+/// binary 판정을 위해 검사할 선두 바이트 수.
+const BINARY_SNIFF_LEN: usize = 8000;
 
 pub struct GitCliWorktreeChangeProvider;
 
 impl WorktreeChangeProvider for GitCliWorktreeChangeProvider {
-    fn list_changes(&self, working_directory: String) -> Result<Vec<WorktreeChange>, String> {
-        let output = git_output(
-            &working_directory,
-            ["status", "--short", "--renames"].as_slice(),
-        )?;
+    fn list_changes(&self, working_directory: &str) -> Result<Vec<WorktreeChange>, String> {
+        let mut changes = Vec::new();
 
-        output
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| change_from_status_line(&working_directory, line))
-            .collect()
-    }
-}
-
-fn change_from_status_line(working_directory: &str, line: &str) -> Result<WorktreeChange, String> {
-    let status = line
-        .get(..2)
-        .ok_or_else(|| format!("Unexpected git status line: {line}"))?;
-    let path_text = line.get(3..).unwrap_or("").trim();
-
-    let (path, old_path) = if matches!(status.chars().next(), Some('R' | 'C'))
-        || matches!(status.chars().nth(1), Some('R' | 'C'))
-    {
-        split_rename_path(path_text)
-    } else {
-        (path_text.to_string(), None)
-    };
-
-    let change_type = change_type_from_status(status);
-    let mut change = WorktreeChange {
-        summary: summary_for_change(&change_type, &path, old_path.as_deref()),
-        path,
-        old_path,
-        change_type,
-        diff: None,
-        preview: None,
-        binary: false,
-        truncated: false,
-        message: None,
-    };
-
-    match change.change_type {
-        WorktreeChangeType::Added if status == "??" => {
-            apply_untracked_preview(working_directory, &mut change)?;
+        for entry in self.tracked_changes(working_directory)? {
+            if changes.len() >= MAX_FILES {
+                return Ok(changes);
+            }
+            changes.push(self.build_tracked_change(working_directory, entry));
         }
-        _ => {
-            apply_git_diff(working_directory, &mut change)?;
+
+        for path in self.untracked_paths(working_directory)? {
+            if changes.len() >= MAX_FILES {
+                return Ok(changes);
+            }
+            changes.push(self.build_untracked_change(working_directory, path));
         }
-    }
 
-    Ok(change)
-}
-
-fn change_type_from_status(status: &str) -> WorktreeChangeType {
-    if status == "??" {
-        return WorktreeChangeType::Added;
-    }
-    if status.contains('U') {
-        return WorktreeChangeType::Unmerged;
-    }
-    if status.contains('R') {
-        return WorktreeChangeType::Renamed;
-    }
-    if status.contains('C') {
-        return WorktreeChangeType::Copied;
-    }
-    if status.contains('D') {
-        return WorktreeChangeType::Deleted;
-    }
-    if status.contains('A') {
-        return WorktreeChangeType::Added;
-    }
-    if status.contains('M') || status.contains('T') {
-        return WorktreeChangeType::Modified;
-    }
-    WorktreeChangeType::Unknown
-}
-
-fn split_rename_path(path_text: &str) -> (String, Option<String>) {
-    if let Some((old_path, new_path)) = path_text.split_once(" -> ") {
-        (new_path.to_string(), Some(old_path.to_string()))
-    } else {
-        (path_text.to_string(), None)
+        Ok(changes)
     }
 }
 
-fn summary_for_change(
-    change_type: &WorktreeChangeType,
-    path: &str,
-    old_path: Option<&str>,
-) -> String {
-    match change_type {
-        WorktreeChangeType::Added => format!("Added {path}"),
-        WorktreeChangeType::Modified => format!("Modified {path}"),
-        WorktreeChangeType::Deleted => format!("Deleted {path}"),
-        WorktreeChangeType::Renamed => {
-            format!("Renamed {} to {path}", old_path.unwrap_or("unknown path"))
+struct TrackedEntry {
+    change_type: WorktreeChangeType,
+    path: String,
+    old_path: Option<String>,
+}
+
+impl GitCliWorktreeChangeProvider {
+    /// HEAD 대비 추적 파일의 변경 목록(rename 감지 포함)을 가져온다.
+    fn tracked_changes(&self, working_directory: &str) -> Result<Vec<TrackedEntry>, String> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                working_directory,
+                "diff",
+                "--name-status",
+                "-M",
+                "-z",
+                "HEAD",
+            ])
+            .output()
+            .map_err(|error| format!("Failed to run git diff: {error}"))?;
+
+        // HEAD가 없는(커밋 0개) 저장소 등에서는 빈 목록으로 처리한다.
+        if !output.status.success() {
+            return Ok(Vec::new());
         }
-        WorktreeChangeType::Copied => format!("Copied {path}"),
-        WorktreeChangeType::Unmerged => format!("Unmerged changes in {path}"),
-        WorktreeChangeType::Unknown => format!("Changed {path}"),
-    }
-}
 
-fn apply_git_diff(working_directory: &str, change: &mut WorktreeChange) -> Result<(), String> {
-    let output = git_output(
-        working_directory,
-        [
-            "diff",
-            "--no-ext-diff",
-            "--find-renames",
-            "HEAD",
-            "--",
-            change.path.as_str(),
-        ]
-        .as_slice(),
-    )?;
-
-    if output.trim().is_empty() {
-        change.message = Some("No unified diff is available for this file.".to_string());
-        return Ok(());
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(parse_name_status_z(&stdout))
     }
 
-    if output.contains("Binary files") || output.contains("GIT binary patch") {
-        change.binary = true;
-        change.message = Some("Binary file diff is not available.".to_string());
-        return Ok(());
-    }
+    fn build_tracked_change(&self, working_directory: &str, entry: TrackedEntry) -> WorktreeChange {
+        let raw_diff = self
+            .diff_for_path(working_directory, &entry)
+            .unwrap_or_default();
 
-    let (diff, truncated) = truncate_text(&output, CONTENT_LIMIT_BYTES);
-    change.diff = Some(diff);
-    change.truncated = truncated;
-    Ok(())
-}
-
-fn apply_untracked_preview(
-    working_directory: &str,
-    change: &mut WorktreeChange,
-) -> Result<(), String> {
-    let path = safe_worktree_path(working_directory, &change.path)?;
-    let metadata = fs::metadata(&path)
-        .map_err(|error| format!("Failed to inspect {}: {error}", change.path))?;
-    if !metadata.is_file() {
-        change.message = Some("Preview is available only for regular files.".to_string());
-        return Ok(());
-    }
-
-    let mut bytes =
-        fs::read(&path).map_err(|error| format!("Failed to read {}: {error}", change.path))?;
-    let truncated = bytes.len() > CONTENT_LIMIT_BYTES;
-    if truncated {
-        bytes.truncate(CONTENT_LIMIT_BYTES);
-    }
-
-    if bytes.contains(&0) {
-        change.binary = true;
-        change.truncated = truncated;
-        change.message = Some("Binary file preview is not available.".to_string());
-        return Ok(());
-    }
-
-    match String::from_utf8(bytes) {
-        Ok(contents) => {
-            change.preview = Some(contents);
-            change.truncated = truncated;
+        if raw_diff.is_empty() {
+            return WorktreeChange {
+                path: entry.path,
+                old_path: entry.old_path,
+                change_type: entry.change_type,
+                binary: false,
+                diff: None,
+                content: None,
+                truncated: false,
+            };
         }
-        Err(_) => {
-            change.binary = true;
-            change.truncated = truncated;
-            change.message = Some("File preview is not valid UTF-8 text.".to_string());
+
+        if diff_is_binary(&raw_diff) {
+            return WorktreeChange {
+                path: entry.path,
+                old_path: entry.old_path,
+                change_type: entry.change_type,
+                binary: true,
+                diff: None,
+                content: None,
+                truncated: false,
+            };
+        }
+
+        let (diff, truncated) = truncate_text(raw_diff, MAX_TEXT_LEN);
+        WorktreeChange {
+            path: entry.path,
+            old_path: entry.old_path,
+            change_type: entry.change_type,
+            binary: false,
+            diff: Some(diff),
+            content: None,
+            truncated,
         }
     }
 
-    Ok(())
-}
-
-fn safe_worktree_path(working_directory: &str, relative_path: &str) -> Result<PathBuf, String> {
-    let base = fs::canonicalize(working_directory)
-        .map_err(|error| format!("Failed to resolve working directory: {error}"))?;
-    let candidate = base.join(relative_path);
-    let resolved = candidate
-        .canonicalize()
-        .map_err(|error| format!("Failed to resolve {relative_path}: {error}"))?;
-
-    if !resolved.starts_with(&base) {
-        return Err(format!("{relative_path} is outside the working directory."));
-    }
-
-    Ok(resolved)
-}
-
-fn git_output(working_directory: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(working_directory)
-        .args(args)
-        .output()
-        .map_err(|error| format!("Failed to run git: {error}"))?;
-
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-fn truncate_text(text: &str, max_bytes: usize) -> (String, bool) {
-    if text.len() <= max_bytes {
-        return (text.to_string(), false);
-    }
-
-    let mut end = 0;
-    for (index, _) in text.char_indices() {
-        if index > max_bytes {
-            break;
+    fn diff_for_path(
+        &self,
+        working_directory: &str,
+        entry: &TrackedEntry,
+    ) -> Result<String, String> {
+        let mut command = Command::new("git");
+        command.args(["-C", working_directory, "diff", "-M", "HEAD", "--"]);
+        if let Some(old_path) = &entry.old_path {
+            command.arg(old_path);
         }
-        end = index;
+        command.arg(&entry.path);
+
+        let output = command
+            .output()
+            .map_err(|error| format!("Failed to run git diff: {error}"))?;
+
+        if !output.status.success() {
+            return Ok(String::new());
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    (text[..end].to_string(), true)
+    /// `.gitignore`를 존중하면서 untracked 파일 목록을 가져온다.
+    fn untracked_paths(&self, working_directory: &str) -> Result<Vec<String>, String> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                working_directory,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ])
+            .output()
+            .map_err(|error| format!("Failed to run git ls-files: {error}"))?;
+
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout
+            .split('\0')
+            .filter(|path| !path.is_empty())
+            .map(|path| path.to_owned())
+            .collect())
+    }
+
+    fn build_untracked_change(&self, working_directory: &str, path: String) -> WorktreeChange {
+        let absolute = Path::new(working_directory).join(&path);
+        match std::fs::read(&absolute) {
+            Ok(bytes) if looks_binary(&bytes) => WorktreeChange {
+                path,
+                old_path: None,
+                change_type: WorktreeChangeType::Untracked,
+                binary: true,
+                diff: None,
+                content: None,
+                truncated: false,
+            },
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                let (content, truncated) = truncate_text(text, MAX_TEXT_LEN);
+                WorktreeChange {
+                    path,
+                    old_path: None,
+                    change_type: WorktreeChangeType::Untracked,
+                    binary: false,
+                    diff: None,
+                    content: Some(content),
+                    truncated,
+                }
+            }
+            Err(_) => WorktreeChange {
+                path,
+                old_path: None,
+                change_type: WorktreeChangeType::Untracked,
+                binary: false,
+                diff: None,
+                content: None,
+                truncated: false,
+            },
+        }
+    }
+}
+
+/// `git diff --name-status -M -z HEAD` 출력을 파싱한다.
+/// 모든 필드가 NUL로 구분되며, rename/copy는 상태 뒤에 (old, new) 두 경로가 온다.
+fn parse_name_status_z(output: &str) -> Vec<TrackedEntry> {
+    let mut tokens = output.split('\0').filter(|token| !token.is_empty());
+    let mut entries = Vec::new();
+
+    while let Some(status) = tokens.next() {
+        let code = status.chars().next().unwrap_or(' ');
+        match code {
+            'R' | 'C' => {
+                let Some(old_path) = tokens.next() else {
+                    break;
+                };
+                let Some(new_path) = tokens.next() else {
+                    break;
+                };
+                entries.push(TrackedEntry {
+                    change_type: if code == 'R' {
+                        WorktreeChangeType::Renamed
+                    } else {
+                        WorktreeChangeType::Added
+                    },
+                    path: new_path.to_owned(),
+                    old_path: Some(old_path.to_owned()),
+                });
+            }
+            other => {
+                let Some(path) = tokens.next() else {
+                    break;
+                };
+                entries.push(TrackedEntry {
+                    change_type: change_type_from_code(other),
+                    path: path.to_owned(),
+                    old_path: None,
+                });
+            }
+        }
+    }
+
+    entries
+}
+
+fn change_type_from_code(code: char) -> WorktreeChangeType {
+    match code {
+        'A' => WorktreeChangeType::Added,
+        'D' => WorktreeChangeType::Deleted,
+        // 'M'(수정), 'T'(타입 변경) 등은 모두 수정으로 취급한다.
+        _ => WorktreeChangeType::Modified,
+    }
+}
+
+/// git diff 출력이 binary 파일 변경을 나타내는지 확인한다.
+fn diff_is_binary(diff: &str) -> bool {
+    diff.lines()
+        .any(|line| line.starts_with("Binary files ") || line == "GIT binary patch")
+}
+
+/// 선두 바이트에 NUL이 있으면 binary로 간주한다.
+fn looks_binary(bytes: &[u8]) -> bool {
+    bytes.iter().take(BINARY_SNIFF_LEN).any(|byte| *byte == 0)
+}
+
+/// 문자열을 char 경계 기준 max 길이로 자르고, 잘렸는지 여부를 반환한다.
+fn truncate_text(text: String, max: usize) -> (String, bool) {
+    if text.chars().count() <= max {
+        return (text, false);
+    }
+
+    let truncated: String = text.chars().take(max).collect();
+    (truncated, true)
 }
 
 #[cfg(test)]
@@ -237,27 +272,53 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_common_status_lines() {
-        let modified = change_type_from_status(" M");
-        let added = change_type_from_status("??");
-        let deleted = change_type_from_status(" D");
-        let renamed = change_type_from_status("R ");
+    fn parses_modified_added_and_deleted_entries() {
+        let output = "M\0src/lib.rs\0A\0src/new.rs\0D\0src/old.rs\0";
+        let entries = parse_name_status_z(output);
 
-        assert_eq!(modified, WorktreeChangeType::Modified);
-        assert_eq!(added, WorktreeChangeType::Added);
-        assert_eq!(deleted, WorktreeChangeType::Deleted);
-        assert_eq!(renamed, WorktreeChangeType::Renamed);
-        assert_eq!(
-            split_rename_path("old name.ts -> new name.ts"),
-            ("new name.ts".to_string(), Some("old name.ts".to_string()))
-        );
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].change_type, WorktreeChangeType::Modified);
+        assert_eq!(entries[0].path, "src/lib.rs");
+        assert_eq!(entries[1].change_type, WorktreeChangeType::Added);
+        assert_eq!(entries[2].change_type, WorktreeChangeType::Deleted);
+        assert_eq!(entries[2].path, "src/old.rs");
     }
 
     #[test]
-    fn truncates_on_utf8_boundary() {
-        let (text, truncated) = truncate_text("abc가나다", 5);
+    fn parses_rename_with_old_and_new_paths() {
+        let output = "R100\0src/old_name.rs\0src/new_name.rs\0";
+        let entries = parse_name_status_z(output);
 
-        assert_eq!(text, "abc");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].change_type, WorktreeChangeType::Renamed);
+        assert_eq!(entries[0].old_path.as_deref(), Some("src/old_name.rs"));
+        assert_eq!(entries[0].path, "src/new_name.rs");
+    }
+
+    #[test]
+    fn detects_binary_diff_output() {
+        assert!(diff_is_binary(
+            "diff --git a/logo.png b/logo.png\nBinary files a/logo.png and b/logo.png differ\n"
+        ));
+        assert!(!diff_is_binary(
+            "diff --git a/x.txt b/x.txt\n@@ -1 +1 @@\n-a\n+b\n"
+        ));
+    }
+
+    #[test]
+    fn detects_binary_bytes() {
+        assert!(looks_binary(&[0x89, 0x50, 0x00, 0x01]));
+        assert!(!looks_binary(b"plain text content"));
+    }
+
+    #[test]
+    fn truncates_only_when_over_limit() {
+        let (text, truncated) = truncate_text("hello".to_owned(), 10);
+        assert_eq!(text, "hello");
+        assert!(!truncated);
+
+        let (text, truncated) = truncate_text("hello world".to_owned(), 5);
+        assert_eq!(text, "hello");
         assert!(truncated);
     }
 }

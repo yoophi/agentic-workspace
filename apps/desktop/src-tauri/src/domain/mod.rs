@@ -20,3 +20,4 @@ pub mod run;
 pub mod saved_prompt;
 pub mod saved_prompt_repository;
 pub mod worktree_change;
+pub mod worktree_change_provider;

@@ -1211,6 +1211,8 @@ export function AgentRunPanel({
               </div>
             </CardContent>
           </Card>
+
+          <WorktreeChangesPanel workingDirectory={workingDirectory} isRunning={isRunning} />
         </div>
       </div>
 

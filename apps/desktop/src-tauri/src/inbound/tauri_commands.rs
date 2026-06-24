@@ -8,7 +8,7 @@ use crate::{
         git_remote_service, git_worktree_changes_service, git_worktree_service, goal_service,
         list_provider_sessions::ListProviderSessionsUseCase, project_service, saved_prompt_service,
         send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
-        start_agent_run::StartAgentRunUseCase, worktree_change_service,
+        start_agent_run::StartAgentRunUseCase, worktree_changes_service,
     },
     domain::{
         agent::AgentDescriptor,
@@ -253,7 +253,10 @@ pub fn list_git_worktrees(working_directory: String) -> Result<Vec<GitWorktree>,
 
 #[tauri::command]
 pub fn list_worktree_changes(working_directory: String) -> Result<Vec<WorktreeChange>, String> {
-    worktree_change_service::list_worktree_changes(&GitCliWorktreeChangeProvider, working_directory)
+    worktree_changes_service::list_worktree_changes(
+        &GitCliWorktreeChangeProvider,
+        working_directory,
+    )
 }
 
 #[tauri::command]

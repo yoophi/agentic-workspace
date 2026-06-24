@@ -68,6 +68,24 @@ export type GoalInput = {
   tokenBudget?: number | null;
 };
 
+export type WorktreeChangeType =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "untracked";
+
+/** worktree에서 HEAD 대비 변경된 파일 한 건(백엔드 camelCase와 일치). */
+export type WorktreeChange = {
+  path: string;
+  oldPath: string | null;
+  changeType: WorktreeChangeType;
+  binary: boolean;
+  diff: string | null;
+  content: string | null;
+  truncated: boolean;
+};
+
 export type GoalUpdateInput = {
   objective?: string;
   status?: GoalStatus;

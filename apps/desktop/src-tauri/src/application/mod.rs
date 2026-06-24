@@ -12,4 +12,4 @@ pub mod saved_prompt_service;
 pub mod send_prompt;
 pub mod set_permission_mode;
 pub mod start_agent_run;
-pub mod worktree_change_service;
+pub mod worktree_changes_service;
