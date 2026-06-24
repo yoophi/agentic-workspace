@@ -194,10 +194,21 @@ const fallbackContextSizeLabels: Record<ContextSizePreset, string> = {
 };
 
 const fallbackModelDescriptions: Record<string, string> = {
-  "gpt-5": "Use GPT-5 when the selected provider advertises it.",
+  "gpt-5.5": "Use OpenAI's current flagship model for coding and reasoning.",
+  "gpt-5.4": "Use OpenAI's more affordable current-generation model.",
+  "gpt-5.4-mini": "Use OpenAI's lower-latency mini model.",
+  "gpt-5.4-nano": "Use OpenAI's lowest-latency nano model.",
+  "gpt-5.3-codex": "Use OpenAI's newer Codex model for coding tasks.",
+  "gpt-5.3-codex-spark": "Use OpenAI's faster Codex Spark model when available.",
+  "gpt-5.2-codex": "Use GPT-5.2 Codex when the selected provider advertises it.",
+  "gpt-5.1-codex": "Use GPT-5.1 Codex when the selected provider advertises it.",
   "gpt-5-codex": "Use GPT-5 Codex when the selected provider advertises it.",
-  "claude-sonnet-4-5":
-    "Use Claude Sonnet 4.5 when the selected provider advertises it.",
+  opus: "Use Claude Code's latest Opus alias.",
+  sonnet: "Use Claude Code's latest Sonnet alias.",
+  fable: "Use Claude Code's Fable alias.",
+  "claude-opus-4-8": "Use Claude's most capable Opus-tier model.",
+  "claude-sonnet-4-6": "Use Claude's current Sonnet model.",
+  "claude-haiku-4-5": "Use Claude's fast Haiku model.",
 };
 
 export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelProps) {
