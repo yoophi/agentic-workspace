@@ -120,3 +120,101 @@ fn sanitize_path_segment(value: &str) -> String {
         .trim_matches(|character| character == '-' || character == '.')
         .to_owned()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::cell::RefCell;
+
+    use super::*;
+    use crate::domain::git_worktree::GitWorktreeStatus;
+
+    #[derive(Default)]
+    struct FakeGitWorktreeProvider {
+        worktrees: Vec<GitWorktree>,
+        created: RefCell<Vec<(String, GitWorktreeCreateDraft)>>,
+        deleted: RefCell<Vec<(String, String)>>,
+    }
+
+    impl GitWorktreeProvider for FakeGitWorktreeProvider {
+        fn list_worktrees(&self, working_directory: &str) -> Result<Vec<GitWorktree>, String> {
+            assert_eq!(working_directory, "/repo");
+            Ok(self.worktrees.clone())
+        }
+
+        fn create_worktree(
+            &self,
+            working_directory: &str,
+            draft: GitWorktreeCreateDraft,
+        ) -> Result<(), String> {
+            self.created
+                .borrow_mut()
+                .push((working_directory.to_string(), draft));
+            Ok(())
+        }
+
+        fn delete_worktree(&self, working_directory: &str, path: &str) -> Result<(), String> {
+            self.deleted
+                .borrow_mut()
+                .push((working_directory.to_string(), path.to_string()));
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn list_git_worktrees_trims_working_directory() {
+        let provider = FakeGitWorktreeProvider {
+            worktrees: vec![GitWorktree {
+                path: "/repo".into(),
+                head: Some("abc123".into()),
+                branch: Some("main".into()),
+                status: GitWorktreeStatus::Clean,
+                prune_reason: None,
+                can_delete: false,
+            }],
+            ..Default::default()
+        };
+
+        let worktrees = list_git_worktrees(&provider, " /repo ".into()).expect("list succeeds");
+
+        assert_eq!(worktrees.len(), 1);
+        assert_eq!(worktrees[0].path, "/repo");
+    }
+
+    #[test]
+    fn create_git_worktree_sanitizes_branch_for_default_path() {
+        let provider = FakeGitWorktreeProvider::default();
+
+        create_git_worktree(
+            &provider,
+            "/Users/me/project/acp-minimal-app".into(),
+            GitWorktreeCreateDraft {
+                path: " ".into(),
+                branch: Some(" feature/user login! ".into()),
+                reference: Some(" main ".into()),
+            },
+        )
+        .expect("create succeeds");
+
+        let created = provider.created.borrow();
+        let (working_directory, draft) = created.first().expect("create call should be captured");
+        assert_eq!(working_directory, "/Users/me/project/acp-minimal-app");
+        assert_eq!(draft.branch.as_deref(), Some("feature/user login!"));
+        assert_eq!(draft.reference.as_deref(), Some("main"));
+        assert!(
+            draft
+                .path
+                .ends_with("/worktrees/acp-minimal-app/feature-user-login")
+        );
+    }
+
+    #[test]
+    fn delete_git_worktree_rejects_blank_paths_before_provider_call() {
+        let provider = FakeGitWorktreeProvider::default();
+
+        let error = delete_git_worktree(&provider, "/repo".into(), " ".into())
+            .expect_err("blank path should be rejected");
+
+        assert_eq!(error, "Worktree path is required.");
+        assert!(provider.deleted.borrow().is_empty());
+    }
+}
