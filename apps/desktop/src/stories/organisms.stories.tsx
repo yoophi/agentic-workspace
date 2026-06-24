@@ -102,20 +102,33 @@ export const AgentRun: Story = {
   ),
 };
 
-export const SavedPrompts: Story = {
-  render: () => (
+function SavedPromptToolbarStory({ disabled = false }: { disabled?: boolean }) {
+  const [sentPrompt, setSentPrompt] = useState<string | null>(null);
+
+  return (
     <Card className="max-w-3xl">
       <CardHeader>
         <CardTitle>Saved prompt toolbar</CardTitle>
         <CardDescription>
-          Saved prompt query data is supplied by Storybook Tauri mocks.
+          Saved prompt query data and mutations are supplied by Storybook Tauri mocks.
         </CardDescription>
       </CardHeader>
-      <CardContent className="p-0">
-        <SavedPromptToolbar disabled={false} onSendPrompt={() => undefined} />
+      <CardContent className="grid gap-3 p-0">
+        <SavedPromptToolbar disabled={disabled} onSendPrompt={setSentPrompt} />
+        <div className="px-4 pb-4 text-xs text-muted-foreground">
+          Last sent prompt: {sentPrompt ?? "None"}
+        </div>
       </CardContent>
     </Card>
-  ),
+  );
+}
+
+export const SavedPrompts: Story = {
+  render: () => <SavedPromptToolbarStory />,
+};
+
+export const SavedPromptsDisabled: Story = {
+  render: () => <SavedPromptToolbarStory disabled />,
 };
 
 export const AgentRunResizablePrompt: Story = {
