@@ -1,6 +1,8 @@
 pub mod acp;
 pub mod agent_catalog;
 pub mod agent_session_registry;
+#[cfg(debug_assertions)]
+pub mod devtools;
 pub mod git_cli_branch_provider;
 pub mod git_cli_remote_provider;
 pub mod fs_provider_session_repository;

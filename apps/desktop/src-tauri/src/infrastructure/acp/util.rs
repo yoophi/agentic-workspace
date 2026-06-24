@@ -4,6 +4,8 @@ use std::{
     env,
     path::{Path, PathBuf},
     sync::OnceLock,
+    thread,
+    time::{Duration, Instant},
 };
 
 pub fn expand_tilde(path: &str) -> PathBuf {
@@ -127,15 +129,35 @@ fn build_enriched_path() -> String {
 /// 띄워야 nvm 등 `.zshrc`/`.bashrc`에 정의된 PATH 변경이 적용된다.
 fn login_shell_path() -> Option<String> {
     let shell = env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let output = std::process::Command::new(&shell)
+    let mut child = std::process::Command::new(&shell)
         .args(["-ilc", "printf '%s' \"$PATH\""])
-        .output()
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
         .ok()?;
-    if !output.status.success() {
-        return None;
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return None;
+                }
+                let output = child.wait_with_output().ok()?;
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                return (!path.is_empty()).then_some(path);
+            }
+            Ok(None) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+            Err(_) => return None,
+        }
     }
-    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    (!path.is_empty()).then_some(path)
 }
 
 /// `program`을 enriched PATH 안에서 실제 실행 파일의 절대경로로 변환한다.
