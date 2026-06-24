@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { PointerEventHandler, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -82,6 +82,9 @@ type AgentRunPanelProps = {
 };
 
 const defaultPrompt = "";
+const PROMPT_PANEL_DEFAULT_HEIGHT = 300;
+const PROMPT_PANEL_MIN_HEIGHT = 180;
+const PROMPT_PANEL_MAX_HEIGHT = 560;
 
 const permissionModeOptions: Array<{
   value: PermissionMode;
@@ -134,8 +137,14 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   const [editingPrompt, setEditingPrompt] = useState<QueuedPrompt | null>(null);
   const [editingPromptText, setEditingPromptText] = useState("");
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
+  const [promptPanelHeight, setPromptPanelHeight] = useState(PROMPT_PANEL_DEFAULT_HEIGHT);
   const endRef = useRef<HTMLDivElement | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const promptResizeRef = useRef<{
+    pointerId: number;
+    startY: number;
+    startHeight: number;
+  } | null>(null);
 
   const agentsQuery = useQuery({
     queryKey: agentRunQueryKeys.agents,
@@ -152,6 +161,13 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
   }, [activeRunId]);
+
+  useEffect(() => {
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -352,6 +368,46 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
     }
   }
 
+  const startPromptResize: PointerEventHandler<HTMLDivElement> = (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    promptResizeRef.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      startHeight: promptPanelHeight,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+  };
+
+  const resizePromptPanel: PointerEventHandler<HTMLDivElement> = (event) => {
+    const resizeState = promptResizeRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const nextHeight = resizeState.startHeight + resizeState.startY - event.clientY;
+    setPromptPanelHeight(clampPromptPanelHeight(nextHeight));
+  };
+
+  const stopPromptResize: PointerEventHandler<HTMLDivElement> = (event) => {
+    const resizeState = promptResizeRef.current;
+    if (!resizeState || resizeState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    promptResizeRef.current = null;
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col gap-4">
       <div className="min-h-0 flex-1 overflow-auto pr-1">
@@ -471,161 +527,181 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
         </div>
       )}
 
-      <PromptInput
-        value={prompt}
-        onValueChange={setPrompt}
-        onSubmit={() => {
-          if (isRunning) {
-            enqueuePrompt();
-            return;
-          }
-          if (canStartRun) {
-            void run();
-          }
-        }}
-        isLoading={isRunning}
-        className="shrink-0 rounded-lg"
-      >
-        <div className="flex flex-wrap items-center gap-2 border-b px-2 py-2">
-          <span className="text-xs font-medium text-muted-foreground">Permission mode</span>
-          <Select
-            value={permissionMode}
-            onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-            disabled={isRunning}
-          >
-            <SelectTrigger className="h-8 w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                {permissionModeOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-          <span className="min-w-0 flex-1 text-xs text-muted-foreground">
-            {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
-          </span>
+      <div className="relative shrink-0" style={{ height: promptPanelHeight }}>
+        <div
+          role="separator"
+          aria-label="프롬프트 영역 크기 조정"
+          aria-orientation="horizontal"
+          className="group absolute -top-2 left-0 right-0 z-10 flex h-4 cursor-ns-resize items-center justify-center touch-none"
+          onPointerDown={startPromptResize}
+          onPointerMove={resizePromptPanel}
+          onPointerUp={stopPromptResize}
+          onPointerCancel={stopPromptResize}
+        >
+          <div className="h-1 w-12 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/60 group-active:bg-primary" />
         </div>
-        <PromptInputTextarea placeholder="선택한 worktree에서 실행할 작업을 입력하세요." />
-        {queuedPrompts.length > 0 && (
-          <div className="flex flex-col gap-2 px-2 pb-2">
-            <div className="text-xs text-muted-foreground">대기 중인 prompt {queuedPrompts.length}개</div>
-            <div className="flex max-h-32 flex-col gap-2 overflow-auto pr-1">
-              {queuedPrompts.map((queuedPrompt, index) => (
-                <div
-                  key={queuedPrompt.id}
-                  className="flex items-start justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
-                >
-                  <div className="min-w-0 flex-1 text-sm">
-                    <span className="mr-2 text-xs text-muted-foreground">#{index + 1}</span>
-                    <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <PromptInputAction tooltip="Edit prompt" side="left">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        aria-label={`${index + 1}번 prompt 편집`}
-                        onClick={() => openQueuedPromptEditor(queuedPrompt)}
-                      >
-                        <PencilIcon className="size-4" />
-                      </Button>
-                    </PromptInputAction>
-                    <PromptInputAction tooltip="Move up" side="left">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        disabled={index === 0}
-                        aria-label={`${index + 1}번 prompt 위로 이동`}
-                        onClick={() => moveQueuedPrompt(index, index - 1)}
-                      >
-                        <ArrowUpIcon className="size-4" />
-                      </Button>
-                    </PromptInputAction>
-                    <PromptInputAction tooltip="Move down" side="left">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        disabled={index === queuedPrompts.length - 1}
-                        aria-label={`${index + 1}번 prompt 아래로 이동`}
-                        onClick={() => moveQueuedPrompt(index, index + 1)}
-                      >
-                        <ArrowDownIcon className="size-4" />
-                      </Button>
-                    </PromptInputAction>
-                    <PromptInputAction tooltip="Remove prompt" side="left">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="size-7"
-                        aria-label={`${index + 1}번 prompt 제거`}
-                        onClick={() => {
-                          setQueuedPrompts((current) =>
-                            current.filter((item) => item.id !== queuedPrompt.id),
-                          );
-                        }}
-                      >
-                        <XIcon className="size-4" />
-                      </Button>
-                    </PromptInputAction>
-                  </div>
-                </div>
-              ))}
-            </div>
+        <PromptInput
+          value={prompt}
+          onValueChange={setPrompt}
+          onSubmit={() => {
+            if (isRunning) {
+              enqueuePrompt();
+              return;
+            }
+            if (canStartRun) {
+              void run();
+            }
+          }}
+          isLoading={isRunning}
+          className="flex h-full min-h-0 flex-col overflow-hidden rounded-lg"
+        >
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-2 py-2">
+            <span className="text-xs font-medium text-muted-foreground">Permission mode</span>
+            <Select
+              value={permissionMode}
+              onValueChange={(value) => setPermissionMode(value as PermissionMode)}
+              disabled={isRunning}
+            >
+              <SelectTrigger className="h-8 w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {permissionModeOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
+            </span>
           </div>
-        )}
-        <div className="flex flex-col gap-3 px-2 pb-1 sm:flex-row sm:items-center sm:justify-between">
-          <span className="min-w-0 text-xs text-muted-foreground">
-            {isRunning
-              ? isAwaitingPromptResponse
-                ? "현재 prompt 처리 중입니다. Enter로 다음 prompt를 queue에 추가합니다."
-                : "다음 prompt를 바로 보낼 수 있습니다. Enter로 queue에 추가합니다."
-              : "Enter로 실행, Shift+Enter로 줄바꿈"}
-          </span>
-          <PromptInputActions className="justify-end">
-            {isRunning ? (
-              <>
-                <PromptInputAction tooltip="Queue prompt">
-                  <Button type="button" size="sm" disabled={!canQueuePrompt} onClick={enqueuePrompt}>
-                    <PlayIcon data-icon="inline-start" />
-                    Queue
-                  </Button>
-                </PromptInputAction>
-                <PromptInputAction tooltip="Cancel run">
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    disabled={!canCancel}
-                    onClick={() => void cancel()}
+          <div className="min-h-0 flex-1">
+            <PromptInputTextarea
+              disableAutosize
+              placeholder="선택한 worktree에서 실행할 작업을 입력하세요."
+              className="h-full min-h-0 resize-none overflow-auto"
+            />
+          </div>
+          {queuedPrompts.length > 0 && (
+            <div className="flex max-h-36 shrink-0 flex-col gap-2 px-2 pb-2">
+              <div className="text-xs text-muted-foreground">대기 중인 prompt {queuedPrompts.length}개</div>
+              <div className="flex min-h-0 flex-col gap-2 overflow-auto pr-1">
+                {queuedPrompts.map((queuedPrompt, index) => (
+                  <div
+                    key={queuedPrompt.id}
+                    className="flex items-start justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
                   >
-                    <SquareIcon data-icon="inline-start" />
-                    Cancel
+                    <div className="min-w-0 flex-1 text-sm">
+                      <span className="mr-2 text-xs text-muted-foreground">#{index + 1}</span>
+                      <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <PromptInputAction tooltip="Edit prompt" side="left">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          aria-label={`${index + 1}번 prompt 편집`}
+                          onClick={() => openQueuedPromptEditor(queuedPrompt)}
+                        >
+                          <PencilIcon className="size-4" />
+                        </Button>
+                      </PromptInputAction>
+                      <PromptInputAction tooltip="Move up" side="left">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={index === 0}
+                          aria-label={`${index + 1}번 prompt 위로 이동`}
+                          onClick={() => moveQueuedPrompt(index, index - 1)}
+                        >
+                          <ArrowUpIcon className="size-4" />
+                        </Button>
+                      </PromptInputAction>
+                      <PromptInputAction tooltip="Move down" side="left">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={index === queuedPrompts.length - 1}
+                          aria-label={`${index + 1}번 prompt 아래로 이동`}
+                          onClick={() => moveQueuedPrompt(index, index + 1)}
+                        >
+                          <ArrowDownIcon className="size-4" />
+                        </Button>
+                      </PromptInputAction>
+                      <PromptInputAction tooltip="Remove prompt" side="left">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          aria-label={`${index + 1}번 prompt 제거`}
+                          onClick={() => {
+                            setQueuedPrompts((current) =>
+                              current.filter((item) => item.id !== queuedPrompt.id),
+                            );
+                          }}
+                        >
+                          <XIcon className="size-4" />
+                        </Button>
+                      </PromptInputAction>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="flex shrink-0 flex-col gap-3 px-2 pb-1 sm:flex-row sm:items-center sm:justify-between">
+            <span className="min-w-0 text-xs text-muted-foreground">
+              {isRunning
+                ? isAwaitingPromptResponse
+                  ? "현재 prompt 처리 중입니다. Enter로 다음 prompt를 queue에 추가합니다."
+                  : "다음 prompt를 바로 보낼 수 있습니다. Enter로 queue에 추가합니다."
+                : "Enter로 실행, Shift+Enter로 줄바꿈"}
+            </span>
+            <PromptInputActions className="justify-end">
+              {isRunning ? (
+                <>
+                  <PromptInputAction tooltip="Queue prompt">
+                    <Button type="button" size="sm" disabled={!canQueuePrompt} onClick={enqueuePrompt}>
+                      <PlayIcon data-icon="inline-start" />
+                      Queue
+                    </Button>
+                  </PromptInputAction>
+                  <PromptInputAction tooltip="Cancel run">
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      disabled={!canCancel}
+                      onClick={() => void cancel()}
+                    >
+                      <SquareIcon data-icon="inline-start" />
+                      Cancel
+                    </Button>
+                  </PromptInputAction>
+                </>
+              ) : (
+                <PromptInputAction tooltip="Start run">
+                  <Button type="button" size="sm" disabled={!canStartRun} onClick={() => void run()}>
+                    <PlayIcon data-icon="inline-start" />
+                    Run
                   </Button>
                 </PromptInputAction>
-              </>
-            ) : (
-              <PromptInputAction tooltip="Start run">
-                <Button type="button" size="sm" disabled={!canStartRun} onClick={() => void run()}>
-                  <PlayIcon data-icon="inline-start" />
-                  Run
-                </Button>
-              </PromptInputAction>
-            )}
-          </PromptInputActions>
-        </div>
-      </PromptInput>
+              )}
+            </PromptInputActions>
+          </div>
+        </PromptInput>
+      </div>
 
       <Dialog
         open={Boolean(editingPrompt)}
@@ -693,6 +769,10 @@ function findPendingPermission(items: TimelineItem[]) {
   }
   const pendingPermissions = Array.from(pending.values());
   return pendingPermissions[pendingPermissions.length - 1] ?? null;
+}
+
+function clampPromptPanelHeight(height: number) {
+  return Math.min(PROMPT_PANEL_MAX_HEIGHT, Math.max(PROMPT_PANEL_MIN_HEIGHT, height));
 }
 
 function PermissionRequestDialog({
