@@ -16,10 +16,12 @@ use tauri::{Manager, WindowEvent};
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(debug_assertions)]
             {
-                if let Some(window) = app.get_webview_window("main") {
+                if infrastructure::devtools::should_open_devtools()
+                    && let Some(window) = _app.get_webview_window("main")
+                {
                     window.open_devtools();
                 }
             }
@@ -27,6 +29,7 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
