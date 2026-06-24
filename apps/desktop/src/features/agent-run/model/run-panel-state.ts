@@ -133,6 +133,29 @@ export function updateQueuedPrompt(
   return { queue: nextQueue, updated };
 }
 
+export function removeQueuedPrompt(queue: QueuedPrompt[], promptId: string) {
+  const index = queue.findIndex((queuedPrompt) => queuedPrompt.id === promptId);
+  if (index < 0) {
+    return { queue, queuedPrompt: null, index: -1 };
+  }
+
+  return {
+    queue: [...queue.slice(0, index), ...queue.slice(index + 1)],
+    queuedPrompt: queue[index],
+    index,
+  };
+}
+
+export function insertQueuedPrompt(
+  queue: QueuedPrompt[],
+  queuedPrompt: QueuedPrompt,
+  index: number,
+) {
+  const nextQueue = [...queue];
+  nextQueue.splice(Math.max(0, Math.min(index, nextQueue.length)), 0, queuedPrompt);
+  return nextQueue;
+}
+
 export function buildSteerPrompt(originalPrompt: string, steerPrompt: string) {
   return [
     "The previous prompt was interrupted because the user wants to steer the task.",

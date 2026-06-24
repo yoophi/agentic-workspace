@@ -63,7 +63,9 @@ import {
 import {
   addUserMessage,
   buildSteerPrompt,
+  insertQueuedPrompt,
   moveQueuedPrompt as reorderQueuedPrompt,
+  removeQueuedPrompt,
   removeUserMessage,
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
@@ -685,7 +687,10 @@ export function AgentRunPanel({
     }
   }
 
-  async function startRun(goal: string) {
+  async function startRun(
+    goal: string,
+    options: { queuedPrompts?: QueuedPrompt[] } = {},
+  ) {
     if (!selectedAgentId || !goal) {
       return false;
     }
@@ -693,7 +698,7 @@ export function AgentRunPanel({
     const runId = crypto.randomUUID();
     setError(null);
     setItems([]);
-    setQueuedPrompts([]);
+    setQueuedPrompts(options.queuedPrompts ?? []);
     setUsageContext(null);
     usageContextRef.current = null;
     runStartedAtRef.current = Date.now();
@@ -851,25 +856,76 @@ export function AgentRunPanel({
     const steerPrompt = prompt.trim();
     const originalPrompt = directPrompt?.trim();
     const runIdToCancel = activeRunId;
+    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
 
     if (!runIdToCancel || !originalPrompt || !steerPrompt) {
       return;
     }
 
     const nextGoal = buildSteerPrompt(originalPrompt, steerPrompt);
+    const queuedPromptsToKeep = queuedPrompts;
     setError(null);
     setPrompt(defaultPrompt);
-    setQueuedPrompts([]);
+    setIsAwaitingPromptResponse(true);
 
     try {
       await cancelAgentRun(runIdToCancel);
-      const started = await startRun(nextGoal);
+      const started = await startRun(nextGoal, { queuedPrompts: queuedPromptsToKeep });
       if (!started) {
         setPrompt(steerPrompt);
+        setQueuedPrompts(queuedPromptsToKeep);
       }
     } catch (caughtError) {
       setError(String(caughtError));
       setPrompt(steerPrompt);
+      setQueuedPrompts(queuedPromptsToKeep);
+      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
+    }
+  }
+
+  async function steerQueuedPrompt(queuedPrompt: QueuedPrompt) {
+    const originalPrompt = directPrompt?.trim();
+    const runIdToCancel = activeRunId;
+    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
+
+    if (!runIdToCancel || !originalPrompt) {
+      return;
+    }
+
+    const result = removeQueuedPrompt(queuedPrompts, queuedPrompt.id);
+    if (!result.queuedPrompt) {
+      setError("전송하려던 prompt가 이미 queue에서 제거되었습니다.");
+      return;
+    }
+
+    const nextGoal = buildSteerPrompt(originalPrompt, result.queuedPrompt.text);
+    setError(null);
+    setQueuedPrompts(result.queue);
+    setIsAwaitingPromptResponse(true);
+    if (editingPrompt?.id === result.queuedPrompt.id) {
+      closeQueuedPromptEditor();
+    }
+
+    const restoreQueue = () => {
+      setQueuedPrompts((current) =>
+        current.some((item) => item.id === result.queuedPrompt!.id)
+          ? current
+          : insertQueuedPrompt(current, result.queuedPrompt!, result.index),
+      );
+    };
+
+    try {
+      await cancelAgentRun(runIdToCancel);
+      const started = await startRun(nextGoal, { queuedPrompts: result.queue });
+      if (!started) {
+        restoreQueue();
+        setPrompt(defaultPrompt);
+      }
+    } catch (caughtError) {
+      restoreQueue();
+      setError(String(caughtError));
+      setPrompt(defaultPrompt);
+      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
     }
   }
 
@@ -1400,6 +1456,19 @@ export function AgentRunPanel({
                       <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
+                      <PromptInputAction tooltip="Steer with prompt" side="left">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="size-7"
+                          disabled={!activeRunId || !directPrompt?.trim()}
+                          aria-label={`${index + 1}번 prompt로 steer`}
+                          onClick={() => void steerQueuedPrompt(queuedPrompt)}
+                        >
+                          <PlayIcon className="size-4" />
+                        </Button>
+                      </PromptInputAction>
                       <PromptInputAction tooltip="Edit prompt" side="left">
                         <Button
                           type="button"

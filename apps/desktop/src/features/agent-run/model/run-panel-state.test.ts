@@ -4,7 +4,9 @@ import {
   addUserMessage,
   applyRunEvent,
   buildSteerPrompt,
+  insertQueuedPrompt,
   moveQueuedPrompt,
+  removeQueuedPrompt,
   removeUserMessage,
   updateQueuedPrompt,
 } from "./run-panel-state";
@@ -139,6 +141,30 @@ describe("run panel state", () => {
     expect(updateQueuedPrompt(queue, "missing", "after")).toEqual({
       queue,
       updated: false,
+    });
+  });
+
+  it("removes and restores queued prompts by id", () => {
+    const queue = [
+      { id: "a", text: "first" },
+      { id: "b", text: "second" },
+      { id: "c", text: "third" },
+    ];
+
+    const removed = removeQueuedPrompt(queue, "b");
+    expect(removed).toEqual({
+      queue: [
+        { id: "a", text: "first" },
+        { id: "c", text: "third" },
+      ],
+      queuedPrompt: { id: "b", text: "second" },
+      index: 1,
+    });
+    expect(insertQueuedPrompt(removed.queue, removed.queuedPrompt!, removed.index)).toEqual(queue);
+    expect(removeQueuedPrompt(queue, "missing")).toEqual({
+      queue,
+      queuedPrompt: null,
+      index: -1,
     });
   });
 
