@@ -6,6 +6,7 @@ import {
   GalleryHorizontalEndIcon,
   GitBranchPlusIcon,
   GitCommitIcon,
+  Loader2Icon,
   PanelTopIcon,
   RefreshCwIcon,
   Trash2Icon,
@@ -309,9 +310,17 @@ export function ProjectWorktreeCard({
                           size="icon-sm"
                           disabled={!worktree.canDelete || deletingPath === worktree.path}
                           onClick={() => void handleDelete(worktree.path)}
-                          aria-label={`${worktree.path} worktree 삭제`}
+                          aria-label={
+                            deletingPath === worktree.path
+                              ? `${worktree.path} worktree 삭제 중`
+                              : `${worktree.path} worktree 삭제`
+                          }
                         >
-                          <Trash2Icon />
+                          {deletingPath === worktree.path ? (
+                            <Loader2Icon className="animate-spin" aria-hidden />
+                          ) : (
+                            <Trash2Icon />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
