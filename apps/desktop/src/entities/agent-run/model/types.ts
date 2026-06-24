@@ -17,6 +17,8 @@ export type AgentRunRequest = {
   resumeSessionId?: string;
   resumePolicy?: ResumePolicy;
   permissionMode?: PermissionMode;
+  modelId?: string;
+  contextSize?: ContextSizePreset;
 };
 
 /** provider가 로컬에 남긴 네이티브 세션 한 건의 요약(백엔드 camelCase와 일치). */
@@ -41,6 +43,8 @@ export type PermissionMode =
   | "plan"
   | "acceptEdits"
   | "dangerouslySkipAllPermissions";
+
+export type ContextSizePreset = "default" | "medium" | "large" | "xLarge";
 
 export type AgentRun = {
   id: string;

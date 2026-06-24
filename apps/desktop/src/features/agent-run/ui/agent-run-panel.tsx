@@ -35,6 +35,7 @@ import {
 } from "@/entities/agent-run/model";
 import type { TimelineRunEvent } from "@/entities/agent-run/model";
 import type {
+  ContextSizePreset,
   EventGroup,
   PermissionMode,
   ProviderSession,
@@ -141,11 +142,65 @@ const permissionModeOptions: Array<{
   },
 ];
 
+const modelOptions = [
+  {
+    value: "providerDefault",
+    label: "Provider default",
+    description: "Use the agent/provider default model.",
+  },
+  {
+    value: "gpt-5",
+    label: "GPT-5",
+    description: "Use GPT-5 when the selected provider advertises it.",
+  },
+  {
+    value: "gpt-5-codex",
+    label: "GPT-5 Codex",
+    description: "Use GPT-5 Codex when the selected provider advertises it.",
+  },
+  {
+    value: "claude-sonnet-4-5",
+    label: "Claude Sonnet 4.5",
+    description: "Use Claude Sonnet 4.5 when the selected provider advertises it.",
+  },
+] as const;
+
+const contextSizeOptions: Array<{
+  value: ContextSizePreset;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "default",
+    label: "Default context",
+    description: "Use the agent/provider default context size.",
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Prefer a balanced context window when supported.",
+  },
+  {
+    value: "large",
+    label: "Large",
+    description: "Prefer a larger context window when supported.",
+  },
+  {
+    value: "xLarge",
+    label: "XL",
+    description: "Prefer the largest common context window when supported.",
+  },
+];
+
 export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelProps) {
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [sessionMode, setSessionMode] = useState<"new" | "reuse">("new");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [modelId, setModelId] = useState<(typeof modelOptions)[number]["value"]>(
+    "providerDefault",
+  );
+  const [contextSize, setContextSize] = useState<ContextSizePreset>("default");
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -328,6 +383,8 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
         cwd: workingDirectory,
         stdioBufferLimitMb: 50,
         permissionMode,
+        ...(modelId !== "providerDefault" ? { modelId } : {}),
+        ...(contextSize !== "default" ? { contextSize } : {}),
         ...(reuseSession
           ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
           : {}),
@@ -712,6 +769,52 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
             </Select>
             <span className="min-w-0 flex-1 text-xs text-muted-foreground">
               {permissionModeOptions.find((option) => option.value === permissionMode)?.description}
+            </span>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-2 py-2">
+            <span className="text-xs font-medium text-muted-foreground">Model</span>
+            <Select
+              value={modelId}
+              onValueChange={(value) =>
+                setModelId(value as (typeof modelOptions)[number]["value"])
+              }
+              disabled={isRunning}
+            >
+              <SelectTrigger className="h-8 w-52">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <span className="text-xs font-medium text-muted-foreground">Context</span>
+            <Select
+              value={contextSize}
+              onValueChange={(value) => setContextSize(value as ContextSizePreset)}
+              disabled={isRunning}
+            >
+              <SelectTrigger className="h-8 w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {contextSizeOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+            <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+              {modelOptions.find((option) => option.value === modelId)?.description}{" "}
+              {contextSizeOptions.find((option) => option.value === contextSize)?.description}
             </span>
           </div>
           <div className="min-h-0 flex-1">

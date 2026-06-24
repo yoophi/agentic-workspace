@@ -305,6 +305,8 @@ mod tests {
             resume_session_id: Some("sess-1".into()),
             resume_policy: Some(ResumePolicy::ResumeIfAvailable),
             permission_mode: None,
+            model_id: None,
+            context_size: None,
             ralph_loop: None,
         }
     }

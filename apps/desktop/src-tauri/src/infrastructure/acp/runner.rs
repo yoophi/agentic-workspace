@@ -1,13 +1,13 @@
 use agent_client_protocol::schema::{
-    ProtocolVersion,
     v1::{
         ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
         InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
         StopReason, TextContent,
     },
+    ProtocolVersion,
 };
-use anyhow::{Context, Result, anyhow, bail};
-use serde_json::{Value, json};
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
 use std::{fs, future::Future, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
@@ -20,14 +20,14 @@ use crate::{
     domain::{
         acp_session::AcpSessionRecord,
         events::{LifecycleStatus, RunEvent},
-        run::{AgentRunRequest, PermissionMode, RalphLoopRequest, ResumePolicy},
+        run::{AgentRunRequest, ContextSizePreset, PermissionMode, RalphLoopRequest, ResumePolicy},
     },
     infrastructure::acp::{
-        client::{AcpClient, lifecycle},
-        transport::{RpcPeer, read_loop},
+        client::{lifecycle, AcpClient},
+        transport::{read_loop, RpcPeer},
         util::{
-            RpcError, display_command, enriched_path, expand_tilde, normalize_path,
-            resolve_program, rpc_to_anyhow,
+            display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
+            rpc_to_anyhow, RpcError,
         },
     },
     ports::{
@@ -210,6 +210,16 @@ where
             &session_id,
             &request.agent_id,
             request.permission_mode.unwrap_or_default(),
+            &session_setup.response,
+            &sink,
+        )
+        .await?;
+        apply_run_configuration(
+            &peer,
+            &run_id,
+            &session_id,
+            request.model_id.as_deref(),
+            request.context_size.unwrap_or_default(),
             &session_setup.response,
             &sink,
         )
@@ -618,6 +628,150 @@ async fn create_agent_session(peer: &RpcPeer, workspace: &PathBuf) -> Result<Acp
     })
 }
 
+async fn apply_run_configuration<S>(
+    peer: &RpcPeer,
+    run_id: &str,
+    session_id: &str,
+    model_id: Option<&str>,
+    context_size: ContextSizePreset,
+    session_response: &Value,
+    sink: &S,
+) -> Result<()>
+where
+    S: RunEventSink,
+{
+    let model_id = model_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "providerDefault");
+    if let Some(model_id) = model_id {
+        apply_session_config_option(
+            peer,
+            run_id,
+            session_id,
+            session_response,
+            "model",
+            &["model", "modelId"],
+            &[json!(model_id)],
+            sink,
+        )
+        .await?;
+    }
+
+    if let Some((label, candidates)) = context_size_candidates(context_size) {
+        apply_session_config_option(
+            peer,
+            run_id,
+            session_id,
+            session_response,
+            "context size",
+            &[
+                "context",
+                "contextSize",
+                "contextWindow",
+                "contextWindowTokens",
+                "maxContextTokens",
+            ],
+            &candidates,
+            sink,
+        )
+        .await?;
+        sink.emit(
+            run_id,
+            RunEvent::Diagnostic {
+                message: format!("requested context size preset {label}"),
+            },
+        );
+    }
+
+    Ok(())
+}
+
+async fn apply_session_config_option<S>(
+    peer: &RpcPeer,
+    run_id: &str,
+    session_id: &str,
+    session_response: &Value,
+    label: &str,
+    config_ids: &[&str],
+    candidates: &[Value],
+    sink: &S,
+) -> Result<()>
+where
+    S: RunEventSink,
+{
+    for config_id in config_ids {
+        if let Some(value) = session_config_option_value(session_response, config_id, candidates) {
+            peer.request(
+                "session/set_config_option",
+                json!({
+                    "sessionId": session_id,
+                    "configId": config_id,
+                    "value": value,
+                }),
+            )
+            .await
+            .map_err(rpc_to_anyhow)?;
+
+            sink.emit(
+                run_id,
+                RunEvent::Diagnostic {
+                    message: format!("{label} applied via config option {config_id}"),
+                },
+            );
+            return Ok(());
+        }
+    }
+
+    sink.emit(
+        run_id,
+        RunEvent::Diagnostic {
+            message: format!(
+                "{label} is not advertised by the agent; continuing with the agent default"
+            ),
+        },
+    );
+    Ok(())
+}
+
+fn context_size_candidates(context_size: ContextSizePreset) -> Option<(&'static str, Vec<Value>)> {
+    match context_size {
+        ContextSizePreset::Default => None,
+        ContextSizePreset::Medium => Some((
+            "medium",
+            vec![
+                json!("medium"),
+                json!("64k"),
+                json!("64000"),
+                json!(64000),
+                json!(65536),
+            ],
+        )),
+        ContextSizePreset::Large => Some((
+            "large",
+            vec![
+                json!("large"),
+                json!("128k"),
+                json!("128000"),
+                json!(128000),
+                json!(131072),
+            ],
+        )),
+        ContextSizePreset::XLarge => Some((
+            "xLarge",
+            vec![
+                json!("xLarge"),
+                json!("xlarge"),
+                json!("200k"),
+                json!("200000"),
+                json!(200000),
+                json!("256k"),
+                json!("262144"),
+                json!(262144),
+            ],
+        )),
+    }
+}
+
 async fn apply_permission_mode<S>(
     peer: &RpcPeer,
     run_id: &str,
@@ -719,23 +873,61 @@ fn permission_mode_candidates(
 }
 
 fn session_config_option_supports(response: &Value, config_id: &str, value: &str) -> bool {
-    response
+    session_config_option_value(response, config_id, &[json!(value)]).is_some()
+}
+
+fn session_config_option_value(
+    response: &Value,
+    config_id: &str,
+    candidates: &[Value],
+) -> Option<Value> {
+    let options = response
         .get("configOptions")
         .or_else(|| response.get("config_options"))
-        .and_then(Value::as_array)
-        .is_some_and(|options| {
-            options.iter().any(|option| {
-                option.get("id").and_then(Value::as_str) == Some(config_id)
-                    && option
-                        .get("options")
-                        .and_then(Value::as_array)
-                        .is_some_and(|values| {
-                            values.iter().any(|option_value| {
-                                option_value.get("value").and_then(Value::as_str) == Some(value)
-                            })
-                        })
-            })
-        })
+        .and_then(Value::as_array)?;
+
+    for option in options {
+        if option.get("id").and_then(Value::as_str) != Some(config_id) {
+            continue;
+        }
+
+        let Some(values) = option.get("options").and_then(Value::as_array) else {
+            continue;
+        };
+
+        for candidate in candidates {
+            if let Some(option_value) = values
+                .iter()
+                .find(|option_value| config_option_value_matches(option_value, candidate))
+            {
+                return Some(advertised_config_value(option_value).clone());
+            }
+        }
+    }
+
+    None
+}
+
+fn config_option_value_matches(option_value: &Value, candidate: &Value) -> bool {
+    let advertised = advertised_config_value(option_value);
+    advertised == candidate
+        || advertised.as_str() == candidate.as_str()
+        || advertised
+            .as_i64()
+            .zip(candidate.as_i64())
+            .is_some_and(|(advertised, candidate)| advertised == candidate)
+        || advertised
+            .as_str()
+            .zip(candidate.as_i64())
+            .is_some_and(|(advertised, candidate)| advertised == candidate.to_string())
+        || advertised
+            .as_i64()
+            .zip(candidate.as_str())
+            .is_some_and(|(advertised, candidate)| advertised.to_string() == candidate)
+}
+
+fn advertised_config_value(option_value: &Value) -> &Value {
+    option_value.get("value").unwrap_or(option_value)
 }
 
 fn session_modes_support(response: &Value, mode_id: &str) -> bool {
@@ -757,7 +949,11 @@ fn session_modes_support(response: &Value, mode_id: &str) -> bool {
 /// 기존 세션을 ACP `session/load`로 agent에 로드한다. agent가 세션을 메모리에
 /// 올려야 이후 `session/prompt`가 동작한다. 호출하지 않으면 agent는 세션을
 /// 모르는 상태라 `-32002 Resource not found`로 응답한다.
-async fn load_agent_session(peer: &RpcPeer, session_id: &str, workspace: &PathBuf) -> Result<Value> {
+async fn load_agent_session(
+    peer: &RpcPeer,
+    session_id: &str,
+    workspace: &PathBuf,
+) -> Result<Value> {
     let params = serde_json::to_value(LoadSessionRequest::new(
         SessionId::new(session_id),
         workspace.clone(),
@@ -860,18 +1056,22 @@ fn is_session_not_found(err: &RpcError) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{resume_session_id, run_prompt_sequence, should_reissue_missing_session};
+    use super::{
+        context_size_candidates, resume_session_id, run_prompt_sequence,
+        session_config_option_value, should_reissue_missing_session,
+    };
     use crate::{
         domain::{
             events::RunEvent,
-            run::{RalphLoopRequest, ResumePolicy},
+            run::{ContextSizePreset, RalphLoopRequest, ResumePolicy},
         },
         ports::event_sink::RunEventSink,
     };
     use anyhow::anyhow;
+    use serde_json::json;
     use std::sync::{
-        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
     };
 
     #[derive(Clone, Default)]
@@ -932,6 +1132,48 @@ mod tests {
         assert!(!should_reissue_missing_session(
             ResumePolicy::ResumeRequired
         ));
+    }
+
+    #[test]
+    fn session_config_option_value_matches_advertised_string_values() {
+        let response = json!({
+            "configOptions": [
+                {
+                    "id": "model",
+                    "options": [
+                        { "value": "gpt-5" },
+                        { "value": "gpt-5-codex" }
+                    ]
+                }
+            ]
+        });
+
+        assert_eq!(
+            session_config_option_value(&response, "model", &[json!("gpt-5-codex")]),
+            Some(json!("gpt-5-codex"))
+        );
+    }
+
+    #[test]
+    fn session_config_option_value_matches_numeric_context_values() {
+        let response = json!({
+            "configOptions": [
+                {
+                    "id": "contextWindowTokens",
+                    "options": [
+                        { "value": 64000 },
+                        { "value": 128000 }
+                    ]
+                }
+            ]
+        });
+
+        let (_, candidates) =
+            context_size_candidates(ContextSizePreset::Large).expect("large candidates");
+        assert_eq!(
+            session_config_option_value(&response, "contextWindowTokens", &candidates),
+            Some(json!(128000))
+        );
     }
 
     #[tokio::test]
