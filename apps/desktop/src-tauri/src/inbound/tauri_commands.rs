@@ -121,18 +121,26 @@ pub fn list_provider_sessions(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub async fn start_agent_run(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    mut request: AgentRunRequest,
-) -> Result<AgentRun, String> {
+/// 클라이언트가 보낸 run 요청을 실행 직전 형태로 정규화한다. run_id를 보장하고
+/// 아직 지원하지 않는 필드(workspace/checkout/ralph_loop)는 비운다.
+/// 단, resume_session_id/resume_policy는 **보존**해야 기존 세션 재사용이 동작한다.
+fn normalize_run_request(mut request: AgentRunRequest) -> AgentRunRequest {
     if request.run_id.as_deref().is_none_or(str::is_empty) {
         request.run_id = Some(uuid::Uuid::new_v4().to_string());
     }
     request.workspace_id = None;
     request.checkout_id = None;
     request.ralph_loop = None;
+    request
+}
+
+#[tauri::command]
+pub async fn start_agent_run(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    request: AgentRunRequest,
+) -> Result<AgentRun, String> {
+    let request = normalize_run_request(request);
 
     let sink = TauriRunEventSink::new(app, state.inner().clone());
     let registry = state.inner().clone();
@@ -176,4 +184,53 @@ pub async fn cancel_agent_run(
         .execute(sink, run_id)
         .await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::run::ResumePolicy;
+
+    fn sample_request() -> AgentRunRequest {
+        AgentRunRequest {
+            goal: "do it".into(),
+            agent_id: "codex".into(),
+            workspace_id: Some("ws".into()),
+            checkout_id: Some("co".into()),
+            cwd: Some("/tmp".into()),
+            agent_command: None,
+            stdio_buffer_limit_mb: None,
+            auto_allow: None,
+            run_id: None,
+            resume_session_id: Some("sess-1".into()),
+            resume_policy: Some(ResumePolicy::ResumeIfAvailable),
+            ralph_loop: None,
+        }
+    }
+
+    // 회귀 방지: 과거 start_agent_run이 resume 필드를 None으로 덮어써 재사용이
+    // 동작하지 않던 버그가 재발하지 않도록 보존을 검증한다.
+    #[test]
+    fn normalize_preserves_resume_fields() {
+        let out = normalize_run_request(sample_request());
+        assert_eq!(out.resume_session_id.as_deref(), Some("sess-1"));
+        assert_eq!(out.resume_policy, Some(ResumePolicy::ResumeIfAvailable));
+    }
+
+    #[test]
+    fn normalize_generates_run_id_and_clears_unsupported() {
+        let out = normalize_run_request(sample_request());
+        assert!(out.run_id.is_some_and(|id| !id.is_empty()));
+        assert!(out.workspace_id.is_none());
+        assert!(out.checkout_id.is_none());
+        assert!(out.ralph_loop.is_none());
+    }
+
+    #[test]
+    fn normalize_keeps_existing_run_id() {
+        let mut request = sample_request();
+        request.run_id = Some("fixed-id".into());
+        let out = normalize_run_request(request);
+        assert_eq!(out.run_id.as_deref(), Some("fixed-id"));
+    }
 }

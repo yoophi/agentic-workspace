@@ -36,6 +36,7 @@ import {
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
 import type { QueuedPrompt, UsageContext } from "@/features/agent-run/model/run-panel-state";
+import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -394,16 +395,23 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
                       <Select
                         value={selectedSessionId}
                         onValueChange={setSelectedSessionId}
-                        disabled={isRunning || sessionsQuery.isLoading || sessions.length === 0}
+                        disabled={
+                          isRunning ||
+                          sessionsQuery.isLoading ||
+                          sessionsQuery.isError ||
+                          sessions.length === 0
+                        }
                       >
                         <SelectTrigger className="w-full sm:w-56">
                           <SelectValue
                             placeholder={
                               sessionsQuery.isLoading
                                 ? "세션 불러오는 중…"
-                                : sessions.length === 0
-                                  ? "재사용 가능한 세션 없음"
-                                  : "재개할 세션 선택"
+                                : sessionsQuery.isError
+                                  ? "세션을 불러오지 못함"
+                                  : sessions.length === 0
+                                    ? "재사용 가능한 세션 없음"
+                                    : "재개할 세션 선택"
                             }
                           />
                         </SelectTrigger>
@@ -420,11 +428,15 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
                     )}
                     {sessionMode === "reuse" &&
                       !sessionsQuery.isLoading &&
-                      sessions.length === 0 && (
+                      (sessionsQuery.isError ? (
+                        <span className="text-xs text-destructive">
+                          세션 목록을 불러오지 못했습니다: {String(sessionsQuery.error)}
+                        </span>
+                      ) : sessions.length === 0 ? (
                         <span className="text-xs text-muted-foreground">
                           이 worktree에서 해당 agent의 기존 세션을 찾지 못했습니다.
                         </span>
-                      )}
+                      ) : null)}
                   </div>
                 </div>
               </div>
@@ -805,18 +817,6 @@ function ToolStep({ item }: { item: TimelineItem }) {
     </Steps>
     </div>
   );
-}
-
-function formatSessionLabel(session: ProviderSession) {
-  const title = session.title?.trim() || session.id.slice(0, 8);
-  const parts = [title, `${session.messageCount} msgs`];
-  if (session.updatedAt) {
-    const when = new Date(session.updatedAt);
-    if (!Number.isNaN(when.getTime())) {
-      parts.push(when.toLocaleString());
-    }
-  }
-  return parts.join(" · ");
 }
 
 function lifecycleStatusLabel(status: string) {
