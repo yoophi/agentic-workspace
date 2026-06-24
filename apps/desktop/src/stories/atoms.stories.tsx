@@ -10,6 +10,7 @@ import { CircularLoader, ClassicLoader, DotsLoader, Loader, PulseDotLoader, Puls
 import { Separator } from "@/components/ui/separator";
 import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 const meta = {
   title: "Atomic Design/Atoms/Registered Components",
@@ -91,6 +92,40 @@ export const Inputs: Story = {
       <SystemMessage variant="action" fill>
         저장이 완료되었습니다.
       </SystemMessage>
+    </div>
+  ),
+};
+
+export const EllipsisPopoverTexts: Story = {
+  render: () => (
+    <div className="grid max-w-xl gap-5">
+      <div className="grid gap-2">
+        <Label>Project path</Label>
+        <div className="w-72 rounded-md border bg-background px-3 py-2">
+          <EllipsisPopoverText
+            value="/Users/yoophi/project/worktrees/acp-minimal-app/feature/ellipsis-popover-text"
+            className="font-mono text-xs text-muted-foreground"
+            contentClassName="font-mono text-xs"
+          />
+        </div>
+      </div>
+      <div className="grid gap-2">
+        <Label>Remote URL</Label>
+        <div className="w-80 rounded-md border bg-background px-3 py-2">
+          <EllipsisPopoverText
+            value="git@github.com:yoophi/acp-minimal-app-with-a-very-long-repository-name.git"
+            className="font-mono text-xs text-muted-foreground"
+            contentClassName="font-mono text-xs"
+          />
+        </div>
+      </div>
+      <Button type="button" variant="outline" className="w-64 justify-start">
+        <EllipsisPopoverText
+          value="feature/add-ellipsis-popover-text-to-long-values"
+          className="flex-1 text-left"
+          focusable={false}
+        />
+      </Button>
     </div>
   ),
 };
