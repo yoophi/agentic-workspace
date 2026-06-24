@@ -2218,8 +2218,8 @@ function ToolStep({ item }: { item: TimelineItem }) {
     <div className="space-y-4">
       <Steps className="" defaultOpen={false}>
         <StepsTrigger leftIcon={<ToolStatusIcon status={status} />} swapIconOnHover={false}>
-          <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="">{item.title || "tool"}</span>
+          <span className="flex min-w-0 w-full flex-wrap items-start gap-x-2 gap-y-1 text-left">
+            <span className="min-w-0 break-words text-left">{item.title || "tool"}</span>
           </span>
         </StepsTrigger>
         <StepsContent>
