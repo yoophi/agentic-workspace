@@ -31,11 +31,11 @@ use crate::{
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_changes_provider::GitCliWorktreeChangesProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
+        json_acp_session_store::JsonAcpSessionStore,
         json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
         json_goal_repository::JsonGoalRepository, json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
-        noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
-        window_manager,
+        tauri_run_event_sink::TauriRunEventSink, window_manager,
     },
     ports::{agent_catalog::AgentCatalog, permission::PermissionDecision},
 };
@@ -398,6 +398,7 @@ pub async fn start_agent_run(
     let request = normalize_run_request(request);
 
     let owner_window_label = window.label().to_string();
+    let session_store = JsonAcpSessionStore::from_app(&app)?;
     let sink =
         TauriRunEventSink::with_target(app, state.inner().clone(), owner_window_label.clone());
     let registry = state.inner().clone();
@@ -405,7 +406,7 @@ pub async fn start_agent_run(
     let runner = AcpAgentRunner::new(
         ConfigurableAgentCatalog::from_env(),
         permissions,
-        Arc::new(NoopAcpSessionStore),
+        Arc::new(session_store),
     );
 
     StartAgentRunUseCase::new(registry)

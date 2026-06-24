@@ -8,6 +8,7 @@ pub mod git_cli_branch_provider;
 pub mod git_cli_remote_provider;
 pub mod git_cli_worktree_changes_provider;
 pub mod git_cli_worktree_provider;
+pub mod json_acp_session_store;
 pub mod json_agent_run_settings_repository;
 pub mod json_goal_repository;
 pub mod json_project_repository;
