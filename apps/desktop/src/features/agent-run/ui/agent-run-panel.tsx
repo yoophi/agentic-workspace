@@ -994,7 +994,10 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
               {contextSizeOptions.find((option) => option.value === contextSize)?.description}
             </span>
           </div>
-          <div className="flex shrink-0 flex-col gap-2 border-b px-2 py-2">
+          <div
+            className="flex shrink-0 flex-col gap-2 border-b px-2 py-2"
+            onClick={(event) => event.stopPropagation()}
+          >
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">Ralph loop</span>
               <Button
