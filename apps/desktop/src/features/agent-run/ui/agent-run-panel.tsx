@@ -241,6 +241,7 @@ export function AgentRunPanel({
   const [ralphMaxIterations, setRalphMaxIterations] = useState(5);
   const [ralphDelaySeconds, setRalphDelaySeconds] = useState(0);
   const [ralphStopOnError, setRalphStopOnError] = useState(true);
+  const [ralphStopOnPermission, setRalphStopOnPermission] = useState(false);
   const [ralphPromptTemplate, setRalphPromptTemplate] = useState(RALPH_DEFAULT_PROMPT);
   const [prompt, setPrompt] = useState(defaultPrompt);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -391,6 +392,7 @@ export function AgentRunPanel({
       );
       setRalphDelaySeconds(Math.max(0, savedSettings.ralphLoop.delayMs / 1000));
       setRalphStopOnError(savedSettings.ralphLoop.stopOnError);
+      setRalphStopOnPermission(savedSettings.ralphLoop.stopOnPermission);
       setRalphPromptTemplate(
         savedSettings.ralphLoop.promptTemplate.trim() || RALPH_DEFAULT_PROMPT,
       );
@@ -429,6 +431,7 @@ export function AgentRunPanel({
         maxIterations: ralphMaxIterations,
         delayMs: Math.max(0, Math.round(ralphDelaySeconds * 1000)),
         stopOnError: ralphStopOnError,
+        stopOnPermission: ralphStopOnPermission,
         promptTemplate: ralphPromptTemplate,
       },
     };
@@ -448,6 +451,7 @@ export function AgentRunPanel({
     ralphLoopEnabled,
     ralphMaxIterations,
     ralphPromptTemplate,
+    ralphStopOnPermission,
     ralphStopOnError,
     saveRunSettings,
     selectedAgentId,
@@ -722,7 +726,7 @@ export function AgentRunPanel({
                 maxIterations: ralphMaxIterations,
                 promptTemplate: ralphPromptTemplate,
                 stopOnError: ralphStopOnError,
-                stopOnPermission: false,
+                stopOnPermission: ralphStopOnPermission,
                 delayMs: Math.max(0, Math.round(ralphDelaySeconds * 1000)),
               },
             }
@@ -1345,6 +1349,15 @@ export function AgentRunPanel({
                   onClick={() => setRalphStopOnError((value) => !value)}
                 >
                   오류 시 중단: {ralphStopOnError ? "On" : "Off"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={ralphStopOnPermission ? "default" : "outline"}
+                  disabled={isRunning}
+                  onClick={() => setRalphStopOnPermission((value) => !value)}
+                >
+                  권한 요청 시 중단: {ralphStopOnPermission ? "On" : "Off"}
                 </Button>
               </div>
               <Textarea

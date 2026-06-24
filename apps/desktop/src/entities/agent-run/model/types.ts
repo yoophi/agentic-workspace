@@ -39,6 +39,7 @@ export type AgentRunSettingsRalphLoop = {
   maxIterations: number;
   delayMs: number;
   stopOnError: boolean;
+  stopOnPermission: boolean;
   promptTemplate: string;
 };
 
