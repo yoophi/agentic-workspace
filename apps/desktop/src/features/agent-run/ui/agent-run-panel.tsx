@@ -192,9 +192,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   }, []);
 
   useEffect(() => {
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    void listenRunEvents((envelope) => {
+    const unlisten = listenRunEvents((envelope) => {
       if (envelope.runId !== activeRunIdRef.current) {
         return;
       }
@@ -233,17 +231,10 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
           setActiveRunId(null);
         }
       }
-    }).then((cleanup) => {
-      if (disposed) {
-        cleanup();
-        return;
-      }
-      unlisten = cleanup;
     });
 
     return () => {
-      disposed = true;
-      unlisten?.();
+      unlisten();
     };
   }, []);
 

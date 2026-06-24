@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 
 import type {
   AgentDescriptor,
@@ -38,5 +37,20 @@ export async function respondAgentPermission(
 }
 
 export function listenRunEvents(callback: (event: RunEventEnvelope) => void) {
-  return listen<RunEventEnvelope>("agent-run-event", (event) => callback(event.payload));
+  let disposed = false;
+  const handleEnvelope = (envelope: RunEventEnvelope) => {
+    if (disposed) {
+      return;
+    }
+    callback(envelope);
+  };
+  const handleFallback = (event: Event) => {
+    handleEnvelope((event as CustomEvent<RunEventEnvelope>).detail);
+  };
+  window.addEventListener("agent-run-event-fallback", handleFallback);
+
+  return () => {
+    disposed = true;
+    window.removeEventListener("agent-run-event-fallback", handleFallback);
+  };
 }
