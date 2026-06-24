@@ -34,6 +34,8 @@ pub struct AgentRunSettingsRalphLoop {
     pub enabled: bool,
     pub max_iterations: usize,
     pub delay_ms: u64,
+    #[serde(default)]
+    pub stop_on_permission: bool,
     pub stop_on_error: bool,
     pub prompt_template: String,
 }
@@ -44,6 +46,7 @@ impl Default for AgentRunSettingsRalphLoop {
             enabled: false,
             max_iterations: 5,
             delay_ms: 0,
+            stop_on_permission: false,
             stop_on_error: true,
             prompt_template: String::new(),
         }

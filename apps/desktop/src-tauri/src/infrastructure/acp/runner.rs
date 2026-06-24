@@ -8,7 +8,17 @@ use agent_client_protocol::schema::{
 };
 use anyhow::{Context, Result, anyhow, bail};
 use serde_json::{Value, json};
-use std::{fs, future::Future, path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use std::{
+    fs,
+    future::Future,
+    path::PathBuf,
+    process::Stdio,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
@@ -339,11 +349,16 @@ where
                 ralph_loop,
             } = *self;
 
-            run_prompt_sequence(sink.clone(), &run_id, initial_goal, ralph_loop, |prompt| {
-                let session = session.clone();
-                let sink = sink.clone();
-                async move { session.send_prompt(sink, prompt).await.map(|_| ()) }
-            })
+            run_prompt_sequence(
+                sink.clone(),
+                &run_id,
+                initial_goal,
+                ralph_loop,
+                |sink, prompt| {
+                    let session = session.clone();
+                    async move { session.send_prompt(sink, prompt).await }
+                },
+            )
             .await;
 
             match child.wait().await {
@@ -405,10 +420,10 @@ async fn run_prompt_sequence<S, Fut>(
     run_id: &str,
     initial_goal: String,
     ralph_loop: Option<RalphLoopRequest>,
-    mut send_prompt: impl FnMut(String) -> Fut,
+    mut send_prompt: impl FnMut(PermissionTrackingSink<S>, String) -> Fut,
 ) where
     S: RunEventSink,
-    Fut: Future<Output = Result<()>>,
+    Fut: Future<Output = Result<String>>,
 {
     if send_loop_prompt(sink.clone(), run_id, initial_goal, &mut send_prompt)
         .await
@@ -443,38 +458,49 @@ async fn run_prompt_sequence<S, Fut>(
                 status: RalphLoopStatus::Started,
             },
         );
-        if send_loop_prompt(sink.clone(), run_id, prompt.clone(), &mut send_prompt)
-            .await
-            .is_err()
-        {
-            sink.emit(
-                run_id,
-                RunEvent::RalphLoop {
-                    iteration,
-                    max_iterations: settings.max_iterations,
-                    status: RalphLoopStatus::Failed,
-                },
-            );
-            if settings.stop_on_error {
+        match send_loop_prompt(sink.clone(), run_id, prompt.clone(), &mut send_prompt).await {
+            Ok(outcome) => {
                 sink.emit(
                     run_id,
-                    RunEvent::Diagnostic {
-                        message: format!(
-                            "Ralph loop stopped after iteration {iteration}: prompt dispatch failed"
-                        ),
+                    RunEvent::RalphLoop {
+                        iteration,
+                        max_iterations: settings.max_iterations,
+                        status: RalphLoopStatus::Completed,
                     },
                 );
-                return;
+                if settings.stop_on_permission && outcome.permission_requested {
+                    sink.emit(
+                        run_id,
+                        RunEvent::Diagnostic {
+                            message: format!(
+                                "Ralph loop stopped after iteration {iteration}: permission was requested"
+                            ),
+                        },
+                    );
+                    return;
+                }
             }
-        } else {
-            sink.emit(
-                run_id,
-                RunEvent::RalphLoop {
-                    iteration,
-                    max_iterations: settings.max_iterations,
-                    status: RalphLoopStatus::Completed,
-                },
-            );
+            Err(_) => {
+                sink.emit(
+                    run_id,
+                    RunEvent::RalphLoop {
+                        iteration,
+                        max_iterations: settings.max_iterations,
+                        status: RalphLoopStatus::Failed,
+                    },
+                );
+                if settings.stop_on_error {
+                    sink.emit(
+                        run_id,
+                        RunEvent::Diagnostic {
+                            message: format!(
+                                "Ralph loop stopped after iteration {iteration}: prompt dispatch failed"
+                            ),
+                        },
+                    );
+                    return;
+                }
+            }
         }
     }
 
@@ -492,21 +518,55 @@ async fn send_loop_prompt<S, Fut>(
     sink: S,
     run_id: &str,
     prompt: String,
-    send_prompt: &mut impl FnMut(String) -> Fut,
-) -> Result<()>
+    send_prompt: &mut impl FnMut(PermissionTrackingSink<S>, String) -> Fut,
+) -> Result<PromptDispatchOutcome>
 where
     S: RunEventSink,
-    Fut: Future<Output = Result<()>>,
+    Fut: Future<Output = Result<String>>,
 {
-    send_prompt(prompt).await.map_err(|err| {
-        sink.emit(
-            run_id,
-            RunEvent::Error {
-                message: err.to_string(),
-            },
-        );
-        err
+    let permission_requested = Arc::new(AtomicBool::new(false));
+    let tracking_sink = PermissionTrackingSink {
+        inner: sink.clone(),
+        permission_requested: permission_requested.clone(),
+    };
+
+    send_prompt(tracking_sink.clone(), prompt)
+        .await
+        .map_err(|err| {
+            tracking_sink.emit(
+                run_id,
+                RunEvent::Error {
+                    message: err.to_string(),
+                },
+            );
+            err
+        })?;
+
+    Ok(PromptDispatchOutcome {
+        permission_requested: permission_requested.load(Ordering::SeqCst),
     })
+}
+
+struct PromptDispatchOutcome {
+    permission_requested: bool,
+}
+
+#[derive(Clone)]
+struct PermissionTrackingSink<S> {
+    inner: S,
+    permission_requested: Arc<AtomicBool>,
+}
+
+impl<S> RunEventSink for PermissionTrackingSink<S>
+where
+    S: RunEventSink,
+{
+    fn emit(&self, run_id: &str, event: RunEvent) {
+        if matches!(event, RunEvent::Permission { .. }) {
+            self.permission_requested.store(true, Ordering::SeqCst);
+        }
+        self.inner.emit(run_id, event);
+    }
 }
 
 pub struct AcpSession {
@@ -1231,11 +1291,11 @@ mod tests {
             Some(ralph_loop(2)),
             {
                 let prompts = prompts.clone();
-                move |prompt| {
+                move |_sink, prompt| {
                     let prompts = prompts.clone();
                     async move {
                         prompts.lock().unwrap().push(prompt);
-                        Ok(())
+                        Ok("end_turn".to_string())
                     }
                 }
             },
@@ -1287,7 +1347,7 @@ mod tests {
             {
                 let prompts = prompts.clone();
                 let attempts = attempts.clone();
-                move |prompt| {
+                move |_sink, prompt| {
                     let prompts = prompts.clone();
                     let attempts = attempts.clone();
                     async move {
@@ -1296,7 +1356,7 @@ mod tests {
                         if attempt == 2 {
                             Err(anyhow!("dispatch failed"))
                         } else {
-                            Ok(())
+                            Ok("end_turn".to_string())
                         }
                     }
                 }
@@ -1326,5 +1386,93 @@ mod tests {
                 status: RalphLoopStatus::Started,
             }
         )));
+    }
+
+    #[tokio::test]
+    async fn ralph_loop_stops_when_permission_is_requested() {
+        let sink = CollectingSink::default();
+        let prompts = Arc::new(Mutex::new(Vec::new()));
+
+        run_prompt_sequence(
+            sink.clone(),
+            "run-1",
+            "initial".into(),
+            Some(ralph_loop(3)),
+            {
+                let prompts = prompts.clone();
+                move |sink, prompt| {
+                    let prompts = prompts.clone();
+                    async move {
+                        prompts.lock().unwrap().push(prompt.clone());
+                        if prompt == "continue" {
+                            sink.emit(
+                                "run-1",
+                                RunEvent::Permission {
+                                    permission_id: Some("permission-1".to_string()),
+                                    title: "Write file".to_string(),
+                                    input: None,
+                                    options: Vec::new(),
+                                    selected: None,
+                                    requires_response: true,
+                                },
+                            );
+                        }
+                        Ok("end_turn".to_string())
+                    }
+                }
+            },
+        )
+        .await;
+
+        assert_eq!(prompts.lock().unwrap().as_slice(), ["initial", "continue"]);
+        let events = sink.events.lock().unwrap();
+        assert!(events.iter().any(|(_, event)| matches!(
+            event,
+            RunEvent::Diagnostic { message }
+                if message == "Ralph loop stopped after iteration 1: permission was requested"
+        )));
+        assert!(!events.iter().any(|(_, event)| matches!(
+            event,
+            RunEvent::Diagnostic { message }
+                if message == "Ralph loop iteration 2/3 started"
+        )));
+    }
+
+    #[tokio::test]
+    async fn ralph_loop_continues_after_permission_when_setting_is_disabled() {
+        let sink = CollectingSink::default();
+        let prompts = Arc::new(Mutex::new(Vec::new()));
+        let mut settings = ralph_loop(2);
+        settings.stop_on_permission = false;
+
+        run_prompt_sequence(sink, "run-1", "initial".into(), Some(settings), {
+            let prompts = prompts.clone();
+            move |sink, prompt| {
+                let prompts = prompts.clone();
+                async move {
+                    prompts.lock().unwrap().push(prompt.clone());
+                    if prompt == "continue" {
+                        sink.emit(
+                            "run-1",
+                            RunEvent::Permission {
+                                permission_id: Some("permission-1".to_string()),
+                                title: "Write file".to_string(),
+                                input: None,
+                                options: Vec::new(),
+                                selected: None,
+                                requires_response: true,
+                            },
+                        );
+                    }
+                    Ok("end_turn".to_string())
+                }
+            }
+        })
+        .await;
+
+        assert_eq!(
+            prompts.lock().unwrap().as_slice(),
+            ["initial", "continue", "continue"]
+        );
     }
 }

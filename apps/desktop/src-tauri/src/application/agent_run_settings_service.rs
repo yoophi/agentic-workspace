@@ -100,6 +100,7 @@ mod tests {
                 enabled: true,
                 max_iterations: 999,
                 delay_ms: 999_999,
+                stop_on_permission: true,
                 stop_on_error: true,
                 prompt_template: " continue ".into(),
             },
@@ -119,6 +120,7 @@ mod tests {
         assert_eq!(saved.model_id, "gpt-5");
         assert_eq!(saved.ralph_loop.max_iterations, MAX_RALPH_ITERATIONS);
         assert_eq!(saved.ralph_loop.delay_ms, MAX_RALPH_DELAY_MS);
+        assert!(saved.ralph_loop.stop_on_permission);
         assert_eq!(saved.ralph_loop.prompt_template, "continue");
         assert_eq!(repository.load_settings().expect("load settings").len(), 1);
     }
