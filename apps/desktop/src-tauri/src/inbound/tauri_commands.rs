@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::sync::Arc;
+use std::{process::Command, sync::Arc};
 use tauri::{AppHandle, State};
 
 use crate::{
@@ -130,6 +130,66 @@ pub fn open_worktree_window(
     mode: String,
 ) -> Result<(), String> {
     window_manager::open_session_window(&app, &project_id, &worktree_path, &mode)
+}
+
+#[tauri::command]
+pub fn open_external_url(url: String) -> Result<(), String> {
+    let url = url.trim();
+    validate_external_browser_url(url)?;
+    open_url_with_system_browser(url)
+}
+
+fn validate_external_browser_url(url: &str) -> Result<(), String> {
+    let trimmed = url.trim();
+    let (scheme, rest) = trimmed
+        .split_once(':')
+        .ok_or_else(|| "external URL must include a scheme".to_string())?;
+
+    if !scheme.eq_ignore_ascii_case("http") && !scheme.eq_ignore_ascii_case("https") {
+        return Err("only http and https links can be opened externally".to_string());
+    }
+
+    if !rest.starts_with("//") {
+        return Err("external URL must include a host".to_string());
+    }
+
+    let host = rest[2..]
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if host.is_empty() {
+        return Err("external URL must include a host".to_string());
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn open_url_with_system_browser(url: &str) -> Result<(), String> {
+    Command::new("open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open external URL: {error}"))
+}
+
+#[cfg(target_os = "windows")]
+fn open_url_with_system_browser(url: &str) -> Result<(), String> {
+    Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open external URL: {error}"))
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_url_with_system_browser(url: &str) -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("failed to open external URL: {error}"))
 }
 
 /// 클라이언트가 보낸 run 요청을 실행 직전 형태로 정규화한다. run_id를 보장하고
@@ -273,5 +333,20 @@ mod tests {
         request.run_id = Some("fixed-id".into());
         let out = normalize_run_request(request);
         assert_eq!(out.run_id.as_deref(), Some("fixed-id"));
+    }
+
+    #[test]
+    fn external_url_validation_allows_http_and_https() {
+        assert!(validate_external_browser_url("https://example.com/docs").is_ok());
+        assert!(validate_external_browser_url("http://localhost:1420").is_ok());
+    }
+
+    #[test]
+    fn external_url_validation_rejects_non_browser_schemes() {
+        assert!(validate_external_browser_url("javascript:alert(1)").is_err());
+        assert!(validate_external_browser_url("file:///tmp/readme.md").is_err());
+        assert!(validate_external_browser_url("/relative/path").is_err());
+        assert!(validate_external_browser_url("https://").is_err());
+        assert!(validate_external_browser_url("https:///docs").is_err());
     }
 }

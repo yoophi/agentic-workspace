@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
+import { ExternalLink } from "@/shared/ui/external-link";
 
 const meta = {
   title: "Atomic Design/Atoms/Registered Components",
@@ -126,6 +127,15 @@ export const EllipsisPopoverTexts: Story = {
           focusable={false}
         />
       </Button>
+    </div>
+  ),
+};
+
+export const ExternalLinks: Story = {
+  render: () => (
+    <div className="grid max-w-xl gap-3 text-sm">
+      <ExternalLink href="https://example.com">Open example.com</ExternalLink>
+      <ExternalLink href="/relative/path">Relative link is not opened externally</ExternalLink>
     </div>
   ),
 };

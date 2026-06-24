@@ -248,7 +248,7 @@ export const ContentAndAgentParts: Story = {
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="grid gap-4">
         <Markdown>
-          {"## Markdown\n\n- Supports **GFM**\n- Renders `inline code`\n\n```ts\nconst ready = true;\n```"}
+          {"## Markdown\n\n- Supports **GFM**\n- Opens [external links](https://example.com) in the browser\n- Renders `inline code`\n\n```ts\nconst ready = true;\n```"}
         </Markdown>
         <CodeBlock>
           <CodeBlockGroup>
@@ -258,7 +258,7 @@ export const ContentAndAgentParts: Story = {
         </CodeBlock>
         <Message>
           <MessageAvatar src="" alt="Assistant" fallback="AI" />
-          <MessageContent markdown>Storybook catalog is ready.</MessageContent>
+          <MessageContent markdown>Storybook catalog is ready. See https://example.com.</MessageContent>
           <MessageActions>
             <MessageAction tooltip="Copy">
               <CopyIcon />

@@ -83,6 +83,7 @@ import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
+import { ExternalLink } from "@/shared/ui/external-link";
 
 type AgentRunPanelProps = {
   workingDirectory: string;
@@ -1152,9 +1153,9 @@ function StreamingMarkdown({ content }: { content: string }) {
             </pre>
           ),
           a: ({ children, href }) => (
-            <a className="font-medium text-primary underline underline-offset-4" href={href} rel="noreferrer" target="_blank">
+            <ExternalLink href={href}>
               {children}
-            </a>
+            </ExternalLink>
           ),
           hr: () => <hr className="my-4 border-border" />,
           table: ({ children }) => (

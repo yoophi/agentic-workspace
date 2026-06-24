@@ -4,6 +4,7 @@ import { memo, useId, useMemo } from "react"
 import ReactMarkdown, { Components } from "react-markdown"
 import remarkBreaks from "remark-breaks"
 import remarkGfm from "remark-gfm"
+import { ExternalLink } from "@/shared/ui/external-link"
 import { CodeBlock, CodeBlockCode } from "./code-block"
 
 export type MarkdownProps = {
@@ -25,6 +26,13 @@ function extractLanguage(className?: string): string {
 }
 
 const INITIAL_COMPONENTS: Partial<Components> = {
+  a: function AnchorComponent({ children, href, node: _node, ...props }) {
+    return (
+      <ExternalLink href={href} {...props}>
+        {children}
+      </ExternalLink>
+    )
+  },
   code: function CodeComponent({ className, children, ...props }) {
     const isInline =
       !props.node?.position?.start.line ||
