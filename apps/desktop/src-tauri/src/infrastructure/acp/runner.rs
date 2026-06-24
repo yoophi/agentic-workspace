@@ -757,7 +757,11 @@ fn session_modes_support(response: &Value, mode_id: &str) -> bool {
 /// 기존 세션을 ACP `session/load`로 agent에 로드한다. agent가 세션을 메모리에
 /// 올려야 이후 `session/prompt`가 동작한다. 호출하지 않으면 agent는 세션을
 /// 모르는 상태라 `-32002 Resource not found`로 응답한다.
-async fn load_agent_session(peer: &RpcPeer, session_id: &str, workspace: &PathBuf) -> Result<Value> {
+async fn load_agent_session(
+    peer: &RpcPeer,
+    session_id: &str,
+    workspace: &PathBuf,
+) -> Result<Value> {
     let params = serde_json::to_value(LoadSessionRequest::new(
         SessionId::new(session_id),
         workspace.clone(),
