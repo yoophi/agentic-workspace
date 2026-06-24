@@ -2,6 +2,13 @@ export type AgentDescriptor = {
   id: string;
   label: string;
   command: string;
+  models?: AgentOptionDescriptor[];
+  contextSizes?: AgentOptionDescriptor[];
+};
+
+export type AgentOptionDescriptor = {
+  id: string;
+  label: string;
 };
 
 export type ResumePolicy = "fresh" | "resumeIfAvailable" | "resumeRequired";
