@@ -5,5 +5,6 @@ pub mod git_remote_service;
 pub mod git_worktree_service;
 pub mod list_provider_sessions;
 pub mod project_service;
+pub mod saved_prompt_service;
 pub mod send_prompt;
 pub mod start_agent_run;

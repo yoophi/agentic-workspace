@@ -11,3 +11,5 @@ pub mod project;
 pub mod project_repository;
 pub mod provider_session;
 pub mod run;
+pub mod saved_prompt;
+pub mod saved_prompt_repository;

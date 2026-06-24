@@ -27,6 +27,8 @@ export type AgentRunRequest = {
   resumeSessionId?: string;
   resumePolicy?: ResumePolicy;
   permissionMode?: PermissionMode;
+  modelId?: string;
+  contextSize?: ContextSizePreset;
   ralphLoop?: RalphLoopRequest;
 };
 
@@ -52,6 +54,8 @@ export type PermissionMode =
   | "plan"
   | "acceptEdits"
   | "dangerouslySkipAllPermissions";
+
+export type ContextSizePreset = "default" | "medium" | "large" | "xLarge";
 
 export type AgentRun = {
   id: string;

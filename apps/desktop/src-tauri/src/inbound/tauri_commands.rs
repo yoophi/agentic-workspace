@@ -6,7 +6,8 @@ use crate::{
     application::{
         cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
         git_worktree_service, list_provider_sessions::ListProviderSessionsUseCase, project_service,
-        send_prompt::SendPromptUseCase, start_agent_run::StartAgentRunUseCase,
+        saved_prompt_service, send_prompt::SendPromptUseCase,
+        start_agent_run::StartAgentRunUseCase,
     },
     domain::{
         agent::AgentDescriptor,
@@ -16,6 +17,7 @@ use crate::{
         project::{Project, ProjectDraft},
         provider_session::{ProviderSession, SessionScope},
         run::{AgentRun, AgentRunRequest, RalphLoopRequest},
+        saved_prompt::{SavedPrompt, SavedPromptDraft},
     },
     infrastructure::{
         acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
@@ -25,6 +27,7 @@ use crate::{
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
         json_project_repository::JsonProjectRepository,
+        json_saved_prompt_repository::JsonSavedPromptRepository,
         noop_acp_session_store::NoopAcpSessionStore, tauri_run_event_sink::TauriRunEventSink,
         window_manager,
     },
@@ -37,6 +40,22 @@ pub struct ProjectInput {
     name: String,
     working_directory: String,
     description: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedPromptInput {
+    label: String,
+    prompt: String,
+}
+
+impl From<SavedPromptInput> for SavedPromptDraft {
+    fn from(input: SavedPromptInput) -> Self {
+        Self {
+            label: input.label,
+            prompt: input.prompt,
+        }
+    }
 }
 
 impl From<ProjectInput> for ProjectDraft {
@@ -71,6 +90,34 @@ pub fn update_project(app: AppHandle, id: String, input: ProjectInput) -> Result
 pub fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     let repository = JsonProjectRepository::from_app(&app)?;
     project_service::delete_project(&repository, id)
+}
+
+#[tauri::command]
+pub fn list_saved_prompts(app: AppHandle) -> Result<Vec<SavedPrompt>, String> {
+    let repository = JsonSavedPromptRepository::from_app(&app)?;
+    saved_prompt_service::list_saved_prompts(&repository)
+}
+
+#[tauri::command]
+pub fn create_saved_prompt(app: AppHandle, input: SavedPromptInput) -> Result<SavedPrompt, String> {
+    let repository = JsonSavedPromptRepository::from_app(&app)?;
+    saved_prompt_service::create_saved_prompt(&repository, input.into())
+}
+
+#[tauri::command]
+pub fn update_saved_prompt(
+    app: AppHandle,
+    id: String,
+    input: SavedPromptInput,
+) -> Result<SavedPrompt, String> {
+    let repository = JsonSavedPromptRepository::from_app(&app)?;
+    saved_prompt_service::update_saved_prompt(&repository, id, input.into())
+}
+
+#[tauri::command]
+pub fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), String> {
+    let repository = JsonSavedPromptRepository::from_app(&app)?;
+    saved_prompt_service::delete_saved_prompt(&repository, id)
 }
 
 #[tauri::command]
@@ -306,6 +353,8 @@ mod tests {
             resume_session_id: Some("sess-1".into()),
             resume_policy: Some(ResumePolicy::ResumeIfAvailable),
             permission_mode: None,
+            model_id: None,
+            context_size: None,
             ralph_loop: None,
         }
     }

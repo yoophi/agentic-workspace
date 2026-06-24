@@ -51,6 +51,16 @@ pub enum PermissionMode {
     DangerouslySkipAllPermissions,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ContextSizePreset {
+    #[default]
+    Default,
+    Medium,
+    Large,
+    XLarge,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentRunRequest {
@@ -63,6 +73,8 @@ pub struct AgentRunRequest {
     pub stdio_buffer_limit_mb: Option<usize>,
     pub auto_allow: Option<bool>,
     pub permission_mode: Option<PermissionMode>,
+    pub model_id: Option<String>,
+    pub context_size: Option<ContextSizePreset>,
     pub run_id: Option<String>,
     pub resume_session_id: Option<String>,
     pub resume_policy: Option<ResumePolicy>,

@@ -503,7 +503,10 @@ mod tests {
             provider_kind_for("claude-code"),
             Some(ProviderKind::Claude)
         ));
-        assert!(matches!(provider_kind_for("codex"), Some(ProviderKind::Codex)));
+        assert!(matches!(
+            provider_kind_for("codex"),
+            Some(ProviderKind::Codex)
+        ));
         assert!(matches!(
             provider_kind_for("pi-coding-agent"),
             Some(ProviderKind::Pi)

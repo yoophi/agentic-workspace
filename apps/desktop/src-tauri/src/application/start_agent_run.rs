@@ -320,6 +320,8 @@ mod tests {
             stdio_buffer_limit_mb: None,
             auto_allow: None,
             permission_mode: None,
+            model_id: None,
+            context_size: None,
             run_id: Some("run-1".into()),
             resume_session_id: None,
             resume_policy: None,
