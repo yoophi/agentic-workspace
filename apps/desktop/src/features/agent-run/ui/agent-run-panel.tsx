@@ -1,5 +1,5 @@
 import type { PointerEventHandler, ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowDownIcon,
@@ -94,6 +94,9 @@ const defaultPrompt = "";
 const PROMPT_PANEL_DEFAULT_HEIGHT = 300;
 const PROMPT_PANEL_MIN_HEIGHT = 180;
 const PROMPT_PANEL_MAX_HEIGHT = 560;
+const TIMELINE_ESTIMATED_ITEM_HEIGHT = 96;
+const TIMELINE_ITEM_GAP = 12;
+const TIMELINE_OVERSCAN = 6;
 
 const permissionModeOptions: Array<{
   value: PermissionMode;
@@ -149,7 +152,6 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
   const [editingPromptText, setEditingPromptText] = useState("");
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
   const [promptPanelHeight, setPromptPanelHeight] = useState(PROMPT_PANEL_DEFAULT_HEIGHT);
-  const endRef = useRef<HTMLDivElement | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
   const promptResizeRef = useRef<{
     pointerId: number;
@@ -238,10 +240,6 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
       unlisten();
     };
   }, []);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
-  }, [items]);
 
   useEffect(() => {
     if (!activeRunId || !isRunning || isAwaitingPromptResponse || queuedPrompts.length === 0) {
@@ -589,20 +587,7 @@ export function AgentRunPanel({ workingDirectory, scrollHeader }: AgentRunPanelP
                     </Button>
                   ))}
                 </div>
-                <div className="p-4" role="log" aria-live="polite">
-                  {visibleItems.length === 0 ? (
-                    <div className="grid min-h-[320px] place-items-center rounded-lg border border-dashed bg-muted/30 text-sm text-muted-foreground">
-                      ACP 응답이 아직 없습니다.
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-3">
-                      {visibleItems.map((item) => (
-                        <RunEventItem key={item.id} item={item} />
-                      ))}
-                    </div>
-                  )}
-                  <div ref={endRef} />
-                </div>
+                <VirtualizedRunTimeline items={visibleItems} />
               </div>
             </CardContent>
           </Card>
@@ -873,6 +858,161 @@ function findPendingPermission(items: TimelineItem[]) {
 
 function clampPromptPanelHeight(height: number) {
   return Math.min(PROMPT_PANEL_MAX_HEIGHT, Math.max(PROMPT_PANEL_MIN_HEIGHT, height));
+}
+
+function VirtualizedRunTimeline({ items }: { items: TimelineItem[] }) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const stickToBottomRef = useRef(true);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement) {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(([entry]) => {
+      setViewportHeight(entry.contentRect.height);
+    });
+    resizeObserver.observe(scrollElement);
+    setViewportHeight(scrollElement.clientHeight);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  const itemLayouts = useMemo(() => {
+    let offset = 0;
+    return items.map((item) => {
+      const height = measuredHeights[item.id] ?? TIMELINE_ESTIMATED_ITEM_HEIGHT;
+      const layout = { item, height, start: offset, end: offset + height };
+      offset += height + TIMELINE_ITEM_GAP;
+      return layout;
+    });
+  }, [items, measuredHeights]);
+
+  const totalHeight = itemLayouts.length
+    ? itemLayouts[itemLayouts.length - 1].end
+    : 0;
+
+  const virtualItems = useMemo(() => {
+    if (!itemLayouts.length) {
+      return [];
+    }
+
+    const viewportBottom = scrollTop + viewportHeight;
+    let startIndex = itemLayouts.findIndex((layout) => layout.end >= scrollTop);
+    if (startIndex === -1) {
+      startIndex = itemLayouts.length - 1;
+    }
+    startIndex = Math.max(0, startIndex - TIMELINE_OVERSCAN);
+
+    let endIndex = startIndex;
+    while (
+      endIndex < itemLayouts.length - 1 &&
+      itemLayouts[endIndex].start <= viewportBottom
+    ) {
+      endIndex += 1;
+    }
+    endIndex = Math.min(itemLayouts.length - 1, endIndex + TIMELINE_OVERSCAN);
+
+    return itemLayouts.slice(startIndex, endIndex + 1);
+  }, [itemLayouts, scrollTop, viewportHeight]);
+
+  useEffect(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || !stickToBottomRef.current) {
+      return;
+    }
+
+    scrollElement.scrollTop = scrollElement.scrollHeight;
+  }, [items.length, totalHeight]);
+
+  const updateItemHeight = useCallback((itemId: string, height: number) => {
+    setMeasuredHeights((current) => {
+      if (current[itemId] === height) {
+        return current;
+      }
+      return { ...current, [itemId]: height };
+    });
+  }, []);
+
+  return (
+    <div
+      ref={scrollRef}
+      className="max-h-[min(70svh,720px)] min-h-[320px] overflow-auto p-4"
+      role="log"
+      aria-live="polite"
+      onScroll={(event) => {
+        const element = event.currentTarget;
+        const distanceFromBottom =
+          element.scrollHeight - element.scrollTop - element.clientHeight;
+        stickToBottomRef.current = distanceFromBottom < 48;
+        setScrollTop(element.scrollTop);
+      }}
+    >
+      {items.length === 0 ? (
+        <div className="grid min-h-[320px] place-items-center rounded-lg border border-dashed bg-muted/30 text-sm text-muted-foreground">
+          ACP 응답이 아직 없습니다.
+        </div>
+      ) : (
+        <div className="relative" style={{ height: totalHeight }}>
+          {virtualItems.map(({ item, start }) => (
+            <MeasuredRunEventItem
+              key={item.id}
+              item={item}
+              top={start}
+              onHeightChange={updateItemHeight}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MeasuredRunEventItem({
+  item,
+  top,
+  onHeightChange,
+}: {
+  item: TimelineItem;
+  top: number;
+  onHeightChange: (itemId: string, height: number) => void;
+}) {
+  const itemRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = itemRef.current;
+    if (!element) {
+      return;
+    }
+
+    const measure = () => {
+      onHeightChange(item.id, element.getBoundingClientRect().height);
+    };
+    measure();
+
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(element);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [item.id, onHeightChange]);
+
+  return (
+    <div
+      ref={itemRef}
+      className="absolute left-0 right-0"
+      style={{ transform: `translateY(${top}px)` }}
+    >
+      <RunEventItem item={item} />
+    </div>
+  );
 }
 
 function PermissionRequestDialog({
