@@ -1,7 +1,7 @@
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use sha2::{Digest, Sha256};
 use std::{sync::mpsc, time::Duration};
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use uuid::Uuid;
 
 #[cfg(debug_assertions)]
 use crate::infrastructure::devtools;
@@ -9,25 +9,12 @@ use crate::infrastructure::devtools;
 /// macOS 네이티브 탭 그룹 식별자. 같은 식별자의 세션 창끼리 탭으로 묶인다.
 const TABBING_IDENTIFIER: &str = "acp-session";
 
-pub fn session_label(project_id: &str, worktree_path: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(project_id.as_bytes());
-    hasher.update([0]);
-    hasher.update(worktree_path.as_bytes());
-    let digest = hasher.finalize();
-    let hash_prefix = digest[..12]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("session-{hash_prefix}")
+pub fn session_label(session_id: &str) -> String {
+    format!("session-{session_id}")
 }
 
-fn focus_if_open(app: &AppHandle, label: &str) -> bool {
-    if let Some(window) = app.get_webview_window(label) {
-        let _ = window.set_focus();
-        return true;
-    }
-    false
+fn new_session_id() -> String {
+    Uuid::new_v4().simple().to_string()
 }
 
 /// 세션 창이 로드할 URL. HashRouter이므로 `#` 뒤가 라우트가 된다.
@@ -48,10 +35,7 @@ pub fn open_session_window(
     worktree_path: &str,
     mode: &str,
 ) -> Result<(), String> {
-    let label = session_label(project_id, worktree_path);
-    if focus_if_open(app, &label) {
-        return Ok(());
-    }
+    let label = session_label(&new_session_id());
 
     #[cfg(target_os = "macos")]
     if mode == "tab" {
@@ -152,8 +136,8 @@ mod tests {
 
     #[test]
     fn session_label_is_stable_and_route_safe() {
-        let first = session_label("project-1", "/tmp/worktree");
-        let second = session_label("project-1", "/tmp/worktree");
+        let first = session_label("session-a");
+        let second = session_label("session-a");
 
         assert_eq!(first, second);
         assert!(first.starts_with("session-"));
@@ -162,5 +146,10 @@ mod tests {
                 .chars()
                 .all(|char| char.is_ascii_alphanumeric() || char == '-')
         );
+    }
+
+    #[test]
+    fn different_session_ids_allow_multiple_windows_for_same_worktree() {
+        assert_ne!(session_label("session-a"), session_label("session-b"));
     }
 }
