@@ -35,6 +35,34 @@ impl GitCommitFileChange {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitFileDiff {
+    pub commit_hash: String,
+    pub path: String,
+    pub content: String,
+    pub is_binary: bool,
+    pub is_truncated: bool,
+}
+
+impl GitFileDiff {
+    pub fn new(
+        commit_hash: String,
+        path: String,
+        content: String,
+        is_binary: bool,
+        is_truncated: bool,
+    ) -> Self {
+        Self {
+            commit_hash,
+            path,
+            content,
+            is_binary,
+            is_truncated,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitCommitDetail {
     pub hash: String,
     pub message: String,

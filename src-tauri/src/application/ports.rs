@@ -1,5 +1,6 @@
 use crate::domain::{
     branch::GitBranch,
+    commit::GitFileDiff,
     commit::{GitCommitDetail, GitCommitSummary},
     repository::Repository,
     worktree::GitWorktree,
@@ -29,4 +30,10 @@ pub trait GitHistoryReader {
         repository_path: &str,
         commit_hash: &str,
     ) -> Result<GitCommitDetail, String>;
+    fn get_file_diff(
+        &self,
+        repository_path: &str,
+        commit_hash: &str,
+        file_path: &str,
+    ) -> Result<GitFileDiff, String>;
 }

@@ -11,7 +11,7 @@ use crate::{
     },
     domain::{
         branch::GitBranch,
-        commit::{GitCommitDetail, GitCommitSummary},
+        commit::{GitCommitDetail, GitCommitSummary, GitFileDiff},
         repository::Repository,
         worktree::GitWorktree,
     },
@@ -41,6 +41,14 @@ pub struct RepositoryRequest {
 pub struct GetCommitDetailRequest {
     repository_id: String,
     commit_hash: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetFileDiffRequest {
+    repository_id: String,
+    commit_hash: String,
+    file_path: String,
 }
 
 #[tauri::command]
@@ -91,6 +99,15 @@ pub fn get_commit_detail(
     request: GetCommitDetailRequest,
 ) -> Result<GitCommitDetail, String> {
     history_service(app)?.get_commit_detail(request.repository_id, request.commit_hash)
+}
+
+#[tauri::command]
+pub fn get_file_diff(app: AppHandle, request: GetFileDiffRequest) -> Result<GitFileDiff, String> {
+    history_service(app)?.get_file_diff(
+        request.repository_id,
+        request.commit_hash,
+        request.file_path,
+    )
 }
 
 fn repository_service(

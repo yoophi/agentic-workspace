@@ -1,6 +1,6 @@
 use crate::{
     application::ports::{GitHistoryReader, RepositoryStore},
-    domain::commit::{GitCommitDetail, GitCommitSummary},
+    domain::commit::{GitCommitDetail, GitCommitSummary, GitFileDiff},
 };
 
 pub struct HistoryService<S, R>
@@ -44,6 +44,29 @@ where
             .get_commit_detail(&repository_path, requested_hash)
     }
 
+    pub fn get_file_diff(
+        &self,
+        repository_id: String,
+        commit_hash: String,
+        file_path: String,
+    ) -> Result<GitFileDiff, String> {
+        let requested_hash = commit_hash.trim();
+        let requested_path = file_path.trim();
+
+        if requested_hash.is_empty() {
+            return Err("Commit hash is required.".to_string());
+        }
+
+        if requested_path.is_empty() {
+            return Err("File path is required.".to_string());
+        }
+
+        let repository_path = self.registered_repository_path(repository_id)?;
+
+        self.reader
+            .get_file_diff(&repository_path, requested_hash, requested_path)
+    }
+
     fn registered_repository_path(&self, repository_id: String) -> Result<String, String> {
         let requested_id = repository_id.trim();
 
@@ -67,7 +90,7 @@ mod tests {
     use crate::{
         application::ports::{GitHistoryReader, RepositoryStore},
         domain::{
-            commit::{GitCommitDetail, GitCommitFileChange, GitCommitSummary},
+            commit::{GitCommitDetail, GitCommitFileChange, GitCommitSummary, GitFileDiff},
             repository::Repository,
         },
     };
@@ -113,6 +136,21 @@ mod tests {
                     "README.md".to_string(),
                     "A".to_string(),
                 )],
+            ))
+        }
+
+        fn get_file_diff(
+            &self,
+            _repository_path: &str,
+            commit_hash: &str,
+            file_path: &str,
+        ) -> Result<GitFileDiff, String> {
+            Ok(GitFileDiff::new(
+                commit_hash.to_string(),
+                file_path.to_string(),
+                "@@ -1 +1 @@\n-old\n+new\n".to_string(),
+                false,
+                false,
             ))
         }
     }
@@ -207,5 +245,61 @@ mod tests {
 
         assert_eq!(detail.hash, "abc123");
         assert_eq!(detail.files.len(), 1);
+    }
+
+    #[test]
+    fn rejects_empty_file_path() {
+        let store = MemoryStore::default();
+        store
+            .save_all(&[Repository::new(
+                "/tmp/repo".to_string(),
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+            )])
+            .expect("repository should be stored");
+        let service = HistoryService::new(
+            store,
+            StaticHistoryReader {
+                commits: Vec::new(),
+            },
+        );
+
+        let result = service.get_file_diff(
+            "/tmp/repo".to_string(),
+            "abc123".to_string(),
+            " ".to_string(),
+        );
+
+        assert_eq!(result.unwrap_err(), "File path is required.");
+    }
+
+    #[test]
+    fn returns_file_diff_for_registered_repository() {
+        let store = MemoryStore::default();
+        store
+            .save_all(&[Repository::new(
+                "/tmp/repo".to_string(),
+                "repo".to_string(),
+                "/tmp/repo".to_string(),
+            )])
+            .expect("repository should be stored");
+        let service = HistoryService::new(
+            store,
+            StaticHistoryReader {
+                commits: Vec::new(),
+            },
+        );
+
+        let diff = service
+            .get_file_diff(
+                "/tmp/repo".to_string(),
+                "abc123".to_string(),
+                "README.md".to_string(),
+            )
+            .expect("file diff should be returned");
+
+        assert_eq!(diff.commit_hash, "abc123");
+        assert_eq!(diff.path, "README.md");
+        assert!(!diff.is_binary);
     }
 }

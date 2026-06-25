@@ -43,6 +43,14 @@ export type GitCommitDetail = GitCommitSummary & {
   files: GitCommitFileChange[];
 };
 
+export type GitFileDiff = {
+  commitHash: string;
+  path: string;
+  content: string;
+  isBinary: boolean;
+  isTruncated: boolean;
+};
+
 export const repositoryKeys = {
   all: ["repositories"] as const,
   worktrees: (repositoryId: string) => ["repositories", repositoryId, "worktrees"] as const,
@@ -50,6 +58,8 @@ export const repositoryKeys = {
   history: (repositoryId: string) => ["repositories", repositoryId, "history"] as const,
   commitDetail: (repositoryId: string, commitHash: string) =>
     ["repositories", repositoryId, "commits", commitHash] as const,
+  fileDiff: (repositoryId: string, commitHash: string, filePath: string) =>
+    ["repositories", repositoryId, "commits", commitHash, "files", filePath, "diff"] as const,
 };
 
 export function getAppInfo() {
@@ -97,6 +107,16 @@ export function getCommitDetail(repositoryId: string, commitHash: string) {
     request: {
       repositoryId,
       commitHash,
+    },
+  });
+}
+
+export function getFileDiff(repositoryId: string, commitHash: string, filePath: string) {
+  return invoke<GitFileDiff>("get_file_diff", {
+    request: {
+      repositoryId,
+      commitHash,
+      filePath,
     },
   });
 }

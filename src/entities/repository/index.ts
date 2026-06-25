@@ -2,6 +2,7 @@ export {
   createRepository,
   getAppInfo,
   getCommitDetail,
+  getFileDiff,
   listBranches,
   listHistory,
   listRepositories,
@@ -13,6 +14,7 @@ export type {
   GitBranch,
   GitCommitDetail,
   GitCommitSummary,
+  GitFileDiff,
   GitWorktree,
   Repository,
 } from "./api";

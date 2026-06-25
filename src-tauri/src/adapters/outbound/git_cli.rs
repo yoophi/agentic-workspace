@@ -6,10 +6,12 @@ use crate::{
     },
     domain::{
         branch::GitBranch,
-        commit::{GitCommitDetail, GitCommitFileChange, GitCommitSummary},
+        commit::{GitCommitDetail, GitCommitFileChange, GitCommitSummary, GitFileDiff},
         worktree::GitWorktree,
     },
 };
+
+const MAX_DIFF_BYTES: usize = 200_000;
 
 pub struct GitCliRepositoryValidator;
 
@@ -166,6 +168,40 @@ impl GitHistoryReader for GitCliRepositoryValidator {
 
         parse_commit_detail(&metadata, &files)
     }
+
+    fn get_file_diff(
+        &self,
+        repository_path: &str,
+        commit_hash: &str,
+        file_path: &str,
+    ) -> Result<GitFileDiff, String> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                repository_path,
+                "show",
+                "--format=",
+                "--find-renames",
+                commit_hash,
+                "--",
+                file_path,
+            ])
+            .output()
+            .map_err(|error| format!("Failed to run git: {error}"))?;
+
+        if !output.status.success() {
+            return Err(git_error_message(
+                &output.stderr,
+                "Failed to read Git file diff.",
+            ));
+        }
+
+        Ok(file_diff_from_output(
+            commit_hash,
+            file_path,
+            &output.stdout,
+        ))
+    }
 }
 
 fn parse_branch_format(output: &str) -> Result<Vec<GitBranch>, String> {
@@ -259,6 +295,29 @@ fn parse_commit_files(output: &str) -> Result<Vec<GitCommitFileChange>, String> 
             ))
         })
         .collect()
+}
+
+fn file_diff_from_output(commit_hash: &str, file_path: &str, output: &[u8]) -> GitFileDiff {
+    let is_truncated = output.len() > MAX_DIFF_BYTES;
+    let bytes = if is_truncated {
+        &output[..MAX_DIFF_BYTES]
+    } else {
+        output
+    };
+    let mut content = String::from_utf8_lossy(bytes).to_string();
+    let is_binary = content.contains("Binary files") || content.contains("GIT binary patch");
+
+    if is_truncated {
+        content.push_str("\n\n[diff truncated]\n");
+    }
+
+    GitFileDiff::new(
+        commit_hash.to_string(),
+        file_path.to_string(),
+        content,
+        is_binary,
+        is_truncated,
+    )
 }
 
 fn parse_worktree_porcelain(output: &str) -> Result<Vec<GitWorktree>, String> {
@@ -413,5 +472,24 @@ def456\0Add feature\0B Developer\02026-06-25T01:00:00+09:00\x1e";
         assert_eq!(detail.files.len(), 2);
         assert_eq!(detail.files[0].status, "A");
         assert_eq!(detail.files[1].path, "apps/desktop/src/main.tsx");
+    }
+
+    #[test]
+    fn marks_large_file_diff_as_truncated() {
+        let output = vec![b'a'; MAX_DIFF_BYTES + 10];
+
+        let diff = file_diff_from_output("abc123", "README.md", &output);
+
+        assert!(diff.is_truncated);
+        assert!(diff.content.ends_with("[diff truncated]\n"));
+    }
+
+    #[test]
+    fn marks_binary_file_diff() {
+        let output = b"Binary files a/image.png and b/image.png differ";
+
+        let diff = file_diff_from_output("abc123", "image.png", output);
+
+        assert!(diff.is_binary);
     }
 }

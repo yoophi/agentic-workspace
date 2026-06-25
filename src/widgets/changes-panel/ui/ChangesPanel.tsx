@@ -20,6 +20,7 @@ import {
 import {
   getAppInfo,
   getCommitDetail,
+  getFileDiff,
   listBranches,
   listHistory,
   listWorktrees,
@@ -104,6 +105,7 @@ function buildBranchTreeRows(branches: GitBranch[]): BranchTreeRow[] {
 
 export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   const [selectedCommitHash, setSelectedCommitHash] = useState<string>();
+  const [selectedFilePath, setSelectedFilePath] = useState<string>();
   const appInfo = useQuery({
     queryKey: ["app-info"],
     queryFn: getAppInfo,
@@ -137,16 +139,31 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
         : ["repositories", "unselected", "commits", "unselected"],
     queryFn: () => getCommitDetail(selectedRepository?.id ?? "", selectedCommitHash ?? ""),
   });
+  const fileDiffQuery = useQuery({
+    enabled: Boolean(selectedRepository && selectedCommitHash && selectedFilePath),
+    queryKey:
+      selectedRepository && selectedCommitHash && selectedFilePath
+        ? repositoryKeys.fileDiff(selectedRepository.id, selectedCommitHash, selectedFilePath)
+        : ["repositories", "unselected", "commits", "unselected", "files", "unselected", "diff"],
+    queryFn: () =>
+      getFileDiff(selectedRepository?.id ?? "", selectedCommitHash ?? "", selectedFilePath ?? ""),
+  });
   const branchRows = buildBranchTreeRows(branchesQuery.data ?? []);
   const isRefreshing =
     worktreesQuery.isFetching ||
     branchesQuery.isFetching ||
     historyQuery.isFetching ||
-    commitDetailQuery.isFetching;
+    commitDetailQuery.isFetching ||
+    fileDiffQuery.isFetching;
 
   useEffect(() => {
     setSelectedCommitHash(undefined);
+    setSelectedFilePath(undefined);
   }, [selectedRepository?.id]);
+
+  useEffect(() => {
+    setSelectedFilePath(undefined);
+  }, [selectedCommitHash]);
 
   return (
     <section className="flex h-full min-h-0 flex-col">
@@ -176,6 +193,9 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             void historyQuery.refetch();
             if (selectedCommitHash) {
               void commitDetailQuery.refetch();
+            }
+            if (selectedFilePath) {
+              void fileDiffQuery.refetch();
             }
           }}
         >
@@ -384,24 +404,67 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
                             {commitDetailQuery.data.author} · {commitDetailQuery.data.date}
                           </p>
                         </div>
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead className="w-20">Status</TableHead>
-                              <TableHead>File</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {commitDetailQuery.data.files.map((file) => (
-                              <TableRow key={`${file.status}:${file.path}`}>
-                                <TableCell className="font-mono text-xs">{file.status}</TableCell>
-                                <TableCell className="max-w-0 truncate font-mono text-xs">
-                                  {file.path}
-                                </TableCell>
+                        <div className="grid gap-3">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead className="w-20">Status</TableHead>
+                                <TableHead>File</TableHead>
                               </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
+                            </TableHeader>
+                            <TableBody>
+                              {commitDetailQuery.data.files.map((file) => {
+                                const isSelected = file.path === selectedFilePath;
+
+                                return (
+                                  <TableRow
+                                    className="cursor-pointer data-[selected=true]:bg-muted"
+                                    data-selected={isSelected}
+                                    key={`${file.status}:${file.path}`}
+                                    onClick={() => setSelectedFilePath(file.path)}
+                                  >
+                                    <TableCell className="font-mono text-xs">
+                                      {file.status}
+                                    </TableCell>
+                                    <TableCell className="max-w-0 truncate font-mono text-xs">
+                                      {file.path}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                          {!selectedFilePath ? (
+                            <p className="text-sm text-muted-foreground">
+                              Select a changed file to inspect its diff.
+                            </p>
+                          ) : fileDiffQuery.isLoading ? (
+                            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Loader2 className="size-4 animate-spin" />
+                              Loading diff
+                            </p>
+                          ) : fileDiffQuery.isError ? (
+                            <p className="flex items-start gap-1.5 text-sm leading-5 text-red-600">
+                              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+                              <span>{getErrorMessage(fileDiffQuery.error)}</span>
+                            </p>
+                          ) : fileDiffQuery.data?.isBinary ? (
+                            <p className="text-sm text-muted-foreground">
+                              This file is binary and cannot be displayed as text diff.
+                            </p>
+                          ) : fileDiffQuery.data ? (
+                            <div className="grid gap-2">
+                              {fileDiffQuery.data.isTruncated ? (
+                                <p className="text-xs text-muted-foreground">
+                                  Large diff truncated for display.
+                                </p>
+                              ) : null}
+                              <pre className="max-h-96 overflow-auto rounded-md border bg-muted/40 p-3 font-mono text-xs leading-5">
+                                {fileDiffQuery.data.content || "No text diff available."}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>
