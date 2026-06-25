@@ -1,7 +1,0 @@
-[
-  {
-    "id": "permission-smoke",
-    "label": "Permission Smoke",
-    "command": "sh -lc 'node \"$(git worktree list --porcelain | sed -n \"s/^worktree //p\" | head -1)/apps/desktop/scripts/acp-permission-smoke-agent.mjs\"'"
-  }
-]

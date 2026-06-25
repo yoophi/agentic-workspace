@@ -22,9 +22,9 @@ dual pane 작업창은 같은 worktree를 기준으로 두 개의 독립 agent s
 
 현재 앱에는 dual pane을 얹을 기반이 이미 있다.
 
-- 화면: `apps/desktop/src/pages/project-worktree-session/ui/project-worktree-session-page.tsx`
+- 화면: `apps/agentic-workbench/src/pages/project-worktree-session/ui/project-worktree-session-page.tsx`
   는 단일 `AgentRunPanel`을 worktree 작업 화면의 주 영역에 렌더링한다.
-- agent panel: `apps/desktop/src/features/agent-run/ui/agent-run-panel.tsx`는 prompt,
+- agent panel: `apps/agentic-workbench/src/features/agent-run/ui/agent-run-panel.tsx`는 prompt,
   provider session reuse, permission mode, model/context size, timeline, goal, Ralph loop를
   한 panel 안에서 관리한다.
 - run identity: `domain/run.rs`의 `AgentRunRequest`와 `AgentRun`은 `runId`, `cwd`,

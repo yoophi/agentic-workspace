@@ -1,4 +1,4 @@
-# ACP Minimal App
+# Agentic Workbench
 
 Minimal Tauri desktop app for managing local coding projects and running ACP
 agents inside selected Git worktrees.
@@ -22,7 +22,7 @@ agents inside selected Git worktrees.
 ## Project layout
 
 ```text
-apps/desktop/
+apps/agentic-workbench/
   src/          React app using Feature-Sliced Design
   src-tauri/    Tauri backend using hexagonal architecture
 ```

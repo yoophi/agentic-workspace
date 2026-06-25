@@ -28,7 +28,7 @@
 
 주의할 점:
 
-- `ACP_AGENT_CATALOG_PATH` smoke catalog는 root `pnpm run tauri:dev`의 Turborepo 경유 실행에서는 Rust 앱까지 전달되지 않았다. smoke 검증 시에는 `apps/desktop`에서 직접 `ACP_AGENT_CATALOG_PATH=... pnpm tauri dev`로 실행해야 했다.
+- `ACP_AGENT_CATALOG_PATH` smoke catalog는 root `pnpm run tauri:dev`의 Turborepo 경유 실행에서는 Rust 앱까지 전달되지 않았다. smoke 검증 시에는 `apps/agentic-workbench`에서 직접 `ACP_AGENT_CATALOG_PATH=... pnpm tauri dev`로 실행해야 했다.
 - smoke catalog command는 linked worktree cwd에서도 main worktree의 smoke script를 찾도록 `git worktree list --porcelain` 기반으로 보강했다.
 - production Vite build는 chunk size warning을 출력한다. 기존 번들 크기 경고이며 이번 PR 기능 검증을 막지는 않는다.
 
@@ -37,9 +37,9 @@
 - `pnpm run check-types` 통과.
 - `pnpm run test` 통과.
 - `pnpm run build` 통과.
-- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` 통과.
-- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --nocapture` 통과.
-- `node --check apps/desktop/scripts/acp-permission-smoke-agent.mjs` 통과.
+- `cargo check --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml` 통과.
+- `cargo test --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml -- --nocapture` 통과.
+- `node --check apps/agentic-workbench/scripts/acp-permission-smoke-agent.mjs` 통과.
 - permission smoke agent JSON-RPC harness 통과: `initialize`, `session/new`, `session/prompt`, `session/request_permission` 응답까지 완료.
 - Tauri dev 앱을 native rebuild와 함께 재실행했다.
 - `ACP_OPEN_DEVTOOLS` 미설정 dev 실행에서 DevTools가 자동으로 열리지 않는 것을 확인했다.
@@ -59,10 +59,10 @@
 - 서로 다른 두 session window에서 동시에 `Permission Smoke` run을 시작했고, main worktree와 linked worktree 각각의 permission dialog가 서로 다른 workspace를 표시하는 것을 확인했다.
 - 동시 permission 상태에서 main worktree run은 `Reject`, linked worktree run은 `Allow once`를 선택했고 각 window timeline에 해당 선택과 agent response가 서로 섞이지 않고 기록되는 것을 확인했다.
 - smoke catalog command가 linked worktree cwd에서도 smoke agent를 초기화하는 것을 별도 harness로 확인했다.
-- `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml`을 release warning 정리 후 다시 통과했다.
-- `pnpm --filter @acp/desktop tauri build` 통과. `.app`와 `.dmg` bundle이 생성됐고 release Rust warning은 없다.
+- `cargo check --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml`을 release warning 정리 후 다시 통과했다.
+- `pnpm --filter @yoophi/agentic-workbench tauri build` 통과. `.app`와 `.dmg` bundle이 생성됐고 release Rust warning은 없다.
 - Finder에서 packaged `.app`를 실행해 기본 Codex agent의 `npx -y @agentclientprotocol/codex-acp`가 `npm exec`, `codex-acp`, Node, Codex app-server 프로세스로 시작되는 것을 확인했다.
-- Finder-launched packaged 앱에서 Codex ACP `pwd` tool call이 `Completed`로 끝나고 `/Users/yoophi/project/acp-minimal-app`와 usage bar가 표시되는 것을 확인했다.
+- Finder-launched packaged 앱에서 Codex ACP `pwd` tool call이 `Completed`로 끝나고 `/Users/yoophi/project/agentic-workbench`와 usage bar가 표시되는 것을 확인했다.
 
 ## 남은 작업
 
@@ -74,29 +74,29 @@
 pnpm run check-types
 pnpm run test
 pnpm run build
-cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
-cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -- --nocapture
-node --check apps/desktop/scripts/acp-permission-smoke-agent.mjs
-pnpm --filter @acp/desktop tauri build
+cargo check --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml
+cargo test --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml -- --nocapture
+node --check apps/agentic-workbench/scripts/acp-permission-smoke-agent.mjs
+pnpm --filter @yoophi/agentic-workbench tauri build
 ```
 
 Permission smoke catalog로 앱을 실행할 때:
 
 ```bash
-cd apps/desktop
-ACP_AGENT_CATALOG_PATH=/Users/yoophi/project/acp-minimal-app/apps/desktop/scripts/acp-smoke-agents.json pnpm tauri dev
+cd apps/agentic-workbench
+ACP_AGENT_CATALOG_PATH=/Users/yoophi/project/agentic-workbench/apps/agentic-workbench/scripts/acp-smoke-agents.json pnpm tauri dev
 ```
 
 ## 참고 파일
 
-- `apps/desktop/src-tauri/src/infrastructure/window_manager.rs`
-- `apps/desktop/src-tauri/src/infrastructure/acp/runner.rs`
-- `apps/desktop/src-tauri/src/infrastructure/acp/permission_flow.rs`
-- `apps/desktop/src-tauri/src/infrastructure/permission_broker.rs`
-- `apps/desktop/src-tauri/src/infrastructure/tauri_run_event_sink.rs`
-- `apps/desktop/src-tauri/src/infrastructure/acp/util.rs`
-- `apps/desktop/src/app/App.tsx`
-- `apps/desktop/src/app/model/session-route.ts`
-- `apps/desktop/src/features/project-worktree/ui/project-worktree-card.tsx`
-- `apps/desktop/src/features/agent-run/ui/agent-run-panel.tsx`
-- `apps/desktop/scripts/acp-permission-smoke-agent.mjs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/window_manager.rs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/acp/runner.rs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/acp/permission_flow.rs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/permission_broker.rs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/tauri_run_event_sink.rs`
+- `apps/agentic-workbench/src-tauri/src/infrastructure/acp/util.rs`
+- `apps/agentic-workbench/src/app/App.tsx`
+- `apps/agentic-workbench/src/app/model/session-route.ts`
+- `apps/agentic-workbench/src/features/project-worktree/ui/project-worktree-card.tsx`
+- `apps/agentic-workbench/src/features/agent-run/ui/agent-run-panel.tsx`
+- `apps/agentic-workbench/scripts/acp-permission-smoke-agent.mjs`

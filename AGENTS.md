@@ -13,7 +13,7 @@
 
 ## Frontend Architecture
 
-- Write code under `apps/desktop/src` using Feature-Sliced Design.
+- Write code under `apps/agentic-workbench/src` using Feature-Sliced Design.
 - Keep app composition and routing state in `app`.
 - Put screen-level UI in `pages`.
 - Put user actions and business interactions in `features`.
@@ -26,7 +26,7 @@
 
 ## Tauri Backend Architecture
 
-- Write code under `apps/desktop/src-tauri/src` using hexagonal architecture.
+- Write code under `apps/agentic-workbench/src-tauri/src` using hexagonal architecture.
 - Keep pure domain models and ports in `domain`.
 - Keep use cases and business rules in `application`.
 - Keep inbound adapters such as Tauri commands in `inbound`.

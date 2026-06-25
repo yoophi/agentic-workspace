@@ -1,17 +1,17 @@
 {
-  "name": "acp-minimal-app",
+  "name": "agentic-workbench",
   "private": true,
   "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@9.10.0",
   "scripts": {
-    "dev": "turbo run dev --filter=@acp/desktop",
+    "dev": "turbo run dev --filter=@yoophi/agentic-workbench",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
-    "preview": "turbo run preview --filter=@acp/desktop",
-    "tauri": "turbo run tauri --filter=@acp/desktop --",
-    "tauri:dev": "turbo run tauri:dev --filter=@acp/desktop --"
+    "preview": "turbo run preview --filter=@yoophi/agentic-workbench",
+    "tauri": "turbo run tauri --filter=@yoophi/agentic-workbench --",
+    "tauri:dev": "turbo run tauri:dev --filter=@yoophi/agentic-workbench --"
   },
   "devDependencies": {
     "turbo": "^2.5.8"

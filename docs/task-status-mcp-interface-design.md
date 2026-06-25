@@ -10,7 +10,7 @@ UI 배치·충돌 전략·MVP 범위를 확정하는 것을 목표로 한다.
 ## 1. 배경과 현재 구조
 
 현재 앱은 ACP **client**로서 agent 프로세스를 실행하고, agent가 보내는 이벤트를
-`RunEvent`로 변환해 프론트엔드에 전달한다(`apps/desktop/src-tauri/src/domain/events.rs`).
+`RunEvent`로 변환해 프론트엔드에 전달한다(`apps/agentic-workbench/src-tauri/src/domain/events.rs`).
 
 ```mermaid
 flowchart LR
@@ -206,7 +206,7 @@ terminal 이후에도 스냅샷을 보존하므로 사용자는 실행이 끝난
 
 ## 6. 백엔드 설계 (hexagonal)
 
-`apps/desktop/src-tauri/src` 아래 기존 헥사고날 구조를 따른다.
+`apps/agentic-workbench/src-tauri/src` 아래 기존 헥사고날 구조를 따른다.
 
 ### 6.1 모듈
 
@@ -256,7 +256,7 @@ timeline에 쌓지 않고 **상태 영역**으로만 라우팅한다(7장).
 
 ## 7. 프론트엔드 설계 (FSD)
 
-`apps/desktop/src` 아래 Feature-Sliced Design을 따른다.
+`apps/agentic-workbench/src` 아래 Feature-Sliced Design을 따른다.
 
 - `entities/agent-run/model/types.ts` — `TaskStatusSnapshot` 등 타입 추가.
 - `entities/agent-run` — `RunEvent`에 `taskStatus` variant 추가, 이벤트 라우팅에서

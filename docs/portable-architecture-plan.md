@@ -1,4 +1,4 @@
-# ACP Minimal App 이식 용이성 개선 계획
+# Agentic Workbench 이식 용이성 개선 계획
 
 ## 배경
 
@@ -107,7 +107,7 @@ flowchart TD
 
 위치 후보:
 
-- 단기: `apps/desktop/src/features/acp-workbench`
+- 단기: `apps/agentic-workbench/src/features/acp-workbench`
 - 장기: `packages/acp-workbench-react`
 
 포함할 것:
@@ -135,7 +135,7 @@ flowchart TD
 
 위치 후보:
 
-- 단기: `apps/desktop/src-tauri/src/acp_workbench`
+- 단기: `apps/agentic-workbench/src-tauri/src/acp_workbench`
 - 장기: workspace crate `crates/acp-workbench-core`
 
 포함할 것:
@@ -389,7 +389,7 @@ Tauri adapter는 `RunOwner.id == window.label()`로 mapping하고, web host adap
 단기 React 구조:
 
 ```text
-apps/desktop/src/
+apps/agentic-workbench/src/
   features/
     acp-workbench/
       api/
@@ -417,7 +417,7 @@ apps/desktop/src/
 단기 Rust 구조:
 
 ```text
-apps/desktop/src-tauri/src/
+apps/agentic-workbench/src-tauri/src/
   acp_workbench/
     domain/
     application/

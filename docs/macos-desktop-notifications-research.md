@@ -57,17 +57,17 @@ macOS 네이티브 API(`UNUserNotificationCenter`)를 직접 감싸는 방식은
 
 현재 프로젝트는 Tauri v2 기반이다.
 
-- `apps/desktop/src-tauri/Cargo.toml`
+- `apps/agentic-workbench/src-tauri/Cargo.toml`
   - `tauri = { version = "2", features = [] }`
   - `tauri-plugin-dialog = "2"`만 등록되어 있다.
-- `apps/desktop/package.json`
+- `apps/agentic-workbench/package.json`
   - `@tauri-apps/plugin-dialog`만 등록되어 있다.
-- `apps/desktop/src-tauri/src/lib.rs`
+- `apps/agentic-workbench/src-tauri/src/lib.rs`
   - `.plugin(tauri_plugin_dialog::init())`만 호출한다.
-- `apps/desktop/src-tauri/capabilities/default.json`
+- `apps/agentic-workbench/src-tauri/capabilities/default.json`
   - 현재 permission은 `["core:default", "dialog:default"]`이다.
-- `apps/desktop/src-tauri/tauri.conf.json`
-  - macOS bundle identifier는 `com.yoophi.acp-minimal-app`이다.
+- `apps/agentic-workbench/src-tauri/tauri.conf.json`
+  - macOS bundle identifier는 `com.yoophi.agentic-workbench`이다.
 
 따라서 notification plugin을 추가하려면 Rust dependency, JS dependency, plugin init,
 capability permission을 모두 추가해야 한다.
@@ -79,7 +79,7 @@ capability permission을 모두 추가해야 한다.
 Tauri CLI를 쓰면 다음 명령으로 플러그인 추가가 가능하다.
 
 ```bash
-cd apps/desktop
+cd apps/agentic-workbench
 pnpm tauri add notification
 ```
 
@@ -87,14 +87,14 @@ pnpm tauri add notification
 
 ### 수동 변경
 
-`apps/desktop/src-tauri/Cargo.toml`:
+`apps/agentic-workbench/src-tauri/Cargo.toml`:
 
 ```toml
 [dependencies]
 tauri-plugin-notification = "2"
 ```
 
-`apps/desktop/package.json`:
+`apps/agentic-workbench/package.json`:
 
 ```json
 {
@@ -104,7 +104,7 @@ tauri-plugin-notification = "2"
 }
 ```
 
-`apps/desktop/src-tauri/src/lib.rs`:
+`apps/agentic-workbench/src-tauri/src/lib.rs`:
 
 ```rust
 pub fn run() {
@@ -115,7 +115,7 @@ pub fn run() {
 }
 ```
 
-`apps/desktop/src-tauri/capabilities/default.json`:
+`apps/agentic-workbench/src-tauri/capabilities/default.json`:
 
 ```json
 {
@@ -151,7 +151,7 @@ FSD 기준으로 notification adapter는 cross-domain utility에 가깝다.
 권장 위치:
 
 ```text
-apps/desktop/src/shared/api/desktop-notification.ts
+apps/agentic-workbench/src/shared/api/desktop-notification.ts
 ```
 
 초기 API:
@@ -292,7 +292,7 @@ MVP에서 추천하는 알림 이벤트:
 권장 위치:
 
 ```text
-apps/desktop/src/features/agent-run/model/notification-policy.ts
+apps/agentic-workbench/src/features/agent-run/model/notification-policy.ts
 ```
 
 정책 입력:

@@ -7,18 +7,18 @@
 - `tauri-git-explorer/docs/git-feature-module-export-plan.md` (이하 **모듈화 계획**)
 - `tauri-git-explorer/docs/monorepo-common-module-management.md` (이하 **모노레포 검토**)
 
-목표는 `tauri-git-explorer`의 Git history / commit graph / commit detail / file diff 기능을 `acp-app`(이 레포, `acp-minimal-app`)에 재사용 가능한 형태로 제공하는 것이다. 이 문서는 "무엇을 공유할지", "어떤 방식으로 공유할지", "어떤 순서로 실행할지"를 확정한다.
+목표는 `tauri-git-explorer`의 Git history / commit graph / commit detail / file diff 기능을 `acp-app`(이 레포, `agentic-workbench`)에 재사용 가능한 형태로 제공하는 것이다. 이 문서는 "무엇을 공유할지", "어떤 방식으로 공유할지", "어떤 순서로 실행할지"를 확정한다.
 
 > 두 원본 문서는 방향이 옳고 서로 일관된다. 이 문서는 그 결론을 유지하되, **공유 방식 선택을 재프레이밍**하고 **실행 순서를 일원화**하며 **과소평가된 리스크를 격상**하는 데 초점을 둔다. 검토자 의견은 `> 의견` 블록으로 표시한다.
 
 ## 현재 상태 (실측 기준)
 
-`acp-minimal-app` 레포를 실제로 확인한 결과는 다음과 같다. 원본 문서의 서술과 일치한다.
+`agentic-workbench` 레포를 실제로 확인한 결과는 다음과 같다. 원본 문서의 서술과 일치한다.
 
-### acp-app (`acp-minimal-app`)
+### acp-app (`agentic-workbench`)
 
-- pnpm workspace + Turbo. 루트 package 이름은 `acp-minimal-app`, 앱은 `@acp/desktop`.
-- `packages/` 디렉터리 없음. 루트 `Cargo.toml` workspace 없음 (`apps/desktop/src-tauri/Cargo.toml` 독립).
+- pnpm workspace + Turbo. 루트 package 이름은 `agentic-workbench`, 앱은 `@yoophi/agentic-workbench`.
+- `packages/` 디렉터리 없음. 루트 `Cargo.toml` workspace 없음 (`apps/agentic-workbench/src-tauri/Cargo.toml` 독립).
 - Rust는 hexagonal: `domain / application / inbound / infrastructure / ports`.
 - Git provider가 **capability별로 이미 분리**되어 있음.
   - `git_cli_branch_provider`, `git_cli_remote_provider`, `git_cli_worktree_provider`, `git_cli_worktree_changes_provider`
@@ -149,8 +149,8 @@ flowchart TD
 1. 두 앱을 **단일 pnpm/Turbo workspace**로 관리한다.
 2. **중립 신규 workspace**로 병합한다. 한 앱 레포에 다른 앱을 흡수시키지 않는다.
    - 워크스페이스명: 제품명이 아닌 중립명(예: `yoophi-desktop-workspace`).
-   - 앱 폴더: `apps/git-explorer`, `apps/acp-minimal`.
-   - 앱 package명: `@workspace/git-explorer`, `@workspace/acp-minimal`.
+   - 앱 폴더: `apps/git-explorer`, `apps/agentic-workbench`.
+   - 앱 package명: `@workspace/git-explorer`, `@workspace/agentic-workbench`.
 3. Rust는 `crates/git-core`부터 추출한다 (acp-app provider 분리 패턴 기준).
 4. TS는 `packages/git-model`(graph layout helper)부터 추출한다.
 5. UI package는 실제 중복이 확인된 뒤 늦게 추출한다.
@@ -159,7 +159,7 @@ flowchart TD
 ```mermaid
 flowchart LR
   GE[apps/git-explorer<br/>Tauri commands] --> GC[crates/git-core]
-  AC[apps/acp-minimal<br/>Tauri commands] --> GC
+  AC[apps/agentic-workbench<br/>Tauri commands] --> GC
   GC --> CLI[Git CLI provider]
   GE -.-> GM[packages/git-model]
   AC -.-> GM
@@ -199,14 +199,14 @@ flowchart TD
 
 ### Phase 1. workspace skeleton 병합
 
-1. 중립 워크스페이스를 만들고 두 앱을 `apps/git-explorer`, `apps/acp-minimal`로 이동.
+1. 중립 워크스페이스를 만들고 두 앱을 `apps/git-explorer`, `apps/agentic-workbench`로 이동.
 2. **git history 보존 병합**: `git subtree add`(또는 `read-tree` 기반 merge)로 양쪽 커밋 이력을 살려 합친다. 단순 파일 복사 금지.
 3. 앱 내부 import는 최소 변경으로 유지.
 4. 루트 `pnpm-workspace.yaml`에 `apps/*`, `packages/*` 등록. Turbo를 루트 표준으로.
 
 ### Phase 2. lockfile / package명 정리
 
-1. 앱 package명을 `@workspace/git-explorer`, `@workspace/acp-minimal`로 구분.
+1. 앱 package명을 `@workspace/git-explorer`, `@workspace/agentic-workbench`로 구분.
 2. React/Tauri/Vite/TS 버전 차이를 즉시 강제 통일하지 않는다. 중복 의존성은 lockfile에서 공존시키고 안정화 후 정리.
 
 ### Phase 3. `git-core` 추출
@@ -229,7 +229,7 @@ flowchart TD
 
 백엔드:
 
-1. `acp-minimal/src-tauri`에 `git-core` 연결.
+1. `agentic-workbench/src-tauri`에 `git-core` 연결.
 2. `application/git_history_service.rs` 추가 (`workingDirectory` blank 검증, limit clamp).
 3. `inbound/tauri_commands.rs`에 command 추가 후 invoke handler 등록.
    - `list_git_history`, `get_git_commit_graph`, `get_git_commit_detail`, `get_git_commit_file_diff`
@@ -279,7 +279,7 @@ invoke<GitCommitGraph>("get_git_commit_graph", {
 - `packages/git-model/**` → 두 앱 typecheck
 - `crates/git-core/**` → `git-core` test + 두 Tauri 앱 `cargo check`
 - `apps/git-explorer/**` → git-explorer 앱 검증
-- `apps/acp-minimal/**` → acp 앱 검증
+- `apps/agentic-workbench/**` → acp 앱 검증
 
 ## 완료 기준
 
