@@ -12,7 +12,7 @@ importers:
         specifier: ^2.5.8
         version: 2.9.18
 
-  apps/desktop:
+  apps/agentic-workbench:
     dependencies:
       '@fontsource-variable/geist':
         specifier: ^5.2.9

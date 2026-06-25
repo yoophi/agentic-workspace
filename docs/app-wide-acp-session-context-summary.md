@@ -26,7 +26,7 @@ provider native session metadata와 ACP session record를 일부 관리한다.
 
 현재 저장소에는 이 기능을 얹을 수 있는 기반이 이미 있다.
 
-- ACP 실행: `apps/desktop/src-tauri/src/infrastructure/acp/runner.rs`의
+- ACP 실행: `apps/agentic-workbench/src-tauri/src/infrastructure/acp/runner.rs`의
   `AcpAgentRunner`가 agent process를 spawn하고 `initialize`, `session/new`,
   `session/load` 또는 `session/resume`, `session/prompt` 흐름을 담당한다.
 - 세션 저장: `domain/acp_session.rs`, `ports/acp_session_store.rs`,
@@ -180,8 +180,8 @@ MVP에서는 stdio MCP server를 앱 안에서 실행 가능한 별도 binary/su
 
 ```json
 {
-  "name": "acp-minimal-app-context",
-  "command": "/path/to/acp-minimal-app-mcp",
+  "name": "agentic-workbench-context",
+  "command": "/path/to/agentic-workbench-mcp",
   "args": ["context-server", "--session-token", "..."],
   "env": []
 }
@@ -202,8 +202,8 @@ session을 load/resume할 때도 다시 전달해야 한다.
   "cwd": "/absolute/path/to/worktree",
   "mcpServers": [
     {
-      "name": "acp-minimal-app-context",
-      "command": "/absolute/path/to/acp-minimal-app-mcp",
+      "name": "agentic-workbench-context",
+      "command": "/absolute/path/to/agentic-workbench-mcp",
       "args": ["context-server", "--session-token", "opaque-token"],
       "env": [
         { "name": "ACP_MINIMAL_APP_ID", "value": "..." }
@@ -221,8 +221,8 @@ session을 load/resume할 때도 다시 전달해야 한다.
   "cwd": "/absolute/path/to/worktree",
   "mcpServers": [
     {
-      "name": "acp-minimal-app-context",
-      "command": "/absolute/path/to/acp-minimal-app-mcp",
+      "name": "agentic-workbench-context",
+      "command": "/absolute/path/to/agentic-workbench-mcp",
       "args": ["context-server", "--session-token", "opaque-token"],
       "env": []
     }
@@ -257,7 +257,7 @@ MCP server descriptor 생성:
 ```rust
 fn app_context_mcp_server(command: PathBuf, token: String) -> McpServer {
     McpServer::Stdio(
-        McpServerStdio::new("acp-minimal-app-context", command)
+        McpServerStdio::new("agentic-workbench-context", command)
             .args(vec![
                 "context-server".to_string(),
                 "--session-token".to_string(),
@@ -291,7 +291,7 @@ peer.request("session/load", params).await?;
 
 #### 현재 코드에서 바꿔야 할 지점
 
-`apps/desktop/src-tauri/src/infrastructure/acp/runner.rs` 기준:
+`apps/agentic-workbench/src-tauri/src/infrastructure/acp/runner.rs` 기준:
 
 - `create_agent_session(peer, workspace)`는 현재
   `NewSessionRequest::new(workspace.clone())`만 보낸다. 여기에
@@ -433,21 +433,21 @@ type WorktreeContextSummary = {
 
 ### 1. 백엔드 domain/application 추가
 
-`apps/desktop/src-tauri/src/domain/context_summary.rs`
+`apps/agentic-workbench/src-tauri/src/domain/context_summary.rs`
 
 - `WorktreeContextSummary`
 - `ContextSummaryScope`
 - `ContextSummaryDraft`
 - plain text length validation
 
-`apps/desktop/src-tauri/src/ports/context_summary_store.rs`
+`apps/agentic-workbench/src-tauri/src/ports/context_summary_store.rs`
 
 - `get(worktree_path)`
 - `put(summary)`
 - `mark_stale(worktree_path)`
 - `clear(worktree_path)`
 
-`apps/desktop/src-tauri/src/application/context_summary_service.rs`
+`apps/agentic-workbench/src-tauri/src/application/context_summary_service.rs`
 
 - summary read/write use case
 - source revision 계산

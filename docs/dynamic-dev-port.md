@@ -2,7 +2,7 @@
 
 ## 배경
 
-현재 Tauri 개발 실행은 `apps/desktop/src-tauri/tauri.conf.json`의 `build.devUrl`과 `apps/desktop/vite.config.ts`의 Vite 개발 서버 포트를 `1420`에 맞춰 둔다. Vite 설정은 `VITE_DEV_SERVER_PORT`를 읽지만 `strictPort: true`이므로 해당 포트가 이미 사용 중이면 실행이 실패한다.
+현재 Tauri 개발 실행은 `apps/agentic-workbench/src-tauri/tauri.conf.json`의 `build.devUrl`과 `apps/agentic-workbench/vite.config.ts`의 Vite 개발 서버 포트를 `1420`에 맞춰 둔다. Vite 설정은 `VITE_DEV_SERVER_PORT`를 읽지만 `strictPort: true`이므로 해당 포트가 이미 사용 중이면 실행이 실패한다.
 
 이 방식은 단순하지만, 여러 Tauri/Vite 프로젝트를 동시에 실행하거나 이전 dev server가 남아 있으면 `pnpm dev` 또는 `pnpm tauri:dev`가 실패한다. 이 프로젝트를 다른 앱으로 이식 가능한 template 또는 module source로 쓰려면 개발 실행 방식도 host 앱에 쉽게 옮길 수 있어야 한다.
 
@@ -27,9 +27,9 @@
 
 ```mermaid
 flowchart LR
-  Root[pnpm dev] --> Turbo[turbo run dev --filter=@acp/desktop]
+  Root[pnpm dev] --> Turbo[turbo run dev --filter=@yoophi/agentic-workbench]
   Turbo --> Vite[vite]
-  RootTauri[pnpm tauri:dev] --> TurboTauri[turbo run tauri:dev --filter=@acp/desktop]
+  RootTauri[pnpm tauri:dev] --> TurboTauri[turbo run tauri:dev --filter=@yoophi/agentic-workbench]
   TurboTauri --> Tauri[tauri dev]
   Tauri --> Conf[tauri.conf.json<br/>devUrl localhost:1420]
   Vite --> ViteConf[vite.config.ts<br/>port 1420 strictPort]
@@ -47,8 +47,8 @@ flowchart LR
 
 - `scripts/tauri-dev.mjs`: 빈 포트 탐색 및 Tauri dev 실행 래퍼
 - `package.json`: root `dev`, `tauri:dev` 진입점을 launcher로 연결
-- `apps/desktop/vite.config.ts`: `DEV_HOST`, `DEV_PORT` 또는 `VITE_DEV_SERVER_PORT` 기반 Vite 서버 설정
-- `apps/desktop/src-tauri/tauri.conf.json`: fallback `devUrl`만 유지
+- `apps/agentic-workbench/vite.config.ts`: `DEV_HOST`, `DEV_PORT` 또는 `VITE_DEV_SERVER_PORT` 기반 Vite 서버 설정
+- `apps/agentic-workbench/src-tauri/tauri.conf.json`: fallback `devUrl`만 유지
 
 실행 흐름:
 
@@ -112,8 +112,8 @@ publicHost: Tauri WebView가 접속할 host
 
 ```json
 {
-  "dev": "turbo run dev --filter=@acp/desktop",
-  "tauri:dev": "turbo run tauri:dev --filter=@acp/desktop --"
+  "dev": "turbo run dev --filter=@yoophi/agentic-workbench",
+  "tauri:dev": "turbo run tauri:dev --filter=@yoophi/agentic-workbench --"
 }
 ```
 
@@ -182,7 +182,7 @@ graph LR
 ## 이식 체크리스트
 
 - root package manager가 `pnpm`인지 확인한다. 다르면 launcher의 command를 host 앱에 맞춘다.
-- desktop package 경로가 `apps/desktop`인지 확인한다. 다르면 launcher의 cwd를 바꾼다.
+- desktop package 경로가 `apps/agentic-workbench`인지 확인한다. 다르면 launcher의 cwd를 바꾼다.
 - Tauri CLI가 desktop package dependency에 있는지 확인한다.
 - `tauri.conf.json`의 `beforeDevCommand`가 launcher override로 덮여도 `beforeBuildCommand`, `frontendDist`가 보존되는지 확인한다.
 - 모든 개발 진입점이 launcher를 쓰는지 확인한다.
@@ -201,7 +201,7 @@ graph LR
 pnpm check-types
 pnpm test
 pnpm build
-cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+cargo check --manifest-path apps/agentic-workbench/src-tauri/Cargo.toml
 git diff --check
 ```
 
