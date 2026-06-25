@@ -365,17 +365,100 @@ stateDiagram-v2
 6. 마지막으로 `POST /runs` 기반 실행으로 전환한다.
 7. Tauri event fallback과 `window.eval` 경로를 제거한다.
 
-## 권장 보안 정책
+## HTTP / WebSocket 보안 권장사항
 
-- HTTP server는 `127.0.0.1` 또는 `[::1]`에만 bind한다.
+HTTP와 WebSocket으로 agent 실행 기능을 노출하면 Tauri 내부 command보다 공격 표면이 넓어진다. 특히 `POST /runs`, prompt 발송, permission 응답은 로컬 파일 접근과 프로세스 실행에 직접 연결되므로 local-only API라도 외부 입력으로 취급해야 한다.
+
+### 네트워크 노출 범위
+
+- HTTP server는 `127.0.0.1` 또는 `[::1]`에만 bind한다. `0.0.0.0` bind는 금지한다.
 - port는 고정값 대신 OS가 배정한 random port를 사용한다.
+- service base URL은 Tauri bootstrap command 또는 안전한 in-memory channel로만 frontend에 전달한다.
+- server URL과 token을 파일, 환경 변수, stdout log에 남기지 않는다.
+- 개발 모드에서만 외부 host bind가 필요하다면 별도 feature flag와 명시적 경고를 둔다.
+
+### 인증과 권한
+
 - 앱 실행마다 app session token을 새로 발급한다.
+- `POST /runs`는 app session token을 요구한다.
 - run 생성 시 owner token을 별도 발급한다.
-- write API는 owner token을 요구한다.
-- WebSocket URL은 token 없이는 연결할 수 없게 한다.
+- prompt 발송, cancel, permission response, permission mode 변경 같은 write API는 owner token을 요구한다.
+- read-only observer가 필요하면 owner token과 별도의 observer token을 둔다.
+- token은 충분한 entropy를 가진 난수로 만들고, run 종료 또는 앱 종료 시 즉시 폐기한다.
+- token 비교는 constant-time 비교 함수를 사용한다.
+
+권한 모델은 다음처럼 분리한다.
+
+```mermaid
+flowchart TB
+  AppToken[App Session Token] --> StartRun[POST /runs]
+  StartRun --> OwnerToken[Owner Token]
+  StartRun --> ObserverToken[Optional Observer Token]
+  OwnerToken --> WriteAPI[send / cancel / permission response]
+  OwnerToken --> EventWS[WebSocket events]
+  ObserverToken --> EventWS
+```
+
+### CORS와 Origin 검증
+
 - CORS는 기본적으로 허용하지 않는다.
-- `Origin` header가 존재하면 앱이 허용한 origin만 통과시킨다.
-- token은 log에 남기지 않는다.
+- browser frontend에서 CORS가 필요하면 정확한 origin만 allowlist에 등록한다.
+- `Origin` header가 존재하면 HTTP와 WebSocket upgrade 모두에서 검사한다.
+- `Origin: null`은 기본 거부한다. 필요할 때만 Tauri webview 동작을 확인한 뒤 제한적으로 허용한다.
+- preflight 요청도 token 없이 넓게 허용하지 않는다.
+- localhost API라고 해서 browser same-origin 정책에 의존하지 않는다.
+
+### WebSocket 보호
+
+- WebSocket URL은 token 없이는 연결할 수 없게 한다.
+- token을 query string에 넣으면 browser history, proxy log, error log에 남을 수 있다. 가능하면 `Sec-WebSocket-Protocol` 또는 첫 client message로 token을 전달한다.
+- query token을 쓰는 경우 token logging을 명시적으로 마스킹한다.
+- 연결 직후 server가 인증 완료 전까지 event replay를 시작하지 않는다.
+- `lastSeq` replay 요청에는 최대 replay 개수와 최대 buffer byte 제한을 둔다.
+- connection별 send queue 크기를 제한하고, 느린 subscriber는 끊는다.
+- ping/pong 또는 idle timeout을 두어 죽은 connection을 정리한다.
+- 같은 run에 붙을 수 있는 WebSocket connection 수를 제한한다.
+
+### 요청 검증과 제한
+
+- 모든 endpoint의 JSON body 크기를 제한한다.
+- prompt 길이, path 길이, environment override 개수, MCP server 설정 크기에 상한을 둔다.
+- `cwd`는 canonicalize 후 허용된 workspace boundary 안에 있는지 검증한다.
+- agent command는 임의 shell string으로 실행하지 않고 argv 배열 또는 등록된 agent catalog id만 허용한다.
+- shell interpolation을 피하고 `Command::new(program).args(args)` 형태를 유지한다.
+- `clientMessageId`를 요구해 prompt 재시도 중복 발송을 방지한다.
+- 같은 token 또는 run에 대한 rate limit을 둔다.
+
+### 민감 정보와 로그
+
+- token, prompt 전문, permission input, file content는 기본 application log에 남기지 않는다.
+- debugging raw ACP log는 사용자가 명시적으로 켠 경우에만 저장한다.
+- raw log에는 token과 authorization header를 기록하지 않는다.
+- crash report나 error event에 local path와 secret이 과도하게 포함되지 않도록 redact한다.
+- WebSocket close reason에도 token, prompt, file content를 넣지 않는다.
+
+### Lifecycle 정리
+
+- run 종료 시 owner token, observer token, event buffer, pending permission을 폐기한다.
+- 앱 종료 시 HTTP server를 graceful shutdown하고 active child process를 정리한다.
+- WebSocket disconnect가 owner UI 종료를 의미하는지, 단순 reconnect인지 정책을 분리한다.
+- 일정 시간 owner가 reconnect하지 않으면 run을 cancel하거나 read-only 상태로 전환하는 timeout 정책을 둔다.
+- permission request가 떠 있는 상태에서 owner가 사라지면 deny, timeout, cancel 중 하나를 명시적으로 선택한다.
+
+### 기본 권장 정책
+
+MVP의 기본값은 다음으로 둔다.
+
+- loopback-only bind
+- random port
+- app session token 필수
+- run별 owner token 필수
+- CORS deny by default
+- strict Origin allowlist
+- WebSocket 인증 후 replay
+- bounded event buffer
+- prompt idempotency key 필수
+- token과 prompt log redaction
 
 ## 결론
 
