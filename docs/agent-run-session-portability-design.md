@@ -37,24 +37,22 @@
 
 portable workbench panel은 다음 영역으로 구성한다.
 
-```text
-┌──────────────────────────────────────────────────────────────┐
-│ Optional host header / worktree summary                       │
-├──────────────────────────────────────────────────────────────┤
-│ Goal / settings / provider session controls                   │
-├──────────────────────────────────────────────────────────────┤
-│ Timeline                                                      │
-│ - user messages                                               │
-│ - agent messages                                              │
-│ - thought / plan / tool / terminal / diagnostic / error        │
-│ - permission request state                                    │
-├──────────────────────────────────────────────────────────────┤
-│ Prompt composer                                               │
-│ - prompt input                                                │
-│ - saved prompt picker                                         │
-│ - queued prompts                                              │
-│ - Ralph loop options                                          │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  Panel[AcpWorkbenchPanel] --> Header[Optional host header<br/>worktree summary]
+  Header --> Controls[Goal / settings / provider session controls]
+  Controls --> Timeline[Timeline]
+  Timeline --> Composer[Prompt composer]
+
+  Timeline --> UserMessages[user messages]
+  Timeline --> AgentMessages[agent messages]
+  Timeline --> SystemEvents[thought / plan / tool / terminal<br/>diagnostic / error]
+  Timeline --> PermissionState[permission request state]
+
+  Composer --> PromptInput[prompt input]
+  Composer --> SavedPromptPicker[saved prompt picker]
+  Composer --> QueuedPrompts[queued prompts]
+  Composer --> RalphLoop[Ralph loop options]
 ```
 
 host app이 제공할 수 있는 slot:
