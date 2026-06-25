@@ -1,13 +1,18 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     adapters::outbound::{
-        git_cli::GitCliRepositoryValidator, json_repository_store::JsonRepositoryStore,
+        fs_repository_watcher::{FsRepositoryWatcher, RepositoryWatchHandle},
+        git_cli::GitCliRepositoryValidator,
+        json_repository_store::JsonRepositoryStore,
     },
     application::{
         branch_service::BranchService, history_service::HistoryService,
-        repository_service::RepositoryService, worktree_service::WorktreeService,
+        repository_service::RepositoryService, repository_watch_service::RepositoryWatchService,
+        worktree_service::WorktreeService,
     },
     domain::{
         branch::GitBranch,
@@ -16,6 +21,18 @@ use crate::{
         worktree::GitWorktree,
     },
 };
+
+pub struct RepositoryWatcherState {
+    handle: Mutex<Option<RepositoryWatchHandle>>,
+}
+
+impl RepositoryWatcherState {
+    pub fn new() -> Self {
+        Self {
+            handle: Mutex::new(None),
+        }
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -110,6 +127,37 @@ pub fn get_file_diff(app: AppHandle, request: GetFileDiffRequest) -> Result<GitF
     )
 }
 
+#[tauri::command]
+pub fn start_repository_watchers(app: AppHandle) -> Result<(), String> {
+    let event_app = app.clone();
+    let handle =
+        repository_watch_service(app.clone())?.watch_registered_repositories(move |event| {
+            if let Err(error) = event_app.emit("repository-changed", event) {
+                eprintln!("Failed to emit repository change event: {error}");
+            }
+        })?;
+    let state = app.state::<RepositoryWatcherState>();
+    let mut stored_handle = state
+        .handle
+        .lock()
+        .map_err(|error| format!("Failed to lock repository watcher state: {error}"))?;
+
+    *stored_handle = Some(handle);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_repository_watchers(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<RepositoryWatcherState>();
+    let mut stored_handle = state
+        .handle
+        .lock()
+        .map_err(|error| format!("Failed to lock repository watcher state: {error}"))?;
+
+    *stored_handle = None;
+    Ok(())
+}
+
 fn repository_service(
     app: AppHandle,
 ) -> Result<RepositoryService<JsonRepositoryStore, GitCliRepositoryValidator>, String> {
@@ -144,6 +192,15 @@ fn history_service(
     let reader = GitCliRepositoryValidator;
 
     Ok(HistoryService::new(store, reader))
+}
+
+fn repository_watch_service(
+    app: AppHandle,
+) -> Result<RepositoryWatchService<JsonRepositoryStore, FsRepositoryWatcher>, String> {
+    let store = repository_store(app)?;
+    let watcher = FsRepositoryWatcher;
+
+    Ok(RepositoryWatchService::new(store, watcher))
 }
 
 fn repository_store(app: AppHandle) -> Result<JsonRepositoryStore, String> {

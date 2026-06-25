@@ -8,6 +8,8 @@ export {
   listRepositories,
   listWorktrees,
   repositoryKeys,
+  startRepositoryWatchers,
+  stopRepositoryWatchers,
 } from "./api";
 export type {
   AppInfo,

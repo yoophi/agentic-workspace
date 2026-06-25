@@ -120,3 +120,11 @@ export function getFileDiff(repositoryId: string, commitHash: string, filePath: 
     },
   });
 }
+
+export function startRepositoryWatchers() {
+  return invoke<void>("start_repository_watchers");
+}
+
+export function stopRepositoryWatchers() {
+  return invoke<void>("stop_repository_watchers");
+}

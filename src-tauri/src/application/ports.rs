@@ -3,6 +3,7 @@ use crate::domain::{
     commit::GitFileDiff,
     commit::{GitCommitDetail, GitCommitSummary},
     repository::Repository,
+    repository_event::RepositoryChangeEvent,
     worktree::GitWorktree,
 };
 
@@ -36,4 +37,14 @@ pub trait GitHistoryReader {
         commit_hash: &str,
         file_path: &str,
     ) -> Result<GitFileDiff, String>;
+}
+
+pub trait RepositoryWatcher {
+    type WatchHandle;
+
+    fn watch_repositories(
+        &self,
+        repositories: &[Repository],
+        notify: Box<dyn Fn(RepositoryChangeEvent) + Send + Sync + 'static>,
+    ) -> Result<Self::WatchHandle, String>;
 }

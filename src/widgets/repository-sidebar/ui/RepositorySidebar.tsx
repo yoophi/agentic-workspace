@@ -17,6 +17,7 @@ import {
   createRepository,
   listRepositories,
   repositoryKeys,
+  startRepositoryWatchers,
   type Repository,
 } from "@/entities/repository";
 
@@ -51,6 +52,9 @@ export function RepositorySidebar({
         repository,
       ]);
       onSelectRepository(repository);
+      startRepositoryWatchers().catch((error) => {
+        console.error("Failed to refresh repository watchers", error);
+      });
     },
   });
   const isRegistering = createRepositoryMutation.isPending;
