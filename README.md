@@ -1,6 +1,7 @@
-# Agentic Workbench
+# Agentic Workspace
 
-Minimal Tauri desktop app for managing local coding projects and running ACP
+Workspace for agent-assisted software development tools. The integrated desktop
+app is Agentic Workbench, which manages local coding projects and runs ACP
 agents inside selected Git worktrees.
 
 ## What it does
@@ -27,9 +28,10 @@ apps/agentic-workbench/
   src-tauri/    Tauri backend using hexagonal architecture
 ```
 
-Frontend code is organized into `app`, `pages`, `features`, `entities`, and
-`components/ui`. Backend code keeps domain models and ports separate from Tauri
-commands, application use cases, and infrastructure adapters.
+Agentic Workbench frontend code is organized into `app`, `pages`, `features`,
+`entities`, and `components/ui`. Backend code keeps domain models and ports
+separate from Tauri commands, application use cases, and infrastructure
+adapters.
 
 ## Requirements
 

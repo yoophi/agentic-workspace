@@ -2,13 +2,13 @@
 
 ## 배경
 
-`../tauri-git-explorer` 프로젝트를 현재 `agentic-workbench` 모노레포로 이전한 뒤, Git history, commit graph, commit detail, file diff 기능을 현재 앱에 이식하려고 한다. 참고 문서인 `/Users/yoophi/project/tauri-git-explorer/docs/monorepo-common-module-management.md`는 두 앱을 단일 pnpm/Turbo workspace로 관리하고, 초기에는 Rust Git core와 TypeScript graph model을 먼저 공유하는 방향을 제안한다.
+`../tauri-git-explorer` 프로젝트를 현재 `agentic-workspace` 모노레포로 이전한 뒤, Git history, commit graph, commit detail, file diff 기능을 Agentic Workbench 앱에 이식하려고 한다. 참고 문서인 `/Users/yoophi/project/tauri-git-explorer/docs/monorepo-common-module-management.md`는 두 앱을 단일 pnpm/Turbo workspace로 관리하고, 초기에는 Rust Git core와 TypeScript graph model을 먼저 공유하는 방향을 제안한다.
 
 현재 레포는 이미 pnpm workspace와 Turbo를 사용하지만, `tauri-git-explorer`를 그대로 가져오기 전에 정리해야 할 항목이 있다. 이 문서는 현재 레포에서 선작업해야 하는 항목만 식별한다.
 
 ## 현재 레포 상태
 
-현재 `agentic-workbench` 레포의 주요 구조는 다음과 같다.
+현재 `agentic-workspace` 레포의 주요 구조는 다음과 같다.
 
 ```text
 apps/
@@ -108,22 +108,24 @@ apps/
 
 ## 3. 루트 workspace 이름 정리
 
-루트 `package.json`의 현재 이름은 `agentic-workbench`다. 두 앱이 들어오면 루트 package 이름이 특정 앱 이름을 가리키는 상태가 된다.
+루트 `package.json`의 이름은 `agentic-workspace`로 둔다. `agentic-workbench`는 통합 앱 이름으로 유지하고, 루트 workspace는 Git explorer, Markdown annotator, Mermaid annotator 같은 미니앱과 공통 모듈을 함께 담는 상위 단위로 표현한다.
 
-선행 결정:
+결정된 방향:
 
-- 루트 package 이름을 workspace 성격의 중립 이름으로 바꿀지 결정한다.
+- 루트 package 이름은 `agentic-workspace`로 사용한다.
+- `apps/agentic-workbench`와 `@yoophi/agentic-workbench`는 통합 앱 identity로 유지한다.
+- 이후 추가되는 미니앱은 `apps/git-explorer`, `apps/markdown-annotator`, `apps/mermaid-annotator`처럼 앱 단위 이름을 사용한다.
 
-권장안:
+루트 `package.json`:
 
 ```json
 {
-  "name": "yoophi-desktop-workspace",
+  "name": "agentic-workspace",
   "private": true
 }
 ```
 
-이 변경은 기능에 직접 영향을 주지는 않지만, 이후 두 앱을 한 제품처럼 오해하지 않게 한다.
+이 구분은 repo와 통합 앱의 이름을 분리한다. 따라서 root README와 root package는 `Agentic Workspace`를 설명하고, Tauri product name, bundle identifier, Rust crate, app package는 `Agentic Workbench`를 유지한다.
 
 ## 4. 루트 script 확장
 
@@ -326,7 +328,7 @@ flowchart LR
 - [ ] `acp-minimal-app-main/` 처리 방향 결정
 - [ ] 현재 앱 경로와 package 이름 유지 여부 결정
 - [ ] `tauri-git-explorer` 이전 대상 경로와 package 이름 결정
-- [ ] 루트 package 이름을 workspace 성격으로 변경할지 결정
+- [x] 루트 package 이름을 `agentic-workspace`로 사용
 - [ ] 앱별 root script 이름 추가
 - [ ] `pnpm-workspace.yaml`의 `allowBuilds` 병합 여부 확인
 - [ ] `packages/git-model` 운영 기준 문서화
