@@ -1,10 +1,4 @@
-use std::{
-    env, fs,
-    path::PathBuf,
-    process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
-};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use crate::{
     domain::agent::{AgentDescriptor, AgentOptionDescriptor},
@@ -12,6 +6,10 @@ use crate::{
 };
 
 const AGENT_CATALOG_PATH_ENV: &str = "ACP_AGENT_CATALOG_PATH";
+const OPENCODE_MODELS_CACHE_PATH_ENV: &str = "ACP_OPENCODE_MODELS_CACHE_PATH";
+const OPENCODE_MODELS_REFRESH_ENV: &str = "ACP_OPENCODE_MODELS_REFRESH";
+const MODELS_DEV_API_URL: &str = "https://models.dev/api.json";
+const MODELS_DEV_FETCH_TIMEOUT_SECONDS: &str = "2";
 
 #[derive(Clone, Default)]
 pub struct ConfigurableAgentCatalog {
@@ -109,43 +107,101 @@ fn options(values: &[(&str, &str)]) -> Vec<AgentOptionDescriptor> {
 }
 
 fn opencode_models() -> Option<Vec<AgentOptionDescriptor>> {
-    let mut child = Command::new("opencode")
-        .arg("models")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        if child.try_wait().ok()?.is_some() {
-            break;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        thread::sleep(Duration::from_millis(25));
+    let cache_path = opencode_models_cache_path();
+    let refresh = env::var_os(OPENCODE_MODELS_REFRESH_ENV).is_some();
+    if !refresh
+        && let Some(cache_path) = &cache_path
+        && let Some(models) = read_cached_opencode_models(cache_path)
+    {
+        return Some(models);
     }
 
-    let output = child.wait_with_output().ok()?;
+    let models = fetch_opencode_models_from_models_dev().or_else(|| {
+        cache_path
+            .as_ref()
+            .and_then(|path| read_cached_opencode_models(path))
+    })?;
+
+    if let Some(cache_path) = &cache_path {
+        write_cached_opencode_models(cache_path, &models);
+    }
+
+    Some(models)
+}
+
+fn fetch_opencode_models_from_models_dev() -> Option<Vec<AgentOptionDescriptor>> {
+    let output = Command::new("curl")
+        .args([
+            "-fsSL",
+            "--max-time",
+            MODELS_DEV_FETCH_TIMEOUT_SECONDS,
+            MODELS_DEV_API_URL,
+        ])
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }
 
-    let models = String::from_utf8_lossy(&output.stdout);
-    let parsed = models
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(|id| AgentOptionDescriptor {
-            id: id.to_string(),
-            label: model_label(id),
+    let content = String::from_utf8(output.stdout).ok()?;
+    parse_models_dev_opencode_models(&content)
+}
+
+fn parse_models_dev_opencode_models(content: &str) -> Option<Vec<AgentOptionDescriptor>> {
+    let root: serde_json::Value = serde_json::from_str(content).ok()?;
+    let models = root
+        .get("opencode")?
+        .get("models")?
+        .as_object()?
+        .keys()
+        .map(|id| {
+            let opencode_id = format!("opencode/{id}");
+            AgentOptionDescriptor {
+                label: model_label(&opencode_id),
+                id: opencode_id,
+            }
         })
         .collect::<Vec<_>>();
 
-    (!parsed.is_empty()).then_some(parsed)
+    (!models.is_empty()).then_some(models)
+}
+
+fn read_cached_opencode_models(cache_path: &PathBuf) -> Option<Vec<AgentOptionDescriptor>> {
+    let content = fs::read_to_string(cache_path).ok()?;
+    serde_json::from_str::<Vec<AgentOptionDescriptor>>(&content)
+        .ok()
+        .filter(|models| !models.is_empty())
+}
+
+fn write_cached_opencode_models(cache_path: &PathBuf, models: &[AgentOptionDescriptor]) {
+    let Some(parent) = cache_path.parent() else {
+        return;
+    };
+    if fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    if let Ok(content) = serde_json::to_string_pretty(models) {
+        let _ = fs::write(cache_path, content);
+    }
+}
+
+fn opencode_models_cache_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os(OPENCODE_MODELS_CACHE_PATH_ENV) {
+        return Some(PathBuf::from(path));
+    }
+
+    let base = if cfg!(target_os = "macos") {
+        env::var_os("HOME")
+            .map(PathBuf::from)?
+            .join("Library")
+            .join("Caches")
+    } else if let Some(path) = env::var_os("XDG_CACHE_HOME") {
+        PathBuf::from(path)
+    } else {
+        env::var_os("HOME").map(PathBuf::from)?.join(".cache")
+    };
+
+    Some(base.join("agentic-workbench").join("opencode-models.json"))
 }
 
 fn opencode_fallback_models() -> Vec<AgentOptionDescriptor> {
@@ -246,5 +302,30 @@ mod tests {
                 .any(|model| model.id == "opencode/claude-opus-4-8")
         );
         assert!(models.iter().any(|model| model.id == "opencode/gpt-5.5"));
+    }
+
+    #[test]
+    fn parses_opencode_models_from_models_dev_catalog() {
+        let catalog = r#"{
+            "opencode": {
+                "models": {
+                    "gpt-5.3-codex-spark": { "name": "GPT-5.3 Codex Spark" },
+                    "claude-sonnet-4-6": { "name": "Claude Sonnet 4.6" }
+                }
+            }
+        }"#;
+
+        let models = parse_models_dev_opencode_models(catalog).expect("models parse");
+
+        assert!(
+            models
+                .iter()
+                .any(|model| model.id == "opencode/gpt-5.3-codex-spark")
+        );
+        assert!(
+            models
+                .iter()
+                .any(|model| model.id == "opencode/claude-sonnet-4-6")
+        );
     }
 }
