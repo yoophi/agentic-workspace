@@ -13,7 +13,7 @@
 
 ## Frontend Architecture
 
-- Write code under `apps/agentic-workbench/src` using Feature-Sliced Design.
+- Write app frontend code under `apps/*/src` using Feature-Sliced Design.
 - Keep app composition and routing state in `app`.
 - Put screen-level UI in `pages`.
 - Put user actions and business interactions in `features`.
@@ -23,10 +23,11 @@
 - When creating components, design them for reuse instead of coupling them to one screen unless the component is truly screen-specific.
 - Register reusable components in Storybook.
 - Manage Storybook stories according to atomic design categories: atoms, molecules, organisms, and pages.
+- Put cross-app reusable TypeScript modules under `packages/*` when they do not depend on a specific Tauri app shell.
 
 ## Tauri Backend Architecture
 
-- Write code under `apps/agentic-workbench/src-tauri/src` using hexagonal architecture.
+- Write Tauri backend code under `apps/*/src-tauri/src` using hexagonal architecture.
 - Keep pure domain models and ports in `domain`.
 - Keep use cases and business rules in `application`.
 - Keep inbound adapters such as Tauri commands in `inbound`.
