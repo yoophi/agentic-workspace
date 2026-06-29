@@ -7,19 +7,30 @@ import type {
   GitFileDiff,
 } from "@/entities/worktree-git/model/types";
 
-export async function listWorktreeGitHistory(workingDirectory: string) {
+export type WorktreeGitPageOptions = {
+  maxCount?: number;
+  offset?: number;
+};
+
+export async function listWorktreeGitHistory(
+  workingDirectory: string,
+  options: WorktreeGitPageOptions = {},
+) {
   return invoke<GitCommitHistory>("list_worktree_git_history", {
     workingDirectory,
-    maxCount: 100,
-    offset: 0,
+    maxCount: options.maxCount ?? 100,
+    offset: options.offset ?? 0,
   });
 }
 
-export async function getWorktreeGitGraph(workingDirectory: string) {
+export async function getWorktreeGitGraph(
+  workingDirectory: string,
+  options: WorktreeGitPageOptions = {},
+) {
   return invoke<GitCommitGraph>("get_worktree_git_graph", {
     workingDirectory,
-    maxCount: 300,
-    offset: 0,
+    maxCount: options.maxCount ?? 300,
+    offset: options.offset ?? 0,
   });
 }
 

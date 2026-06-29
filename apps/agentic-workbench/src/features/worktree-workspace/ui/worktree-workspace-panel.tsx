@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   ChevronDownIcon,
@@ -47,6 +47,7 @@ import {
 import type {
   GitCommitGraph,
   GitCommitSummary,
+  GitGraphLayoutHints,
   GitGraphCommit,
   GitGraphRef,
 } from "@/entities/worktree-git/model/types";
@@ -162,13 +163,27 @@ function GitWorkspaceTab({
 }) {
   const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(null);
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
-  const historyQuery = useQuery({
+  const historyQuery = useInfiniteQuery({
     queryKey: worktreeGitQueryKeys.history(worktree.path),
-    queryFn: () => listWorktreeGitHistory(worktree.path),
+    queryFn: ({ pageParam }) =>
+      listWorktreeGitHistory(worktree.path, {
+        maxCount: 100,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.hasMore ? lastPage.page.offset + lastPage.commits.length : undefined,
   });
-  const graphQuery = useQuery({
+  const graphQuery = useInfiniteQuery({
     queryKey: worktreeGitQueryKeys.graph(worktree.path),
-    queryFn: () => getWorktreeGitGraph(worktree.path),
+    queryFn: ({ pageParam }) =>
+      getWorktreeGitGraph(worktree.path, {
+        maxCount: 300,
+        offset: pageParam,
+      }),
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.hasMore ? lastPage.page.offset + lastPage.commits.length : undefined,
   });
   const statusQuery = useQuery({
     queryKey: projectQueryKeys.worktreeChanges(worktree.path),
@@ -194,15 +209,17 @@ function GitWorkspaceTab({
         selectedDiffPath ?? "",
       ),
   });
-  const graphRows = useMemo(
-    () => computeGitGraphRows(graphQuery.data?.commits ?? []),
-    [graphQuery.data?.commits],
+  const historyData = useMemo(
+    () => combineGitHistoryPages(historyQuery.data?.pages ?? []),
+    [historyQuery.data?.pages],
   );
+  const graphData = useMemo(
+    () => combineGitGraphPages(graphQuery.data?.pages ?? []),
+    [graphQuery.data?.pages],
+  );
+  const graphRows = useMemo(() => computeGitGraphRows(graphData?.commits ?? []), [graphData]);
   const maxGraphLane = useMemo(() => getMaxGraphLane(graphRows), [graphRows]);
-  const graphRefs = useMemo(
-    () => refsByTarget(graphQuery.data?.refs ?? []),
-    [graphQuery.data?.refs],
-  );
+  const graphRefs = useMemo(() => refsByTarget(graphData?.refs ?? []), [graphData?.refs]);
 
   function selectCommit(commitHash: string) {
     setSelectedCommitHash(commitHash);
@@ -279,14 +296,17 @@ function GitWorkspaceTab({
                     description={String(graphQuery.error)}
                     variant="destructive"
                   />
-                ) : graphQuery.data && graphQuery.data.commits.length > 0 ? (
+                ) : graphData && graphData.commits.length > 0 ? (
                   <HistoryGraphView
-                    graph={graphQuery.data}
+                    graph={graphData}
                     graphRefs={graphRefs}
                     graphRows={graphRows}
                     maxGraphLane={maxGraphLane}
                     selectedCommitHash={selectedCommitHash}
                     onSelectCommit={selectCommit}
+                    hasNextPage={graphQuery.hasNextPage}
+                    isFetchingNextPage={graphQuery.isFetchingNextPage}
+                    onLoadMore={() => void graphQuery.fetchNextPage()}
                   />
                 ) : (
                   <EmptyPanel title="Commit 없음" description="표시할 Git commit이 없습니다." />
@@ -300,11 +320,15 @@ function GitWorkspaceTab({
                   description={String(historyQuery.error)}
                   variant="destructive"
                 />
-              ) : historyQuery.data && historyQuery.data.commits.length > 0 ? (
+              ) : historyData && historyData.commits.length > 0 ? (
                 <CommitListView
-                  commits={historyQuery.data.commits}
+                  commits={historyData.commits}
+                  page={historyData.page}
                   selectedCommitHash={selectedCommitHash}
                   onSelectCommit={selectCommit}
+                  hasNextPage={historyQuery.hasNextPage}
+                  isFetchingNextPage={historyQuery.isFetchingNextPage}
+                  onLoadMore={() => void historyQuery.fetchNextPage()}
                 />
               ) : (
                 <EmptyPanel title="Commit 없음" description="표시할 Git commit이 없습니다." />
@@ -422,6 +446,9 @@ function HistoryGraphView({
   maxGraphLane,
   selectedCommitHash,
   onSelectCommit,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
 }: {
   graph: GitCommitGraph;
   graphRefs: Map<string, GitGraphRef[]>;
@@ -429,6 +456,9 @@ function HistoryGraphView({
   maxGraphLane: number;
   selectedCommitHash: string | null;
   onSelectCommit: (commitHash: string) => void;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
 }) {
   const rowHeight = graph.layoutHints.rowHeight || 32;
 
@@ -451,7 +481,13 @@ function HistoryGraphView({
         />
       ))}
       <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+        <InfiniteLoadSentinel
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          onLoadMore={onLoadMore}
+        />
         {graph.commits.length} / {graph.page.totalCount} commits loaded
+        {isFetchingNextPage ? " · loading older commits" : ""}
       </div>
     </div>
   );
@@ -548,12 +584,20 @@ function GraphCell({
 
 function CommitListView({
   commits,
+  page,
   selectedCommitHash,
   onSelectCommit,
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
 }: {
   commits: GitCommitSummary[];
+  page: GitCommitGraph["page"];
   selectedCommitHash: string | null;
   onSelectCommit: (commitHash: string) => void;
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-md border text-sm">
@@ -574,8 +618,47 @@ function CommitListView({
           </span>
         </button>
       ))}
+      <div className="border-t px-3 py-2 text-xs text-muted-foreground">
+        <InfiniteLoadSentinel
+          hasNextPage={hasNextPage}
+          isFetchingNextPage={isFetchingNextPage}
+          onLoadMore={onLoadMore}
+        />
+        {commits.length} / {page.totalCount} commits loaded
+        {isFetchingNextPage ? " · loading older commits" : ""}
+      </div>
     </div>
   );
+}
+
+function InfiniteLoadSentinel({
+  hasNextPage,
+  isFetchingNextPage,
+  onLoadMore,
+}: {
+  hasNextPage: boolean;
+  isFetchingNextPage: boolean;
+  onLoadMore: () => void;
+}) {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node || !hasNextPage || isFetchingNextPage) {
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        onLoadMore();
+      }
+    });
+    observer.observe(node);
+
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, onLoadMore]);
+
+  return <div ref={sentinelRef} className="h-px w-px" aria-hidden />;
 }
 
 function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
@@ -1358,6 +1441,67 @@ function refsByTarget(refs: GitGraphRef[]) {
   }
 
   return result;
+}
+
+function combineGitHistoryPages(pages: Array<{ commits: GitCommitSummary[]; page: GitCommitGraph["page"] }>) {
+  if (pages.length === 0) {
+    return null;
+  }
+
+  const commits = pages.flatMap((page) => page.commits);
+  const lastPage = pages[pages.length - 1].page;
+
+  return {
+    commits,
+    page: {
+      ...lastPage,
+      offset: 0,
+      limit: commits.length,
+      hasMore: lastPage.hasMore,
+    },
+  };
+}
+
+function combineGitGraphPages(pages: GitCommitGraph[]) {
+  if (pages.length === 0) {
+    return null;
+  }
+
+  const commits: GitGraphCommit[] = [];
+  const commitHashes = new Set<string>();
+  const refs = new Map<string, GitGraphRef>();
+  let layoutHints: GitGraphLayoutHints = pages[0].layoutHints;
+  let totalCount = pages[0].page.totalCount;
+  let hasMore = false;
+
+  for (const page of pages) {
+    layoutHints = page.layoutHints;
+    totalCount = page.page.totalCount;
+    hasMore = page.page.hasMore;
+
+    for (const commit of page.commits) {
+      if (!commitHashes.has(commit.hash)) {
+        commitHashes.add(commit.hash);
+        commits.push(commit);
+      }
+    }
+
+    for (const ref of page.refs) {
+      refs.set(`${ref.kind}:${ref.name}:${ref.target}`, ref);
+    }
+  }
+
+  return {
+    commits,
+    refs: [...refs.values()],
+    layoutHints,
+    page: {
+      offset: 0,
+      limit: commits.length,
+      totalCount,
+      hasMore,
+    },
+  };
 }
 
 function laneX(lane: number) {
