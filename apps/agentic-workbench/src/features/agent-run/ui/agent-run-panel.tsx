@@ -127,9 +127,15 @@ type AgentRunPanelProps = {
   scrollHeader?: ReactNode;
   onRunSettled?: () => void;
   initialInputMode?: AgentInputMode;
+  externalPromptRequest?: AgentPromptRequest | null;
 };
 
 type AgentInputMode = "prompt" | "ralphLoop";
+
+export type AgentPromptRequest = {
+  id: string;
+  text: string;
+};
 
 const defaultPrompt = "";
 // 백엔드(MAX_RALPH_ITERATIONS)와 맞춘 자동 반복 상한. 입력은 이 값으로 제한된다.
@@ -245,6 +251,7 @@ export function AgentRunPanel({
   scrollHeader,
   onRunSettled,
   initialInputMode = "prompt",
+  externalPromptRequest = null,
 }: AgentRunPanelProps) {
   const queryClient = useQueryClient();
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -288,6 +295,7 @@ export function AgentRunPanel({
   const goalContinuationPendingRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const handledExternalPromptRequestIdRef = useRef<string | null>(null);
 
   const agentsQuery = useQuery({
     queryKey: agentRunQueryKeys.agents,
@@ -730,6 +738,35 @@ export function AgentRunPanel({
     : canSteerPrompt;
   const canCancel = Boolean(activeRunId && isRunning);
 
+  useEffect(() => {
+    if (
+      !externalPromptRequest ||
+      handledExternalPromptRequestIdRef.current === externalPromptRequest.id
+    ) {
+      return;
+    }
+
+    handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
+    const nextPrompt = externalPromptRequest.text.trim();
+    if (!nextPrompt) {
+      return;
+    }
+
+    if (activeRunIdRef.current && isRunning) {
+      enqueuePrompt(nextPrompt);
+      return;
+    }
+
+    setInputMode("prompt");
+    setRalphLoopEnabled(false);
+    setIsRalphSettingsDialogOpen(false);
+    void startRun(nextPrompt, { ralphLoopEnabled: false }).then((started) => {
+      if (!started) {
+        setPrompt(nextPrompt);
+      }
+    });
+  }, [externalPromptRequest, isRunning]);
+
   async function run() {
     const goal = prompt.trim();
     if (!goal) {
@@ -741,7 +778,11 @@ export function AgentRunPanel({
 
   async function startRun(
     goal: string,
-    options: { queuedPrompts?: QueuedPrompt[]; displayPrompt?: string } = {},
+    options: {
+      queuedPrompts?: QueuedPrompt[];
+      displayPrompt?: string;
+      ralphLoopEnabled?: boolean;
+    } = {},
   ) {
     if (!selectedAgentId || !goal) {
       return false;
@@ -777,7 +818,7 @@ export function AgentRunPanel({
         ...(reuseSession
           ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
           : {}),
-        ...(ralphLoopEnabled
+        ...((options.ralphLoopEnabled ?? ralphLoopEnabled)
           ? {
               ralphLoop: {
                 enabled: true,

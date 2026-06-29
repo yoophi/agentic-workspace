@@ -16,6 +16,7 @@ import {
   MessageSquareIcon,
   PencilLineIcon,
   RefreshCwIcon,
+  SendIcon,
   Trash2Icon,
 } from "lucide-react";
 import {
@@ -69,6 +70,7 @@ import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
+  onSendAnnotationPrompt?: (prompt: string) => void;
 };
 
 type WorkspaceTabId = "git" | "files" | "markdown";
@@ -89,7 +91,10 @@ const workspaceTabs: Array<{
   { id: "markdown", label: "Markdown", icon: FileTextIcon },
 ];
 
-export function WorktreeWorkspacePanel({ worktree }: WorktreeWorkspacePanelProps) {
+export function WorktreeWorkspacePanel({
+  worktree,
+  onSendAnnotationPrompt,
+}: WorktreeWorkspacePanelProps) {
   const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>("git");
   const [gitHistoryView, setGitHistoryView] = useState<GitHistoryView>("graph");
 
@@ -145,7 +150,10 @@ export function WorktreeWorkspacePanel({ worktree }: WorktreeWorkspacePanelProps
         ) : selectedTab === "files" ? (
           <FileWorkspaceTab worktree={worktree} />
         ) : (
-          <MarkdownWorkspaceTab worktree={worktree} />
+          <MarkdownWorkspaceTab
+            worktree={worktree}
+            onSendAnnotationPrompt={onSendAnnotationPrompt}
+          />
         )}
       </div>
     </section>
@@ -810,7 +818,13 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
   );
 }
 
-function MarkdownWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
+function MarkdownWorkspaceTab({
+  worktree,
+  onSendAnnotationPrompt,
+}: {
+  worktree: GitWorktree;
+  onSendAnnotationPrompt?: (prompt: string) => void;
+}) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [annotationsByFile, setAnnotationsByFile] = useState<Record<string, AnnotationDraft[]>>({});
@@ -1109,7 +1123,18 @@ function MarkdownWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
                   </div>
                   {annotations.length > 0 ? (
                     <div className="rounded-md border">
-                      <div className="border-b px-3 py-2 text-sm font-medium">Agent prompt</div>
+                      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+                        <span className="text-sm font-medium">Agent prompt</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!onSendAnnotationPrompt}
+                          onClick={() => onSendAnnotationPrompt?.(annotationPrompt)}
+                        >
+                          <SendIcon data-icon="inline-start" />
+                          Send
+                        </Button>
+                      </div>
                       <pre className="max-h-80 overflow-auto p-3 text-xs leading-5">
                         <code>{annotationPrompt}</code>
                       </pre>

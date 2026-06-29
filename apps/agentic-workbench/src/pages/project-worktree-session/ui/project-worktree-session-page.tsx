@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FolderGit2Icon } from "lucide-react";
 import {
   Group as ResizablePanelGroup,
@@ -7,7 +8,10 @@ import {
 
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project } from "@/entities/project/model/types";
-import { AgentRunPanel } from "@/features/agent-run/ui/agent-run-panel";
+import {
+  AgentRunPanel,
+  type AgentPromptRequest,
+} from "@/features/agent-run/ui/agent-run-panel";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import { Badge } from "@/components/ui/badge";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
@@ -21,6 +25,9 @@ type ProjectWorktreeSessionPageProps = {
 export function ProjectWorktreeSessionPage({
   worktree,
 }: ProjectWorktreeSessionPageProps) {
+  const [workspacePromptRequest, setWorkspacePromptRequest] =
+    useState<AgentPromptRequest | null>(null);
+
   return (
     <div className="flex h-[calc(100svh-3rem)] min-h-0 flex-col gap-4 overflow-hidden">
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
@@ -28,6 +35,7 @@ export function ProjectWorktreeSessionPage({
           <div className="h-full min-h-0">
             <AgentRunPanel
               workingDirectory={worktree.path}
+              externalPromptRequest={workspacePromptRequest}
               scrollHeader={
                 <div className="sticky top-0 z-20 flex min-w-0 items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur">
                   <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
@@ -59,7 +67,12 @@ export function ProjectWorktreeSessionPage({
         </ResizableHandle>
 
         <ResizablePanel id="project-worktree-session-workspace" minSize="480px">
-          <WorktreeWorkspacePanel worktree={worktree} />
+          <WorktreeWorkspacePanel
+            worktree={worktree}
+            onSendAnnotationPrompt={(text) =>
+              setWorkspacePromptRequest({ id: crypto.randomUUID(), text })
+            }
+          />
         </ResizablePanel>
       </ResizablePanelGroup>
     </div>
