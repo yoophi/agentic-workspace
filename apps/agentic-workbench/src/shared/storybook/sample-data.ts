@@ -9,6 +9,10 @@ import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { GitWorktreeChanges } from "@/entities/project/model/git-worktree-changes";
 import type { Project } from "@/entities/project/model/types";
 import type { SavedPrompt } from "@/entities/saved-prompt/model/types";
+import type {
+  WorktreeFileEntry,
+  WorktreeTextFile,
+} from "@/entities/worktree-file/model/types";
 
 export const sampleProjects: Project[] = [
   {
@@ -143,6 +147,93 @@ export const sampleAgentRunWorktreeChanges: WorktreeChange[] = [
     truncated: false,
   },
 ];
+
+export const sampleWorktreeFiles: WorktreeFileEntry[] = [
+  {
+    name: "apps",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/apps",
+    relativePath: "apps",
+    isDir: true,
+    size: 0,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "agentic-workbench",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/apps/agentic-workbench",
+    relativePath: "apps/agentic-workbench",
+    isDir: true,
+    size: 0,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "src",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/apps/agentic-workbench/src",
+    relativePath: "apps/agentic-workbench/src",
+    isDir: true,
+    size: 0,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "project-worktree-session-page.tsx",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/apps/agentic-workbench/src/project-worktree-session-page.tsx",
+    relativePath: "apps/agentic-workbench/src/project-worktree-session-page.tsx",
+    isDir: false,
+    size: 1820,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "docs",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/docs",
+    relativePath: "docs",
+    isDir: true,
+    size: 0,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "project-worktree-session-workspace-plan.md",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/docs/project-worktree-session-workspace-plan.md",
+    relativePath: "docs/project-worktree-session-workspace-plan.md",
+    isDir: false,
+    size: 4300,
+    modifiedMs: 1760000000000,
+  },
+  {
+    name: "README.md",
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/README.md",
+    relativePath: "README.md",
+    isDir: false,
+    size: 720,
+    modifiedMs: 1760000000000,
+  },
+];
+
+export const sampleWorktreeTextFiles: Record<string, WorktreeTextFile> = {
+  "README.md": {
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/README.md",
+    relativePath: "README.md",
+    content: "# Agentic Workbench\n\nStorybook에서 file preview를 확인하기 위한 샘플 파일입니다.\n",
+    size: 720,
+    truncated: false,
+  },
+  "docs/project-worktree-session-workspace-plan.md": {
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/docs/project-worktree-session-workspace-plan.md",
+    relativePath: "docs/project-worktree-session-workspace-plan.md",
+    content: "# ProjectWorktreeSessionPage Workspace 통합 계획\n\n- Git workspace\n- File tree\n- Markdown preview + annotation\n",
+    size: 4300,
+    truncated: false,
+  },
+  "apps/agentic-workbench/src/project-worktree-session-page.tsx": {
+    path: "/Users/yoophi/project/worktrees/agentic-workbench/storybook/apps/agentic-workbench/src/project-worktree-session-page.tsx",
+    relativePath: "apps/agentic-workbench/src/project-worktree-session-page.tsx",
+    content: [
+      "export function ProjectWorktreeSessionPage() {",
+      "  return <main>Resizable agent workspace</main>;",
+      "}",
+    ].join("\n"),
+    size: 1820,
+    truncated: false,
+  },
+};
 
 export const sampleGoal: ThreadGoal = {
   workingDirectory: "/Users/yoophi/project/agentic-workbench",

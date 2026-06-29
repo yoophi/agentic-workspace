@@ -11,9 +11,10 @@ import { ProjectWorktreeCard } from "@/features/project-worktree/ui/project-work
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
 import { WorktreeChangesPanel as WorktreeChangeReviewPanel } from "@/features/worktree-change-review/ui/worktree-changes-panel";
 import { WorktreeChangesPanel as AgentRunWorktreeChangesPanel } from "@/features/worktree-changes/ui/worktree-changes-panel";
+import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { sampleProjects } from "@/shared/storybook/sample-data";
+import { sampleProjects, sampleWorktrees } from "@/shared/storybook/sample-data";
 
 const meta = {
   title: "Atomic Design/Organisms/Registered Components",
@@ -101,6 +102,14 @@ export const WorktreeManagement: Story = {
 export const WorktreeChangeReview: Story = {
   render: () => (
     <WorktreeChangeReviewPanel workingDirectory="/Users/yoophi/project/worktrees/agentic-workbench/storybook" />
+  ),
+};
+
+export const WorktreeWorkspace: Story = {
+  render: () => (
+    <div className="h-[720px] overflow-hidden border">
+      <WorktreeWorkspacePanel worktree={sampleWorktrees[1]} />
+    </div>
   ),
 };
 

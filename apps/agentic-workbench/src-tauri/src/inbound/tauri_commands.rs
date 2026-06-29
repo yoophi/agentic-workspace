@@ -8,7 +8,7 @@ use crate::{
         git_remote_service, git_worktree_changes_service, git_worktree_service, goal_service,
         list_provider_sessions::ListProviderSessionsUseCase, project_service, saved_prompt_service,
         send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
-        start_agent_run::StartAgentRunUseCase, worktree_changes_service,
+        start_agent_run::StartAgentRunUseCase, worktree_changes_service, worktree_file_service,
     },
     domain::{
         agent::AgentDescriptor,
@@ -23,11 +23,13 @@ use crate::{
         run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
         saved_prompt::{SavedPrompt, SavedPromptDraft},
         worktree_change::WorktreeChange,
+        worktree_file::{WorktreeFileEntry, WorktreeTextFile},
     },
     infrastructure::{
         acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
         fs_provider_session_repository::FsProviderSessionRepository,
+        fs_worktree_file_provider::FsWorktreeFileProvider,
         git_cli_branch_provider::GitCliBranchProvider,
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_change_provider::GitCliWorktreeChangeProvider,
@@ -290,6 +292,19 @@ pub fn get_worktree_file_diff(
         working_directory,
         path,
     )
+}
+
+#[tauri::command]
+pub fn list_worktree_files(working_directory: String) -> Result<Vec<WorktreeFileEntry>, String> {
+    worktree_file_service::list_worktree_files(&FsWorktreeFileProvider, working_directory)
+}
+
+#[tauri::command]
+pub fn read_worktree_text_file(
+    working_directory: String,
+    path: String,
+) -> Result<WorktreeTextFile, String> {
+    worktree_file_service::read_worktree_text_file(&FsWorktreeFileProvider, working_directory, path)
 }
 
 #[tauri::command]

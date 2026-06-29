@@ -6,6 +6,8 @@ import {
   sampleProjects,
   sampleRemotes,
   sampleSavedPrompts,
+  sampleWorktreeFiles,
+  sampleWorktreeTextFiles,
   sampleWorktreeChanges,
   sampleWorktrees,
 } from "../../src/shared/storybook/sample-data";
@@ -154,6 +156,16 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
         truncated: false,
         binary: false,
       } as T;
+    case "list_worktree_files":
+      return sampleWorktreeFiles as T;
+    case "read_worktree_text_file": {
+      const path = String(args?.path ?? "README.md");
+      const file = sampleWorktreeTextFiles[path];
+      if (!file) {
+        throw new Error(`Cannot preview ${path}`);
+      }
+      return file as T;
+    }
     case "list_agents":
       return sampleAgents as T;
     case "start_agent_run": {
