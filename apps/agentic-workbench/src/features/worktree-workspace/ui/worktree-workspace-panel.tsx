@@ -23,6 +23,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Markdown } from "@/components/ui/markdown";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import { worktreeFileQueryKeys } from "@/entities/worktree-file/api/query-keys";
 import {
@@ -130,13 +131,7 @@ export function WorktreeWorkspacePanel({ worktree }: WorktreeWorkspacePanelProps
         ) : selectedTab === "files" ? (
           <FileWorkspaceTab worktree={worktree} />
         ) : (
-          <PlaceholderWorkspaceTab
-            icon={FileTextIcon}
-            title="Markdown files"
-            description="Markdown 파일만 필터링해 표시할 영역입니다."
-            detailTitle="Markdown preview"
-            detailDescription="Markdown preview와 annotation UI를 이 영역에 통합합니다."
-          />
+          <MarkdownWorkspaceTab worktree={worktree} />
         )}
       </div>
     </section>
@@ -699,6 +694,146 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
   );
 }
 
+function MarkdownWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const filesQuery = useQuery({
+    queryKey: worktreeFileQueryKeys.list(worktree.path),
+    queryFn: () => listWorktreeFiles(worktree.path),
+  });
+  const markdownEntries = useMemo(
+    () => filterMarkdownTreeEntries(filesQuery.data ?? []),
+    [filesQuery.data],
+  );
+  const rows = useMemo(
+    () => buildFileTreeRows(markdownEntries, expandedFolders),
+    [markdownEntries, expandedFolders],
+  );
+  const previewQuery = useQuery({
+    enabled: selectedFilePath !== null,
+    queryKey: selectedFilePath
+      ? worktreeFileQueryKeys.textFile(worktree.path, selectedFilePath)
+      : worktreeFileQueryKeys.textFile(worktree.path, ""),
+    queryFn: () => readWorktreeTextFile(worktree.path, selectedFilePath ?? ""),
+  });
+
+  function toggleFolder(path: string) {
+    setExpandedFolders((current) => {
+      const next = new Set(current);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+      <ResizablePanel id="markdown-workspace-tree" defaultSize="38%" minSize="260px">
+        <div className="flex h-full min-h-0 flex-col border-r">
+          <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-medium">Markdown files</h2>
+                <p className="truncate text-xs text-muted-foreground">
+                  {markdownEntries.filter((entry) => !entry.isDir).length} files
+                </p>
+              </div>
+            </div>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              aria-label="Markdown file tree 새로고침"
+              disabled={filesQuery.isFetching}
+              onClick={() => void filesQuery.refetch()}
+            >
+              <RefreshCwIcon className={cn(filesQuery.isFetching && "animate-spin")} />
+            </Button>
+          </header>
+          <div className="min-h-0 flex-1 overflow-auto p-2">
+            {filesQuery.isLoading ? (
+              <InlineState icon={Loader2Icon} title="Markdown 파일을 불러오는 중입니다." spinning />
+            ) : filesQuery.isError ? (
+              <InlineState
+                icon={AlertCircleIcon}
+                title="Markdown 파일을 불러오지 못했습니다."
+                description={String(filesQuery.error)}
+                variant="destructive"
+              />
+            ) : rows.length === 0 ? (
+              <EmptyPanel
+                title="Markdown 파일 없음"
+                description=".md, .markdown, .mdx 파일을 찾지 못했습니다."
+                className="min-h-56"
+              />
+            ) : (
+              <div className="flex flex-col text-sm">
+                {rows.map((row) => (
+                  <FileTreeRowButton
+                    key={row.relativePath}
+                    row={row}
+                    selected={row.relativePath === selectedFilePath}
+                    onToggleFolder={toggleFolder}
+                    onSelectFile={setSelectedFilePath}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </ResizablePanel>
+
+      <ResizableHandle
+        aria-label="Markdown preview 영역 크기 조정"
+        className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
+      </ResizableHandle>
+
+      <ResizablePanel id="markdown-workspace-preview" minSize="360px">
+        <div className="flex h-full min-h-0 flex-col">
+          <header className="shrink-0 border-b px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-medium">Markdown preview</h2>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {selectedFilePath ?? "No markdown file selected"}
+                </p>
+              </div>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {selectedFilePath === null ? (
+              <EmptyPanel
+                title="Markdown 파일을 선택하세요"
+                description="왼쪽 markdown tree에서 파일을 선택하면 preview를 표시합니다."
+              />
+            ) : previewQuery.isLoading ? (
+              <InlineState icon={Loader2Icon} title="Markdown 파일을 읽는 중입니다." spinning />
+            ) : previewQuery.isError ? (
+              <InlineState
+                icon={AlertCircleIcon}
+                title="Markdown preview를 표시할 수 없습니다."
+                description={String(previewQuery.error)}
+                variant="destructive"
+              />
+            ) : previewQuery.data ? (
+              <div className="rounded-md border bg-background p-4">
+                <Markdown>{previewQuery.data.content}</Markdown>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
 function FileTreeRowButton({
   row,
   selected,
@@ -885,6 +1020,38 @@ function isEntryVisible(
   }
 
   return true;
+}
+
+function filterMarkdownTreeEntries(entries: WorktreeFileEntry[]) {
+  const markdownFiles = entries.filter(
+    (entry) => !entry.isDir && isMarkdownPath(entry.relativePath),
+  );
+  const folderPaths = new Set<string>();
+
+  for (const file of markdownFiles) {
+    const segments = file.relativePath.split("/").filter(Boolean);
+    let folderPath = "";
+
+    for (const segment of segments.slice(0, -1)) {
+      folderPath = folderPath ? `${folderPath}/${segment}` : segment;
+      folderPaths.add(folderPath);
+    }
+  }
+
+  return entries.filter(
+    (entry) =>
+      (!entry.isDir && isMarkdownPath(entry.relativePath)) ||
+      (entry.isDir && folderPaths.has(entry.relativePath)),
+  );
+}
+
+function isMarkdownPath(path: string) {
+  const normalized = path.toLowerCase();
+  return (
+    normalized.endsWith(".md") ||
+    normalized.endsWith(".markdown") ||
+    normalized.endsWith(".mdx")
+  );
 }
 
 function pathDepth(path: string) {
