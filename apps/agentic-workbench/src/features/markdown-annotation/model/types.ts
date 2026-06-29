@@ -19,16 +19,22 @@ export type MarkdownBlock = {
   language?: string;
 };
 
-export type AnnotationType = "note" | "change-request";
+export type AnnotationType = "note" | "change-request" | "delete";
+
+export type AnnotationAnchor = {
+  blockId: string;
+  startLine: number;
+  endLine: number;
+  startOffset?: number;
+  endOffset?: number;
+  selectedText?: string;
+};
 
 export type AnnotationDraft = {
   id: string;
+  groupId?: string;
   fileName: string;
-  anchor: {
-    blockId: string;
-    startLine: number;
-    endLine: number;
-  };
+  anchor: AnnotationAnchor;
   selectedText: string;
   comment: string;
   type: AnnotationType;
