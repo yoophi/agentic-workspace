@@ -28,6 +28,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Markdown } from "@/components/ui/markdown";
 import { Textarea } from "@/components/ui/textarea";
+import { projectQueryKeys } from "@/entities/project/api/query-keys";
+import { getWorktreeChanges } from "@/entities/project/api/git-worktree-repository";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import { worktreeFileQueryKeys } from "@/entities/worktree-file/api/query-keys";
 import {
@@ -168,6 +170,10 @@ function GitWorkspaceTab({
     queryKey: worktreeGitQueryKeys.graph(worktree.path),
     queryFn: () => getWorktreeGitGraph(worktree.path),
   });
+  const statusQuery = useQuery({
+    queryKey: projectQueryKeys.worktreeChanges(worktree.path),
+    queryFn: () => getWorktreeChanges(worktree.path),
+  });
   const commitDetailQuery = useQuery({
     enabled: selectedCommitHash !== null,
     queryKey: selectedCommitHash
@@ -218,6 +224,22 @@ function GitWorkspaceTab({
               <Badge variant="outline" className="shrink-0 font-mono">
                 {worktree.branch || "detached"}
               </Badge>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {statusQuery.isLoading ? (
+                <Badge variant="secondary">Loading status</Badge>
+              ) : statusQuery.isError ? (
+                <Badge variant="destructive">Status error</Badge>
+              ) : statusQuery.data ? (
+                <>
+                  <Badge variant="outline">staged {statusQuery.data.stagedCount}</Badge>
+                  <Badge variant="outline">unstaged {statusQuery.data.unstagedCount}</Badge>
+                  <Badge variant="outline">untracked {statusQuery.data.untrackedCount}</Badge>
+                  <Badge variant={statusQuery.data.conflictedCount > 0 ? "destructive" : "outline"}>
+                    conflicted {statusQuery.data.conflictedCount}
+                  </Badge>
+                </>
+              ) : null}
             </div>
           </section>
 
