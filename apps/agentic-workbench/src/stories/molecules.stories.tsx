@@ -8,7 +8,7 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { CodeBlock, CodeBlockCode, CodeBlockGroup } from "@/components/ui/code-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator, CommandShortcut } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty";
 import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSeparator, FieldSet, FieldTitle } from "@/components/ui/field";
@@ -16,7 +16,7 @@ import { Input } from "@/components/ui/input";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput, InputGroupText, InputGroupTextarea } from "@/components/ui/input-group";
 import { Markdown } from "@/components/ui/markdown";
 import { Message, MessageAction, MessageActions, MessageAvatar, MessageContent } from "@/components/ui/message";
-import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Popover, PopoverAnchor, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { PromptInput, PromptInputAction, PromptInputActions, PromptInputTextarea } from "@/components/ui/prompt-input";
 import { ScrollButton } from "@/components/ui/scroll-button";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -158,6 +158,9 @@ export const OverlaysAndNavigation: Story = {
               <DialogDescription>Dialog content is composed from header, body and footer slots.</DialogDescription>
             </DialogHeader>
             <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Cancel</Button>
+              </DialogClose>
               <Button>Save</Button>
             </DialogFooter>
           </DialogContent>
@@ -178,6 +181,9 @@ export const OverlaysAndNavigation: Story = {
           </AlertDialogContent>
         </AlertDialog>
         <Popover>
+          <PopoverAnchor asChild>
+            <span className="rounded-md border px-2 py-1 text-sm">origin/main</span>
+          </PopoverAnchor>
           <PopoverTrigger asChild>
             <Button variant="outline">Popover</Button>
           </PopoverTrigger>

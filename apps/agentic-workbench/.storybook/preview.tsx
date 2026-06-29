@@ -3,6 +3,10 @@ import type { Preview } from "@storybook/react-vite";
 import { StorybookProviders } from "../src/shared/storybook/storybook-providers";
 import "../src/index.css";
 
+if (import.meta.env.DEV) {
+  void import("./react-grab");
+}
+
 const preview: Preview = {
   decorators: [
     (Story) => (
