@@ -198,4 +198,14 @@ describe("run panel state", () => {
       "## Original prompt\noriginal task\n\n## Steering instruction\nnew direction",
     );
   });
+
+  it("does not nest generated steer prompts as the original prompt", () => {
+    const first = buildSteerPrompt("original task", "first steer");
+    const second = buildSteerPrompt(first, "second steer");
+
+    expect(second).toContain(
+      "## Original prompt\noriginal task\n\n## Steering instruction\nsecond steer",
+    );
+    expect(second).not.toContain("## Steering instruction\nfirst steer");
+  });
 });

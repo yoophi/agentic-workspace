@@ -91,6 +91,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { CircularLoader } from "@/components/ui/loader";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -281,6 +282,7 @@ export function AgentRunPanel({
   const [inputMode, setInputMode] = useState<AgentInputMode>(initialInputMode);
   const activeRunIdRef = useRef<string | null>(null);
   const activeGoalRef = useRef<ThreadGoal | null>(null);
+  const activePromptSentRef = useRef(false);
   const runStartedAtRef = useRef<number | null>(null);
   const usageContextRef = useRef<UsageContext | null>(null);
   const goalContinuationPendingRef = useRef(false);
@@ -520,6 +522,7 @@ export function AgentRunPanel({
         setQueuedPrompts([]);
         setDirectPrompt(null);
         setIsRunning(false);
+        activePromptSentRef.current = false;
         activeRunIdRef.current = null;
         setActiveRunId(null);
         onRunSettled?.();
@@ -529,6 +532,7 @@ export function AgentRunPanel({
 
       if (timelineEvent.type === "lifecycle") {
         if (timelineEvent.status === "promptSent") {
+          activePromptSentRef.current = true;
           setIsAwaitingPromptResponse(true);
         }
         if (timelineEvent.status === "promptCompleted") {
@@ -539,11 +543,15 @@ export function AgentRunPanel({
           setQueuedPrompts([]);
           setDirectPrompt(null);
           setIsRunning(false);
+          activePromptSentRef.current = false;
           activeRunIdRef.current = null;
           setActiveRunId(null);
           onRunSettled?.();
           void recordRunGoalProgress();
         }
+      }
+      if (isIdleThreadStatusEvent(timelineEvent)) {
+        setIsAwaitingPromptResponse(false);
       }
     });
 
@@ -558,8 +566,10 @@ export function AgentRunPanel({
     }
 
     const nextPrompt = queuedPrompts[0];
+    const previousDirectPrompt = directPrompt;
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
+    setDirectPrompt(nextPrompt.text);
     setItems((currentItems) =>
       addUserMessage(currentItems, activeRunId, nextPrompt.text),
     );
@@ -568,10 +578,11 @@ export function AgentRunPanel({
       setItems((currentItems) =>
         removeUserMessage(currentItems, activeRunId, nextPrompt.text),
       );
+      setDirectPrompt(previousDirectPrompt);
       setIsAwaitingPromptResponse(false);
       setError(String(caughtError));
     });
-  }, [activeRunId, isAwaitingPromptResponse, isRunning, queuedPrompts]);
+  }, [activeRunId, directPrompt, isAwaitingPromptResponse, isRunning, queuedPrompts]);
 
   useEffect(() => {
     const sessionReady = sessionMode === "new" || Boolean(selectedSessionId);
@@ -708,38 +719,48 @@ export function AgentRunPanel({
       !isAwaitingPromptResponse &&
       queuedPrompts.length > 0,
   );
-  const canSendPrompt = shouldQueueSendPrompt ? canQueuePrompt : canSteerPrompt;
+  const shouldSendDirectPrompt = Boolean(
+    activeRunId &&
+      isRunning &&
+      !isAwaitingPromptResponse &&
+      queuedPrompts.length === 0,
+  );
+  const canSendPrompt = shouldQueueSendPrompt || shouldSendDirectPrompt
+    ? canQueuePrompt
+    : canSteerPrompt;
   const canCancel = Boolean(activeRunId && isRunning);
 
   async function run() {
     const goal = prompt.trim();
-    const started = await startRun(goal);
-    if (started) {
-      setPrompt(defaultPrompt);
+    if (!goal) {
+      return;
     }
+    setPrompt(defaultPrompt);
+    await startRun(goal);
   }
 
   async function startRun(
     goal: string,
-    options: { queuedPrompts?: QueuedPrompt[] } = {},
+    options: { queuedPrompts?: QueuedPrompt[]; displayPrompt?: string } = {},
   ) {
     if (!selectedAgentId || !goal) {
       return false;
     }
 
     const runId = crypto.randomUUID();
+    const displayPrompt = options.displayPrompt ?? goal;
     setError(null);
-    setItems([]);
+    setItems(addUserMessage([], runId, displayPrompt));
     setQueuedPrompts(options.queuedPrompts ?? []);
     setUsageContext(null);
     usageContextRef.current = null;
     runStartedAtRef.current = Date.now();
-    setDirectPrompt(goal);
+    setDirectPrompt(displayPrompt);
+    activePromptSentRef.current = false;
     activeRunIdRef.current = runId;
     setActiveRunId(runId);
     setIsRunning(true);
     setIsAwaitingPromptResponse(true);
-    setItems((currentItems) => addUserMessage(currentItems, runId, goal));
 
     const reuseSession = sessionMode === "reuse" && Boolean(selectedSessionId);
 
@@ -773,10 +794,11 @@ export function AgentRunPanel({
     } catch (caughtError) {
       setError(String(caughtError));
       setPrompt(goal);
-      setItems((currentItems) => removeUserMessage(currentItems, runId, goal));
+      setItems((currentItems) => removeUserMessage(currentItems, runId, displayPrompt));
       setDirectPrompt(null);
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
+      activePromptSentRef.current = false;
       activeRunIdRef.current = null;
       runStartedAtRef.current = null;
       setActiveRunId(null);
@@ -802,7 +824,7 @@ export function AgentRunPanel({
       return;
     }
 
-    if (isRunning) {
+    if (isRunning || activeRunIdRef.current) {
       enqueuePrompt(nextPrompt);
       return;
     }
@@ -902,7 +924,10 @@ export function AgentRunPanel({
 
     try {
       await cancelAgentRun(runIdToCancel);
-      const started = await startRun(nextGoal, { queuedPrompts: queuedPromptsToKeep });
+      const started = await startRun(nextGoal, {
+        queuedPrompts: queuedPromptsToKeep,
+        displayPrompt: steerPrompt,
+      });
       if (!started) {
         setPrompt(steerPrompt);
         setQueuedPrompts(queuedPromptsToKeep);
@@ -916,12 +941,45 @@ export function AgentRunPanel({
   }
 
   function sendPrompt() {
+    if (activeRunIdRef.current && !activePromptSentRef.current) {
+      enqueuePrompt();
+      return;
+    }
     if (shouldQueueSendPrompt) {
       enqueuePrompt();
       return;
     }
+    if (shouldSendDirectPrompt) {
+      void sendDirectPrompt();
+      return;
+    }
 
     void steer();
+  }
+
+  async function sendDirectPrompt() {
+    const nextPrompt = prompt.trim();
+    const runId = activeRunId;
+    const previousDirectPrompt = directPrompt;
+    if (!runId || !nextPrompt) {
+      return;
+    }
+
+    setError(null);
+    setPrompt(defaultPrompt);
+    setIsAwaitingPromptResponse(true);
+    setDirectPrompt(nextPrompt);
+    setItems((currentItems) => addUserMessage(currentItems, runId, nextPrompt));
+
+    try {
+      await sendPromptToRun(runId, nextPrompt);
+    } catch (caughtError) {
+      setPrompt(nextPrompt);
+      setItems((currentItems) => removeUserMessage(currentItems, runId, nextPrompt));
+      setDirectPrompt(previousDirectPrompt);
+      setIsAwaitingPromptResponse(false);
+      setError(String(caughtError));
+    }
   }
 
   async function steerQueuedPrompt(queuedPrompt: QueuedPrompt) {
@@ -957,7 +1015,10 @@ export function AgentRunPanel({
 
     try {
       await cancelAgentRun(runIdToCancel);
-      const started = await startRun(nextGoal, { queuedPrompts: result.queue });
+      const started = await startRun(nextGoal, {
+        queuedPrompts: result.queue,
+        displayPrompt: result.queuedPrompt.text,
+      });
       if (!started) {
         restoreQueue();
         setPrompt(defaultPrompt);
@@ -1186,6 +1247,21 @@ export function AgentRunPanel({
                   items={visibleItems}
                   scrollParentRef={timelineScrollRef}
                 />
+                {inputMode === "prompt" && queuedPrompts.length > 0 && (
+                  <QueuedPromptTimeline
+                    queuedPrompts={queuedPrompts}
+                    activeRunId={activeRunId}
+                    directPrompt={directPrompt}
+                    onSteerPrompt={(queuedPrompt) => void steerQueuedPrompt(queuedPrompt)}
+                    onEditPrompt={openQueuedPromptEditor}
+                    onMovePrompt={moveQueuedPrompt}
+                    onRemovePrompt={(queuedPromptId) => {
+                      setQueuedPrompts((current) =>
+                        current.filter((item) => item.id !== queuedPromptId),
+                      );
+                    }}
+                  />
+                )}
               </div>
 
           </div>
@@ -1211,10 +1287,8 @@ export function AgentRunPanel({
           value={prompt}
           onValueChange={setPrompt}
           onSubmit={() => {
-            if (inputMode === "prompt" && isRunning) {
-              if (canSendPrompt) {
-                sendPrompt();
-              }
+            if (inputMode === "prompt" && (isRunning || activeRunIdRef.current)) {
+              sendPrompt();
               return;
             }
             if (!isRunning && canStartRun) {
@@ -1311,8 +1385,7 @@ export function AgentRunPanel({
                   !event.ctrlKey &&
                   !event.altKey &&
                   inputMode === "prompt" &&
-                  isRunning &&
-                  canQueuePrompt
+                  (isRunning || activeRunIdRef.current)
                 ) {
                   event.preventDefault();
                   enqueuePrompt();
@@ -1320,93 +1393,6 @@ export function AgentRunPanel({
               }}
             />
           </div>
-          {inputMode === "prompt" && queuedPrompts.length > 0 && (
-            <div className="flex max-h-36 shrink-0 flex-col gap-2 px-4 pb-2">
-              <div className="text-xs text-muted-foreground">대기 중인 prompt {queuedPrompts.length}개</div>
-              <div className="flex min-h-0 flex-col gap-2 overflow-auto pr-1">
-                {queuedPrompts.map((queuedPrompt, index) => (
-                  <div
-                    key={queuedPrompt.id}
-                    className="flex items-start justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2"
-                  >
-                    <div className="min-w-0 flex-1 text-sm">
-                      <span className="mr-2 text-xs text-muted-foreground">#{index + 1}</span>
-                      <span className="whitespace-pre-wrap break-words">{queuedPrompt.text}</span>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-1">
-                      <PromptInputAction tooltip="Steer with prompt" side="left">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          disabled={!activeRunId || !directPrompt?.trim()}
-                          aria-label={`${index + 1}번 prompt로 steer`}
-                          onClick={() => void steerQueuedPrompt(queuedPrompt)}
-                        >
-                          <PlayIcon className="size-4" />
-                        </Button>
-                      </PromptInputAction>
-                      <PromptInputAction tooltip="Edit prompt" side="left">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label={`${index + 1}번 prompt 편집`}
-                          onClick={() => openQueuedPromptEditor(queuedPrompt)}
-                        >
-                          <PencilIcon className="size-4" />
-                        </Button>
-                      </PromptInputAction>
-                      <PromptInputAction tooltip="Move up" side="left">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          disabled={index === 0}
-                          aria-label={`${index + 1}번 prompt 위로 이동`}
-                          onClick={() => moveQueuedPrompt(index, index - 1)}
-                        >
-                          <ArrowUpIcon className="size-4" />
-                        </Button>
-                      </PromptInputAction>
-                      <PromptInputAction tooltip="Move down" side="left">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          disabled={index === queuedPrompts.length - 1}
-                          aria-label={`${index + 1}번 prompt 아래로 이동`}
-                          onClick={() => moveQueuedPrompt(index, index + 1)}
-                        >
-                          <ArrowDownIcon className="size-4" />
-                        </Button>
-                      </PromptInputAction>
-                      <PromptInputAction tooltip="Remove prompt" side="left">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-7"
-                          aria-label={`${index + 1}번 prompt 제거`}
-                          onClick={() => {
-                            setQueuedPrompts((current) =>
-                              current.filter((item) => item.id !== queuedPrompt.id),
-                            );
-                          }}
-                        >
-                          <XIcon className="size-4" />
-                        </Button>
-                      </PromptInputAction>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
           <div className="flex shrink-0 flex-col gap-3 px-4 pb-1 sm:flex-row sm:items-center sm:justify-between">
             <Button
               type="button"
@@ -2379,8 +2365,137 @@ function RunEventItem({ item }: { item: TimelineItem }) {
   );
 }
 
+function QueuedPromptTimeline({
+  queuedPrompts,
+  activeRunId,
+  directPrompt,
+  onSteerPrompt,
+  onEditPrompt,
+  onMovePrompt,
+  onRemovePrompt,
+}: {
+  queuedPrompts: QueuedPrompt[];
+  activeRunId: string | null;
+  directPrompt: string | null;
+  onSteerPrompt: (queuedPrompt: QueuedPrompt) => void;
+  onEditPrompt: (queuedPrompt: QueuedPrompt) => void;
+  onMovePrompt: (fromIndex: number, toIndex: number) => void;
+  onRemovePrompt: (queuedPromptId: string) => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-col gap-2" aria-label="Queued prompts">
+      {queuedPrompts.map((queuedPrompt, index) => (
+        <Message key={queuedPrompt.id} className="justify-end">
+          <div className="min-w-0 max-w-[80%] rounded-lg border border-border bg-muted-foreground p-2 text-background">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <CircularLoader size="sm" className="shrink-0 border-background border-t-transparent" />
+                <span className="shrink-0 text-xs text-background/75">#{index + 1}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-background hover:bg-background/15 hover:text-background"
+                  disabled={!activeRunId || !directPrompt?.trim()}
+                  aria-label={`${index + 1}번 대기 prompt 즉시 전송`}
+                  onClick={() => onSteerPrompt(queuedPrompt)}
+                >
+                  <PlayIcon className="size-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-background hover:bg-background/15 hover:text-background"
+                  aria-label={`${index + 1}번 대기 prompt 편집`}
+                  onClick={() => onEditPrompt(queuedPrompt)}
+                >
+                  <PencilIcon className="size-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-background hover:bg-background/15 hover:text-background"
+                  disabled={index === 0}
+                  aria-label={`${index + 1}번 대기 prompt 위로 이동`}
+                  onClick={() => onMovePrompt(index, index - 1)}
+                >
+                  <ArrowUpIcon className="size-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-background hover:bg-background/15 hover:text-background"
+                  disabled={index === queuedPrompts.length - 1}
+                  aria-label={`${index + 1}번 대기 prompt 아래로 이동`}
+                  onClick={() => onMovePrompt(index, index + 1)}
+                >
+                  <ArrowDownIcon className="size-3" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="text-background hover:bg-background/15 hover:text-background"
+                  aria-label={`${index + 1}번 대기 prompt 제거`}
+                  onClick={() => onRemovePrompt(queuedPrompt.id)}
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              </div>
+            </div>
+            <div className="whitespace-pre-wrap break-words text-sm">{queuedPrompt.text}</div>
+          </div>
+        </Message>
+      ))}
+    </div>
+  );
+}
+
 function addRunEventItem(items: TimelineItem[], runId: string, event: TimelineRunEvent) {
   return appendOneTimelineItem(items, toTimelineItem(runId, event));
+}
+
+function isIdleThreadStatusEvent(event: TimelineRunEvent) {
+  if (event.type !== "raw" || event.method !== "session/update") {
+    return false;
+  }
+
+  const payload = event.payload;
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+
+  const update = "update" in payload ? (payload as { update?: unknown }).update : payload;
+  if (!update || typeof update !== "object") {
+    return false;
+  }
+
+  const sessionUpdate = (update as { sessionUpdate?: unknown }).sessionUpdate;
+  if (sessionUpdate !== "session_info_update") {
+    return false;
+  }
+
+  const meta = (update as { _meta?: unknown })._meta;
+  if (!meta || typeof meta !== "object") {
+    return false;
+  }
+
+  const codex = (meta as { codex?: unknown }).codex;
+  if (!codex || typeof codex !== "object") {
+    return false;
+  }
+
+  const threadStatus = (codex as { threadStatus?: unknown }).threadStatus;
+  if (!threadStatus || typeof threadStatus !== "object") {
+    return false;
+  }
+
+  return (threadStatus as { type?: unknown }).type === "idle";
 }
 
 function LifecycleStep({ item }: { item: TimelineItem }) {

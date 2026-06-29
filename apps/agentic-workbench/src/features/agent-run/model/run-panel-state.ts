@@ -157,17 +157,43 @@ export function insertQueuedPrompt(
 }
 
 export function buildSteerPrompt(originalPrompt: string, steerPrompt: string) {
+  const normalizedOriginalPrompt = unwrapSteerPrompt(originalPrompt);
+
   return [
     "The previous prompt was interrupted because the user wants to steer the task.",
     "",
     "## Original prompt",
-    originalPrompt.trim(),
+    normalizedOriginalPrompt,
     "",
     "## Steering instruction",
     steerPrompt.trim(),
     "",
     "Continue from the original prompt, but follow the steering instruction above.",
   ].join("\n");
+}
+
+function unwrapSteerPrompt(prompt: string) {
+  const originalPromptMarker = "## Original prompt";
+  const steeringInstructionMarker = "## Steering instruction";
+  let current = prompt.trim();
+
+  while (current.startsWith("The previous prompt was interrupted")) {
+    const originalPromptStart = current.indexOf(originalPromptMarker);
+    const steeringInstructionStart = current.indexOf(steeringInstructionMarker);
+    if (originalPromptStart < 0 || steeringInstructionStart < 0) {
+      break;
+    }
+
+    const next = current
+      .slice(originalPromptStart + originalPromptMarker.length, steeringInstructionStart)
+      .trim();
+    if (!next || next === current) {
+      break;
+    }
+    current = next;
+  }
+
+  return current;
 }
 
 export type QueuedSteerPlan = {
