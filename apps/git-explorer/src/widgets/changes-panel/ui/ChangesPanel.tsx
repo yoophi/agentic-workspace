@@ -6,6 +6,7 @@ import {
   ChevronDown,
   ChevronRight,
   EyeOff,
+  FileDiff,
   Filter,
   Folder,
   FolderGit2,
@@ -34,6 +35,8 @@ import {
   getCommitDetail,
   getCommitGraph,
   getFileDiff,
+  getWorktreeFileDiff,
+  getWorktreeStatus,
   listBranches,
   listHistory,
   listWorktrees,
@@ -54,6 +57,7 @@ import {
   CommitDetailView,
   HistoryGraphView,
   InfiniteLoadSentinel,
+  WorktreeChangesView,
   combineGitCommitGraphPages,
   refsByTarget,
 } from "@yoophi/git-ui";
@@ -319,6 +323,14 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   const [filteredBranchKeys, setFilteredBranchKeys] = useState<Set<string>>(new Set());
   const [hiddenBranchKeys, setHiddenBranchKeys] = useState<Set<string>>(new Set());
   const [staleCommitSelection, setStaleCommitSelection] = useState<StaleSelection | null>(null);
+  const [viewMode, setViewMode] = useState<"commit" | "worktree">("commit");
+  const [worktreeFilePath, setWorktreeFilePath] = useState<string>();
+
+  function selectCommit(commitHash: string) {
+    setViewMode("commit");
+    setSelectedCommitHash(commitHash);
+    setStaleCommitSelection(null);
+  }
   const appInfo = useQuery({
     queryKey: ["app-info"],
     queryFn: getAppInfo,
@@ -404,6 +416,21 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
       getFileDiff(selectedRepository?.id ?? "", selectedCommitHash ?? "", selectedFilePath ?? ""),
     ...autoRefreshQueryOptions,
   });
+  const worktreeStatusQuery = useQuery({
+    enabled: Boolean(selectedRepository),
+    queryKey: selectedRepository
+      ? repositoryKeys.worktreeStatus(selectedRepository.id)
+      : ["repositories", "unselected", "worktreeStatus"],
+    queryFn: () => getWorktreeStatus(selectedRepository?.id ?? ""),
+  });
+  const worktreeDiffQuery = useQuery({
+    enabled: Boolean(selectedRepository && viewMode === "worktree" && worktreeFilePath),
+    queryKey:
+      selectedRepository && worktreeFilePath
+        ? repositoryKeys.worktreeFileDiff(selectedRepository.id, worktreeFilePath)
+        : ["repositories", "unselected", "worktreeFileDiff"],
+    queryFn: () => getWorktreeFileDiff(selectedRepository?.id ?? "", worktreeFilePath ?? ""),
+  });
   const branchRows = useMemo(
     () => buildBranchTreeRows(branchesQuery.data ?? [], expandedBranchFolders),
     [branchesQuery.data, expandedBranchFolders],
@@ -438,7 +465,9 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     historyQuery.isFetching ||
     graphQuery.isFetching ||
     commitDetailQuery.isFetching ||
-    fileDiffQuery.isFetching;
+    fileDiffQuery.isFetching ||
+    worktreeStatusQuery.isFetching ||
+    worktreeDiffQuery.isFetching;
 
   useEffect(() => {
     setSelectedCommitHash(undefined);
@@ -446,6 +475,8 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     setStaleCommitSelection(null);
     setFilteredBranchKeys(new Set());
     setHiddenBranchKeys(new Set());
+    setViewMode("commit");
+    setWorktreeFilePath(undefined);
   }, [selectedRepository?.id]);
 
   useEffect(() => {
@@ -835,10 +866,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             isFetchingNextPage={graphQuery.isFetchingNextPage}
             onLoadMore={() => void graphQuery.fetchNextPage()}
             maxGraphLane={maxGraphLane}
-            onSelectCommit={(commitHash) => {
-              setSelectedCommitHash(commitHash);
-              setStaleCommitSelection(null);
-            }}
+            onSelectCommit={selectCommit}
             selectedCommitHash={selectedCommitHash}
           />
         ) : (
@@ -861,10 +889,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
                       className="cursor-pointer data-[selected=true]:bg-muted"
                       data-selected={isSelected}
                       key={commit.hash}
-                      onClick={() => {
-                        setSelectedCommitHash(commit.hash);
-                        setStaleCommitSelection(null);
-                      }}
+                      onClick={() => selectCommit(commit.hash)}
                     >
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {getShortHash(commit.hash)}
@@ -901,21 +926,84 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     </section>
   );
 
+  const worktreeChangeCount = worktreeStatusQuery.data?.files.length ?? 0;
+
   const commitDetail = (
     <section className="flex h-full min-h-0 flex-col">
       <header className="border-b px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <GitCommit className="size-4 text-muted-foreground" />
-          <div className="min-w-0">
-            <h2 className="truncate text-sm font-medium">Selected commit</h2>
-            <p className="truncate text-xs text-muted-foreground">
-              {selectedCommitHash ? getShortHash(selectedCommitHash) : "No commit selected"}
-            </p>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {viewMode === "commit" ? (
+              <GitCommit className="size-4 text-muted-foreground" />
+            ) : (
+              <FileDiff className="size-4 text-muted-foreground" />
+            )}
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-medium">
+                {viewMode === "commit" ? "Selected commit" : "Working tree"}
+              </h2>
+              <p className="truncate text-xs text-muted-foreground">
+                {viewMode === "commit"
+                  ? selectedCommitHash
+                    ? getShortHash(selectedCommitHash)
+                    : "No commit selected"
+                  : "Uncommitted changes"}
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 rounded-md border p-0.5">
+            <Button
+              size="sm"
+              variant={viewMode === "commit" ? "secondary" : "ghost"}
+              onClick={() => setViewMode("commit")}
+            >
+              Commit
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "worktree" ? "secondary" : "ghost"}
+              onClick={() => setViewMode("worktree")}
+            >
+              Working tree{worktreeChangeCount > 0 ? ` (${worktreeChangeCount})` : ""}
+            </Button>
           </div>
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">
-        {!selectedRepository || !selectedCommitHash ? (
+        {!selectedRepository ? (
+          <div className="flex min-h-60 items-center justify-center">
+            <div className="max-w-xs text-center">
+              <GitCommit className="mx-auto size-8 text-muted-foreground" />
+              <h3 className="mt-3 text-sm font-medium">No repository selected</h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                Select a repository to inspect commits and working-tree changes.
+              </p>
+            </div>
+          </div>
+        ) : viewMode === "worktree" ? (
+          worktreeStatusQuery.isLoading ? (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading changes
+            </p>
+          ) : worktreeStatusQuery.isError ? (
+            <p className="flex items-start gap-1.5 text-sm leading-5 text-red-600">
+              <AlertCircle className="mt-0.5 size-4 shrink-0" />
+              <span>{getErrorMessage(worktreeStatusQuery.error)}</span>
+            </p>
+          ) : (
+            <WorktreeChangesView
+              changes={worktreeStatusQuery.data}
+              selectedFilePath={worktreeFilePath}
+              onSelectFile={setWorktreeFilePath}
+              diff={worktreeDiffQuery.data}
+              diffLoading={worktreeDiffQuery.isLoading}
+              diffError={
+                worktreeDiffQuery.isError ? getErrorMessage(worktreeDiffQuery.error) : undefined
+              }
+            />
+          )
+        ) : !selectedCommitHash ? (
           <div className="flex min-h-60 items-center justify-center">
             <div className="max-w-xs text-center">
               <GitCommit className="mx-auto size-8 text-muted-foreground" />

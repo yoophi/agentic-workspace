@@ -40,6 +40,10 @@ export type {
   GitCommitDetail,
   GitFileDiff,
   GitCommitQueryOptions,
+  GitChangedFileGroup,
+  GitChangedFile,
+  GitWorktreeChanges,
+  GitWorktreeFileDiff,
 } from "@yoophi/git-graph";
 import type {
   GitCommitHistory,
@@ -47,6 +51,8 @@ import type {
   GitCommitDetail,
   GitFileDiff,
   GitCommitQueryOptions,
+  GitWorktreeChanges,
+  GitWorktreeFileDiff,
 } from "@yoophi/git-graph";
 
 export const repositoryKeys = {
@@ -77,6 +83,10 @@ export const repositoryKeys = {
     ["repositories", repositoryId, "commits", commitHash] as const,
   fileDiff: (repositoryId: string, commitHash: string, filePath: string) =>
     ["repositories", repositoryId, "commits", commitHash, "files", filePath, "diff"] as const,
+  worktreeStatus: (repositoryId: string) =>
+    ["repositories", repositoryId, "worktreeStatus"] as const,
+  worktreeFileDiff: (repositoryId: string, filePath: string) =>
+    ["repositories", repositoryId, "worktreeFileDiff", filePath] as const,
 };
 
 export function getAppInfo() {
@@ -166,6 +176,23 @@ export function getFileDiff(repositoryId: string, commitHash: string, filePath: 
     request: {
       repositoryId,
       commitHash,
+      filePath,
+    },
+  });
+}
+
+export function getWorktreeStatus(repositoryId: string) {
+  return invoke<GitWorktreeChanges>("get_worktree_status", {
+    request: {
+      repositoryId,
+    },
+  });
+}
+
+export function getWorktreeFileDiff(repositoryId: string, filePath: string) {
+  return invoke<GitWorktreeFileDiff>("get_worktree_file_diff", {
+    request: {
+      repositoryId,
       filePath,
     },
   });

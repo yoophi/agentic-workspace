@@ -4,8 +4,9 @@ mod domain;
 
 use adapters::inbound::tauri_commands::{
     app_info, create_repository, delete_repository, get_commit_detail, get_commit_graph,
-    get_file_diff, list_branches, list_history, list_repositories, list_worktrees,
-    rename_repository, start_repository_watchers, stop_repository_watchers, RepositoryWatcherState,
+    get_file_diff, get_worktree_file_diff, get_worktree_status, list_branches, list_history,
+    list_repositories, list_worktrees, rename_repository, start_repository_watchers,
+    stop_repository_watchers, RepositoryWatcherState,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -26,6 +27,8 @@ pub fn run() {
             get_commit_graph,
             get_commit_detail,
             get_file_diff,
+            get_worktree_status,
+            get_worktree_file_diff,
             start_repository_watchers,
             stop_repository_watchers
         ])

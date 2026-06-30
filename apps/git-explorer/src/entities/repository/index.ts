@@ -5,6 +5,8 @@ export {
   getCommitDetail,
   getCommitGraph,
   getFileDiff,
+  getWorktreeFileDiff,
+  getWorktreeStatus,
   listBranches,
   listHistory,
   listRepositories,
@@ -29,5 +31,7 @@ export type {
   GitGraphLayoutHints,
   GitGraphRef,
   GitWorktree,
+  GitWorktreeChanges,
+  GitWorktreeFileDiff,
   Repository,
 } from "./api";

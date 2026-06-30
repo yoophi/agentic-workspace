@@ -4,3 +4,4 @@ pub mod ports;
 pub mod repository_service;
 pub mod repository_watch_service;
 pub mod worktree_service;
+pub mod worktree_status_service;

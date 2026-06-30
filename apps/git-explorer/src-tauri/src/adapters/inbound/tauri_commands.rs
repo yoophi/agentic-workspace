@@ -12,11 +12,14 @@ use crate::{
     application::{
         branch_service::BranchService, history_service::HistoryService,
         repository_service::RepositoryService, repository_watch_service::RepositoryWatchService,
-        worktree_service::WorktreeService,
+        worktree_service::WorktreeService, worktree_status_service::WorktreeStatusService,
     },
     domain::{
         branch::GitBranch,
-        commit::{GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff},
+        commit::{
+            GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff, GitWorktreeChanges,
+            GitWorktreeFileDiff,
+        },
         repository::Repository,
         worktree::GitWorktree,
     },
@@ -92,6 +95,19 @@ pub struct GetCommitDetailRequest {
 pub struct GetFileDiffRequest {
     repository_id: String,
     commit_hash: String,
+    file_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetWorktreeStatusRequest {
+    repository_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetWorktreeFileDiffRequest {
+    repository_id: String,
     file_path: String,
 }
 
@@ -188,6 +204,22 @@ pub fn get_file_diff(app: AppHandle, request: GetFileDiffRequest) -> Result<GitF
 }
 
 #[tauri::command]
+pub fn get_worktree_status(
+    app: AppHandle,
+    request: GetWorktreeStatusRequest,
+) -> Result<GitWorktreeChanges, String> {
+    worktree_status_service(app)?.get_worktree_status(request.repository_id)
+}
+
+#[tauri::command]
+pub fn get_worktree_file_diff(
+    app: AppHandle,
+    request: GetWorktreeFileDiffRequest,
+) -> Result<GitWorktreeFileDiff, String> {
+    worktree_status_service(app)?.get_worktree_file_diff(request.repository_id, request.file_path)
+}
+
+#[tauri::command]
 pub fn start_repository_watchers(app: AppHandle) -> Result<(), String> {
     let event_app = app.clone();
     let handle =
@@ -252,6 +284,16 @@ fn history_service(
     let reader = git_core::GitCliHistoryReader;
 
     Ok(HistoryService::new(store, reader))
+}
+
+fn worktree_status_service(
+    app: AppHandle,
+) -> Result<WorktreeStatusService<JsonRepositoryStore, git_core::GitCliWorktreeStatusReader>, String>
+{
+    let store = repository_store(app)?;
+    let reader = git_core::GitCliWorktreeStatusReader;
+
+    Ok(WorktreeStatusService::new(store, reader))
 }
 
 fn repository_watch_service(
