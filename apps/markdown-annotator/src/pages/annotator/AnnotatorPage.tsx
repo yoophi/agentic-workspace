@@ -76,9 +76,10 @@ import {
 } from "@/features/open-document/openMarkdownDocument";
 import {
   MarkdownViewer,
-  type MarkdownViewerBlockNote,
-  type MarkdownViewerInlineAnnotation,
-} from "@/shared/ui/MarkdownViewer";
+  buildViewerAnnotationMaps,
+  getSelectionAnchors,
+} from "@yoophi/markdown-annotation-react";
+import { markdownViewerComponents } from "@/shared/ui/markdown-viewer-components";
 
 const WINDOW_HIGHLIGHT_EVENT = "markdown-annotator://window-highlight";
 
@@ -168,66 +169,8 @@ function isUsefulSelectionRect(rect: DOMRect) {
   return rect.width > 0 && rect.height > 0;
 }
 
-function isFullBlockAnnotation(annotation: AnnotationDraft, block: MarkdownBlock) {
-  return annotation.anchor.startOffset === 0 && annotation.anchor.endOffset === block.content.length;
-}
-
-function containsNode(parent: HTMLElement, node: Node) {
-  return parent === node || parent.contains(node);
-}
-
 function isTauriRuntime() {
   return "__TAURI_INTERNALS__" in window;
-}
-
-function getSelectionAnchors(root: HTMLElement | null): AnnotationAnchor[] {
-  const selection = window.getSelection();
-  const selectedText = selection?.toString().trim();
-  if (!root || !selection || !selectedText || selection.rangeCount === 0) {
-    return [];
-  }
-
-  const range = selection.getRangeAt(0);
-  const blockContentElements = Array.from(root.querySelectorAll<HTMLElement>("[data-block-content]"));
-
-  return blockContentElements.flatMap((blockContentElement) => {
-    const annotatedElement = blockContentElement.closest<HTMLElement>("[data-block-id]");
-    if (!annotatedElement || !range.intersectsNode(blockContentElement)) {
-      return [];
-    }
-
-    const segmentRange = range.cloneRange();
-    segmentRange.selectNodeContents(blockContentElement);
-
-    if (containsNode(blockContentElement, range.startContainer)) {
-      segmentRange.setStart(range.startContainer, range.startOffset);
-    }
-
-    if (containsNode(blockContentElement, range.endContainer)) {
-      segmentRange.setEnd(range.endContainer, range.endOffset);
-    }
-
-    const segmentText = segmentRange.toString();
-    if (!segmentText.trim()) {
-      return [];
-    }
-
-    const prefixRange = document.createRange();
-    prefixRange.selectNodeContents(blockContentElement);
-    prefixRange.setEnd(segmentRange.startContainer, segmentRange.startOffset);
-    const startOffset = prefixRange.toString().length;
-
-    return [
-      {
-        blockId: annotatedElement.dataset.blockId ?? "unknown-block",
-        startOffset,
-        endOffset: startOffset + segmentText.length,
-        selectedText: segmentText,
-        startLine: Number(annotatedElement.dataset.startLine) || undefined,
-        endLine: Number(annotatedElement.dataset.endLine) || undefined,
-      },
-    ];
-  });
 }
 
 export function AnnotatorPage() {
@@ -272,72 +215,8 @@ export function AnnotatorPage() {
       }),
     [annotations, blocks, document.absolutePath, document.fileName, promptFilePath, promptGoal, promptInstruction],
   );
-  const annotatedBlockIds = useMemo(
-    () => new Set(annotations.map((annotation) => annotation.anchor.blockId)),
-    [annotations],
-  );
-  const deletedBlockIds = useMemo(
-    () => {
-      const fullBlockDeletes = annotations
-        .filter((annotation) => {
-          if (annotation.type !== "delete") {
-            return false;
-          }
-
-          const block = blocks.find((candidate) => candidate.id === annotation.anchor.blockId);
-          return block !== undefined && isFullBlockAnnotation(annotation, block);
-        })
-        .map((annotation) => annotation.anchor.blockId);
-
-      return new Set(fullBlockDeletes);
-    },
-    [annotations, blocks],
-  );
-  const noteAnnotationsByBlock = useMemo(() => {
-    const notes = new Map<string, MarkdownViewerBlockNote[]>();
-
-    annotations
-      .filter((annotation) => annotation.type === "note")
-      .forEach((annotation) => {
-        const blockNotes = notes.get(annotation.anchor.blockId) ?? [];
-        blockNotes.push({
-          id: annotation.id,
-          comment: annotation.comment,
-        });
-        notes.set(annotation.anchor.blockId, blockNotes);
-      });
-
-    return notes;
-  }, [annotations]);
-  const inlineAnnotationsByBlock = useMemo(() => {
-    const inlineAnnotations = new Map<string, MarkdownViewerInlineAnnotation[]>();
-
-    annotations
-      .filter((annotation) => annotation.type === "delete" || annotation.type === "note")
-      .forEach((annotation) => {
-        const block = blocks.find((candidate) => candidate.id === annotation.anchor.blockId);
-        if (
-          !block ||
-          annotation.anchor.startOffset === undefined ||
-          annotation.anchor.endOffset === undefined ||
-          isFullBlockAnnotation(annotation, block)
-        ) {
-          return;
-        }
-
-        const blockAnnotations = inlineAnnotations.get(annotation.anchor.blockId) ?? [];
-        blockAnnotations.push({
-          id: annotation.id,
-          comment: annotation.comment,
-          endOffset: annotation.anchor.endOffset,
-          startOffset: annotation.anchor.startOffset,
-          type: annotation.type,
-        });
-        inlineAnnotations.set(annotation.anchor.blockId, blockAnnotations);
-      });
-
-    return inlineAnnotations;
-  }, [annotations, blocks]);
+  const { annotatedBlockIds, deletedBlockIds, inlineAnnotationsByBlock, noteAnnotationsByBlock } =
+    useMemo(() => buildViewerAnnotationMaps(annotations, blocks), [annotations, blocks]);
   const visibleAnnotations = useMemo(() => {
     const seen = new Set<string>();
 
@@ -853,6 +732,7 @@ export function AnnotatorPage() {
                 </CardHeader>
                 <CardContent>
                   <MarkdownViewer
+                    components={markdownViewerComponents}
                     blocks={blocks}
                     annotatedBlockIds={annotatedBlockIds}
                     deletedBlockIds={deletedBlockIds}

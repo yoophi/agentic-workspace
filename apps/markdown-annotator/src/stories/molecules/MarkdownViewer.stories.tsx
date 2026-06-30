@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
-import { MarkdownViewer } from "@/shared/ui/MarkdownViewer";
+import { MarkdownViewer } from "@yoophi/markdown-annotation-react";
+import { markdownViewerComponents } from "@/shared/ui/markdown-viewer-components";
 
 const meta = {
   title: "Molecules/MarkdownViewer",
   component: MarkdownViewer,
+  args: {
+    components: markdownViewerComponents,
+  },
   parameters: {
     layout: "padded",
   },
