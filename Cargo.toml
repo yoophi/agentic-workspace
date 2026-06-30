@@ -1,0 +1,9 @@
+# 루트 Cargo workspace — 공유 Rust crate(git-core)와 두 Tauri 앱을 한 workspace로
+# 묶어 atomic 빌드/테스트를 가능하게 한다(전략 문서 git-feature-sharing-monorepo-strategy.md Phase 0, 옵션 A).
+[workspace]
+resolver = "2"
+members = [
+    "crates/*",
+    "apps/agentic-workbench/src-tauri",
+    "apps/git-explorer/src-tauri",
+]
