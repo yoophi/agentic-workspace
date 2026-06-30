@@ -429,7 +429,7 @@ export function MarkdownViewer({
   onRequestBlockDelete,
 }: MarkdownViewerProps) {
   return (
-    <article className="markdown-viewer flex max-w-none flex-col gap-0">
+    <article className="markdown-viewer max-w-none">
       {blocks.map((block) => (
         <MarkdownBlockRenderer
           annotated={annotatedBlockIds.has(block.id)}
