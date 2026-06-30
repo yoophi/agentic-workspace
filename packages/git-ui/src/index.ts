@@ -11,3 +11,10 @@ export {
 } from "./model/file-tree";
 export { graphSegmentPath, laneX, refsByTarget } from "./model/graph-render";
 export { combineGitCommitGraphPages } from "./model/commit-graph";
+
+// React UI 컴포넌트 (react / react-dom / lucide-react는 peer)
+export { GraphCell } from "./ui/graph-cell";
+export { InfiniteLoadSentinel } from "./ui/infinite-load-sentinel";
+export { DiffViewer } from "./ui/diff-viewer";
+export { HistoryGraphView, type HistoryGraphViewProps } from "./ui/history-graph-view";
+export { CommitDetailView, type CommitDetailViewProps } from "./ui/commit-detail-view";
