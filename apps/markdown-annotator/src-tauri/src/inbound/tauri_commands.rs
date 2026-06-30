@@ -1,18 +1,46 @@
 use crate::{
-    application::document_service::DocumentService, domain::document::MarkdownDocument,
-    infrastructure::fs_document_reader::FsDocumentReader,
+    application::document_service::DocumentService,
+    domain::document::MarkdownDocument,
+    infrastructure::{
+        fs_document_reader::FsDocumentReader,
+        fs_document_watcher::{DocumentWatchHandle, watch_document},
+    },
 };
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 use tauri::{Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 
 const WINDOW_HIGHLIGHT_EVENT: &str = "markdown-annotator://window-highlight";
+const MARKDOWN_DOCUMENT_CHANGED_EVENT: &str = "workspace://markdown-document-changed";
+
+pub struct DocumentWatcherState {
+    handles: Mutex<HashMap<String, DocumentWatchHandle>>,
+}
+
+impl DocumentWatcherState {
+    pub fn new() -> Self {
+        Self {
+            handles: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn stop_for_window(&self, window_label: &str) -> Result<(), String> {
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|error| format!("failed to lock document watcher state: {error}"))?;
+        handles.remove(window_label);
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +54,41 @@ pub struct CliInstallStatus {
 pub fn read_markdown_file(path: String) -> Result<MarkdownDocument, String> {
     let service = DocumentService::new(FsDocumentReader);
     service.read_markdown_file(&path)
+}
+
+#[tauri::command]
+pub fn start_markdown_document_watcher(
+    app: tauri::AppHandle,
+    window: WebviewWindow,
+    state: tauri::State<'_, DocumentWatcherState>,
+    path: String,
+) -> Result<(), String> {
+    let window_label = window.label().to_string();
+    let target_label = window_label.clone();
+    let event_app = app.clone();
+    let handle = watch_document(path, move |event| {
+        if let Err(error) = event_app.emit_to(
+            target_label.as_str(),
+            MARKDOWN_DOCUMENT_CHANGED_EVENT,
+            event,
+        ) {
+            eprintln!("failed to emit markdown document change event: {error}");
+        }
+    })?;
+    let mut handles = state
+        .handles
+        .lock()
+        .map_err(|error| format!("failed to lock document watcher state: {error}"))?;
+    handles.insert(window_label, handle);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_markdown_document_watcher(
+    window: WebviewWindow,
+    state: tauri::State<'_, DocumentWatcherState>,
+) -> Result<(), String> {
+    state.stop_for_window(window.label())
 }
 
 #[tauri::command]

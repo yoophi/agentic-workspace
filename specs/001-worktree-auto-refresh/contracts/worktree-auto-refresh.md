@@ -8,7 +8,8 @@
 
 `packages/workspace-auto-refresh`는 다음 pure helper만 제공한다.
 
-- 3초 refresh interval과 focus refresh 옵션
+- 30초 fallback refresh interval과 focus refresh 옵션
+- watcher event name/type
 - active scope key 생성/비교 helper
 - selected file/commit/document stale 판정 helper
 - last-successful-data 유지에 필요한 상태 타입
@@ -34,8 +35,9 @@
 ## Refresh Timing Contract
 
 - File tree, markdown file tree, active markdown document, and Git status/history/graph MUST refresh while the corresponding workspace/app view is mounted.
-- Visible changes SHOULD be reflected within 3 seconds.
-- Background refresh MUST keep last successful data visible while fetching.
+- Visible changes SHOULD be reflected within 3 seconds through Tauri watcher events when the app is running.
+- Fallback polling SHOULD run no more frequently than every 30 seconds and SHOULD refresh on window focus.
+- Refresh MUST keep last successful data visible while fetching.
 - Manual refresh buttons MUST keep working and use the same scoped query keys.
 - Refresh MUST NOT invalidate query keys or reload state for unrelated worktree paths, repository ids, or markdown file paths.
 

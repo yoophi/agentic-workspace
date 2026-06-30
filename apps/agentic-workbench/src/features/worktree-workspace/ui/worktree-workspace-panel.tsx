@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
   ChevronDownIcon,
@@ -35,6 +36,8 @@ import { worktreeFileQueryKeys } from "@/entities/worktree-file/api/query-keys";
 import {
   listWorktreeFiles,
   readWorktreeTextFile,
+  startWorktreeWatcher,
+  stopWorktreeWatcher,
 } from "@/entities/worktree-file/api/worktree-file-repository";
 import type { WorktreeFileEntry } from "@/entities/worktree-file/model/types";
 import { worktreeGitQueryKeys } from "@/entities/worktree-git/api/query-keys";
@@ -82,6 +85,8 @@ import {
   autoRefreshQueryOptions,
   findStaleCommitSelection,
   findStaleFileSelection,
+  WORKTREE_CHANGED_EVENT,
+  type WorktreeChangedEvent,
   type StaleSelection,
 } from "@yoophi/workspace-auto-refresh";
 import { annotationDialogComponents } from "@/features/worktree-workspace/ui/annotation-dialog-components";
@@ -169,6 +174,55 @@ export function WorktreeWorkspacePanel({
 }: WorktreeWorkspacePanelProps) {
   const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>("git");
   const [gitHistoryView, setGitHistoryView] = useState<GitHistoryView>("graph");
+  const queryClient = useQueryClient();
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    startWorktreeWatcher(worktree.path).catch((error) => {
+      console.error("Failed to start worktree watcher", error);
+    });
+
+    listen<WorktreeChangedEvent>(WORKTREE_CHANGED_EVENT, (event) => {
+      if (disposed || event.payload.workingDirectory !== worktree.path) {
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: worktreeFileQueryKeys.list(worktree.path) });
+      void queryClient.invalidateQueries({
+        queryKey: ["worktree-files", "text-file", worktree.path],
+      });
+      void queryClient.invalidateQueries({ queryKey: projectQueryKeys.worktreeChanges(worktree.path) });
+
+      if (event.payload.kind === "file") {
+        return;
+      }
+
+      void queryClient.invalidateQueries({ queryKey: worktreeGitQueryKeys.history(worktree.path) });
+      void queryClient.invalidateQueries({ queryKey: worktreeGitQueryKeys.graph(worktree.path) });
+      void queryClient.invalidateQueries({
+        queryKey: ["worktree-git", "commit-detail", worktree.path],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["worktree-git", "file-diff", worktree.path],
+      });
+    })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch((error) => {
+        console.error("Failed to listen for worktree changes", error);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      stopWorktreeWatcher().catch((error) => {
+        console.error("Failed to stop worktree watcher", error);
+      });
+    };
+  }, [queryClient, worktree.path]);
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden border-l bg-background">

@@ -1,6 +1,10 @@
 use serde::Deserialize;
-use std::{process::Command, sync::Arc};
-use tauri::{AppHandle, State};
+use std::{
+    collections::HashMap,
+    process::Command,
+    sync::{Arc, Mutex},
+};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     application::{
@@ -30,10 +34,12 @@ use crate::{
         },
     },
     infrastructure::{
-        acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
+        acp::runner::AcpAgentRunner,
+        agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
         fs_provider_session_repository::FsProviderSessionRepository,
         fs_worktree_file_provider::FsWorktreeFileProvider,
+        fs_worktree_watcher::{WorktreeWatchHandle, watch_worktree},
         git_cli_branch_provider::GitCliBranchProvider,
         git_cli_remote_provider::GitCliRemoteProvider,
         git_cli_worktree_change_provider::GitCliWorktreeChangeProvider,
@@ -42,12 +48,37 @@ use crate::{
         git_cli_worktree_provider::GitCliWorktreeProvider,
         json_acp_session_store::JsonAcpSessionStore,
         json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
-        json_goal_repository::JsonGoalRepository, json_project_repository::JsonProjectRepository,
+        json_goal_repository::JsonGoalRepository,
+        json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
-        tauri_run_event_sink::TauriRunEventSink, window_manager,
+        tauri_run_event_sink::TauriRunEventSink,
+        window_manager,
     },
     ports::{agent_catalog::AgentCatalog, permission::PermissionDecision},
 };
+
+const WORKTREE_CHANGED_EVENT: &str = "workspace://worktree-changed";
+
+pub struct WorktreeWatcherState {
+    handles: Mutex<HashMap<String, WorktreeWatchHandle>>,
+}
+
+impl WorktreeWatcherState {
+    pub fn new() -> Self {
+        Self {
+            handles: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn stop_for_window(&self, window_label: &str) -> Result<(), String> {
+        let mut handles = self
+            .handles
+            .lock()
+            .map_err(|error| format!("Failed to lock worktree watcher state: {error}"))?;
+        handles.remove(window_label);
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -310,6 +341,39 @@ pub fn read_worktree_text_file(
     path: String,
 ) -> Result<WorktreeTextFile, String> {
     worktree_file_service::read_worktree_text_file(&FsWorktreeFileProvider, working_directory, path)
+}
+
+#[tauri::command]
+pub fn start_worktree_watcher(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, WorktreeWatcherState>,
+    working_directory: String,
+) -> Result<(), String> {
+    let window_label = window.label().to_string();
+    let target_label = window_label.clone();
+    let event_app = app.clone();
+    let handle = watch_worktree(working_directory, move |event| {
+        if let Err(error) = event_app.emit_to(target_label.as_str(), WORKTREE_CHANGED_EVENT, event)
+        {
+            eprintln!("Failed to emit worktree change event: {error}");
+        }
+    })?;
+    let mut handles = state
+        .handles
+        .lock()
+        .map_err(|error| format!("Failed to lock worktree watcher state: {error}"))?;
+
+    handles.insert(window_label, handle);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_worktree_watcher(
+    window: tauri::Window,
+    state: State<'_, WorktreeWatcherState>,
+) -> Result<(), String> {
+    state.stop_for_window(window.label())
 }
 
 #[tauri::command]

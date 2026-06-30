@@ -1,12 +1,12 @@
 # Research: Worktree Auto Refresh
 
-## Decision: React Query 기반 polling과 targeted invalidation을 1차 자동 갱신 메커니즘으로 사용한다
+## Decision: Tauri filesystem watcher event를 1차 자동 갱신 메커니즘으로 사용하고 React Query polling은 fallback으로 유지한다
 
-**Rationale**: 현재 `WorktreeWorkspacePanel`과 `git-explorer`의 `ChangesPanel`은 file/Git 데이터를 React Query로 조회한다. 기존 구조에 `refetchInterval`, `refetchOnWindowFocus`, active tab 기반 `enabled`, query key 기반 invalidation을 추가하면 3초 갱신 목표를 만족할 수 있다. `markdown-annotator`는 React Query가 없으므로 같은 refresh interval/stale policy를 local document reload adapter로 소비한다. Tauri backend의 기존 command 경계도 유지된다.
+**Rationale**: 사용자가 열린 worktree/repository/document를 외부에서 변경하면 UI는 즉시 반응해야 한다. `agentic-workbench`와 `markdown-annotator`는 Tauri/Rust `notify` watcher가 filesystem event를 debounce한 뒤 window-scoped event를 emit하고, frontend가 active scope query만 invalidate/reload한다. `git-explorer`는 이미 존재하는 `repository-changed` watcher invalidation을 유지한다. React Query `refetchInterval`은 watcher event 누락, app lifecycle, focus 복귀를 보정하는 30초 fallback으로만 사용한다.
 
 **Alternatives considered**:
 
-- Tauri filesystem watcher: 더 즉각적이지만 platform별 watcher event 차이, Git `.git` 내부 변경 감지 범위, burst coalescing, window lifecycle 정리가 추가된다. 1차 구현에서는 요구사항 대비 비용이 크다.
+- 짧은 React Query polling만 사용: 구현은 단순하지만 세 앱의 file/Git/markdown query가 계속 실행되어 불필요한 Tauri/Git 호출이 늘어난다.
 - Git command hook/post-commit hook: 사용자의 repository에 hook을 설치해야 하므로 앱 기능으로 부적절하다.
 - 전체 workspace reload: 구현은 쉽지만 selection/scroll 보존 요구와 충돌한다.
 
@@ -28,14 +28,14 @@
 - 모든 worktree/repository/document query invalidation: 구현은 단순하지만 unrelated 대상까지 불필요하게 갱신한다.
 - project root 단위 invalidation: branch/worktree 혼동이 생기고 scope 요구와 맞지 않는다.
 
-## Decision: burst 변경은 짧은 interval과 background fetch 상태로 흡수하고, UI는 마지막 성공 데이터를 유지한다
+## Decision: burst 변경은 Rust watcher debounce와 foreground fetch 상태로 흡수하고, UI는 마지막 성공 데이터를 유지한다
 
-**Rationale**: React Query는 refetch 중에도 기본적으로 이전 데이터를 유지해 사용자가 보고 있는 목록을 즉시 비우지 않는다. `isFetching`과 `isError`를 구분해 비차단 refresh indicator를 표시하면 최신화 중임을 알리면서 review context를 보존할 수 있다.
+**Rationale**: filesystem watcher는 저장/rename/checkout 과정에서 짧은 시간에 여러 event를 보낼 수 있다. Rust watcher가 300~500ms 단위로 debounce한 뒤 frontend에 scope event를 보내고, React Query는 refetch 중에도 이전 데이터를 유지한다. `isFetching`과 `isError`를 구분해 비차단 refresh indicator를 표시하면 최신화 중임을 알리면서 review context를 보존할 수 있다.
 
 **Alternatives considered**:
 
 - 매 filesystem event마다 즉시 refetch: burst 상황에서 flicker와 중복 command 호출이 커진다.
-- explicit debounce queue를 먼저 구현: watcher 없이 polling만 쓰는 1차 구현에서는 복잡도 대비 이득이 작다. 추후 watcher 도입 시 필요하다.
+- frontend debounce만 사용: window가 background 상태일 때 event 처리와 query fetch lifecycle이 섞이므로 watcher source에서 1차 coalescing하는 편이 단순하다.
 
 ## Decision: selected file/commit은 refresh 후 존재 여부를 검증하고 stale 상태로 전환한다
 
@@ -64,11 +64,11 @@
 - watcher만 사용: watcher event가 누락되거나 앱 lifecycle에서 끊기면 stale data가 남을 수 있다.
 - polling만 사용: 이미 존재하는 watcher invalidation 이점을 버리게 된다.
 
-## Decision: backend watcher command는 이번 plan의 필수 범위에서 제외한다
+## Decision: backend watcher command는 app-local lifecycle로 제한한다
 
-**Rationale**: 기존 Tauri commands가 이미 path 검증, file read, Git history/detail/diff 조회를 제공한다. 3초 이내 갱신은 shared frontend policy와 app-local adapter로 달성 가능하다. watcher는 배터리/CPU/권한/platform event coalescing 정책이 필요하므로 별도 성능 최적화 feature로 다루는 편이 경계가 명확하다.
+**Rationale**: watcher는 filesystem adapter이므로 각 Tauri 앱의 infrastructure에 둔다. inbound command는 `start_*_watcher`/`stop_*_watcher` lifecycle과 Tauri event emit만 담당하고, file/Git 조회 로직은 기존 application service/query command에 남긴다. watcher handle은 window label별로 보관해 session/document window unmount 시 정리한다.
 
 **Alternatives considered**:
 
-- `watch_worktree_changes` command 신설: 실시간성은 높지만 command lifecycle, unlisten, channel/event contract, watcher provider 테스트가 필요하다.
-- Rust에서 Git 상태 fingerprint만 polling: frontend polling과 중복되며 command surface가 늘어난다.
+- shared Rust watcher crate 선행 추출: 세 앱의 path scope와 event 종류가 아직 다르므로 app-local 구현 후 중복이 안정되면 추출한다.
+- Rust에서 Git 상태 fingerprint polling: frontend fallback polling과 중복되며 command surface가 늘어난다.

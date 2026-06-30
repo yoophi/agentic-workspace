@@ -57,6 +57,8 @@ import {
   checkCliInstalled,
   installCli,
   readMarkdownDocument,
+  startMarkdownDocumentWatcher,
+  stopMarkdownDocumentWatcher,
 } from "@/entities/document/api/documentApi";
 import { exampleMarkdownDocuments } from "@/entities/document/model/examples";
 import type { MarkdownDocument } from "@/entities/document";
@@ -79,7 +81,9 @@ import {
 } from "@yoophi/markdown-annotation-react";
 import {
   AUTO_REFRESH_INTERVAL_MS,
+  MARKDOWN_DOCUMENT_CHANGED_EVENT,
   findStaleMarkdownDocument,
+  type MarkdownDocumentChangedEvent,
   type StaleSelection,
 } from "@yoophi/workspace-auto-refresh";
 import { annotationDialogComponents } from "@/shared/ui/annotation-dialog-components";
@@ -463,6 +467,39 @@ export function AnnotatorPage() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
+
+  useEffect(() => {
+    if (!isReloadableDocument) {
+      return;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+
+    startMarkdownDocumentWatcher(document.absolutePath).catch((error) => {
+      console.error("Failed to start markdown document watcher", error);
+    });
+
+    listen<MarkdownDocumentChangedEvent>(MARKDOWN_DOCUMENT_CHANGED_EVENT, (event) => {
+      if (!disposed && event.payload.path === document.absolutePath) {
+        void reloadActiveDocument();
+      }
+    })
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch((error) => {
+        console.error("Failed to listen for markdown document changes", error);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      stopMarkdownDocumentWatcher().catch((error) => {
+        console.error("Failed to stop markdown document watcher", error);
+      });
+    };
+  }, [document.absolutePath, isReloadableDocument]);
 
   useEffect(() => {
     if (!isReloadableDocument) {

@@ -125,10 +125,10 @@ Research output: [research.md](./research.md)
 
 핵심 결정:
 
-- React Query `refetchInterval`, `refetchOnWindowFocus`, targeted `invalidateQueries`/`refetchQueries`를 pane별로 조합한다. React Query가 없는 markdown-annotator는 같은 interval policy를 local document reload adapter로 소비한다.
+- Tauri filesystem watcher event를 1차 갱신 신호로 사용하고, React Query `refetchInterval`/`refetchOnWindowFocus`는 fallback으로 조합한다. React Query가 없는 markdown-annotator는 watcher event와 같은 fallback interval policy를 local document reload adapter로 소비한다.
 - 파일 목록과 Git 상태는 active worktree path, repository id/path, markdown file path key에만 묶는다.
 - infinite query는 자동 갱신 시 첫 페이지 기준으로 최신 head를 갱신하고, 필요 시 loaded pages를 reset/refetch하는 정책을 명시한다.
-- OS filesystem watcher는 1차 구현에서 도입하지 않는다. Tauri watcher는 burst/권한/platform 차이를 줄이기 위한 후속 최적화 후보로 남긴다.
+- `agentic-workbench`와 `markdown-annotator`는 app-local Tauri watcher command를 추가한다. `git-explorer`는 기존 repository watcher를 유지하고 shared fallback policy만 맞춘다.
 
 ## Phase 1: Design & Contracts
 

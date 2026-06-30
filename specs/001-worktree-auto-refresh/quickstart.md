@@ -35,7 +35,7 @@ pnpm tauri:dev:annotator
    printf 'hello\n' > path/to/worktree/tmp-auto-refresh.txt
    ```
 
-4. Expected: within 3 seconds, `tmp-auto-refresh.txt` appears in the file tree without page reload.
+4. Expected: watcher event updates the tree without page reload; normally this is visible within 3 seconds. If an event is missed, fallback polling/window focus refresh eventually corrects it.
 5. Select the file, then change content:
 
    ```bash
@@ -60,7 +60,7 @@ pnpm tauri:dev:annotator
    printf '# Auto Refresh\n\ncontent\n' > path/to/worktree/tmp-auto-refresh.md
    ```
 
-3. Expected: within 3 seconds, the markdown tree includes the file.
+3. Expected: watcher event updates the markdown tree without page reload; normally this is visible within 3 seconds.
 4. Select the file and edit markdown content.
 5. Expected: markdown preview updates while annotations/selection UI remain usable.
 
@@ -75,7 +75,7 @@ pnpm tauri:dev:annotator
    git -C path/to/worktree commit -m "test auto refresh"
    ```
 
-3. Expected: within 3 seconds, the new commit appears in graph/list in both apps.
+3. Expected: watcher event updates graph/list in both apps; normally this is visible within 3 seconds.
 4. Select an older commit and create another commit.
 5. Expected: selected older commit remains selected if it still exists.
 6. Switch branch:
@@ -95,7 +95,7 @@ pnpm tauri:dev:annotator
    printf '# Auto Reload\n\nchanged\n' > path/to/document.md
    ```
 
-3. Expected: within 3 seconds, markdown preview reflects the updated content without app reload.
+3. Expected: watcher event reloads the document and markdown preview reflects the updated content without app reload; normally this is visible within 3 seconds.
 4. Delete or temporarily make the file unreadable.
 5. Expected: the app keeps last successful content where possible and marks the document stale or recoverable.
 

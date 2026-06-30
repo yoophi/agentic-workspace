@@ -6,8 +6,8 @@ import {
 } from "@yoophi/workspace-auto-refresh";
 
 describe("markdown annotator auto reload integration", () => {
-  it("uses the shared 3 second refresh policy for active markdown documents", () => {
-    expect(AUTO_REFRESH_INTERVAL_MS).toBe(3_000);
+  it("uses the shared fallback refresh policy for active markdown documents", () => {
+    expect(AUTO_REFRESH_INTERVAL_MS).toBe(30_000);
   });
 
   it("marks unreadable active markdown documents as stale", () => {

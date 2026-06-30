@@ -309,16 +309,21 @@ sequenceDiagram
 ### 7단계: Cross-app auto reload
 
 `agentic-workbench`, `git-explorer`, `markdown-annotator`는 열린 작업 대상이 외부에서
-변경되었을 때 3초 이내에 최신 상태를 반영한다. 세 앱이 같은 정책을 쓰도록 순수
-refresh helper는 `packages/workspace-auto-refresh`에 둔다.
+변경되었을 때 Tauri watcher event로 최신 상태를 반영한다. React Query polling은
+event 누락과 focus 복귀를 보정하는 30초 fallback으로 둔다. 세 앱이 같은 fallback/stale
+정책을 쓰도록 순수 refresh helper는 `packages/workspace-auto-refresh`에 둔다.
 
 ```mermaid
 flowchart LR
-  Core["packages/workspace-auto-refresh<br/>interval · scope key · stale selection"]
+  Core["packages/workspace-auto-refresh<br/>fallback interval · event types · stale selection"]
+  Watcher["Tauri watcher events<br/>notify debounce"]
   AW["agentic-workbench<br/>worktree file/git/markdown panes"]
   GE["git-explorer<br/>repository changes panel"]
   MA["markdown-annotator<br/>active markdown document"]
 
+  Watcher --> AW
+  Watcher --> GE
+  Watcher --> MA
   Core --> AW
   Core --> GE
   Core --> MA
@@ -326,11 +331,11 @@ flowchart LR
 
 구현 기준:
 
-- 공통 interval은 3초이며 window focus 복귀 시에도 갱신한다.
-- `agentic-workbench`는 active `worktree.path` query만 갱신한다.
+- 공통 fallback interval은 30초이며 window focus 복귀 시에도 갱신한다.
+- `agentic-workbench`는 active worktree root와 Git metadata path를 watch하고, event 수신 시 active `worktree.path` query만 갱신한다.
 - `git-explorer`는 selected repository query만 갱신하고 기존 repository watcher
   invalidation을 유지한다.
-- `markdown-annotator`는 Tauri에서 열린 active markdown file만 다시 읽는다.
+- `markdown-annotator`는 Tauri에서 열린 active markdown file을 watch하고, event 수신 시 해당 문서만 다시 읽는다.
 - refresh 실패 시 마지막 성공 데이터를 유지하고 stale/error 상태를 표시한다.
 - 선택 파일/commit/document가 refresh 후에도 유효하면 선택과 scroll 맥락을 유지한다.
 - 선택 대상이 사라지면 stale 상태로 표시하고 재선택 또는 retry 경로를 제공한다.

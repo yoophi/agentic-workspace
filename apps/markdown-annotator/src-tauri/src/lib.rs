@@ -5,9 +5,10 @@ mod inbound;
 mod infrastructure;
 
 use inbound::tauri_commands::{
-    check_cli_installed, focus_any_window, initial_cli_args, install_cli,
+    DocumentWatcherState, check_cli_installed, focus_any_window, initial_cli_args, install_cli,
     open_document_from_cli_args, open_welcome_window, read_markdown_file,
-    request_open_document_tab, request_open_document_window,
+    request_open_document_tab, request_open_document_window, start_markdown_document_watcher,
+    stop_markdown_document_watcher,
 };
 use tauri::{Manager, RunEvent};
 
@@ -34,9 +35,12 @@ pub fn run() {
             check_cli_installed,
             install_cli,
             read_markdown_file,
+            start_markdown_document_watcher,
+            stop_markdown_document_watcher,
             request_open_document_tab,
             request_open_document_window
         ])
+        .manage(DocumentWatcherState::new())
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(move |app, event| {

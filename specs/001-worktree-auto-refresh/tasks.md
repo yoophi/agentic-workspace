@@ -40,7 +40,7 @@
 
 **CRITICAL**: No user story work can begin until this phase is complete.
 
-- [X] T007 [P] Add failing refresh option tests for 3-second interval, focus refresh, and scope key comparison in `packages/workspace-auto-refresh/src/refresh-options.test.ts`.
+- [X] T007 [P] Add failing refresh option tests for 30-second fallback interval, focus refresh, and scope key comparison in `packages/workspace-auto-refresh/src/refresh-options.test.ts`.
 - [X] T008 [P] Add failing stale selection tests for file, commit, and markdown document states in `packages/workspace-auto-refresh/src/selection-staleness.test.ts`.
 - [X] T009 Implement refresh interval, focus refresh, and scope key helpers in `packages/workspace-auto-refresh/src/refresh-options.ts`.
 - [X] T010 Implement stale file, stale commit, and stale markdown document helper functions in `packages/workspace-auto-refresh/src/selection-staleness.ts`.
@@ -67,11 +67,11 @@
 
 ### Implementation for User Story 1
 
-- [X] T018 [US1] Apply shared refresh options to workbench file list query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
-- [X] T019 [US1] Apply shared refresh options to workbench file preview query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
+- [X] T018 [US1] Apply Tauri watcher event invalidation and shared fallback refresh options to workbench file list query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
+- [X] T019 [US1] Apply Tauri watcher event invalidation and shared fallback refresh options to workbench file preview query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
 - [X] T020 [US1] Apply shared stale file selection handling to workbench Files tab in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
 - [X] T021 [US1] Apply shared refresh options and stale selection handling to workbench Markdown tab in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
-- [X] T022 [US1] Add active markdown document auto reload state using shared refresh options in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`.
+- [X] T022 [US1] Add active markdown document watcher reload state using shared fallback refresh options in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`.
 - [X] T023 [US1] Keep last successful markdown document text on reload failure in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`.
 - [ ] T024 [US1] Validate US1 manually using Quickstart Scenarios 1, 2, and 4 from `specs/001-worktree-auto-refresh/quickstart.md`.
 
@@ -92,8 +92,8 @@
 
 ### Implementation for User Story 2
 
-- [X] T027 [US2] Apply shared refresh options to workbench Git status query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
-- [X] T028 [US2] Apply shared latest-page refresh policy to workbench Git history and graph infinite queries in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
+- [X] T027 [US2] Apply Tauri watcher event invalidation and shared fallback refresh options to workbench Git status query in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
+- [X] T028 [US2] Apply Tauri watcher event invalidation and shared latest-page fallback refresh policy to workbench Git history and graph infinite queries in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
 - [X] T029 [US2] Apply shared stale commit selection handling to workbench commit detail state in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`.
 - [X] T030 [US2] Apply shared refresh options to git-explorer worktrees, branches, history, and graph queries in `apps/git-explorer/src/widgets/changes-panel/ui/ChangesPanel.tsx`.
 - [X] T031 [US2] Preserve git-explorer existing repository watcher invalidation while adding shared refresh fallback in `apps/git-explorer/src/app/providers/query.tsx`.

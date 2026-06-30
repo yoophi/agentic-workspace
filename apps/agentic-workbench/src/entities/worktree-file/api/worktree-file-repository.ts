@@ -18,3 +18,11 @@ export async function readWorktreeTextFile(
     path,
   });
 }
+
+export function startWorktreeWatcher(workingDirectory: string) {
+  return invoke<void>("start_worktree_watcher", { workingDirectory });
+}
+
+export function stopWorktreeWatcher() {
+  return invoke<void>("stop_worktree_watcher");
+}
