@@ -1,0 +1,72 @@
+/**
+ * MarkdownViewer 본문 타이포그래피. viewer가 렌더하는 순수 HTML 태그(h1~h3, p,
+ * ul/ol, blockquote, pre/code, table)는 Tailwind preflight로 기본 스타일이
+ * reset되므로, 이 스타일이 없으면 마크다운이 평문처럼 보인다.
+ *
+ * 소비 앱은 index.css에서 `@import "@yoophi/markdown-annotation-react/styles.css"`
+ * 한 줄로 가져온다. @apply는 import한 앱의 Tailwind 컨텍스트에서 처리되며,
+ * 색/간격 토큰은 두 앱이 공유하는 디자인 토큰(foreground/muted 등)에 의존한다.
+ */
+@layer components {
+  .markdown-viewer {
+    @apply text-sm leading-7 text-foreground;
+  }
+
+  .markdown-viewer h1 {
+    @apply mb-4 mt-0 text-3xl font-semibold tracking-normal;
+  }
+
+  .markdown-viewer h2 {
+    @apply mb-3 mt-8 border-b pb-2 text-2xl font-semibold tracking-normal;
+  }
+
+  .markdown-viewer h3 {
+    @apply mb-2 mt-6 text-xl font-semibold tracking-normal;
+  }
+
+  .markdown-viewer p {
+    @apply my-4;
+  }
+
+  .markdown-viewer ul,
+  .markdown-viewer ol {
+    @apply my-4 flex flex-col gap-2 pl-6;
+  }
+
+  .markdown-viewer ul {
+    @apply list-disc;
+  }
+
+  .markdown-viewer ol {
+    @apply list-decimal;
+  }
+
+  .markdown-viewer blockquote {
+    @apply my-4 border-l-4 border-primary/40 bg-muted/60 py-2 pl-4 text-muted-foreground;
+  }
+
+  .markdown-viewer pre {
+    @apply my-4 overflow-x-auto rounded-lg bg-muted p-4 text-xs;
+  }
+
+  .markdown-viewer code {
+    @apply rounded bg-muted px-1 py-0.5 text-xs;
+  }
+
+  .markdown-viewer pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .markdown-viewer table {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+
+  .markdown-viewer th,
+  .markdown-viewer td {
+    @apply border px-3 py-2 text-left align-top;
+  }
+
+  .markdown-viewer th {
+    @apply bg-muted font-medium;
+  }
+}

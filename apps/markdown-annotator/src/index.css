@@ -2,6 +2,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "@yoophi/markdown-annotation-react/styles.css";
 
 /* 공유 패키지의 Tailwind 클래스도 스캔하도록 명시(node_modules 기본 제외 회피). */
 @source "../../../packages/markdown-annotation-react/src";
@@ -136,69 +137,5 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
-  }
-}
-
-@layer components {
-  .markdown-viewer {
-    @apply text-sm leading-7 text-foreground;
-  }
-
-  .markdown-viewer h1 {
-    @apply mb-4 mt-0 text-3xl font-semibold tracking-normal;
-  }
-
-  .markdown-viewer h2 {
-    @apply mb-3 mt-8 border-b pb-2 text-2xl font-semibold tracking-normal;
-  }
-
-  .markdown-viewer h3 {
-    @apply mb-2 mt-6 text-xl font-semibold tracking-normal;
-  }
-
-  .markdown-viewer p {
-    @apply my-4;
-  }
-
-  .markdown-viewer ul,
-  .markdown-viewer ol {
-    @apply my-4 flex flex-col gap-2 pl-6;
-  }
-
-  .markdown-viewer ul {
-    @apply list-disc;
-  }
-
-  .markdown-viewer ol {
-    @apply list-decimal;
-  }
-
-  .markdown-viewer blockquote {
-    @apply my-4 border-l-4 border-primary/40 bg-muted/60 py-2 pl-4 text-muted-foreground;
-  }
-
-  .markdown-viewer pre {
-    @apply my-4 overflow-x-auto rounded-lg bg-muted p-4 text-xs;
-  }
-
-  .markdown-viewer code {
-    @apply rounded bg-muted px-1 py-0.5 text-xs;
-  }
-
-  .markdown-viewer pre code {
-    @apply bg-transparent p-0;
-  }
-
-  .markdown-viewer table {
-    @apply my-4 w-full border-collapse text-sm;
-  }
-
-  .markdown-viewer th,
-  .markdown-viewer td {
-    @apply border px-3 py-2 text-left align-top;
-  }
-
-  .markdown-viewer th {
-    @apply bg-muted font-medium;
   }
 }
