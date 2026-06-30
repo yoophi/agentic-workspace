@@ -1,4 +1,4 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Layout } from "react-resizable-panels";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
@@ -10,7 +10,6 @@ import {
   Folder,
   FolderGit2,
   FolderOpen,
-  FileText,
   GitBranch as GitBranchIcon,
   GitCommit,
   Loader2,
@@ -40,7 +39,6 @@ import {
   listWorktrees,
   repositoryKeys,
   type GitBranch,
-  type GitCommitFileChange,
   type GitCommitGraph,
   type GitGraphCommit,
   type GitGraphRef,
@@ -51,15 +49,20 @@ import {
   computeGitGraphRows,
   getMaxGraphLane,
   type GitGraphRow,
-  type GitGraphSegment,
 } from "@/features/history-tree/model/graph-layout";
+import {
+  CommitDetailView,
+  HistoryGraphView,
+  InfiniteLoadSentinel,
+  combineGitCommitGraphPages,
+  refsByTarget,
+} from "@yoophi/git-ui";
 
 type ChangesPanelProps = {
   selectedRepository?: Repository;
 };
 
 type HistoryView = "list" | "graph";
-type FileChangeView = "tree" | "list";
 type BranchGraphRefKind = "localBranch" | "remoteBranch";
 
 const CHANGES_LAYOUT_STORAGE_KEY = "repository-detail-columns-layout";
@@ -82,30 +85,6 @@ type BranchTreeRow =
       name: string;
       type: "branch";
     };
-
-type FileTreeRow =
-  | {
-      depth: number;
-      id: string;
-      isExpanded: boolean;
-      name: string;
-      path: string;
-      type: "folder";
-    }
-  | {
-      depth: number;
-      file: GitCommitFileChange;
-      id: string;
-      name: string;
-      type: "file";
-    };
-
-type FileTreeFolderNode = {
-  files: GitCommitFileChange[];
-  folders: Map<string, FileTreeFolderNode>;
-  name: string;
-  path: string;
-};
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -137,86 +116,6 @@ function loadColumnLayout(): Layout | undefined {
 
 function saveColumnLayout(layout: Layout) {
   localStorage.setItem(CHANGES_LAYOUT_STORAGE_KEY, JSON.stringify(layout));
-}
-
-function laneX(lane: number) {
-  return 10 + lane * 20;
-}
-
-function graphSegmentPath(segment: GitGraphSegment, rowHeight: number) {
-  const fromX = laneX(segment.fromLane);
-  const toX = laneX(segment.toLane);
-  const centerY = rowHeight / 2;
-
-  if (segment.type === "vertical") {
-    return `M ${fromX} 0 L ${toX} ${rowHeight}`;
-  }
-
-  if (segment.type === "vertical-top") {
-    return `M ${fromX} 0 L ${fromX} ${centerY}`;
-  }
-
-  if (segment.type === "vertical-bottom") {
-    return `M ${fromX} ${centerY} L ${fromX} ${rowHeight}`;
-  }
-
-  return `M ${fromX} ${centerY} C ${fromX} ${rowHeight}, ${toX} ${rowHeight}, ${toX} ${rowHeight}`;
-}
-
-function GraphCell({
-  maxLane,
-  row,
-  rowHeight,
-}: {
-  maxLane: number;
-  row?: GitGraphRow;
-  rowHeight: number;
-}) {
-  const width = 20 + (maxLane + 1) * 20;
-  const nodeX = row ? laneX(row.lane) : 10;
-  const centerY = rowHeight / 2;
-
-  return (
-    <svg aria-hidden className="block shrink-0" height={rowHeight} width={width}>
-      {row?.connections.map((segment, index) => (
-        <path
-          d={graphSegmentPath(segment, rowHeight)}
-          fill="none"
-          key={`${segment.type}:${segment.fromLane}:${segment.toLane}:${index}`}
-          stroke={segment.color}
-          strokeDasharray={segment.type.startsWith("merge") ? "4 3" : undefined}
-          strokeWidth="2"
-        />
-      ))}
-      {row ? (
-        row.nodeType === "head" ? (
-          <>
-            <circle cx={nodeX} cy={centerY} fill="none" r="6" stroke="currentColor" strokeWidth="2" />
-            <circle cx={nodeX} cy={centerY} fill={row.color} r="4" />
-          </>
-        ) : row.nodeType === "merge" ? (
-          <>
-            <circle cx={nodeX} cy={centerY} fill="none" r="5" stroke={row.color} strokeWidth="1.5" />
-            <circle cx={nodeX} cy={centerY} fill={row.color} r="3" />
-          </>
-        ) : (
-          <circle cx={nodeX} cy={centerY} fill={row.color} r="4" />
-        )
-      ) : null}
-    </svg>
-  );
-}
-
-function refsByTarget(refs: GitGraphRef[]) {
-  const result = new Map<string, GitGraphRef[]>();
-
-  for (const ref of refs) {
-    const existing = result.get(ref.target) ?? [];
-    existing.push(ref);
-    result.set(ref.target, existing);
-  }
-
-  return result;
 }
 
 function branchGraphRefKind(branch: GitBranch): BranchGraphRefKind {
@@ -328,293 +227,6 @@ function filterGraphByBranchControls(
   };
 }
 
-function combineGitCommitGraphPages(pages: GitCommitGraph[]) {
-  const [firstPage] = pages;
-
-  if (!firstPage) {
-    return undefined;
-  }
-
-  const commits: GitGraphCommit[] = [];
-  const commitHashes = new Set<string>();
-
-  for (const page of pages) {
-    for (const commit of page.commits) {
-      if (commitHashes.has(commit.hash)) {
-        continue;
-      }
-
-      commitHashes.add(commit.hash);
-      commits.push(commit);
-    }
-  }
-
-  const lastPage = pages[pages.length - 1] ?? firstPage;
-
-  return {
-    ...firstPage,
-    commits,
-    page: {
-      ...lastPage.page,
-      offset: 0,
-    },
-  };
-}
-
-function diffLineClassName(line: string) {
-  if (line.startsWith("+++") || line.startsWith("---")) {
-    return "bg-muted/70 text-muted-foreground";
-  }
-
-  if (line.startsWith("@@")) {
-    return "bg-blue-500/10 text-blue-700 dark:text-blue-300";
-  }
-
-  if (line.startsWith("+")) {
-    return "bg-green-500/15 text-green-800 dark:text-green-200";
-  }
-
-  if (line.startsWith("-")) {
-    return "bg-red-500/15 text-red-800 dark:text-red-200";
-  }
-
-  if (line.startsWith("diff --git") || line.startsWith("index ")) {
-    return "bg-muted/40 text-muted-foreground";
-  }
-
-  return "text-foreground";
-}
-
-function fileStatusClassName(status: string) {
-  const normalizedStatus = status.charAt(0).toUpperCase();
-
-  if (normalizedStatus === "A") {
-    return "border-green-500/30 bg-green-500/10 text-green-700 dark:text-green-300";
-  }
-
-  if (normalizedStatus === "M") {
-    return "border-yellow-500/30 bg-yellow-500/10 text-yellow-700 dark:text-yellow-300";
-  }
-
-  if (normalizedStatus === "D") {
-    return "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300";
-  }
-
-  if (normalizedStatus === "R") {
-    return "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300";
-  }
-
-  if (normalizedStatus === "C") {
-    return "border-purple-500/30 bg-purple-500/10 text-purple-700 dark:text-purple-300";
-  }
-
-  return "border-border bg-background text-muted-foreground";
-}
-
-type DiffLine = {
-  content: string;
-  newLineNumber?: number;
-  oldLineNumber?: number;
-};
-
-function parseHunkHeader(line: string) {
-  const match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-
-  if (!match) {
-    return null;
-  }
-
-  return {
-    oldLineNumber: Number.parseInt(match[1], 10),
-    newLineNumber: Number.parseInt(match[2], 10),
-  };
-}
-
-function parseDiffLines(content: string): DiffLine[] {
-  const lines = content ? content.split("\n") : ["No text diff available."];
-  let oldLineNumber = 0;
-  let newLineNumber = 0;
-
-  return lines.map((line) => {
-    const hunk = parseHunkHeader(line);
-
-    if (hunk) {
-      oldLineNumber = hunk.oldLineNumber;
-      newLineNumber = hunk.newLineNumber;
-      return { content: line };
-    }
-
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      return { content: line };
-    }
-
-    if (line.startsWith("+")) {
-      const currentNewLineNumber = newLineNumber;
-      newLineNumber += 1;
-
-      return {
-        content: line,
-        newLineNumber: currentNewLineNumber,
-      };
-    }
-
-    if (line.startsWith("-")) {
-      const currentOldLineNumber = oldLineNumber;
-      oldLineNumber += 1;
-
-      return {
-        content: line,
-        oldLineNumber: currentOldLineNumber,
-      };
-    }
-
-    if (
-      line.startsWith("diff --git") ||
-      line.startsWith("index ") ||
-      line.startsWith("new file mode ") ||
-      line.startsWith("deleted file mode ")
-    ) {
-      return { content: line };
-    }
-
-    const currentOldLineNumber = oldLineNumber;
-    const currentNewLineNumber = newLineNumber;
-    oldLineNumber += 1;
-    newLineNumber += 1;
-
-    return {
-      content: line,
-      oldLineNumber: currentOldLineNumber,
-      newLineNumber: currentNewLineNumber,
-    };
-  });
-}
-
-function DiffViewer({ content }: { content: string }) {
-  const lines = parseDiffLines(content);
-
-  return (
-    <pre className="max-h-96 overflow-auto rounded-md border bg-background font-mono text-xs leading-5">
-      {lines.map((line, index) => (
-        <div
-          className={`grid min-w-max grid-cols-[3.5rem_3.5rem_minmax(0,1fr)] whitespace-pre ${diffLineClassName(line.content)}`}
-          key={`${index}:${line.content}`}
-        >
-          <span className="select-none border-r px-2 text-right text-muted-foreground/70">
-            {line.oldLineNumber ?? ""}
-          </span>
-          <span className="select-none border-r px-2 text-right text-muted-foreground/70">
-            {line.newLineNumber ?? ""}
-          </span>
-          <span className="px-3">{line.content || " "}</span>
-        </div>
-      ))}
-    </pre>
-  );
-}
-
-function HistoryGraphView({
-  graph,
-  graphRefs,
-  graphRows,
-  hasNextPage,
-  isFetchingNextPage,
-  loadMoreRef,
-  maxGraphLane,
-  onSelectCommit,
-  selectedCommitHash,
-}: {
-  graph: GitCommitGraph;
-  graphRefs: Map<string, GitGraphRef[]>;
-  graphRows: Map<string, GitGraphRow>;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  loadMoreRef: RefObject<HTMLDivElement | null>;
-  maxGraphLane: number;
-  onSelectCommit: (commitHash: string) => void;
-  selectedCommitHash?: string;
-}) {
-  const rowHeight = graph.layoutHints.rowHeight || 32;
-
-  return (
-    <div className="overflow-hidden rounded-md border">
-      <div className="grid grid-cols-[auto_minmax(0,1fr)_9rem_12rem] border-b bg-muted/40 px-2 py-2 text-xs font-medium text-muted-foreground">
-        <span>Graph</span>
-        <span>Commit</span>
-        <span>Author</span>
-        <span>Date</span>
-      </div>
-      <div>
-        {graph.commits.map((commit) => (
-          <HistoryGraphRow
-            commit={commit}
-            graphRefs={graphRefs.get(commit.hash) ?? []}
-            graphRow={graphRows.get(commit.hash)}
-            isSelected={commit.hash === selectedCommitHash}
-            key={commit.hash}
-            maxGraphLane={maxGraphLane}
-            onSelectCommit={onSelectCommit}
-            rowHeight={rowHeight}
-          />
-        ))}
-      </div>
-      <div className="border-t px-3 py-2 text-xs text-muted-foreground">
-        <div ref={loadMoreRef} className="h-px w-px shrink-0" aria-hidden />
-        {graph.commits.length} / {graph.page.totalCount} commits loaded
-        {hasNextPage ? " · more commits available" : ""}
-        {isFetchingNextPage ? " · loading older commits" : ""}
-      </div>
-    </div>
-  );
-}
-
-function HistoryGraphRow({
-  commit,
-  graphRefs,
-  graphRow,
-  isSelected,
-  maxGraphLane,
-  onSelectCommit,
-  rowHeight,
-}: {
-  commit: GitGraphCommit;
-  graphRefs: GitGraphRef[];
-  graphRow?: GitGraphRow;
-  isSelected: boolean;
-  maxGraphLane: number;
-  onSelectCommit: (commitHash: string) => void;
-  rowHeight: number;
-}) {
-  return (
-    <button
-      aria-label={`Commit ${commit.shortHash} by ${commit.author}: ${commit.message}`}
-      className="grid w-full grid-cols-[auto_minmax(0,1fr)_9rem_12rem] items-center border-b px-2 text-left text-sm last:border-b-0 hover:bg-muted/50 data-[selected=true]:bg-muted"
-      data-selected={isSelected}
-      onClick={() => onSelectCommit(commit.hash)}
-      style={{ minHeight: rowHeight }}
-      type="button"
-    >
-      <GraphCell maxLane={maxGraphLane} row={graphRow} rowHeight={rowHeight} />
-      <span className="flex min-w-0 items-center gap-2 pr-2">
-        <span className="font-mono text-xs text-muted-foreground">{commit.shortHash}</span>
-        {graphRefs.map((ref) => (
-          <span
-            className="max-w-40 truncate rounded-sm border bg-background px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground"
-            key={`${ref.kind}:${ref.name}`}
-            title={ref.name}
-          >
-            {ref.kind === "tag" ? "tag:" : ""}
-            {ref.name}
-          </span>
-        ))}
-        <span className="min-w-0 truncate">{commit.message}</span>
-      </span>
-      <span className="truncate pr-2 text-xs text-muted-foreground">{commit.author}</span>
-      <span className="truncate font-mono text-xs text-muted-foreground">{commit.date}</span>
-    </button>
-  );
-}
-
 function getBranchFolderPaths(branches: GitBranch[]) {
   const folders = new Set<string>();
 
@@ -694,141 +306,13 @@ function buildBranchTreeRows(
   return rows;
 }
 
-function getFileFolderPaths(files: GitCommitFileChange[]) {
-  const folders = new Set<string>();
-
-  for (const file of files) {
-    const segments = file.path.split("/").filter(Boolean);
-    let folderPath = "";
-
-    for (const segment of segments.slice(0, -1)) {
-      folderPath = folderPath ? `${folderPath}/${segment}` : segment;
-      folders.add(folderPath);
-    }
-  }
-
-  return folders;
-}
-
-function createFileTreeFolderNode(name: string, path: string): FileTreeFolderNode {
-  return {
-    files: [],
-    folders: new Map(),
-    name,
-    path,
-  };
-}
-
-function buildFileTree(files: GitCommitFileChange[]) {
-  const root = createFileTreeFolderNode("", "");
-
-  for (const file of [...files].sort((a, b) => a.path.localeCompare(b.path))) {
-    const segments = file.path.split("/").filter(Boolean);
-
-    if (segments.length === 0) {
-      continue;
-    }
-
-    let current = root;
-
-    for (const segment of segments.slice(0, -1)) {
-      const folderPath = current.path ? `${current.path}/${segment}` : segment;
-      let child = current.folders.get(segment);
-
-      if (!child) {
-        child = createFileTreeFolderNode(segment, folderPath);
-        current.folders.set(segment, child);
-      }
-
-      current = child;
-    }
-
-    current.files.push(file);
-  }
-
-  return root;
-}
-
-function compressFileTreeFolder(node: FileTreeFolderNode) {
-  const names = [node.name];
-  let current = node;
-
-  while (current.files.length === 0 && current.folders.size === 1) {
-    const [next] = current.folders.values();
-
-    if (!next) {
-      break;
-    }
-
-    names.push(next.name);
-    current = next;
-  }
-
-  return {
-    name: names.join("/"),
-    node: current,
-  };
-}
-
-function appendFileTreeRows(
-  node: FileTreeFolderNode,
-  depth: number,
-  expandedFolders: ReadonlySet<string>,
-  rows: FileTreeRow[],
-) {
-  const folderNodes = [...node.folders.values()].sort((a, b) => a.name.localeCompare(b.name));
-
-  for (const folderNode of folderNodes) {
-    const compressedFolder = compressFileTreeFolder(folderNode);
-    const isExpanded = expandedFolders.has(compressedFolder.node.path);
-
-    rows.push({
-      depth,
-      id: `folder:${compressedFolder.node.path}`,
-      isExpanded,
-      name: compressedFolder.name,
-      path: compressedFolder.node.path,
-      type: "folder",
-    });
-
-    if (isExpanded) {
-      appendFileTreeRows(compressedFolder.node, depth + 1, expandedFolders, rows);
-    }
-  }
-
-  for (const file of [...node.files].sort((a, b) => a.path.localeCompare(b.path))) {
-    const segments = file.path.split("/").filter(Boolean);
-
-    rows.push({
-      depth,
-      file,
-      id: `file:${file.status}:${file.path}`,
-      name: segments[segments.length - 1] ?? file.path,
-      type: "file",
-    });
-  }
-}
-
-function buildFileTreeRows(
-  files: GitCommitFileChange[],
-  expandedFolders: ReadonlySet<string>,
-): FileTreeRow[] {
-  const rows: FileTreeRow[] = [];
-  appendFileTreeRows(buildFileTree(files), 0, expandedFolders, rows);
-
-  return rows;
-}
-
 export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   const [selectedCommitHash, setSelectedCommitHash] = useState<string>();
   const [selectedFilePath, setSelectedFilePath] = useState<string>();
   const [historyView, setHistoryView] = useState<HistoryView>("list");
-  const [fileChangeView, setFileChangeView] = useState<FileChangeView>("tree");
   const [expandedBranchFolders, setExpandedBranchFolders] = useState<Set<string>>(new Set());
-  const [expandedFileFolders, setExpandedFileFolders] = useState<Set<string>>(new Set());
   const [filteredBranchKeys, setFilteredBranchKeys] = useState<Set<string>>(new Set());
   const [hiddenBranchKeys, setHiddenBranchKeys] = useState<Set<string>>(new Set());
-  const commitLogLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const appInfo = useQuery({
     queryKey: ["app-info"],
     queryFn: getAppInfo,
@@ -911,7 +395,6 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
       getFileDiff(selectedRepository?.id ?? "", selectedCommitHash ?? "", selectedFilePath ?? ""),
   });
   const branchRows = buildBranchTreeRows(branchesQuery.data ?? [], expandedBranchFolders);
-  const fileRows = buildFileTreeRows(commitDetailQuery.data?.files ?? [], expandedFileFolders);
   const historyCommits = historyQuery.data?.pages.flatMap((page) => page.commits) ?? [];
   const rawGraphData = combineGitCommitGraphPages(graphQuery.data?.pages ?? []);
   const graphData = rawGraphData
@@ -947,61 +430,6 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   useEffect(() => {
     setExpandedBranchFolders(getBranchFolderPaths(branchesQuery.data ?? []));
   }, [branchesQuery.data]);
-
-  useEffect(() => {
-    setExpandedFileFolders(getFileFolderPaths(commitDetailQuery.data?.files ?? []));
-  }, [commitDetailQuery.data?.files]);
-
-  useEffect(() => {
-    const loadMoreElement = commitLogLoadMoreRef.current;
-
-    if (!loadMoreElement || !selectedRepository) {
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) {
-          return;
-        }
-
-        if (
-          historyView === "list" &&
-          historyQuery.hasNextPage &&
-          !historyQuery.isFetchingNextPage
-        ) {
-          void historyQuery.fetchNextPage();
-          return;
-        }
-
-        if (
-          historyView === "graph" &&
-          graphQuery.hasNextPage &&
-          !graphQuery.isFetchingNextPage
-        ) {
-          void graphQuery.fetchNextPage();
-        }
-      },
-      {
-        rootMargin: "240px 0px",
-      },
-    );
-
-    observer.observe(loadMoreElement);
-
-    return () => {
-      observer.disconnect();
-    };
-  }, [
-    graphQuery,
-    graphQuery.hasNextPage,
-    graphQuery.isFetchingNextPage,
-    historyQuery,
-    historyQuery.hasNextPage,
-    historyQuery.isFetchingNextPage,
-    historyView,
-    selectedRepository,
-  ]);
 
   function toggleBranchFolder(path: string) {
     setExpandedBranchFolders((current) => {
@@ -1049,19 +477,6 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     });
   }
 
-  function toggleFileFolder(path: string) {
-    setExpandedFileFolders((current) => {
-      const next = new Set(current);
-
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-
-      return next;
-    });
-  }
 
   const repositoryInfo = (
     <section className="flex h-full min-h-0 flex-col">
@@ -1342,7 +757,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             graphRows={graphRows}
             hasNextPage={graphQuery.hasNextPage}
             isFetchingNextPage={graphQuery.isFetchingNextPage}
-            loadMoreRef={commitLogLoadMoreRef}
+            onLoadMore={() => void graphQuery.fetchNextPage()}
             maxGraphLane={maxGraphLane}
             onSelectCommit={setSelectedCommitHash}
             selectedCommitHash={selectedCommitHash}
@@ -1385,7 +800,11 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
               </TableBody>
             </Table>
             <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-              <div ref={commitLogLoadMoreRef} className="h-px w-px shrink-0" aria-hidden />
+              <InfiniteLoadSentinel
+                hasNextPage={historyQuery.hasNextPage}
+                isFetchingNextPage={historyQuery.isFetchingNextPage}
+                onLoadMore={() => void historyQuery.fetchNextPage()}
+              />
               <span>
                 {historyCommits.length} /{" "}
                 {historyQuery.data?.pages[historyQuery.data.pages.length - 1]?.page.totalCount ??
@@ -1435,146 +854,15 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             <span>{getErrorMessage(commitDetailQuery.error)}</span>
           </p>
         ) : commitDetailQuery.data ? (
-          <div className="grid gap-4">
-            <div className="grid gap-1">
-              <p className="font-mono text-xs text-muted-foreground">
-                {commitDetailQuery.data.hash}
-              </p>
-              <h3 className="break-words text-sm font-medium">{commitDetailQuery.data.message}</h3>
-              <p className="text-sm text-muted-foreground">
-                {commitDetailQuery.data.author} · {commitDetailQuery.data.date}
-              </p>
-            </div>
-            <div className="grid gap-3">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">Changed files</h3>
-                <div className="flex rounded-md border p-0.5">
-                  <Button
-                    size="sm"
-                    variant={fileChangeView === "tree" ? "secondary" : "ghost"}
-                    onClick={() => setFileChangeView("tree")}
-                  >
-                    Tree
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant={fileChangeView === "list" ? "secondary" : "ghost"}
-                    onClick={() => setFileChangeView("list")}
-                  >
-                    List
-                  </Button>
-                </div>
-              </div>
-              {fileChangeView === "tree" ? (
-                <div className="overflow-hidden rounded-md border text-sm">
-                  {fileRows.map((row) =>
-                    row.type === "folder" ? (
-                      <button
-                        aria-expanded={row.isExpanded}
-                        className="flex h-8 w-full items-center gap-1 border-b px-2 text-left last:border-b-0 hover:bg-muted/50"
-                        key={row.id}
-                        onClick={() => toggleFileFolder(row.path)}
-                        style={{ paddingLeft: `${8 + row.depth * 18}px` }}
-                        type="button"
-                      >
-                        {row.isExpanded ? (
-                          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" />
-                        ) : (
-                          <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />
-                        )}
-                        {row.isExpanded ? (
-                          <FolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                        ) : (
-                          <Folder className="size-4 shrink-0 text-muted-foreground" />
-                        )}
-                        <span className="min-w-0 truncate text-muted-foreground">{row.name}</span>
-                      </button>
-                    ) : (
-                      <button
-                        className="flex h-8 w-full items-center gap-2 border-b px-2 text-left last:border-b-0 hover:bg-muted/50 data-[selected=true]:bg-muted"
-                        data-selected={row.file.path === selectedFilePath}
-                        key={row.id}
-                        onClick={() => setSelectedFilePath(row.file.path)}
-                        style={{ paddingLeft: `${28 + row.depth * 18}px` }}
-                        title={row.file.path}
-                        type="button"
-                      >
-                        <FileText className="size-4 shrink-0 text-muted-foreground" />
-                        <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                          {row.name}
-                        </span>
-                        <span
-                          className={`ml-auto shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] leading-none ${fileStatusClassName(row.file.status)}`}
-                        >
-                          {row.file.status}
-                        </span>
-                      </button>
-                    ),
-                  )}
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-20">Status</TableHead>
-                      <TableHead>File</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {commitDetailQuery.data.files.map((file) => {
-                      const isSelected = file.path === selectedFilePath;
-
-                      return (
-                        <TableRow
-                          className="cursor-pointer data-[selected=true]:bg-muted"
-                          data-selected={isSelected}
-                          key={`${file.status}:${file.path}`}
-                          onClick={() => setSelectedFilePath(file.path)}
-                        >
-                          <TableCell className="font-mono text-xs">
-                            <span
-                              className={`rounded-sm border px-1.5 py-0.5 text-[10px] leading-none ${fileStatusClassName(file.status)}`}
-                            >
-                              {file.status}
-                            </span>
-                          </TableCell>
-                          <TableCell className="max-w-0 truncate font-mono text-xs">
-                            {file.path}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
-              {!selectedFilePath ? (
-                <p className="text-sm text-muted-foreground">
-                  Select a changed file to inspect its diff.
-                </p>
-              ) : fileDiffQuery.isLoading ? (
-                <p className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <Loader2 className="size-4 animate-spin" />
-                  Loading diff
-                </p>
-              ) : fileDiffQuery.isError ? (
-                <p className="flex items-start gap-1.5 text-sm leading-5 text-red-600">
-                  <AlertCircle className="mt-0.5 size-4 shrink-0" />
-                  <span>{getErrorMessage(fileDiffQuery.error)}</span>
-                </p>
-              ) : fileDiffQuery.data?.isBinary ? (
-                <p className="text-sm text-muted-foreground">
-                  This file is binary and cannot be displayed as text diff.
-                </p>
-              ) : fileDiffQuery.data ? (
-                <div className="grid gap-2">
-                  {fileDiffQuery.data.isTruncated ? (
-                    <p className="text-xs text-muted-foreground">Large diff truncated for display.</p>
-                  ) : null}
-                  <DiffViewer content={fileDiffQuery.data.content} />
-                </div>
-              ) : null}
-            </div>
-          </div>
+          <CommitDetailView
+            commit={commitDetailQuery.data}
+            files={commitDetailQuery.data.files}
+            selectedFilePath={selectedFilePath}
+            onSelectFile={setSelectedFilePath}
+            diff={fileDiffQuery.data}
+            diffLoading={fileDiffQuery.isLoading}
+            diffError={fileDiffQuery.isError ? getErrorMessage(fileDiffQuery.error) : undefined}
+          />
         ) : null}
       </div>
     </section>

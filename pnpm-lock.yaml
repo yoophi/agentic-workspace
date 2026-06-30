@@ -162,6 +162,9 @@ importers:
       '@yoophi/git-graph':
         specifier: workspace:*
         version: link:../../packages/git-graph
+      '@yoophi/git-ui':
+        specifier: workspace:*
+        version: link:../../packages/git-ui
       '@yoophi/ui':
         specifier: workspace:*
         version: link:../../packages/ui

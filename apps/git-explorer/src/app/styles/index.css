@@ -1,3 +1,4 @@
 @import "@yoophi/ui/globals.css";
 
 @source "../../../../../packages/ui/src";
+@source "../../../../../packages/git-ui/src";

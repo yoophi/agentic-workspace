@@ -20,6 +20,7 @@
     "@tauri-apps/plugin-dialog": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "@yoophi/git-graph": "workspace:*",
+    "@yoophi/git-ui": "workspace:*",
     "@yoophi/ui": "workspace:*",
     "lucide-react": "^1.17.0",
     "react": "^19.1.0",
