@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Layout } from "react-resizable-panels";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
@@ -331,10 +331,9 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
       : ["repositories", "unselected", "branches"],
     queryFn: () => listBranches(selectedRepository?.id ?? ""),
   });
-  const branchRefs = branchHistoryRefs(
-    branchesQuery.data ?? [],
-    filteredBranchKeys,
-    hiddenBranchKeys,
+  const branchRefs = useMemo(
+    () => branchHistoryRefs(branchesQuery.data ?? [], filteredBranchKeys, hiddenBranchKeys),
+    [branchesQuery.data, filteredBranchKeys, hiddenBranchKeys],
   );
   const branchRefsSignature = `${branchRefs.includedRefs.join("\0")}\u0001${branchRefs.excludedRefs.join("\0")}`;
   const historyQuery = useInfiniteQuery({
@@ -394,15 +393,34 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     queryFn: () =>
       getFileDiff(selectedRepository?.id ?? "", selectedCommitHash ?? "", selectedFilePath ?? ""),
   });
-  const branchRows = buildBranchTreeRows(branchesQuery.data ?? [], expandedBranchFolders);
-  const historyCommits = historyQuery.data?.pages.flatMap((page) => page.commits) ?? [];
-  const rawGraphData = combineGitCommitGraphPages(graphQuery.data?.pages ?? []);
-  const graphData = rawGraphData
-    ? filterGraphByBranchControls(rawGraphData, filteredBranchKeys, hiddenBranchKeys)
-    : undefined;
-  const graphRows = graphData ? computeGitGraphRows(graphData.commits) : new Map<string, GitGraphRow>();
-  const maxGraphLane = getMaxGraphLane(graphRows);
-  const graphRefs = graphData ? refsByTarget(graphData.refs) : new Map<string, GitGraphRef[]>();
+  const branchRows = useMemo(
+    () => buildBranchTreeRows(branchesQuery.data ?? [], expandedBranchFolders),
+    [branchesQuery.data, expandedBranchFolders],
+  );
+  const historyCommits = useMemo(
+    () => historyQuery.data?.pages.flatMap((page) => page.commits) ?? [],
+    [historyQuery.data?.pages],
+  );
+  const rawGraphData = useMemo(
+    () => combineGitCommitGraphPages(graphQuery.data?.pages ?? []),
+    [graphQuery.data?.pages],
+  );
+  const graphData = useMemo(
+    () =>
+      rawGraphData
+        ? filterGraphByBranchControls(rawGraphData, filteredBranchKeys, hiddenBranchKeys)
+        : undefined,
+    [rawGraphData, filteredBranchKeys, hiddenBranchKeys],
+  );
+  const graphRows = useMemo(
+    () => (graphData ? computeGitGraphRows(graphData.commits) : new Map<string, GitGraphRow>()),
+    [graphData],
+  );
+  const maxGraphLane = useMemo(() => getMaxGraphLane(graphRows), [graphRows]);
+  const graphRefs = useMemo(
+    () => (graphData ? refsByTarget(graphData.refs) : new Map<string, GitGraphRef[]>()),
+    [graphData],
+  );
   const isRefreshing =
     worktreesQuery.isFetching ||
     branchesQuery.isFetching ||

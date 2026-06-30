@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   AlertCircle,
@@ -20,8 +20,6 @@ import { DiffViewer } from "./diff-viewer";
 
 type FileChangeView = "tree" | "list";
 
-const NEUTRAL_STATUS_CLASS = "border-border bg-background text-muted-foreground";
-
 export type CommitDetailViewProps = {
   /** 커밋 메타(해시/메시지/작성자·날짜). 없으면 헤더를 생략한다. */
   commit?: GitCommitDetail;
@@ -31,17 +29,11 @@ export type CommitDetailViewProps = {
   diff?: GitFileDiff;
   diffLoading?: boolean;
   diffError?: string | null;
-  /** Tree/List 토글 제공 여부(기본 true). false면 List 고정. */
-  enableTreeView?: boolean;
-  /** 파일 상태별 색상 배지 사용 여부(기본 true). */
-  showFileStatusColor?: boolean;
-  /** Diff 라인 번호 표시 여부(기본 true). */
-  showDiffLineNumbers?: boolean;
   /** Diff 뷰어 컨테이너 클래스 오버라이드(예: 최대 높이). */
   diffClassName?: string;
 };
 
-/** 커밋 상세 = 메타 헤더 + 변경 파일 목록(tree/list, 상태 색상) + 선택 파일 diff. */
+/** 커밋 상세 = 메타 헤더 + 변경 파일 목록(Tree/List, 상태 색상) + 선택 파일 diff. */
 export function CommitDetailView({
   commit,
   files,
@@ -50,14 +42,9 @@ export function CommitDetailView({
   diff,
   diffLoading = false,
   diffError,
-  enableTreeView = true,
-  showFileStatusColor = true,
-  showDiffLineNumbers = true,
   diffClassName,
 }: CommitDetailViewProps) {
-  const [fileChangeView, setFileChangeView] = useState<FileChangeView>(
-    enableTreeView ? "tree" : "list",
-  );
+  const [fileChangeView, setFileChangeView] = useState<FileChangeView>("tree");
   const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
@@ -76,10 +63,7 @@ export function CommitDetailView({
     });
   }
 
-  const effectiveView: FileChangeView = enableTreeView ? fileChangeView : "list";
-  const fileRows = buildFileTreeRows(files, expandedFolders);
-  const statusClass = (status: string) =>
-    showFileStatusColor ? fileStatusClassName(status) : NEUTRAL_STATUS_CLASS;
+  const fileRows = useMemo(() => buildFileTreeRows(files, expandedFolders), [files, expandedFolders]);
 
   return (
     <div className="grid gap-3">
@@ -96,21 +80,19 @@ export function CommitDetailView({
       <div className="grid gap-3">
         <div className="flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">Changed files</h3>
-          {enableTreeView ? (
-            <div className="flex rounded-md border p-0.5">
-              <ViewToggle active={effectiveView === "tree"} onClick={() => setFileChangeView("tree")}>
-                Tree
-              </ViewToggle>
-              <ViewToggle active={effectiveView === "list"} onClick={() => setFileChangeView("list")}>
-                List
-              </ViewToggle>
-            </div>
-          ) : null}
+          <div className="flex rounded-md border p-0.5">
+            <ViewToggle active={fileChangeView === "tree"} onClick={() => setFileChangeView("tree")}>
+              Tree
+            </ViewToggle>
+            <ViewToggle active={fileChangeView === "list"} onClick={() => setFileChangeView("list")}>
+              List
+            </ViewToggle>
+          </div>
         </div>
 
         {files.length === 0 ? (
           <p className="rounded-md border p-3 text-sm text-muted-foreground">No changed files.</p>
-        ) : effectiveView === "tree" ? (
+        ) : fileChangeView === "tree" ? (
           <div className="overflow-hidden rounded-md border text-sm">
             {fileRows.map((row) =>
               row.type === "folder" ? (
@@ -149,7 +131,7 @@ export function CommitDetailView({
                   <span
                     className={cn(
                       "ml-auto shrink-0 rounded-sm border px-1.5 py-0.5 font-mono text-[10px] leading-none",
-                      statusClass(row.file.status),
+                      fileStatusClassName(row.file.status),
                     )}
                   >
                     {row.file.status}
@@ -179,7 +161,7 @@ export function CommitDetailView({
                       <span
                         className={cn(
                           "rounded-sm border px-1.5 py-0.5 text-[10px] leading-none",
-                          statusClass(file.status),
+                          fileStatusClassName(file.status),
                         )}
                       >
                         {file.status}
@@ -214,11 +196,7 @@ export function CommitDetailView({
             {diff.isTruncated ? (
               <p className="text-xs text-muted-foreground">Large diff truncated for display.</p>
             ) : null}
-            <DiffViewer
-              className={diffClassName}
-              content={diff.content}
-              showLineNumbers={showDiffLineNumbers}
-            />
+            <DiffViewer className={diffClassName} content={diff.content} />
           </div>
         ) : null}
       </div>
