@@ -3,6 +3,9 @@
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 
+/* 공유 패키지의 Tailwind 클래스도 스캔하도록 명시(node_modules 기본 제외 회피). */
+@source "../../../packages/markdown-annotation-react/src";
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

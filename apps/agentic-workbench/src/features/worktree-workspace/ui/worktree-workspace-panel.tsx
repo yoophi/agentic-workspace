@@ -1,4 +1,3 @@
-import type { ElementType, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
@@ -14,15 +13,12 @@ import {
   GitPullRequestIcon,
   ListTreeIcon,
   Loader2Icon,
-  MessageSquareIcon,
   PencilLineIcon,
   RefreshCwIcon,
   SendIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   Group as ResizablePanelGroup,
   Panel as ResizablePanel,
@@ -31,7 +27,6 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Markdown } from "@/components/ui/markdown";
 import { Textarea } from "@/components/ui/textarea";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { getWorktreeChanges } from "@/entities/project/api/git-worktree-repository";
@@ -63,7 +58,6 @@ import {
   type GitGraphSegment,
 } from "@/features/worktree-workspace/model/git-graph-layout";
 import {
-  buildInlineAnnotationsByBlock,
   formatAnnotationsForAgent,
   isFullBlockAnnotation,
   parseMarkdownToBlocks,
@@ -74,7 +68,13 @@ import type {
   AnnotationType,
   MarkdownBlock,
 } from "@yoophi/markdown-annotation-core/types";
+import {
+  MarkdownViewer,
+  buildViewerAnnotationMaps,
+  getSelectionAnchors,
+} from "@yoophi/markdown-annotation-react";
 import { cn } from "@/lib/utils";
+import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type WorktreeWorkspacePanelProps = {
@@ -163,68 +163,6 @@ function formatDraftTargetRange(target: AnnotationDraftTarget) {
   }
 
   return `Selection lines ${first.startLine}-${last.endLine}`;
-}
-
-function getSelectionAnchors(root: HTMLElement | null): AnnotationAnchor[] {
-  const selection = window.getSelection();
-  if (!root || !selection || selection.isCollapsed || selection.rangeCount === 0) {
-    return [];
-  }
-
-  const range = selection.getRangeAt(0);
-  if (
-    !selection.anchorNode ||
-    !selection.focusNode ||
-    !root.contains(selection.anchorNode) ||
-    !root.contains(selection.focusNode)
-  ) {
-    return [];
-  }
-
-  const anchors: AnnotationAnchor[] = [];
-
-  for (const contentElement of Array.from(root.querySelectorAll<HTMLElement>("[data-block-content]"))) {
-      if (!range.intersectsNode(contentElement)) {
-        continue;
-      }
-
-      const blockElement = contentElement.closest<HTMLElement>("[data-block-id]");
-      const blockId = blockElement?.dataset.blockId;
-      if (!blockElement || !blockId) {
-        continue;
-      }
-
-      const text = contentElement.textContent ?? "";
-      const startOffset = contentElement.contains(range.startContainer)
-        ? getTextOffsetWithin(contentElement, range.startContainer, range.startOffset)
-        : 0;
-      const endOffset = contentElement.contains(range.endContainer)
-        ? getTextOffsetWithin(contentElement, range.endContainer, range.endOffset)
-        : text.length;
-      const normalizedStart = Math.max(0, Math.min(startOffset, text.length));
-      const normalizedEnd = Math.max(normalizedStart, Math.min(endOffset, text.length));
-      if (normalizedStart === normalizedEnd) {
-        continue;
-      }
-
-      anchors.push({
-        blockId,
-        startLine: Number(blockElement.dataset.startLine ?? 0),
-        endLine: Number(blockElement.dataset.endLine ?? 0),
-        startOffset: normalizedStart,
-        endOffset: normalizedEnd,
-        selectedText: text.slice(normalizedStart, normalizedEnd),
-      });
-    }
-
-  return anchors;
-}
-
-function getTextOffsetWithin(root: Node, target: Node, targetOffset: number) {
-  const range = document.createRange();
-  range.selectNodeContents(root);
-  range.setEnd(target, targetOffset);
-  return range.toString().length;
 }
 
 export function WorktreeWorkspacePanel({
@@ -970,6 +908,7 @@ function MarkdownWorkspaceTab({
   const [draftComment, setDraftComment] = useState("");
   const [selectionText, setSelectionText] = useState("");
   const [selectionAnchors, setSelectionAnchors] = useState<AnnotationAnchor[]>([]);
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const filesQuery = useQuery({
     queryKey: worktreeFileQueryKeys.list(worktree.path),
     queryFn: () => listWorktreeFiles(worktree.path),
@@ -997,16 +936,21 @@ function MarkdownWorkspaceTab({
   const annotationPrompt = selectedFilePath
     ? formatAnnotationsForAgent(selectedFilePath, annotations, blocks)
     : "";
-  const inlineAnnotationsByBlock = useMemo(
-    () => buildInlineAnnotationsByBlock(annotations, blocks),
+  const viewerMaps = useMemo(
+    () => buildViewerAnnotationMaps(annotations, blocks),
     [annotations, blocks],
   );
 
-  function selectMarkdownFile(path: string) {
-    setSelectedFilePath(path);
+  function resetDraftState() {
     setDraftTarget(null);
     setDraftComment("");
     setDraftType("note");
+    setEditingAnnotationId(null);
+  }
+
+  function selectMarkdownFile(path: string) {
+    setSelectedFilePath(path);
+    resetDraftState();
     resetSelectionState();
   }
 
@@ -1027,6 +971,30 @@ function MarkdownWorkspaceTab({
       return;
     }
 
+    const comment = draftComment.trim();
+
+    // 편집 모드: 기존 annotation(그룹 포함)의 comment/type만 갱신한다.
+    if (editingAnnotationId) {
+      setAnnotationsByFile((current) => {
+        const fileAnnotations = current[selectedFilePath] ?? [];
+        const editing = fileAnnotations.find((annotation) => annotation.id === editingAnnotationId);
+        const editingGroupId = editing?.groupId;
+
+        return {
+          ...current,
+          [selectedFilePath]: fileAnnotations.map((annotation) =>
+            annotation.id === editingAnnotationId ||
+            (editingGroupId !== undefined && annotation.groupId === editingGroupId)
+              ? { ...annotation, comment, type: draftType }
+              : annotation,
+          ),
+        };
+      });
+      resetDraftState();
+      resetSelectionState();
+      return;
+    }
+
     const createdAt = new Date().toISOString();
     const groupId =
       draftTarget.kind === "selection" && draftTarget.anchors.length > 1
@@ -1038,7 +1006,7 @@ function MarkdownWorkspaceTab({
             createAnnotationFromAnchor({
               anchor: fullBlockAnchor(draftTarget.block),
               block: draftTarget.block,
-              comment: draftComment.trim(),
+              comment,
               createdAt,
               fileName: selectedFilePath,
               type: draftType,
@@ -1047,7 +1015,7 @@ function MarkdownWorkspaceTab({
         : draftTarget.anchors.map((anchor) =>
             createAnnotationFromAnchor({
               anchor,
-              comment: draftComment.trim(),
+              comment,
               createdAt,
               fileName: selectedFilePath,
               groupId,
@@ -1059,10 +1027,59 @@ function MarkdownWorkspaceTab({
       ...current,
       [selectedFilePath]: [...(current[selectedFilePath] ?? []), ...nextAnnotations],
     }));
-    setDraftTarget(null);
-    setDraftComment("");
-    setDraftType("note");
+    resetDraftState();
     resetSelectionState();
+  }
+
+  function requestBlockComment(block: MarkdownBlock) {
+    setEditingAnnotationId(null);
+    setDraftTarget({ kind: "block", block });
+    setDraftType("note");
+    setDraftComment("");
+  }
+
+  // 전체 블록 delete 토글: 이미 있으면 취소, 없으면 즉시 추가(부록 B-2.7 결함 해소).
+  function toggleBlockDelete(block: MarkdownBlock) {
+    if (!selectedFilePath) {
+      return;
+    }
+
+    const existing = annotations.find(
+      (annotation) => annotation.type === "delete" && isFullBlockAnnotation(annotation, block),
+    );
+    if (existing) {
+      removeAnnotation(existing.id);
+      return;
+    }
+
+    const annotation = createAnnotationFromAnchor({
+      anchor: fullBlockAnchor(block),
+      block,
+      comment: "",
+      createdAt: new Date().toISOString(),
+      fileName: selectedFilePath,
+      type: "delete",
+    });
+    setAnnotationsByFile((current) => ({
+      ...current,
+      [selectedFilePath]: [...(current[selectedFilePath] ?? []), annotation],
+    }));
+  }
+
+  function editInlineAnnotation(annotationId: string) {
+    const annotation = annotations.find((candidate) => candidate.id === annotationId);
+    if (!annotation) {
+      return;
+    }
+
+    setEditingAnnotationId(annotation.id);
+    setDraftType(annotation.type);
+    setDraftComment(annotation.comment);
+    setDraftTarget({
+      kind: "selection",
+      anchors: [annotation.anchor],
+      text: annotation.selectedText,
+    });
   }
 
   function removeAnnotation(annotationId: string) {
@@ -1206,24 +1223,20 @@ function MarkdownWorkspaceTab({
               />
             ) : previewQuery.data ? (
               <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
-	                <div className="grid gap-3">
-	                  {blocks.map((block) => (
-	                    <MarkdownAnnotationBlock
-	                      key={block.id}
-	                      block={block}
-	                      annotations={annotations.filter(
-	                        (annotation) => annotation.anchor.blockId === block.id,
-	                      )}
-	                      inlineAnnotations={inlineAnnotationsByBlock.get(block.id) ?? []}
-	                      onAnnotate={(type) => {
-	                        setDraftTarget({ kind: "block", block });
-	                        setDraftType(type);
-	                        setDraftComment("");
-	                      }}
-	                      onRemoveAnnotation={removeAnnotation}
-	                    />
-	                  ))}
-	                </div>
+                <div className="min-w-0">
+                  <MarkdownViewer
+                    blocks={blocks}
+                    components={markdownViewerComponents}
+                    annotatedBlockIds={viewerMaps.annotatedBlockIds}
+                    deletedBlockIds={viewerMaps.deletedBlockIds}
+                    inlineAnnotationsByBlock={viewerMaps.inlineAnnotationsByBlock}
+                    noteAnnotationsByBlock={viewerMaps.noteAnnotationsByBlock}
+                    onCancelInlineAnnotation={removeAnnotation}
+                    onEditInlineAnnotation={editInlineAnnotation}
+                    onRequestBlockComment={requestBlockComment}
+                    onRequestBlockDelete={toggleBlockDelete}
+                  />
+                </div>
                 <aside className="grid content-start gap-3">
                   <div className="rounded-md border p-3">
                     <div className="flex items-center justify-between gap-2">
@@ -1381,15 +1394,26 @@ function MarkdownWorkspaceTab({
 	                                  Lines {annotation.anchor.startLine}-{annotation.anchor.endLine}
 	                                </p>
 	                              </div>
-                              <Button
-                                type="button"
-                                size="icon-xs"
-                                variant="ghost"
-                                aria-label="Annotation 삭제"
-                                onClick={() => removeAnnotation(annotation.id)}
-                              >
-                                <Trash2Icon />
-                              </Button>
+                              <div className="flex shrink-0 items-center gap-1">
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="Annotation 편집"
+                                  onClick={() => editInlineAnnotation(annotation.id)}
+                                >
+                                  <PencilLineIcon />
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon-xs"
+                                  variant="ghost"
+                                  aria-label="Annotation 삭제"
+                                  onClick={() => removeAnnotation(annotation.id)}
+                                >
+                                  <Trash2Icon />
+                                </Button>
+                              </div>
 	                            </div>
 	                            <p className="mt-2 line-clamp-3 whitespace-pre-wrap break-words text-xs text-muted-foreground">
 	                              {annotation.selectedText}
@@ -1474,236 +1498,6 @@ function FileTreeRowButton({
       ) : null}
     </button>
   );
-}
-
-function MarkdownAnnotationBlock({
-  block,
-  annotations,
-  inlineAnnotations,
-  onAnnotate,
-  onRemoveAnnotation,
-}: {
-  block: MarkdownBlock;
-  annotations: AnnotationDraft[];
-  inlineAnnotations: AnnotationDraft[];
-  onAnnotate: (type: AnnotationType) => void;
-  onRemoveAnnotation: (annotationId: string) => void;
-}) {
-  const hasAnnotations = annotations.length > 0;
-  const deleted = annotations.some((annotation) => isFullBlockAnnotation(annotation, block) && annotation.type === "delete");
-  const noteAnnotations = annotations.filter((annotation) => annotation.type === "note");
-
-  return (
-    <section
-      data-block-id={block.id}
-      data-start-line={block.startLine}
-      data-end-line={block.endLine}
-      className={cn(
-        "group/markdown-block rounded-md border bg-background p-3 transition-colors",
-        hasAnnotations && "border-primary/30 bg-primary/5",
-        deleted && "border-destructive/30 bg-destructive/5",
-      )}
-    >
-      <div className="flex items-start gap-3">
-        <div
-          className={cn(
-            "min-w-0 flex-1",
-            deleted && "text-destructive line-through decoration-destructive decoration-2",
-          )}
-        >
-          <MarkdownBlockContent block={block} inlineAnnotations={inlineAnnotations} />
-        </div>
-        <div className="flex shrink-0 items-center gap-1 opacity-0 transition-opacity group-hover/markdown-block:opacity-100 group-focus-within/markdown-block:opacity-100">
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Note annotation 추가"
-            onClick={() => onAnnotate("note")}
-          >
-            <MessageSquareIcon />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Delete annotation 추가"
-            onClick={() => onAnnotate("delete")}
-          >
-            <Trash2Icon />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label="Change request annotation 추가"
-            onClick={() => onAnnotate("change-request")}
-          >
-            <PencilLineIcon />
-          </Button>
-        </div>
-      </div>
-      {noteAnnotations.length > 0 ? (
-        <div className="mt-3 grid gap-2 border-t pt-3">
-          {noteAnnotations.map((annotation) => (
-            <div
-              key={annotation.id}
-              className="flex items-start justify-between gap-2 rounded-md bg-background px-2 py-1.5 text-sm"
-            >
-              <div className="min-w-0">
-                <Badge variant="outline">{annotation.type}</Badge>
-                <p className="mt-1 break-words text-muted-foreground">{annotation.comment}</p>
-              </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Annotation 삭제"
-                onClick={() => onRemoveAnnotation(annotation.id)}
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {annotations.length > 0 && noteAnnotations.length === 0 ? (
-        <div className="mt-3 grid gap-2 border-t pt-3">
-          {annotations.map((annotation) => (
-            <div
-              key={annotation.id}
-              className="flex items-start justify-between gap-2 rounded-md bg-background px-2 py-1.5 text-sm"
-            >
-              <div className="min-w-0">
-                <Badge variant={annotation.type === "delete" ? "destructive" : "outline"}>
-                  {annotation.type}
-                </Badge>
-                {annotation.comment ? (
-                  <p className="mt-1 break-words text-muted-foreground">{annotation.comment}</p>
-                ) : null}
-              </div>
-              <Button
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                aria-label="Annotation 삭제"
-                onClick={() => onRemoveAnnotation(annotation.id)}
-              >
-                <Trash2Icon />
-              </Button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-function MarkdownBlockContent({
-  block,
-  inlineAnnotations,
-}: {
-  block: MarkdownBlock;
-  inlineAnnotations: AnnotationDraft[];
-}) {
-  const content = (
-    <AnnotatedInlineText annotations={inlineAnnotations}>{block.content}</AnnotatedInlineText>
-  );
-
-  if (block.type === "heading") {
-    const Tag = `h${block.level ?? 1}` as ElementType;
-    return <Tag data-block-content>{content}</Tag>;
-  }
-
-  if (block.type === "code") {
-    return (
-      <pre data-block-content>
-        <code>{content}</code>
-      </pre>
-    );
-  }
-
-  if (block.type === "hr") {
-    return (
-      <div data-block-content>
-        <hr />
-      </div>
-    );
-  }
-
-  if (block.type === "paragraph" || block.type === "blockquote" || block.type === "list-item") {
-    return (
-      <div data-block-content>
-        {inlineAnnotations.length > 0 ? (
-          content
-        ) : (
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.rawContent}</ReactMarkdown>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div data-block-content>
-      <Markdown>{block.rawContent}</Markdown>
-    </div>
-  );
-}
-
-function AnnotatedInlineText({
-  annotations,
-  children,
-}: {
-  annotations: AnnotationDraft[];
-  children: string;
-}) {
-  const sortedAnnotations = [...annotations]
-    .filter(
-      (annotation) =>
-        annotation.anchor.startOffset !== undefined &&
-        annotation.anchor.endOffset !== undefined &&
-        annotation.anchor.endOffset > annotation.anchor.startOffset,
-    )
-    .sort((left, right) => (left.anchor.startOffset ?? 0) - (right.anchor.startOffset ?? 0));
-  const segments: ReactNode[] = [];
-  let cursor = 0;
-
-  for (const annotation of sortedAnnotations) {
-    const startOffset = Math.max(0, Math.min(annotation.anchor.startOffset ?? 0, children.length));
-    const endOffset = Math.max(startOffset, Math.min(annotation.anchor.endOffset ?? startOffset, children.length));
-    if (startOffset < cursor || startOffset === endOffset) {
-      continue;
-    }
-
-    if (cursor < startOffset) {
-      segments.push(children.slice(cursor, startOffset));
-    }
-
-    segments.push(
-      <mark
-        key={annotation.id}
-        className={cn(
-          "rounded-sm px-0.5",
-          annotation.type === "delete" &&
-            "bg-transparent text-destructive line-through decoration-destructive decoration-2",
-          annotation.type === "change-request" && "bg-sky-100 text-foreground",
-          annotation.type === "note" && "bg-yellow-200 text-foreground",
-          annotation.type === "question" && "bg-violet-100 text-foreground",
-          annotation.type === "approve" && "bg-emerald-100 text-foreground",
-        )}
-        title={annotation.comment || annotation.type}
-      >
-        {children.slice(startOffset, endOffset)}
-      </mark>,
-    );
-    cursor = endOffset;
-  }
-
-  if (cursor < children.length) {
-    segments.push(children.slice(cursor));
-  }
-
-  return <>{segments}</>;
 }
 
 function PlaceholderWorkspaceTab({
