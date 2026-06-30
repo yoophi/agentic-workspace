@@ -242,3 +242,44 @@ impl GitCommitDetail {
         }
     }
 }
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitChangedFileGroup {
+    Staged,
+    Unstaged,
+    Untracked,
+    Conflicted,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitChangedFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub staged_status: Option<String>,
+    pub unstaged_status: Option<String>,
+    pub group: GitChangedFileGroup,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeChanges {
+    pub working_directory: String,
+    pub files: Vec<GitChangedFile>,
+    pub staged_count: usize,
+    pub unstaged_count: usize,
+    pub untracked_count: usize,
+    pub conflicted_count: usize,
+}
+
+/// 미커밋(working-tree) 파일의 diff. commit `GitFileDiff`와 필드 규약을 맞춰
+/// (commit_hash 없음) 공유 `DiffViewer`가 동일하게 소비할 수 있게 한다.
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorktreeFileDiff {
+    pub path: String,
+    pub content: String,
+    pub is_binary: bool,
+    pub is_truncated: bool,
+}

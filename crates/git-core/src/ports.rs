@@ -1,4 +1,7 @@
-use crate::domain::{GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff};
+use crate::domain::{
+    GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff, GitWorktreeChanges,
+    GitWorktreeFileDiff,
+};
 
 /// working_directory(path) 기반 Git history/graph/detail/diff 조회 포트.
 /// repositoryId 같은 앱별 식별자는 소비 앱(facade)에서 path로 변환해 전달한다.
@@ -30,4 +33,11 @@ pub trait GitHistoryReader {
         commit_hash: &str,
         file_path: &str,
     ) -> Result<GitFileDiff, String>;
+}
+
+/// working_directory(path) 기반 미커밋(working-tree) status/diff 조회 포트.
+/// `git status --porcelain` 파싱과 `git diff`(+`--cached`)를 추상화한다.
+pub trait GitWorktreeStatusReader {
+    fn status(&self, repository_path: &str) -> Result<GitWorktreeChanges, String>;
+    fn diff(&self, repository_path: &str, file_path: &str) -> Result<GitWorktreeFileDiff, String>;
 }

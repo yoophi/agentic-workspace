@@ -10,9 +10,10 @@ pub mod git_cli;
 pub mod ports;
 
 pub use domain::{
-    GitCommitDetail, GitCommitFileChange, GitCommitGraph, GitCommitHistory, GitCommitPage,
-    GitCommitSummary, GitFileDiff, GitGraphCommit, GitGraphLayoutHints, GitGraphPage, GitGraphRef,
-    GitGraphRefKind,
+    GitChangedFile, GitChangedFileGroup, GitCommitDetail, GitCommitFileChange, GitCommitGraph,
+    GitCommitHistory, GitCommitPage, GitCommitSummary, GitFileDiff, GitGraphCommit,
+    GitGraphLayoutHints, GitGraphPage, GitGraphRef, GitGraphRefKind, GitWorktreeChanges,
+    GitWorktreeFileDiff,
 };
-pub use git_cli::{git_error_message, GitCliHistoryReader};
-pub use ports::GitHistoryReader;
+pub use git_cli::{git_error_message, GitCliHistoryReader, GitCliWorktreeStatusReader};
+pub use ports::{GitHistoryReader, GitWorktreeStatusReader};
