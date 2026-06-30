@@ -306,6 +306,43 @@ sequenceDiagram
 - cross-app 재사용 코드가 `packages/*` 또는 명확한 app-local feature로 정리된다.
 - Storybook에서 각 공용 컴포넌트가 독립 검증된다.
 
+### 7단계: Cross-app auto reload
+
+`agentic-workbench`, `git-explorer`, `markdown-annotator`는 열린 작업 대상이 외부에서
+변경되었을 때 3초 이내에 최신 상태를 반영한다. 세 앱이 같은 정책을 쓰도록 순수
+refresh helper는 `packages/workspace-auto-refresh`에 둔다.
+
+```mermaid
+flowchart LR
+  Core["packages/workspace-auto-refresh<br/>interval · scope key · stale selection"]
+  AW["agentic-workbench<br/>worktree file/git/markdown panes"]
+  GE["git-explorer<br/>repository changes panel"]
+  MA["markdown-annotator<br/>active markdown document"]
+
+  Core --> AW
+  Core --> GE
+  Core --> MA
+```
+
+구현 기준:
+
+- 공통 interval은 3초이며 window focus 복귀 시에도 갱신한다.
+- `agentic-workbench`는 active `worktree.path` query만 갱신한다.
+- `git-explorer`는 selected repository query만 갱신하고 기존 repository watcher
+  invalidation을 유지한다.
+- `markdown-annotator`는 Tauri에서 열린 active markdown file만 다시 읽는다.
+- refresh 실패 시 마지막 성공 데이터를 유지하고 stale/error 상태를 표시한다.
+- 선택 파일/commit/document가 refresh 후에도 유효하면 선택과 scroll 맥락을 유지한다.
+- 선택 대상이 사라지면 stale 상태로 표시하고 재선택 또는 retry 경로를 제공한다.
+
+완료 기준:
+
+- 파일 변경은 `agentic-workbench` file/markdown pane과 `markdown-annotator` preview에
+  3초 이내 반영된다.
+- commit/branch/ref 변경은 `agentic-workbench` Git pane과 `git-explorer` changes panel에
+  3초 이내 반영된다.
+- 세 앱이 app-to-app import 없이 `packages/workspace-auto-refresh`만 공유한다.
+
 ## 테스트 및 검증
 
 - `ProjectWorktreeSessionPage` Storybook story 추가/수정
@@ -315,6 +352,10 @@ sequenceDiagram
 - resize interaction은 Playwright 또는 Storybook interaction test로 확인
 - Tauri command는 path/repository 식별 실패 case 테스트
 - markdown annotation formatter는 기존 테스트 유지 및 agentic-workbench 연동 case 추가
+- auto reload helper: `pnpm --filter @yoophi/workspace-auto-refresh test`
+- workbench: `pnpm --filter @yoophi/agentic-workbench check-types && pnpm --filter @yoophi/agentic-workbench test`
+- git-explorer: `pnpm --filter @yoophi/git-explorer check-types && pnpm build-storybook:git`
+- markdown-annotator: `pnpm --filter @yoophi/markdown-annotator check-types && pnpm --filter @yoophi/markdown-annotator test`
 
 ## 리스크와 결정 필요 사항
 

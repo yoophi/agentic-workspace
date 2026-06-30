@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@yoophi/workspace-auto-refresh": ["./src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

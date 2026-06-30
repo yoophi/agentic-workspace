@@ -23,6 +23,7 @@
     "@vitejs/plugin-react": "^5.0.0",
     "@yoophi/markdown-annotation-core": "workspace:*",
     "@yoophi/markdown-annotation-react": "workspace:*",
+    "@yoophi/workspace-auto-refresh": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^1.21.0",
@@ -44,6 +45,7 @@
     "@types/node": "^26.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@vitest/coverage-v8": "4.1.9",
     "storybook": "^10.4.6",
     "typescript": "^5.6.0",
     "vitest": "^4.1.9"

@@ -22,6 +22,7 @@
     "@yoophi/git-graph": "workspace:*",
     "@yoophi/git-ui": "workspace:*",
     "@yoophi/ui": "workspace:*",
+    "@yoophi/workspace-auto-refresh": "workspace:*",
     "lucide-react": "^1.17.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

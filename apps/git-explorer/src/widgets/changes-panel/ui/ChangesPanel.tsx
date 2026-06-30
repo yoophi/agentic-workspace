@@ -57,6 +57,11 @@ import {
   combineGitCommitGraphPages,
   refsByTarget,
 } from "@yoophi/git-ui";
+import {
+  autoRefreshQueryOptions,
+  findStaleCommitSelection,
+  type StaleSelection,
+} from "@yoophi/workspace-auto-refresh";
 
 type ChangesPanelProps = {
   selectedRepository?: Repository;
@@ -313,6 +318,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   const [expandedBranchFolders, setExpandedBranchFolders] = useState<Set<string>>(new Set());
   const [filteredBranchKeys, setFilteredBranchKeys] = useState<Set<string>>(new Set());
   const [hiddenBranchKeys, setHiddenBranchKeys] = useState<Set<string>>(new Set());
+  const [staleCommitSelection, setStaleCommitSelection] = useState<StaleSelection | null>(null);
   const appInfo = useQuery({
     queryKey: ["app-info"],
     queryFn: getAppInfo,
@@ -323,6 +329,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
       ? repositoryKeys.worktrees(selectedRepository.id)
       : ["repositories", "unselected", "worktrees"],
     queryFn: () => listWorktrees(selectedRepository?.id ?? ""),
+    ...autoRefreshQueryOptions,
   });
   const branchesQuery = useQuery({
     enabled: Boolean(selectedRepository),
@@ -330,12 +337,12 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
       ? repositoryKeys.branches(selectedRepository.id)
       : ["repositories", "unselected", "branches"],
     queryFn: () => listBranches(selectedRepository?.id ?? ""),
+    ...autoRefreshQueryOptions,
   });
   const branchRefs = useMemo(
     () => branchHistoryRefs(branchesQuery.data ?? [], filteredBranchKeys, hiddenBranchKeys),
     [branchesQuery.data, filteredBranchKeys, hiddenBranchKeys],
   );
-  const branchRefsSignature = `${branchRefs.includedRefs.join("\0")}\u0001${branchRefs.excludedRefs.join("\0")}`;
   const historyQuery = useInfiniteQuery({
     enabled: Boolean(selectedRepository),
     queryKey: selectedRepository
@@ -355,6 +362,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     initialPageParam: 0,
     getNextPageParam: (lastPage) =>
       lastPage.page.hasMore ? lastPage.page.offset + lastPage.commits.length : undefined,
+    ...autoRefreshQueryOptions,
   });
   const graphQuery = useInfiniteQuery({
     enabled: Boolean(selectedRepository),
@@ -375,6 +383,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
     initialPageParam: 0,
     getNextPageParam: (lastPage) =>
       lastPage.page.hasMore ? lastPage.page.offset + lastPage.commits.length : undefined,
+    ...autoRefreshQueryOptions,
   });
   const commitDetailQuery = useQuery({
     enabled: Boolean(selectedRepository && selectedCommitHash),
@@ -383,6 +392,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
         ? repositoryKeys.commitDetail(selectedRepository.id, selectedCommitHash)
         : ["repositories", "unselected", "commits", "unselected"],
     queryFn: () => getCommitDetail(selectedRepository?.id ?? "", selectedCommitHash ?? ""),
+    ...autoRefreshQueryOptions,
   });
   const fileDiffQuery = useQuery({
     enabled: Boolean(selectedRepository && selectedCommitHash && selectedFilePath),
@@ -392,6 +402,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
         : ["repositories", "unselected", "commits", "unselected", "files", "unselected", "diff"],
     queryFn: () =>
       getFileDiff(selectedRepository?.id ?? "", selectedCommitHash ?? "", selectedFilePath ?? ""),
+    ...autoRefreshQueryOptions,
   });
   const branchRows = useMemo(
     () => buildBranchTreeRows(branchesQuery.data ?? [], expandedBranchFolders),
@@ -432,6 +443,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   useEffect(() => {
     setSelectedCommitHash(undefined);
     setSelectedFilePath(undefined);
+    setStaleCommitSelection(null);
     setFilteredBranchKeys(new Set());
     setHiddenBranchKeys(new Set());
   }, [selectedRepository?.id]);
@@ -441,13 +453,33 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
   }, [selectedCommitHash]);
 
   useEffect(() => {
-    setSelectedCommitHash(undefined);
-    setSelectedFilePath(undefined);
-  }, [branchRefsSignature]);
-
-  useEffect(() => {
     setExpandedBranchFolders(getBranchFolderPaths(branchesQuery.data ?? []));
   }, [branchesQuery.data]);
+
+  useEffect(() => {
+    if (!selectedCommitHash) {
+      setStaleCommitSelection(null);
+      return;
+    }
+
+    const availableCommitHashes = new Set<string>();
+    for (const commit of historyCommits) {
+      availableCommitHashes.add(commit.hash);
+    }
+    for (const commit of graphData?.commits ?? []) {
+      availableCommitHashes.add(commit.hash);
+    }
+
+    const staleSelection = findStaleCommitSelection({
+      selectedCommitHash,
+      availableCommitHashes,
+      reason: "history-rewritten",
+    });
+    setStaleCommitSelection(staleSelection);
+    if (staleSelection) {
+      setSelectedFilePath(undefined);
+    }
+  }, [graphData?.commits, historyCommits, selectedCommitHash]);
 
   function toggleBranchFolder(path: string) {
     setExpandedBranchFolders((current) => {
@@ -513,26 +545,38 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             </p>
           </div>
         </div>
-        <Button
-          aria-label="Refresh repository data"
-          disabled={!selectedRepository || isRefreshing}
-          size="icon-sm"
-          variant="outline"
-          onClick={() => {
-            void worktreesQuery.refetch();
-            void branchesQuery.refetch();
-            void historyQuery.refetch();
-            void graphQuery.refetch();
-            if (selectedCommitHash) {
-              void commitDetailQuery.refetch();
-            }
-            if (selectedFilePath) {
-              void fileDiffQuery.refetch();
-            }
-          }}
-        >
-          {isRefreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          {isRefreshing ? (
+            <span className="rounded-sm border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              Refreshing
+            </span>
+          ) : null}
+          {staleCommitSelection ? (
+            <span className="rounded-sm border border-red-300 px-1.5 py-0.5 text-[10px] leading-none text-red-600">
+              Stale commit
+            </span>
+          ) : null}
+          <Button
+            aria-label="Refresh repository data"
+            disabled={!selectedRepository || isRefreshing}
+            size="icon-sm"
+            variant="outline"
+            onClick={() => {
+              void worktreesQuery.refetch();
+              void branchesQuery.refetch();
+              void historyQuery.refetch();
+              void graphQuery.refetch();
+              if (selectedCommitHash) {
+                void commitDetailQuery.refetch();
+              }
+              if (selectedFilePath) {
+                void fileDiffQuery.refetch();
+              }
+            }}
+          >
+            {isRefreshing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          </Button>
+        </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">
         {!selectedRepository ? (
@@ -724,6 +768,19 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             </p>
           </div>
         </div>
+        <div className="flex items-center gap-2">
+          {(historyQuery.isFetching || graphQuery.isFetching) &&
+          !historyQuery.isLoading &&
+          !graphQuery.isLoading ? (
+            <span className="rounded-sm border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+              Refreshing
+            </span>
+          ) : null}
+          {staleCommitSelection ? (
+            <span className="rounded-sm border border-red-300 px-1.5 py-0.5 text-[10px] leading-none text-red-600">
+              Stale
+            </span>
+          ) : null}
         <div className="flex rounded-md border p-0.5">
           <Button
             size="sm"
@@ -739,6 +796,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
           >
             Graph
           </Button>
+        </div>
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto p-4">
@@ -777,7 +835,10 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
             isFetchingNextPage={graphQuery.isFetchingNextPage}
             onLoadMore={() => void graphQuery.fetchNextPage()}
             maxGraphLane={maxGraphLane}
-            onSelectCommit={setSelectedCommitHash}
+            onSelectCommit={(commitHash) => {
+              setSelectedCommitHash(commitHash);
+              setStaleCommitSelection(null);
+            }}
             selectedCommitHash={selectedCommitHash}
           />
         ) : (
@@ -800,7 +861,10 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
                       className="cursor-pointer data-[selected=true]:bg-muted"
                       data-selected={isSelected}
                       key={commit.hash}
-                      onClick={() => setSelectedCommitHash(commit.hash)}
+                      onClick={() => {
+                        setSelectedCommitHash(commit.hash);
+                        setStaleCommitSelection(null);
+                      }}
                     >
                       <TableCell className="font-mono text-xs text-muted-foreground">
                         {getShortHash(commit.hash)}
@@ -858,6 +922,17 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
               <h3 className="mt-3 text-sm font-medium">No commit selected</h3>
               <p className="mt-1 text-sm leading-6 text-muted-foreground">
                 Select a commit from the log to inspect changed files and diff.
+              </p>
+            </div>
+          </div>
+        ) : staleCommitSelection ? (
+          <div className="flex min-h-60 items-center justify-center">
+            <div className="max-w-xs text-center">
+              <GitCommit className="mx-auto size-8 text-muted-foreground" />
+              <h3 className="mt-3 text-sm font-medium">Commit no longer in current history</h3>
+              <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                {staleCommitSelection.id.slice(0, 8)} may have disappeared after a branch change,
+                rebase, or reset. Select another commit from the refreshed log.
               </p>
             </div>
           </div>

@@ -1,9 +1,12 @@
 node_modules/
 dist/
+build/
 storybook-static/
+coverage/
 target/
 **/src-tauri/gen/
 .turbo/
 .DS_Store
 *.log
+.env*
 .acp*/

@@ -77,6 +77,11 @@ import {
   requiresComment,
   type SelectionRect,
 } from "@yoophi/markdown-annotation-react";
+import {
+  AUTO_REFRESH_INTERVAL_MS,
+  findStaleMarkdownDocument,
+  type StaleSelection,
+} from "@yoophi/workspace-auto-refresh";
 import { annotationDialogComponents } from "@/shared/ui/annotation-dialog-components";
 import { markdownViewerComponents } from "@/shared/ui/markdown-viewer-components";
 
@@ -139,8 +144,13 @@ export function AnnotatorPage() {
   const [selectionHighlightRects, setSelectionHighlightRects] = useState<SelectionRect[]>([]);
   const [selectionToolbarPosition, setSelectionToolbarPosition] = useState<SelectionToolbarPosition | null>(null);
   const [status, setStatus] = useState("예제 문서를 선택하거나 로컬 Markdown 파일을 열 수 있습니다.");
+  const [isDocumentRefreshing, setDocumentRefreshing] = useState(false);
+  const [documentReloadError, setDocumentReloadError] = useState<string | null>(null);
+  const [staleDocument, setStaleDocument] = useState<StaleSelection | null>(null);
 
   const title = document.fileName;
+  const isReloadableDocument =
+    isTauriRuntime() && !document.absolutePath.startsWith("examples/markdown-annotator/");
   const blocks = useMemo(() => parseMarkdownToBlocks(document.markdownText), [document.markdownText]);
   const exportText = useMemo(
     () =>
@@ -181,6 +191,8 @@ export function AnnotatorPage() {
     setDocument(opened);
     setPromptFilePath(opened.absolutePath);
     setAnnotations([]);
+    setDocumentReloadError(null);
+    setStaleDocument(null);
     resetSelectionState();
     setEditingAnnotationId(null);
     setNoteDialogOpen(false);
@@ -231,6 +243,8 @@ export function AnnotatorPage() {
     });
     setPromptFilePath(`examples/markdown-annotator/${example.fileName}`);
     setAnnotations([]);
+    setDocumentReloadError(null);
+    setStaleDocument(null);
     resetSelectionState();
     setEditingAnnotationId(null);
     setNoteDialogOpen(false);
@@ -261,6 +275,41 @@ export function AnnotatorPage() {
       setStatus(error instanceof Error ? error.message : "CLI를 설치할 수 없습니다.");
     } finally {
       setCliInstalling(false);
+    }
+  }
+
+  async function reloadActiveDocument({ announceSuccess = false }: { announceSuccess?: boolean } = {}) {
+    if (!isReloadableDocument) {
+      return;
+    }
+
+    setDocumentRefreshing(true);
+    try {
+      const reloaded = await readMarkdownDocument(document.absolutePath);
+      setDocumentReloadError(null);
+      setStaleDocument(null);
+      // Only swap document state when the content actually changed. Re-setting an
+      // identical document on every poll would re-parse the markdown and reset the
+      // reader's annotation/selection context unnecessarily.
+      if (reloaded.markdownText !== document.markdownText) {
+        setDocument(reloaded);
+        setPromptFilePath(reloaded.absolutePath);
+      }
+      if (announceSuccess) {
+        setStatus(`${reloaded.fileName} 파일을 다시 불러왔습니다.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Markdown 파일을 다시 읽을 수 없습니다.";
+      setDocumentReloadError(message);
+      setStaleDocument(
+        findStaleMarkdownDocument({
+          absolutePath: document.absolutePath,
+          readable: false,
+        }),
+      );
+      setStatus(message);
+    } finally {
+      setDocumentRefreshing(false);
     }
   }
 
@@ -414,6 +463,24 @@ export function AnnotatorPage() {
       void unlistenPromise.then((unlisten) => unlisten());
     };
   }, []);
+
+  useEffect(() => {
+    if (!isReloadableDocument) {
+      return;
+    }
+
+    let cancelled = false;
+    const intervalId = window.setInterval(() => {
+      if (!cancelled) {
+        void reloadActiveDocument();
+      }
+    }, AUTO_REFRESH_INTERVAL_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [document.absolutePath, isReloadableDocument]);
 
   useEffect(() => {
     if (!isTauriRuntime()) {
@@ -646,7 +713,21 @@ export function AnnotatorPage() {
                   <CardTitle>{title}</CardTitle>
                   <CardDescription>{document.absolutePath}</CardDescription>
                   <CardAction>
-                    <Badge variant="secondary">{annotations.length} annotations</Badge>
+                    <div className="flex items-center gap-2">
+                      {isDocumentRefreshing ? <Badge variant="outline">Refreshing</Badge> : null}
+                      {staleDocument ? <Badge variant="destructive">Stale</Badge> : null}
+                      {documentReloadError ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void reloadActiveDocument({ announceSuccess: true })}
+                        >
+                          Retry
+                        </Button>
+                      ) : null}
+                      <Badge variant="secondary">{annotations.length} annotations</Badge>
+                    </div>
                   </CardAction>
                 </CardHeader>
                 <CardContent>
