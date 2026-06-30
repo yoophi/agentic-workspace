@@ -28,6 +28,14 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { getWorktreeChanges } from "@/entities/project/api/git-worktree-repository";
@@ -1183,7 +1191,8 @@ function MarkdownWorkspaceTab({
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+    <>
+      <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
       <ResizablePanel id="markdown-workspace-tree" defaultSize="38%" minSize="260px">
         <div className="flex h-full min-h-0 flex-col border-r">
           <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
@@ -1340,143 +1349,7 @@ function MarkdownWorkspaceTab({
                       <h3 className="text-sm font-medium">Annotations</h3>
                       <Badge variant="outline">{annotations.length}</Badge>
 	                    </div>
-	                    {selectionText ? (
-	                      <div className="mt-3 rounded-md border bg-muted/30 p-2">
-	                        <div className="flex items-start justify-between gap-2">
-	                          <div className="min-w-0">
-	                            <p className="text-xs font-medium">Selected text</p>
-	                            <p className="mt-1 line-clamp-3 whitespace-pre-wrap break-words text-xs text-muted-foreground">
-	                              {selectionText}
-	                            </p>
-	                          </div>
-	                          <Button
-	                            type="button"
-	                            size="icon-xs"
-	                            variant="ghost"
-	                            aria-label="선택 영역 해제"
-	                            onClick={resetSelectionState}
-	                          >
-	                            <XIcon />
-	                          </Button>
-	                        </div>
-	                        <div className="mt-2 flex flex-wrap gap-1">
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant="secondary"
-	                            onClick={() => {
-	                              setDraftTarget({
-	                                kind: "selection",
-	                                anchors: selectionAnchors,
-	                                text: selectionText,
-	                              });
-	                              setDraftType("note");
-	                              setDraftComment("");
-	                            }}
-	                          >
-	                            Note
-	                          </Button>
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant="secondary"
-	                            onClick={() => {
-	                              setDraftTarget({
-	                                kind: "selection",
-	                                anchors: selectionAnchors,
-	                                text: selectionText,
-	                              });
-	                              setDraftType("change-request");
-	                              setDraftComment("");
-	                            }}
-	                          >
-	                            Change
-	                          </Button>
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant="destructive"
-	                            onClick={() => {
-	                              setDraftTarget({
-	                                kind: "selection",
-	                                anchors: selectionAnchors,
-	                                text: selectionText,
-	                              });
-	                              setDraftType("delete");
-	                              setDraftComment("");
-	                            }}
-	                          >
-	                            Delete
-	                          </Button>
-	                        </div>
-	                      </div>
-	                    ) : null}
-	                    {draftTarget ? (
-	                      <div className="mt-3 grid gap-2">
-	                        <div className="flex rounded-md border p-0.5">
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant={draftType === "note" ? "secondary" : "ghost"}
-	                            onClick={() => setDraftType("note")}
-	                          >
-	                            Note
-	                          </Button>
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant={draftType === "change-request" ? "secondary" : "ghost"}
-	                            onClick={() => setDraftType("change-request")}
-	                          >
-	                            Change
-	                          </Button>
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant={draftType === "delete" ? "destructive" : "ghost"}
-	                            onClick={() => setDraftType("delete")}
-	                          >
-	                            Delete
-	                          </Button>
-	                        </div>
-	                        <p className="text-xs text-muted-foreground">
-	                          {formatDraftTargetRange(draftTarget)}
-	                        </p>
-	                        <Textarea
-	                          value={draftComment}
-	                          onChange={(event) => setDraftComment(event.target.value)}
-	                          placeholder={
-	                            draftType === "delete"
-	                              ? "삭제 이유를 입력하세요. 선택 사항입니다."
-	                              : draftType === "change-request"
-	                                ? "변경 요청 내용을 입력하세요."
-	                                : "참고 메모를 입력하세요."
-	                          }
-	                          className="min-h-24 text-sm"
-	                        />
-	                        <div className="flex justify-end gap-2">
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            variant="ghost"
-	                            onClick={() => {
-	                              setDraftTarget(null);
-	                              setDraftComment("");
-	                            }}
-	                          >
-	                            Cancel
-	                          </Button>
-	                          <Button
-	                            type="button"
-	                            size="sm"
-	                            disabled={draftType !== "delete" && !draftComment.trim()}
-	                            onClick={saveAnnotation}
-	                          >
-	                            Add
-	                          </Button>
-	                        </div>
-                      </div>
-                    ) : annotations.length === 0 ? (
+	                    {annotations.length === 0 ? (
                       <p className="mt-3 text-sm text-muted-foreground">No annotations.</p>
                     ) : (
                       <div className="mt-3 grid gap-2">
@@ -1549,6 +1422,86 @@ function MarkdownWorkspaceTab({
         </div>
       </ResizablePanel>
     </ResizablePanelGroup>
+      <Dialog
+        open={draftTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetDraftState();
+            resetSelectionState();
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{editingAnnotationId ? "Annotation 수정" : "Annotation 추가"}</DialogTitle>
+            <DialogDescription>
+              {draftTarget ? formatDraftTargetRange(draftTarget) : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <div className="flex rounded-md border p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={draftType === "note" ? "secondary" : "ghost"}
+                onClick={() => setDraftType("note")}
+              >
+                Note
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={draftType === "change-request" ? "secondary" : "ghost"}
+                onClick={() => setDraftType("change-request")}
+              >
+                Change
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={draftType === "delete" ? "destructive" : "ghost"}
+                onClick={() => setDraftType("delete")}
+              >
+                Delete
+              </Button>
+            </div>
+            <Textarea
+              value={draftComment}
+              onChange={(event) => setDraftComment(event.target.value)}
+              placeholder={
+                draftType === "delete"
+                  ? "삭제 이유를 입력하세요. 선택 사항입니다."
+                  : draftType === "change-request"
+                    ? "변경 요청 내용을 입력하세요."
+                    : "참고 메모를 입력하세요."
+              }
+              className="min-h-24 text-sm"
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                resetDraftState();
+                resetSelectionState();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={draftType !== "delete" && !draftComment.trim()}
+              onClick={saveAnnotation}
+            >
+              {editingAnnotationId ? "Save" : "Add"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
