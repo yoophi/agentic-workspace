@@ -17,11 +17,27 @@ use inbound::tauri_commands::{
     update_saved_prompt,
 };
 use infrastructure::agent_session_registry::AppState;
-use tauri::{Manager, WindowEvent};
+use tauri::{
+    Manager, WindowEvent,
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
+};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+
+const ABOUT_MENU_ID: &str = "about-agentic-workbench";
+const APP_DISPLAY_NAME: &str = "Agentic Workbench";
+const APP_VERSION: &str = env!("AGENTIC_WORKBENCH_PACKAGE_VERSION");
+const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
+const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .menu(build_native_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == ABOUT_MENU_ID {
+                show_about_dialog(app);
+            }
+        })
         .setup(|_app| {
             #[cfg(debug_assertions)]
             {
@@ -94,4 +110,119 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {
+    let about_item = MenuItem::with_id(
+        app,
+        ABOUT_MENU_ID,
+        format!("About {APP_DISPLAY_NAME}"),
+        true,
+        None::<&str>,
+    )?;
+    let window_menu = Submenu::with_id_and_items(
+        app,
+        "Window",
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(app, None)?,
+            &PredefinedMenuItem::maximize(app, None)?,
+            #[cfg(target_os = "macos")]
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::close_window(app, None)?,
+        ],
+    )?;
+    let help_menu = Submenu::with_id_and_items(
+        app,
+        "Help",
+        "Help",
+        true,
+        &[
+            #[cfg(not(target_os = "macos"))]
+            &about_item,
+        ],
+    )?;
+
+    Menu::with_items(
+        app,
+        &[
+            #[cfg(target_os = "macos")]
+            &Submenu::with_items(
+                app,
+                APP_DISPLAY_NAME,
+                true,
+                &[
+                    &about_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::services(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::hide(app, None)?,
+                    &PredefinedMenuItem::hide_others(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            #[cfg(not(any(
+                target_os = "linux",
+                target_os = "dragonfly",
+                target_os = "freebsd",
+                target_os = "netbsd",
+                target_os = "openbsd"
+            )))]
+            &Submenu::with_items(
+                app,
+                "File",
+                true,
+                &[
+                    &PredefinedMenuItem::close_window(app, None)?,
+                    #[cfg(not(target_os = "macos"))]
+                    &PredefinedMenuItem::quit(app, None)?,
+                ],
+            )?,
+            &Submenu::with_items(
+                app,
+                "Edit",
+                true,
+                &[
+                    &PredefinedMenuItem::undo(app, None)?,
+                    &PredefinedMenuItem::redo(app, None)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &PredefinedMenuItem::cut(app, None)?,
+                    &PredefinedMenuItem::copy(app, None)?,
+                    &PredefinedMenuItem::paste(app, None)?,
+                    &PredefinedMenuItem::select_all(app, None)?,
+                ],
+            )?,
+            #[cfg(target_os = "macos")]
+            &Submenu::with_items(
+                app,
+                "View",
+                true,
+                &[&PredefinedMenuItem::fullscreen(app, None)?],
+            )?,
+            &window_menu,
+            &help_menu,
+        ],
+    )
+}
+
+fn show_about_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    app.dialog()
+        .message(format!(
+            "{APP_DISPLAY_NAME}\n\nVersion: {APP_VERSION}\nCommit: {}",
+            display_commit_hash()
+        ))
+        .title(format!("About {APP_DISPLAY_NAME}"))
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::Ok)
+        .show(|_| {});
+}
+
+fn display_commit_hash() -> &'static str {
+    if BUILD_COMMIT_HASH.trim().is_empty() {
+        BUILD_COMMIT_FALLBACK
+    } else {
+        BUILD_COMMIT_HASH
+    }
 }
