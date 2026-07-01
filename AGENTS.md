@@ -11,6 +11,12 @@
 - Write documentation content in Korean.
 - Use Mermaid charts for diagrams and flows in documentation.
 
+## Project Aliases
+
+- `AW` means `apps/agentic-workbench`.
+- `MA` means `apps/markdown-annotator`.
+- `GE` means `apps/git-explorer`.
+
 ## Frontend Architecture
 
 - Write app frontend code under `apps/*/src` using Feature-Sliced Design.
