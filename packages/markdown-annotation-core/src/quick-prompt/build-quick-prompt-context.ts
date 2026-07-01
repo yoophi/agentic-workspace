@@ -129,10 +129,12 @@ export function buildDocumentQuickPromptContext(input: DocumentQuickPromptInput)
 
 export function createQuickPromptActionState({
   scopeKind,
+  surface,
   enabled,
   disabledReason,
 }: {
   scopeKind: QuickPromptActionState["scopeKind"];
+  surface?: QuickPromptActionState["surface"];
   enabled: boolean;
   disabledReason?: string;
 }): QuickPromptActionState {
@@ -145,11 +147,24 @@ export function createQuickPromptActionState({
 
   return {
     scopeKind,
+    surface: surface ?? defaultSurfaceForScope(scopeKind),
     enabled,
     disabledReason: enabled ? undefined : disabledReason,
     tooltip: enabled ? label : disabledReason ?? `${label}를 사용할 수 없습니다.`,
     accessibleName: label,
   };
+}
+
+function defaultSurfaceForScope(scopeKind: QuickPromptActionState["scopeKind"]): QuickPromptActionState["surface"] {
+  if (scopeKind === "selection") {
+    return "selection-toolbar";
+  }
+
+  if (scopeKind === "block") {
+    return "block-toolbar";
+  }
+
+  return "document-action";
 }
 
 export function isQuickPromptSendable({

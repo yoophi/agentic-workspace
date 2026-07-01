@@ -71,6 +71,7 @@ describe("quick prompt context builder", () => {
     expect(
       createQuickPromptActionState({
         scopeKind: "selection",
+        surface: "selection-toolbar",
         enabled: false,
         disabledReason: "선택 영역이 없습니다.",
       }),
@@ -78,6 +79,7 @@ describe("quick prompt context builder", () => {
       accessibleName: "선택 영역 quick prompt",
       disabledReason: "선택 영역이 없습니다.",
       enabled: false,
+      surface: "selection-toolbar",
     });
   });
 

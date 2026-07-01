@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildSelectionQuickPromptContext, formatQuickPromptForAgent } from "@yoophi/markdown-annotation-core";
+import {
+  buildSelectionQuickPromptContext,
+  createQuickPromptActionState,
+  formatQuickPromptForAgent,
+} from "@yoophi/markdown-annotation-core";
 
 describe("markdown annotator selection quick prompt integration", () => {
   it("creates an agent prompt from selected text context", () => {
@@ -22,5 +26,19 @@ describe("markdown annotator selection quick prompt integration", () => {
 
     expect(context.scope.label).toBe("선택 영역");
     expect(formatQuickPromptForAgent({ promptText: "Explain", context })).toContain("selected sentence");
+  });
+
+  it("exposes selection quick annotate as a selection toolbar action", () => {
+    const action = createQuickPromptActionState({
+      scopeKind: "selection",
+      surface: "selection-toolbar",
+      enabled: true,
+    });
+
+    expect(action).toMatchObject({
+      accessibleName: "선택 영역 quick prompt",
+      enabled: true,
+      surface: "selection-toolbar",
+    });
   });
 });

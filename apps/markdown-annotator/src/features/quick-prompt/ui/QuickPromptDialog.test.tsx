@@ -30,6 +30,16 @@ describe("QuickPromptDialog", () => {
     expect(standaloneQuickPromptTarget.availability).toBe("unavailable");
   });
 
+  it("uses the dialog-entered prompt text instead of a default prompt", () => {
+    const prompt = formatQuickPromptForAgent({
+      promptText: "사용자가 입력한 프롬프트",
+      context,
+    });
+
+    expect(prompt).toContain("사용자가 입력한 프롬프트");
+    expect(prompt).not.toContain("기본 프롬프트");
+  });
+
   it("keeps reduced context and blocked target details available", () => {
     const reducedContext = {
       ...context,

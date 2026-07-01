@@ -2,8 +2,12 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import {
   buildDocumentQuickPromptContext,
   buildSelectionQuickPromptContext,
+  createQuickPromptActionState,
 } from "@yoophi/markdown-annotation-core";
+import { Zap } from "lucide-react";
 import { QuickPromptDialog } from "@/features/quick-prompt/ui/QuickPromptDialog";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   createAvailableQuickPromptTarget,
   standaloneQuickPromptTarget,
@@ -41,6 +45,12 @@ const longContext = buildDocumentQuickPromptContext({
   maxContentLength: 240,
 });
 
+const selectionToolbarAction = createQuickPromptActionState({
+  scopeKind: "selection",
+  surface: "selection-toolbar",
+  enabled: true,
+});
+
 const meta = {
   title: "Organisms/QuickPrompt",
   component: QuickPromptDialog,
@@ -71,6 +81,36 @@ export const SelectionReady: Story = {
     context: selectionContext,
     target: createAvailableQuickPromptTarget("Active agent session"),
   },
+};
+
+export const SelectionToolbarQuickAnnotate: Story = {
+  args: {
+    context: selectionContext,
+  },
+  render: () => (
+    <div className="grid gap-3">
+      <p className="max-w-sm rounded-md bg-yellow-100 px-2 py-1 text-sm text-yellow-950">
+        이 문단의 표현이 모호합니다.
+      </p>
+      <div className="flex w-fit items-center gap-1 rounded-lg border bg-popover p-1 shadow-sm">
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                aria-label={selectionToolbarAction.accessibleName}
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+              >
+                <Zap aria-hidden="true" />
+              </Button>
+            }
+          />
+          <TooltipContent>{selectionToolbarAction.tooltip}</TooltipContent>
+        </Tooltip>
+      </div>
+    </div>
+  ),
 };
 
 export const DocumentContext: Story = {

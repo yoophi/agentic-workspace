@@ -16,6 +16,7 @@ export type {
   FormatQuickPromptOptions,
   PromptDraft,
   QuickPromptActionState,
+  QuickPromptActionSurface,
   QuickPromptBuildOptions,
   QuickPromptContext,
   QuickPromptDraftStatus,

@@ -2,6 +2,8 @@ import type { AnnotationAnchor } from "./annotation";
 
 export type QuickPromptScopeKind = "selection" | "block" | "document";
 
+export type QuickPromptActionSurface = "selection-toolbar" | "block-toolbar" | "document-action";
+
 export type QuickPromptLengthState = "complete" | "reduced";
 
 export type QuickPromptDraftStatus =
@@ -62,6 +64,7 @@ export type AgentTarget = {
 
 export type QuickPromptActionState = {
   scopeKind: QuickPromptScopeKind;
+  surface: QuickPromptActionSurface;
   enabled: boolean;
   disabledReason?: string;
   tooltip: string;

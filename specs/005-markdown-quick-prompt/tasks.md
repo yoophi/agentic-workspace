@@ -167,22 +167,22 @@
 
 ### Tests for Selection Toolbar Amendment
 
-- [ ] T063 [P] [US1] Add MA integration coverage for selection toolbar quick annotate visibility after non-empty text selection in `apps/markdown-annotator/src/pages/annotator/quick-prompt-selection.test.tsx`
-- [ ] T064 [P] [US1] Add AW integration coverage for selection toolbar quick annotate opening a prompt dialog before send in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.test.tsx`
-- [ ] T065 [P] [US1] Add dialog regression coverage that submitted payload uses dialog-entered prompt text instead of a default prompt in `apps/markdown-annotator/src/features/quick-prompt/ui/QuickPromptDialog.test.tsx`
+- [X] T063 [P] [US1] Add MA integration coverage for selection toolbar quick annotate visibility after non-empty text selection in `apps/markdown-annotator/src/pages/annotator/quick-prompt-selection.test.tsx`
+- [X] T064 [P] [US1] Add AW integration coverage for selection toolbar quick annotate opening a prompt dialog before send in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.test.tsx`
+- [X] T065 [P] [US1] Add dialog regression coverage that submitted payload uses dialog-entered prompt text instead of a default prompt in `apps/markdown-annotator/src/features/quick-prompt/ui/QuickPromptDialog.test.tsx`
 
 ### Implementation for Selection Toolbar Amendment
 
-- [ ] T066 [US1] Extend quick prompt action state usage to identify the `selection-toolbar` surface in `packages/markdown-annotation-core/src/types/quick-prompt.ts`
-- [ ] T067 [US1] Ensure the selection toolbar quick annotate lightning button is rendered only for current non-empty selections in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`
-- [ ] T068 [US1] Add AW selection quick annotate draft state that opens a prompt dialog instead of immediately sending a default prompt in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
-- [ ] T069 [US1] Wire AW dialog send to deliver the exact user-entered prompt text plus selected Markdown context to the active agent-run in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
-- [ ] T070 [US1] Add Storybook coverage for selection toolbar quick annotate and selection prompt dialog states in `apps/markdown-annotator/src/stories/organisms/QuickPrompt.stories.tsx`
+- [X] T066 [US1] Extend quick prompt action state usage to identify the `selection-toolbar` surface in `packages/markdown-annotation-core/src/types/quick-prompt.ts`
+- [X] T067 [US1] Ensure the selection toolbar quick annotate lightning button is rendered only for current non-empty selections in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`
+- [X] T068 [US1] Add AW selection quick annotate draft state that opens a prompt dialog instead of immediately sending a default prompt in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T069 [US1] Wire AW dialog send to deliver the exact user-entered prompt text plus selected Markdown context to the active agent-run in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T070 [US1] Add Storybook coverage for selection toolbar quick annotate and selection prompt dialog states in `apps/markdown-annotator/src/stories/organisms/QuickPrompt.stories.tsx`
 
 ### Verification for Selection Toolbar Amendment
 
-- [ ] T071 [P] Run MA tests and typecheck for selection toolbar quick annotate using `apps/markdown-annotator/package.json`
-- [ ] T072 [P] Run AW tests and typecheck for agent-run quick annotate delivery using `apps/agentic-workbench/package.json`
+- [X] T071 [P] Run MA tests and typecheck for selection toolbar quick annotate using `apps/markdown-annotator/package.json`
+- [X] T072 [P] Run AW tests and typecheck for agent-run quick annotate delivery using `apps/agentic-workbench/package.json`
 
 ---
 
