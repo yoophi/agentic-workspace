@@ -33,6 +33,57 @@ export const Basic: Story = {
   },
 };
 
+export const MermaidDiagram: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`# Mermaid Diagram
+
+\`\`\`mermaid
+flowchart TD
+  A[Open document] --> B[Render Mermaid diagram]
+  B --> C[Continue annotation workflow]
+\`\`\`
+
+\`\`\`ts
+const ordinaryCode = true;
+\`\`\`
+`),
+  },
+};
+
+export const MermaidFailureFallback: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`# Mermaid Failure
+
+\`\`\`mermaid
+flowchart TD
+  A --> 
+\`\`\`
+
+The rest of the document remains readable.
+`),
+  },
+};
+
+export const LargeMermaidDiagram: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`# Large Mermaid Diagram
+
+\`\`\`mermaid
+flowchart LR
+  A[Start] --> B[Collect requirements]
+  B --> C[Design shared core detection]
+  C --> D[Render diagram]
+  D --> E[Show fallback on failure]
+  E --> F[Verify annotation workflow]
+  F --> G[Validate auto reload]
+  G --> H[Finish]
+  H --> I[Review]
+  I --> J[Ship]
+\`\`\`
+`),
+  },
+};
+
 const blockActionMarkdown = `# Block Actions
 
 Hover this paragraph to show the delete and comment controls for the whole block.

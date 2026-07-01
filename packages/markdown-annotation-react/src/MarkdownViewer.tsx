@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { MessageSquare, Pencil, StickyNote, Trash2, X } from "lucide-react";
 import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 import { cn } from "./cn";
+import { MermaidDiagram } from "./MermaidDiagram";
 import { segmentTextByAnnotations } from "./segment-text";
 import type {
   MarkdownViewerBlockNote,
@@ -373,6 +374,14 @@ function MarkdownBlockRenderer({
       );
 
     case "code":
+      if (block.mermaid) {
+        return (
+          <BlockShell {...shellProps}>
+            <MermaidDiagram blockId={block.id} source={block.content} />
+          </BlockShell>
+        );
+      }
+
       return (
         <BlockShell {...shellProps}>
           <pre>

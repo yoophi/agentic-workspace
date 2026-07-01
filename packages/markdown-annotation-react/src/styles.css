@@ -60,6 +60,48 @@
     @apply bg-transparent p-0;
   }
 
+  .markdown-viewer__mermaid,
+  .markdown-viewer__mermaid-loading,
+  .markdown-viewer__mermaid-fallback {
+    @apply my-4 max-h-[32rem] max-w-full overflow-auto rounded-lg border bg-background p-4;
+  }
+
+  .markdown-viewer__mermaid {
+    @apply text-center;
+  }
+
+  .markdown-viewer__mermaid svg {
+    @apply max-w-none;
+  }
+
+  .markdown-viewer__mermaid-loading {
+    @apply text-sm text-muted-foreground;
+  }
+
+  .markdown-viewer__mermaid-fallback {
+    @apply border-destructive/40 bg-destructive/5 text-left;
+  }
+
+  .markdown-viewer__mermaid-fallback-header {
+    @apply mb-3 flex flex-col gap-1;
+  }
+
+  .markdown-viewer__mermaid-fallback-title {
+    @apply m-0 text-sm font-medium text-destructive;
+  }
+
+  .markdown-viewer__mermaid-fallback-reason {
+    @apply m-0 whitespace-pre-wrap break-words text-sm text-foreground;
+  }
+
+  .markdown-viewer__mermaid-fallback-category {
+    @apply m-0 font-mono text-xs text-muted-foreground;
+  }
+
+  .markdown-viewer__mermaid-source {
+    @apply m-0 max-h-80 overflow-auto rounded-md bg-muted p-3 text-xs;
+  }
+
   .markdown-viewer table {
     @apply my-4 w-full border-collapse text-sm;
   }

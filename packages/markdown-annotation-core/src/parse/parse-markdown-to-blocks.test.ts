@@ -68,6 +68,57 @@ After`);
     ]);
   });
 
+  it("attaches mermaid metadata for mermaid language markers", () => {
+    const blocks = parseMarkdownToBlocks(`\`\`\`mermaid
+flowchart TD
+  A --> B
+\`\`\``);
+
+    expect(blocks[0]).toMatchObject({
+      type: "code",
+      language: "mermaid",
+      content: "flowchart TD\n  A --> B",
+      mermaid: {
+        detected: true,
+        reason: "language-marker",
+        declaration: "mermaid",
+        source: "flowchart TD\n  A --> B",
+      },
+    });
+  });
+
+  it("attaches mermaid metadata for priority start tokens without language markers", () => {
+    const blocks = parseMarkdownToBlocks(`\`\`\`
+requirementDiagram
+  requirement test_req {
+    id: 1
+  }
+\`\`\``);
+
+    expect(blocks[0]).toMatchObject({
+      type: "code",
+      language: undefined,
+      mermaid: {
+        detected: true,
+        reason: "leading-declaration",
+        declaration: "requirementDiagram",
+      },
+    });
+  });
+
+  it("preserves ordinary code blocks without mermaid metadata", () => {
+    const blocks = parseMarkdownToBlocks(`\`\`\`ts
+const graph = new Map();
+\`\`\``);
+
+    expect(blocks[0]).toMatchObject({
+      type: "code",
+      language: "ts",
+      content: "const graph = new Map();",
+    });
+    expect(blocks[0]?.mermaid).toBeUndefined();
+  });
+
   it("parses tables, nested checklist items, and blockquotes", () => {
     const blocks = parseMarkdownToBlocks(`| Name | Value |
 | --- | --- |

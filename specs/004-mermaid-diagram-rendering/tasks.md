@@ -12,8 +12,8 @@
 
 **목적**: 기능 구현 전에 dependency와 package 경계를 준비한다.
 
-- [ ] T001 Mermaid renderer dependency를 `packages/markdown-annotation-react/package.json`에 추가하고 `pnpm-lock.yaml`을 갱신한다.
-- [ ] T002 [P] 현재 Markdown viewer export와 앱 adapter를 `packages/markdown-annotation-react/src/index.ts`, `apps/markdown-annotator/src/shared/ui/markdown-viewer-components.tsx`, `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-viewer-components.tsx`에서 확인한다.
+- [X] T001 Mermaid renderer dependency를 `packages/markdown-annotation-react/package.json`에 추가하고 `pnpm-lock.yaml`을 갱신한다.
+- [X] T002 [P] 현재 Markdown viewer export와 앱 adapter를 `packages/markdown-annotation-react/src/index.ts`, `apps/markdown-annotator/src/shared/ui/markdown-viewer-components.tsx`, `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-viewer-components.tsx`에서 확인한다.
 
 ---
 
@@ -23,10 +23,10 @@
 
 **중요**: 이 phase가 끝나기 전에는 user story 구현을 시작하지 않는다.
 
-- [ ] T003 [P] 선택적 Mermaid metadata type을 `packages/markdown-annotation-core/src/types/markdown-block.ts`에 추가한다.
-- [ ] T004 [P] language marker와 priority start token 감지를 위한 실패 fixture 테스트를 `packages/markdown-annotation-core/src/mermaid/detect-mermaid-block.test.ts`에 작성한다.
-- [ ] T005 priority start token 감지 helper를 `packages/markdown-annotation-core/src/mermaid/detect-mermaid-block.ts`에 구현한다.
-- [ ] T006 Mermaid 감지 helper와 type을 `packages/markdown-annotation-core/src/index.ts` 및 `packages/markdown-annotation-core/src/types/index.ts`에서 export한다.
+- [X] T003 [P] 선택적 Mermaid metadata type을 `packages/markdown-annotation-core/src/types/markdown-block.ts`에 추가한다.
+- [X] T004 [P] language marker와 priority start token 감지를 위한 실패 fixture 테스트를 `packages/markdown-annotation-core/src/mermaid/detect-mermaid-block.test.ts`에 작성한다.
+- [X] T005 priority start token 감지 helper를 `packages/markdown-annotation-core/src/mermaid/detect-mermaid-block.ts`에 구현한다.
+- [X] T006 Mermaid 감지 helper와 type을 `packages/markdown-annotation-core/src/index.ts` 및 `packages/markdown-annotation-core/src/types/index.ts`에서 export한다.
 
 **Checkpoint**: foundation 준비 완료 - user story 구현을 시작할 수 있다.
 
@@ -40,16 +40,16 @@
 
 ### Tests for User Story 1
 
-- [ ] T007 [P] [US1] `mermaid` language marker, priority start token, non-Mermaid code block parser fixture 테스트를 `packages/markdown-annotation-core/src/parse/parse-markdown-to-blocks.test.ts`에 추가한다.
-- [ ] T008 [P] [US1] 유효한 diagram 렌더링과 일반 code block 보존을 검증하는 mocked Mermaid shared viewer 테스트를 `packages/markdown-annotation-react/src/MermaidDiagram.test.tsx`에 추가한다.
+- [X] T007 [P] [US1] `mermaid` language marker, priority start token, non-Mermaid code block parser fixture 테스트를 `packages/markdown-annotation-core/src/parse/parse-markdown-to-blocks.test.ts`에 추가한다.
+- [X] T008 [P] [US1] 유효한 diagram 렌더링과 일반 code block 보존을 검증하는 mocked Mermaid shared viewer 테스트를 `packages/markdown-annotation-react/src/MermaidDiagram.test.tsx`에 추가한다.
 
 ### Implementation for User Story 1
 
-- [ ] T009 [US1] `type: "code"`를 유지하면서 Mermaid metadata를 `packages/markdown-annotation-core/src/parse/parse-markdown-to-blocks.ts`에서 붙인다.
-- [ ] T010 [US1] `startOnLoad: false`와 strict security 기본값을 사용하는 lazy Mermaid rendering component를 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 생성한다.
-- [ ] T011 [US1] Mermaid code block을 새 diagram component로 렌더링하도록 `packages/markdown-annotation-react/src/MarkdownViewer.tsx`를 수정한다.
-- [ ] T012 [US1] contained diagram styling과 일반 code block 보존 style을 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
-- [ ] T013 [P] [US1] Mermaid 성공 렌더링 Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
+- [X] T009 [US1] `type: "code"`를 유지하면서 Mermaid metadata를 `packages/markdown-annotation-core/src/parse/parse-markdown-to-blocks.ts`에서 붙인다.
+- [X] T010 [US1] `startOnLoad: false`와 strict security 기본값을 사용하는 lazy Mermaid rendering component를 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 생성한다.
+- [X] T011 [US1] Mermaid code block을 새 diagram component로 렌더링하도록 `packages/markdown-annotation-react/src/MarkdownViewer.tsx`를 수정한다.
+- [X] T012 [US1] contained diagram styling과 일반 code block 보존 style을 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
+- [X] T013 [P] [US1] Mermaid 성공 렌더링 Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
 
 **Checkpoint**: User Story 1을 독립적으로 동작 및 검증할 수 있다.
 
@@ -63,15 +63,15 @@
 
 ### Tests for User Story 2
 
-- [ ] T014 [P] [US2] empty source, syntax/parse failure, renderer/runtime failure category를 검증하는 shared viewer 테스트를 `packages/markdown-annotation-react/src/MermaidDiagram.test.tsx`에 추가한다.
-- [ ] T015 [P] [US2] source 표시와 block-local isolation을 검증하는 contract 지향 fallback assertion을 `packages/markdown-annotation-react/src/MarkdownViewer.test.tsx`에 추가한다.
+- [X] T014 [P] [US2] empty source, syntax/parse failure, renderer/runtime failure category를 검증하는 shared viewer 테스트를 `packages/markdown-annotation-react/src/MermaidDiagram.test.tsx`에 추가한다.
+- [X] T015 [P] [US2] source 표시와 block-local isolation을 검증하는 contract 지향 fallback assertion을 `packages/markdown-annotation-react/src/MarkdownViewer.test.tsx`에 추가한다.
 
 ### Implementation for User Story 2
 
-- [ ] T016 [US2] failure category와 읽을 수 있는 failure reason mapping을 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 추가한다.
-- [ ] T017 [US2] failure reason과 원본 Mermaid source를 보여주는 block-local fallback panel을 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 추가한다.
-- [ ] T018 [US2] fallback, source panel, 긴 error text containment style을 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
-- [ ] T019 [P] [US2] Mermaid 실패 fallback Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
+- [X] T016 [US2] failure category와 읽을 수 있는 failure reason mapping을 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 추가한다.
+- [X] T017 [US2] failure reason과 원본 Mermaid source를 보여주는 block-local fallback panel을 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`에 추가한다.
+- [X] T018 [US2] fallback, source panel, 긴 error text containment style을 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
+- [X] T019 [P] [US2] Mermaid 실패 fallback Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
 
 **Checkpoint**: User Story 1과 2를 각각 독립적으로 동작 및 검증할 수 있다.
 
@@ -85,16 +85,16 @@
 
 ### Tests for User Story 3
 
-- [ ] T020 [P] [US3] Mermaid block의 block shell data attribute와 block action을 검증하는 viewer regression 테스트를 `packages/markdown-annotation-react/src/MarkdownViewer.test.tsx`에 추가한다.
-- [ ] T021 [P] [US3] Mermaid source 갱신을 다루는 auto reload integration coverage를 `apps/markdown-annotator/src/pages/annotator/annotator-auto-reload.test.tsx`에 확장한다.
+- [X] T020 [P] [US3] Mermaid block의 block shell data attribute와 block action을 검증하는 viewer regression 테스트를 `packages/markdown-annotation-react/src/MarkdownViewer.test.tsx`에 추가한다.
+- [X] T021 [P] [US3] Mermaid source 갱신을 다루는 auto reload integration coverage를 `apps/markdown-annotator/src/pages/annotator/annotator-auto-reload.test.tsx`에 확장한다.
 
 ### Implementation for User Story 3
 
-- [ ] T022 [US3] Mermaid block이 `data-block-id`, line range attribute, note control, block action control을 유지하도록 `packages/markdown-annotation-react/src/MarkdownViewer.tsx`를 확인 및 수정한다.
-- [ ] T023 [US3] block id와 source hash를 기준으로 render state를 keying하여 source 변경 시 diagram이 다시 렌더링되도록 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`를 수정한다.
-- [ ] T024 [US3] 큰 diagram overflow containment를 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
-- [ ] T025 [P] [US3] 큰 Mermaid diagram Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
-- [ ] T026 [P] [US3] agentic workbench Markdown viewer adapter에 app-shell coupling 변경이 필요 없는지 `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-viewer-components.tsx`에서 검증한다.
+- [X] T022 [US3] Mermaid block이 `data-block-id`, line range attribute, note control, block action control을 유지하도록 `packages/markdown-annotation-react/src/MarkdownViewer.tsx`를 확인 및 수정한다.
+- [X] T023 [US3] block id와 source hash를 기준으로 render state를 keying하여 source 변경 시 diagram이 다시 렌더링되도록 `packages/markdown-annotation-react/src/MermaidDiagram.tsx`를 수정한다.
+- [X] T024 [US3] 큰 diagram overflow containment를 `packages/markdown-annotation-react/src/styles.css`에 추가한다.
+- [X] T025 [P] [US3] 큰 Mermaid diagram Storybook state를 `apps/markdown-annotator/src/stories/molecules/MarkdownViewer.stories.tsx`에 추가한다.
+- [X] T026 [P] [US3] agentic workbench Markdown viewer adapter에 app-shell coupling 변경이 필요 없는지 `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-viewer-components.tsx`에서 검증한다.
 
 **Checkpoint**: 모든 user story를 독립적으로 동작 및 검증할 수 있다.
 
@@ -104,12 +104,12 @@
 
 **목적**: 검증, 정리, cross-app safety check를 수행한다.
 
-- [ ] T027 [P] `pnpm --filter @yoophi/markdown-annotation-core test`로 shared core 테스트를 실행한다.
-- [ ] T028 [P] `pnpm --filter @yoophi/markdown-annotation-react test` 및 `pnpm --filter @yoophi/markdown-annotation-react check-types`로 shared React package 테스트와 타입 검사를 실행한다.
-- [ ] T029 [P] `pnpm --filter @yoophi/markdown-annotator test`, `pnpm --filter @yoophi/markdown-annotator check-types`, `pnpm --filter @yoophi/markdown-annotator build-storybook`으로 markdown annotator 테스트, 타입 검사, Storybook build를 실행한다.
-- [ ] T030 [P] `pnpm --filter @yoophi/agentic-workbench test` 및 `pnpm --filter @yoophi/agentic-workbench check-types`로 agentic workbench 소비 앱 테스트와 타입 검사를 실행한다.
-- [ ] T031 `apps/markdown-annotator/src`와 `apps/agentic-workbench/src`를 검색하여 app-to-app import가 추가되지 않았는지 검증한다.
-- [ ] T032 manual smoke scenario를 `specs/004-mermaid-diagram-rendering/quickstart.md` 기준으로 검증한다.
+- [X] T027 [P] `pnpm --filter @yoophi/markdown-annotation-core test`로 shared core 테스트를 실행한다.
+- [X] T028 [P] `pnpm --filter @yoophi/markdown-annotation-react test` 및 `pnpm --filter @yoophi/markdown-annotation-react check-types`로 shared React package 테스트와 타입 검사를 실행한다.
+- [X] T029 [P] `pnpm --filter @yoophi/markdown-annotator test`, `pnpm --filter @yoophi/markdown-annotator check-types`, `pnpm --filter @yoophi/markdown-annotator build-storybook`으로 markdown annotator 테스트, 타입 검사, Storybook build를 실행한다.
+- [X] T030 [P] `pnpm --filter @yoophi/agentic-workbench test` 및 `pnpm --filter @yoophi/agentic-workbench check-types`로 agentic workbench 소비 앱 테스트와 타입 검사를 실행한다.
+- [X] T031 `apps/markdown-annotator/src`와 `apps/agentic-workbench/src`를 검색하여 app-to-app import가 추가되지 않았는지 검증한다.
+- [X] T032 manual smoke scenario를 `specs/004-mermaid-diagram-rendering/quickstart.md` 기준으로 검증한다.
 
 ---
 

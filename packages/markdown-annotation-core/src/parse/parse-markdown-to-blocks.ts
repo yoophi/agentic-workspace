@@ -1,4 +1,5 @@
 import type { MarkdownBlock } from "../types";
+import { detectMermaidBlock } from "../mermaid/detect-mermaid-block";
 
 type FrontmatterResult = {
   content: string;
@@ -111,6 +112,7 @@ export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
         content: codeLines.join("\n"),
         rawContent: rawCodeLines.join("\n"),
         language,
+        mermaid: detectMermaidBlock({ content: codeLines.join("\n"), language }),
         startLine: lineNumber,
         endLine,
       });

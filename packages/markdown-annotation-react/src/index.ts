@@ -14,6 +14,16 @@ export {
   type AnnotationInputDialogProps,
 } from "./AnnotationInputDialog";
 export {
+  MermaidDiagram,
+  createMermaidRenderId,
+  createMermaidSourceHash,
+  emptyMermaidFailure,
+  toMermaidFailure,
+  type MermaidDiagramProps,
+  type MermaidFailure,
+  type MermaidFailureCategory,
+} from "./MermaidDiagram";
+export {
   annotationTypes,
   getAnnotationCommentLabel,
   getAnnotationCommentPlaceholder,
