@@ -6,6 +6,7 @@ import {
   createMermaidRenderId,
   createMermaidSourceHash,
   emptyMermaidFailure,
+  removeMermaidRenderArtifacts,
   toMermaidFailure,
 } from "./MermaidDiagram";
 
@@ -78,5 +79,29 @@ describe("MermaidDiagram", () => {
     expect(createMermaidRenderId(":r1:", "block-1", "flowchart TD")).not.toBe(
       createMermaidRenderId(":r1:", "block-1", "sequenceDiagram"),
     );
+  });
+
+  it("removes Mermaid render artifacts created outside the React tree", () => {
+    const existingIds = new Set(["diagram-1", "ddiagram-1", "idiagram-1", "other-node"]);
+    const removedIds: string[] = [];
+    const root = {
+      getElementById(id: string) {
+        if (!existingIds.has(id)) {
+          return null;
+        }
+
+        return {
+          remove() {
+            existingIds.delete(id);
+            removedIds.push(id);
+          },
+        };
+      },
+    };
+
+    removeMermaidRenderArtifacts("diagram-1", root);
+
+    expect(removedIds).toEqual(["diagram-1", "ddiagram-1", "idiagram-1"]);
+    expect(existingIds).toEqual(new Set(["other-node"]));
   });
 });

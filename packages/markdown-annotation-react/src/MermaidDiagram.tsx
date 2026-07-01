@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 
 export type MermaidFailureCategory =
   | "empty-source"
@@ -34,6 +34,40 @@ export function createMermaidRenderId(id: string, blockId: string, source: strin
   const normalizedId = id.replace(/[^a-zA-Z0-9_-]/g, "");
   const normalizedBlockId = blockId.replace(/[^a-zA-Z0-9_-]/g, "-");
   return `mermaid-${normalizedId}-${normalizedBlockId}-${createMermaidSourceHash(source)}`;
+}
+
+type MermaidArtifactElement = {
+  remove(): void;
+};
+
+type MermaidArtifactRoot = {
+  getElementById(id: string): MermaidArtifactElement | null;
+};
+
+function createMermaidRenderContainer(renderId: string) {
+  if (typeof document === "undefined") {
+    return undefined;
+  }
+
+  const container = document.createElement("div");
+  container.setAttribute("data-mermaid-render-container", renderId);
+  container.style.position = "absolute";
+  container.style.left = "-10000px";
+  container.style.top = "0";
+  container.style.opacity = "0";
+  container.style.pointerEvents = "none";
+  document.body.appendChild(container);
+
+  return container;
+}
+
+export function removeMermaidRenderArtifacts(
+  renderId: string,
+  root: MermaidArtifactRoot | undefined = typeof document === "undefined" ? undefined : document,
+) {
+  root?.getElementById(renderId)?.remove();
+  root?.getElementById(`d${renderId}`)?.remove();
+  root?.getElementById(`i${renderId}`)?.remove();
 }
 
 export function toMermaidFailure(error: unknown): MermaidFailure {
@@ -88,7 +122,8 @@ function MermaidFallback({ failure, source }: { failure: MermaidFailure; source:
 
 export function MermaidDiagram({ blockId, renderActions, source }: MermaidDiagramProps) {
   const reactId = useId();
-  const renderId = useMemo(() => createMermaidRenderId(reactId, blockId, source), [blockId, reactId, source]);
+  const baseRenderId = useMemo(() => createMermaidRenderId(reactId, blockId, source), [blockId, reactId, source]);
+  const renderAttemptRef = useRef(0);
   const [state, setState] = useState<MermaidRenderState>(() =>
     source.trim() ? { status: "loading" } : { status: "failed", failure: emptyMermaidFailure() },
   );
@@ -103,21 +138,30 @@ export function MermaidDiagram({ blockId, renderActions, source }: MermaidDiagra
     }
 
     setState({ status: "loading" });
+    renderAttemptRef.current += 1;
+    const renderId = `${baseRenderId}-${renderAttemptRef.current}`;
 
     async function renderDiagram() {
+      const renderContainer = createMermaidRenderContainer(renderId);
+
       try {
         const { default: mermaid } = await import("mermaid");
         mermaid.initialize({
           securityLevel: "strict",
           startOnLoad: false,
+          suppressErrorRendering: true,
           theme: "default",
         });
-        const result = await mermaid.render(renderId, source);
+        const result = await mermaid.render(renderId, source, renderContainer);
+        renderContainer?.remove();
+        removeMermaidRenderArtifacts(renderId);
 
         if (!cancelled) {
           setState({ status: "rendered", svg: result.svg });
         }
       } catch (error) {
+        renderContainer?.remove();
+        removeMermaidRenderArtifacts(renderId);
         if (!cancelled) {
           setState({ status: "failed", failure: toMermaidFailure(error) });
         }
@@ -129,7 +173,7 @@ export function MermaidDiagram({ blockId, renderActions, source }: MermaidDiagra
     return () => {
       cancelled = true;
     };
-  }, [renderId, source]);
+  }, [baseRenderId, source]);
 
   if (state.status === "failed") {
     return <MermaidFallback failure={state.failure} source={source} />;

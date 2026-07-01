@@ -29,6 +29,7 @@ describe("StreamingMarkdown Mermaid expanded view", () => {
     expect(html).toContain('data-agent-run-mermaid-expanded-trigger="true"');
     expect(html).toContain('aria-label="Open Mermaid diagram in full screen"');
     expect(html).toContain("flowchart TD");
+    expect(html.match(/data-block-id=/g)).toHaveLength(1);
   });
 
   it("can render the expanded trigger in an open state", () => {
