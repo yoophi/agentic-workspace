@@ -10,7 +10,7 @@ use inbound::tauri_commands::{
     request_open_document_tab, request_open_document_window, start_markdown_document_watcher,
     stop_markdown_document_watcher,
 };
-use tauri::{Manager, RunEvent};
+use tauri::{Manager, RunEvent, WindowEvent};
 
 pub fn run() {
     let initial_cli_args = initial_cli_args()
@@ -31,6 +31,12 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::Destroyed = event {
+                let state = window.state::<DocumentWatcherState>();
+                let _ = state.stop_for_window(window.label());
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             check_cli_installed,
             install_cli,

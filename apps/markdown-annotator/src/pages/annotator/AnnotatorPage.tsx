@@ -71,6 +71,7 @@ import {
   getDocumentPathFromWindowQuery,
   openMarkdownDocumentTab,
 } from "@/features/open-document/openMarkdownDocument";
+import { shouldSwapDocument } from "./model/document-reload";
 import {
   AnnotationInputDialog,
   MarkdownToc,
@@ -135,6 +136,7 @@ export function AnnotatorPage() {
       markdownText: initial.markdownText,
     };
   });
+  const latestDocumentRef = useRef(document);
   const [selection, setSelection] = useState("");
   const [selectionAnchor, setSelectionAnchor] = useState<AnnotationAnchor | null>(null);
   const [selectionAnchors, setSelectionAnchors] = useState<AnnotationAnchor[]>([]);
@@ -158,6 +160,8 @@ export function AnnotatorPage() {
   const [documentReloadError, setDocumentReloadError] = useState<string | null>(null);
   const [staleDocument, setStaleDocument] = useState<StaleSelection | null>(null);
   const [isTocOpen, setTocOpen] = useState(true);
+
+  latestDocumentRef.current = document;
 
   const title = document.fileName;
   const isReloadableDocument =
@@ -291,19 +295,24 @@ export function AnnotatorPage() {
   }
 
   async function reloadActiveDocument({ announceSuccess = false }: { announceSuccess?: boolean } = {}) {
-    if (!isReloadableDocument) {
+    const activeDocument = latestDocumentRef.current;
+    const isActiveDocumentReloadable =
+      isTauriRuntime() && !activeDocument.absolutePath.startsWith("examples/markdown-annotator/");
+
+    if (!isActiveDocumentReloadable) {
       return;
     }
 
     setDocumentRefreshing(true);
     try {
-      const reloaded = await readMarkdownDocument(document.absolutePath);
+      const reloaded = await readMarkdownDocument(activeDocument.absolutePath);
       setDocumentReloadError(null);
       setStaleDocument(null);
       // Only swap document state when the content actually changed. Re-setting an
       // identical document on every poll would re-parse the markdown and reset the
       // reader's annotation/selection context unnecessarily.
-      if (reloaded.markdownText !== document.markdownText) {
+      if (shouldSwapDocument(latestDocumentRef.current, reloaded)) {
+        latestDocumentRef.current = reloaded;
         setDocument(reloaded);
         setPromptFilePath(reloaded.absolutePath);
       }
@@ -315,7 +324,7 @@ export function AnnotatorPage() {
       setDocumentReloadError(message);
       setStaleDocument(
         findStaleMarkdownDocument({
-          absolutePath: document.absolutePath,
+          absolutePath: activeDocument.absolutePath,
           readable: false,
         }),
       );
@@ -516,7 +525,7 @@ export function AnnotatorPage() {
 
     let cancelled = false;
     const intervalId = window.setInterval(() => {
-      if (!cancelled) {
+      if (!cancelled && !globalThis.document.hidden) {
         void reloadActiveDocument();
       }
     }, AUTO_REFRESH_INTERVAL_MS);

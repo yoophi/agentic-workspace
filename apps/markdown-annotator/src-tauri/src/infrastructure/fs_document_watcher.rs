@@ -1,5 +1,5 @@
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -45,11 +45,7 @@ pub fn watch_document(
     let mut watcher = RecommendedWatcher::new(
         move |result: notify::Result<notify::Event>| match result {
             Ok(event) => {
-                if !event
-                    .paths
-                    .iter()
-                    .any(|path| path == &document_path_for_watcher)
-                {
+                if !event_targets_document(&event.paths, &document_path_for_watcher) {
                     return;
                 }
                 if !should_emit_event(&last_event_for_watcher, DOCUMENT_EVENT_DEBOUNCE) {
@@ -80,6 +76,15 @@ pub fn watch_document(
     Ok(DocumentWatchHandle { _watcher: watcher })
 }
 
+fn event_targets_document(event_paths: &[PathBuf], document_path: &Path) -> bool {
+    let document_file_name = document_path.file_name();
+
+    event_paths.iter().any(|event_path| {
+        event_path == document_path
+            || (document_file_name.is_some() && event_path.file_name() == document_file_name)
+    })
+}
+
 fn should_emit_event(last_event: &Arc<Mutex<Instant>>, debounce: Duration) -> bool {
     let now = Instant::now();
     let mut last_event = match last_event.lock() {
@@ -96,4 +101,38 @@ fn should_emit_event(last_event: &Arc<Mutex<Instant>>, debounce: Duration) -> bo
 
     *last_event = now;
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::event_targets_document;
+
+    #[test]
+    fn detects_exact_document_path() {
+        assert!(event_targets_document(
+            &[PathBuf::from("/notes/doc.md")],
+            &PathBuf::from("/notes/doc.md"),
+        ));
+    }
+
+    #[test]
+    fn detects_atomic_save_target_by_file_name() {
+        assert!(event_targets_document(
+            &[
+                PathBuf::from("/notes/.doc.md.swp"),
+                PathBuf::from("/notes/doc.md")
+            ],
+            &PathBuf::from("/notes/doc.md"),
+        ));
+    }
+
+    #[test]
+    fn ignores_unrelated_file_names() {
+        assert!(!event_targets_document(
+            &[PathBuf::from("/notes/other.md")],
+            &PathBuf::from("/notes/doc.md"),
+        ));
+    }
 }

@@ -5,6 +5,7 @@ import {
   findStaleMarkdownDocument,
 } from "@yoophi/workspace-auto-refresh";
 import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
+import { shouldSwapDocument } from "./model/document-reload";
 
 describe("markdown annotator auto reload integration", () => {
   it("uses the shared fallback refresh policy for active markdown documents", () => {
@@ -46,5 +47,30 @@ sequenceDiagram
       declaration: "mermaid",
       source: "sequenceDiagram\n  participant A\n  participant B\n  A->>B: Reloaded",
     });
+  });
+
+  it("swaps a reloaded document when content changes back to an earlier value", () => {
+    const current = {
+      fileName: "notes.md",
+      absolutePath: "/notes/notes.md",
+      markdownText: "B",
+    };
+    const reloaded = {
+      fileName: "notes.md",
+      absolutePath: "/notes/notes.md",
+      markdownText: "A",
+    };
+
+    expect(shouldSwapDocument(current, reloaded)).toBe(true);
+  });
+
+  it("keeps document state stable when polling reloads identical content", () => {
+    const current = {
+      fileName: "notes.md",
+      absolutePath: "/notes/notes.md",
+      markdownText: "A",
+    };
+
+    expect(shouldSwapDocument(current, { ...current })).toBe(false);
   });
 });
