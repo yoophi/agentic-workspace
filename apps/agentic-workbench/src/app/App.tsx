@@ -27,12 +27,15 @@ import {
 } from "@/entities/project/api/git-worktree-repository";
 import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
+import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary";
 import { formatWorktreeWindowTitle } from "@/entities/project/lib/worktree-window-title";
+import type { DashboardAction } from "@/entities/project/model";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project, ProjectInput } from "@/entities/project/model/types";
 import { DeleteProjectDialog } from "@/features/project-delete/ui/delete-project-dialog";
 import { ProjectFormDialog } from "@/features/project-form/ui/project-form-dialog";
 import type { OpenWorktreeMode } from "@/features/project-worktree/ui/project-worktree-card";
+import { ProjectDashboardPage } from "@/pages/project-dashboard/ui/project-dashboard-page";
 import { ProjectDetailPage } from "@/pages/project-detail/ui/project-detail-page";
 import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";
 import { ProjectWorktreeSessionPage } from "@/pages/project-worktree-session/ui/project-worktree-session-page";
@@ -121,6 +124,36 @@ export function App() {
     );
   }
 
+  function handleDashboardAction(action: DashboardAction) {
+    if (!action.enabled) {
+      return;
+    }
+
+    if (action.kind === "createProject" || action.kind === "openExistingProject") {
+      openCreateDialog();
+      return;
+    }
+
+    if (action.kind === "retry") {
+      void projectsQuery.refetch();
+      return;
+    }
+
+    if (action.target?.type === "route") {
+      navigate(action.target.to);
+      return;
+    }
+
+    if (action.target?.type === "worktree") {
+      navigate(
+        buildProjectWorktreeRoute(
+          action.target.projectId,
+          action.target.worktreePath,
+        ),
+      );
+    }
+  }
+
   async function confirmDeleteProject() {
     if (!deletingProject) {
       return;
@@ -139,6 +172,11 @@ export function App() {
   const isWorktreeSessionPage =
     location.pathname.startsWith("/session/") ||
     location.pathname.endsWith("/worktrees");
+  const projectDashboard = buildProjectDashboard({
+    projects,
+    isLoading: projectsQuery.isLoading,
+    errorMessage: projectsQuery.error ? String(projectsQuery.error) : null,
+  });
 
   return (
     <main
@@ -162,6 +200,15 @@ export function App() {
         <Routes>
           <Route
             path="/"
+            element={
+              <ProjectDashboardPage
+                dashboard={projectDashboard}
+                onAction={handleDashboardAction}
+              />
+            }
+          />
+          <Route
+            path="/projects"
             element={
               <ProjectListPage
                 projects={projects}

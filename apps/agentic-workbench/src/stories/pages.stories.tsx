@@ -1,9 +1,20 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { ProjectDetailPage } from "@/pages/project-detail/ui/project-detail-page";
+import { ProjectDashboardPage } from "@/pages/project-dashboard/ui/project-dashboard-page";
 import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";
 import { ProjectWorktreeSessionPage } from "@/pages/project-worktree-session/ui/project-worktree-session-page";
-import { sampleProjects, sampleWorktrees } from "@/shared/storybook/sample-data";
+import {
+  sampleEmptyProjectDashboard,
+  sampleErrorProjectDashboard,
+  sampleLoadingProjectDashboard,
+  sampleLongContentProjectDashboard,
+  samplePartialProjectDashboard,
+  sampleProjectDashboard,
+  sampleProjectDashboardWithQuickActions,
+  sampleProjects,
+  sampleWorktrees,
+} from "@/shared/storybook/sample-data";
 
 const meta = {
   title: "Atomic Design/Pages/Registered Components",
@@ -18,6 +29,69 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const ProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const ProjectDashboardQuickActions: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleProjectDashboardWithQuickActions}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const EmptyProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleEmptyProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const LoadingProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleLoadingProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const ErrorProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleErrorProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const PartialProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={samplePartialProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
+
+export const LongContentProjectDashboard: Story = {
+  render: () => (
+    <ProjectDashboardPage
+      dashboard={sampleLongContentProjectDashboard}
+      onAction={() => undefined}
+    />
+  ),
+};
 
 export const ProjectList: Story = {
   render: () => (

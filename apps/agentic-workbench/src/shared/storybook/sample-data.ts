@@ -8,7 +8,13 @@ import type { GitBranch } from "@/entities/project/model/git-branch";
 import type { GitRemote } from "@/entities/project/model/git-remote";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { GitWorktreeChanges } from "@/entities/project/model/git-worktree-changes";
+import type {
+  ChangeSummary,
+  SessionSummary,
+  WorktreeSummary,
+} from "@/entities/project/model";
 import type { Project } from "@/entities/project/model/types";
+import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary";
 import type { SavedPrompt } from "@/entities/saved-prompt/model/types";
 import type {
   WorktreeFileEntry,
@@ -35,6 +41,153 @@ export const sampleProjects: Project[] = [
     description: "Logseq 개인 지식 그래프",
   },
 ];
+
+export const sampleLongProjects: Project[] = [
+  {
+    id: "project-long-dashboard",
+    name: "Agentic Workbench dashboard validation project with a very long display name",
+    workingDirectory:
+      "/Users/yoophi/project/worktrees/agentic-workspace/feature/project-dashboard-start-screen-with-long-path-layout-validation",
+    description:
+      "긴 프로젝트 이름, 긴 경로, 긴 설명이 시작화면의 action과 상태 영역을 침범하지 않는지 검증하기 위한 샘플입니다.",
+  },
+  ...sampleProjects,
+];
+
+const sampleSessionsByProjectId: Record<string, SessionSummary> = {
+  "project-acp": {
+    projectId: "project-acp",
+    sessionId: "session-acp-dashboard",
+    label: "Dashboard implementation",
+    lastActivityLabel: "12분 전",
+    lastActivityMs: 1_783_012_000_000,
+    resumable: true,
+    routeTarget: "/session/project-acp",
+  },
+  "project-notes": {
+    projectId: "project-notes",
+    sessionId: "session-notes-review",
+    label: "Knowledge graph cleanup",
+    lastActivityLabel: "어제",
+    lastActivityMs: 1_782_900_000_000,
+    resumable: true,
+    routeTarget: "/session/project-notes",
+  },
+};
+
+const sampleWorktreesByProjectId: Record<string, WorktreeSummary> = {
+  "project-acp": {
+    projectId: "project-acp",
+    count: 3,
+    activeCount: 2,
+    primaryWorktreePath:
+      "/Users/yoophi/project/worktrees/agentic-workbench/storybook",
+    status: "ready",
+  },
+  "project-notes": {
+    projectId: "project-notes",
+    count: 1,
+    activeCount: 1,
+    status: "ready",
+  },
+};
+
+const sampleChangesByProjectId: Record<string, ChangeSummary> = {
+  "project-acp": {
+    changedFileCount: 5,
+    hasChanges: true,
+    status: "ready",
+  },
+  "project-notes": {
+    changedFileCount: 0,
+    hasChanges: false,
+    status: "ready",
+  },
+};
+
+export const sampleProjectDashboard = buildProjectDashboard({
+  projects: sampleProjects,
+  isLoading: false,
+  sessionsByProjectId: sampleSessionsByProjectId,
+  worktreesByProjectId: sampleWorktreesByProjectId,
+  changesByProjectId: sampleChangesByProjectId,
+});
+
+export const sampleProjectDashboardWithQuickActions = buildProjectDashboard({
+  projects: sampleProjects,
+  isLoading: false,
+});
+
+export const sampleEmptyProjectDashboard = buildProjectDashboard({
+  projects: [],
+  isLoading: false,
+});
+
+export const sampleLoadingProjectDashboard = buildProjectDashboard({
+  projects: [],
+  isLoading: true,
+});
+
+export const sampleErrorProjectDashboard = buildProjectDashboard({
+  projects: [],
+  isLoading: false,
+  errorMessage: "프로젝트 저장소를 읽을 수 없습니다.",
+});
+
+export const samplePartialProjectDashboard = buildProjectDashboard({
+  projects: sampleProjects,
+  isLoading: false,
+  sessionsByProjectId: sampleSessionsByProjectId,
+  worktreesByProjectId: {
+    ...sampleWorktreesByProjectId,
+    "project-notes": {
+      projectId: "project-notes",
+      count: 0,
+      activeCount: 0,
+      status: "unavailable",
+    },
+  },
+  changesByProjectId: {
+    ...sampleChangesByProjectId,
+    "project-notes": {
+      status: "unavailable",
+    },
+  },
+});
+
+export const sampleLongContentProjectDashboard = buildProjectDashboard({
+  projects: sampleLongProjects,
+  isLoading: false,
+  sessionsByProjectId: {
+    "project-long-dashboard": {
+      projectId: "project-long-dashboard",
+      sessionId: "session-long-dashboard",
+      label:
+        "A very long resumable session label for validating dashboard action spacing",
+      lastActivityLabel: "방금 전",
+      lastActivityMs: 1_783_100_000_000,
+      resumable: true,
+      routeTarget: "/session/project-long-dashboard",
+    },
+  },
+  worktreesByProjectId: {
+    "project-long-dashboard": {
+      projectId: "project-long-dashboard",
+      count: 12,
+      activeCount: 7,
+      primaryWorktreePath:
+        "/Users/yoophi/project/worktrees/agentic-workspace/feature/project-dashboard-start-screen-with-long-path-layout-validation",
+      status: "ready",
+    },
+  },
+  changesByProjectId: {
+    "project-long-dashboard": {
+      changedFileCount: 42,
+      hasChanges: true,
+      status: "ready",
+    },
+  },
+});
 
 export const sampleBranches: GitBranch[] = [
   { name: "main", isCurrent: true, isRemote: false },
