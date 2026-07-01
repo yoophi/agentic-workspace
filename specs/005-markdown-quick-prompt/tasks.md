@@ -159,6 +159,33 @@
 
 ---
 
+## Phase 8: Amendment - Selection Toolbar Quick Annotate Dialog & Agent-Run Delivery
+
+**Purpose**: Bring the completed implementation into alignment with the updated selection-toolbar contract: the quick annotate button appears in the toolbar shown after region selection, opens a user-input dialog, and sends the dialog-entered prompt text plus selected context to agent-run.
+
+**Independent Test**: Select a non-empty Markdown region in AW, confirm the selection toolbar shows quick annotate, click it, enter a prompt in the dialog, send it, and verify the active agent-run receives the exact entered prompt text with the selected Markdown context.
+
+### Tests for Selection Toolbar Amendment
+
+- [ ] T063 [P] [US1] Add MA integration coverage for selection toolbar quick annotate visibility after non-empty text selection in `apps/markdown-annotator/src/pages/annotator/quick-prompt-selection.test.tsx`
+- [ ] T064 [P] [US1] Add AW integration coverage for selection toolbar quick annotate opening a prompt dialog before send in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.test.tsx`
+- [ ] T065 [P] [US1] Add dialog regression coverage that submitted payload uses dialog-entered prompt text instead of a default prompt in `apps/markdown-annotator/src/features/quick-prompt/ui/QuickPromptDialog.test.tsx`
+
+### Implementation for Selection Toolbar Amendment
+
+- [ ] T066 [US1] Extend quick prompt action state usage to identify the `selection-toolbar` surface in `packages/markdown-annotation-core/src/types/quick-prompt.ts`
+- [ ] T067 [US1] Ensure the selection toolbar quick annotate lightning button is rendered only for current non-empty selections in `apps/markdown-annotator/src/pages/annotator/AnnotatorPage.tsx`
+- [ ] T068 [US1] Add AW selection quick annotate draft state that opens a prompt dialog instead of immediately sending a default prompt in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [ ] T069 [US1] Wire AW dialog send to deliver the exact user-entered prompt text plus selected Markdown context to the active agent-run in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [ ] T070 [US1] Add Storybook coverage for selection toolbar quick annotate and selection prompt dialog states in `apps/markdown-annotator/src/stories/organisms/QuickPrompt.stories.tsx`
+
+### Verification for Selection Toolbar Amendment
+
+- [ ] T071 [P] Run MA tests and typecheck for selection toolbar quick annotate using `apps/markdown-annotator/package.json`
+- [ ] T072 [P] Run AW tests and typecheck for agent-run quick annotate delivery using `apps/agentic-workbench/package.json`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -170,6 +197,7 @@
 - **US3 (Phase 5)**: Depends on Foundational; can run alongside US1/US2 after shared formatter support exists.
 - **US4 (Phase 6)**: Depends on all story surfaces being present enough to harden disabled/a11y/regression states.
 - **Polish (Phase 7)**: Depends on desired user stories being complete.
+- **Amendment (Phase 8)**: Depends on the existing US1 foundation and AW send integration; should complete before any final PR merge.
 
 ### User Story Dependencies
 
@@ -177,6 +205,7 @@
 - **US2**: No dependency on US1 for core block context; UI conflict review should happen before final checkpoint.
 - **US3**: No dependency on US1/US2 except shared formatter foundation.
 - **US4**: Depends on US1-US3 UI surfaces for full regression and accessibility coverage.
+- **US1 Amendment**: Depends on existing US1 selection context/dialog work and AW delivery path from US4.
 
 ### Parallel Opportunities
 
@@ -187,6 +216,8 @@
 - US3 tests T036-T038 can be written in parallel.
 - US4 tests T044-T047 can be written in parallel.
 - Polish verification T055-T059 can run in parallel after implementation.
+- Amendment tests T063-T065 can be written in parallel before T066-T070 implementation.
+- Amendment verification T071-T072 can run in parallel after T066-T070 are complete.
 
 ---
 
@@ -223,6 +254,14 @@ Task: "T046 [P] [US4] Add failing regression test for annotation actions and qui
 Task: "T047 [P] [US4] Add failing MA regression test for auto reload stale context display while quick prompt dialog is open in apps/markdown-annotator/src/pages/annotator/annotator-auto-reload.test.tsx"
 ```
 
+## Parallel Example: Selection Toolbar Amendment
+
+```text
+Task: "T063 [P] [US1] Add MA integration coverage for selection toolbar quick annotate visibility after non-empty text selection in apps/markdown-annotator/src/pages/annotator/quick-prompt-selection.test.tsx"
+Task: "T064 [P] [US1] Add AW integration coverage for selection toolbar quick annotate opening a prompt dialog before send in apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.test.tsx"
+Task: "T065 [P] [US1] Add dialog regression coverage that submitted payload uses dialog-entered prompt text instead of a default prompt in apps/markdown-annotator/src/features/quick-prompt/ui/QuickPromptDialog.test.tsx"
+```
+
 ---
 
 ## Implementation Strategy
@@ -241,10 +280,12 @@ Task: "T047 [P] [US4] Add failing MA regression test for auto reload stale conte
 2. Add US2 block quick prompt using the same dialog and formatter.
 3. Add US3 document quick prompt and long-context display.
 4. Add US4 disabled, accessibility, AW integration, and regression hardening.
-5. Run all quickstart checks.
+5. Complete Phase 8 selection toolbar quick annotate amendment.
+6. Run all quickstart checks.
 
 ### Notes
 
 - Tasks marked `[P]` touch separate files or are test-writing tasks that can be prepared independently.
 - Story labels map directly to spec user stories: US1 selection, US2 block, US3 document, US4 disabled/accessibility.
 - No Tauri backend tasks are listed because the plan keeps v1 delivery app-local and callback-based.
+- Phase 8 tasks are intentionally unchecked because they were added after the initial implementation pass to reflect the updated selection toolbar and agent-run dialog-send contract.
