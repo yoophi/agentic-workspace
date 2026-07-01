@@ -351,4 +351,24 @@ No tasks here.
     expect(html).toContain("Mermaid diagram source is empty.");
     expect(html).toContain("Following text remains readable.");
   });
+
+  it("renders optional block quick prompt action with existing block actions", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownViewer
+        blocks={[codeBlock({})]}
+        components={components}
+        blockQuickPromptAction={{
+          accessibleName: "Create quick prompt from this block",
+          tooltip: "Quick prompt",
+          onRequest: () => undefined,
+        }}
+        onRequestBlockComment={() => undefined}
+        onRequestBlockDelete={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Create quick prompt from this block"');
+    expect(html).toContain('aria-label="Delete block"');
+    expect(html).toContain('aria-label="Comment on block"');
+  });
 });

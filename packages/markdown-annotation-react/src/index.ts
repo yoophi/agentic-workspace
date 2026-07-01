@@ -52,6 +52,7 @@ export type {
   MermaidExpandedDialogRootProps,
   MermaidExpandedDialogTriggerProps,
   MarkdownViewerBlockNote,
+  MarkdownViewerBlockQuickPromptAction,
   MarkdownViewerComponents,
   MarkdownViewerInlineAnnotation,
   TypeSelectOption,

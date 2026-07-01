@@ -6,6 +6,7 @@ import type {
   TextareaHTMLAttributes,
 } from "react";
 import type { AnnotationType } from "@yoophi/markdown-annotation-core/types";
+import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 
 /**
  * Viewer 전용 inline annotation 표현. core의 AnnotationDraft에서 viewer 렌더에
@@ -74,6 +75,14 @@ export type MarkdownViewerComponents = {
   Button: ComponentType<ViewerButtonProps>;
   Tooltip: ComponentType<ViewerTooltipProps>;
   MermaidExpandedDialog?: MermaidExpandedDialogComponents;
+};
+
+export type MarkdownViewerBlockQuickPromptAction = {
+  accessibleName?: string;
+  tooltip?: ReactNode;
+  disabled?: boolean;
+  disabledReason?: ReactNode;
+  onRequest: (block: MarkdownBlock) => void;
 };
 
 export type TypeSelectOption = {

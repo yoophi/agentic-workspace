@@ -9,6 +9,7 @@ import {
   StickyNote,
   Terminal,
   Trash2,
+  Zap,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -49,6 +50,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AnnotationAnchor, AnnotationDraft, AnnotationType } from "@/entities/annotation";
 import {
   extractTocEntries,
@@ -56,6 +58,10 @@ import {
   parseMarkdownToBlocks,
   type AgentPromptGoal,
   type TocEntry,
+  buildBlockQuickPromptContext,
+  buildDocumentQuickPromptContext,
+  buildSelectionQuickPromptContext,
+  type QuickPromptContext,
 } from "@yoophi/markdown-annotation-core";
 import {
   checkCliInstalled,
@@ -96,6 +102,8 @@ import {
 } from "@yoophi/workspace-auto-refresh";
 import { annotationDialogComponents } from "@/shared/ui/annotation-dialog-components";
 import { markdownViewerComponents } from "@/shared/ui/markdown-viewer-components";
+import { standaloneQuickPromptTarget } from "@/features/quick-prompt/model/quick-prompt-target";
+import { QuickPromptDialog, type QuickPromptDialogStatus } from "@/features/quick-prompt/ui/QuickPromptDialog";
 
 const WINDOW_HIGHLIGHT_EVENT = "markdown-annotator://window-highlight";
 
@@ -163,6 +171,10 @@ export function AnnotatorPage() {
   const [isTocOpen, setTocOpen] = useState(true);
 
   latestDocumentRef.current = document;
+  const [quickPromptContext, setQuickPromptContext] = useState<QuickPromptContext | null>(null);
+  const [quickPromptText, setQuickPromptText] = useState("");
+  const [quickPromptStatus, setQuickPromptStatus] = useState<QuickPromptDialogStatus>("editing");
+  const [quickPromptError, setQuickPromptError] = useState<string | null>(null);
 
   const title = document.fileName;
   const isReloadableDocument =
@@ -203,6 +215,32 @@ export function AnnotatorPage() {
     window.getSelection()?.removeAllRanges();
   }
 
+  function documentRevisionLabel() {
+    return `${document.fileName}:${document.markdownText.length}:${blocks.length}`;
+  }
+
+  function resetQuickPromptState() {
+    setQuickPromptContext(null);
+    setQuickPromptText("");
+    setQuickPromptStatus("editing");
+    setQuickPromptError(null);
+  }
+
+  function openQuickPrompt(context: QuickPromptContext, defaultPrompt = "") {
+    setQuickPromptContext(context);
+    setQuickPromptText(defaultPrompt);
+    setQuickPromptStatus("editing");
+    setQuickPromptError(null);
+  }
+
+  function quickPromptOptions() {
+    return {
+      sourceLabel: document.fileName,
+      documentPath: document.absolutePath,
+      documentRevisionLabel: documentRevisionLabel(),
+    };
+  }
+
   function loadDocumentIntoWindow(opened: MarkdownDocument, message: string) {
     setSelectedExampleId("");
     setDocument(opened);
@@ -214,6 +252,7 @@ export function AnnotatorPage() {
     setEditingAnnotationId(null);
     setNoteDialogOpen(false);
     setComment("");
+    resetQuickPromptState();
     setStatus(message);
   }
 
@@ -266,6 +305,7 @@ export function AnnotatorPage() {
     setEditingAnnotationId(null);
     setNoteDialogOpen(false);
     setComment("");
+    resetQuickPromptState();
     setStatus(`${example.fileName} 예제를 불러왔습니다.`);
   }
 
@@ -411,6 +451,22 @@ export function AnnotatorPage() {
       },
     ]);
     setStatus("블록 삭제 annotation을 추가했습니다.");
+  }
+
+  function requestBlockQuickPrompt(block: MarkdownBlock) {
+    try {
+      openQuickPrompt(
+        buildBlockQuickPromptContext({
+          ...quickPromptOptions(),
+          block,
+        }),
+        "",
+      );
+      setStatus("블럭 quick prompt를 열었습니다.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "블럭 quick prompt를 열 수 없습니다.";
+      setStatus(message);
+    }
   }
 
   function captureSelection() {
@@ -609,6 +665,46 @@ export function AnnotatorPage() {
     );
   }
 
+  function requestSelectionQuickPrompt() {
+    const anchors = activeSelectionAnchors();
+    if (!selection.trim() || anchors.length === 0) {
+      setStatus("Quick prompt로 보낼 선택 영역이 없습니다.");
+      return;
+    }
+
+    try {
+      openQuickPrompt(
+        buildSelectionQuickPromptContext({
+          ...quickPromptOptions(),
+          anchors,
+          selectedText: selection,
+        }),
+        "",
+      );
+      setSelectionToolbarPosition(null);
+      setStatus("선택 영역 quick prompt를 열었습니다.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "선택 영역 quick prompt를 열 수 없습니다.";
+      setStatus(message);
+    }
+  }
+
+  function requestDocumentQuickPrompt() {
+    try {
+      openQuickPrompt(
+        buildDocumentQuickPromptContext({
+          ...quickPromptOptions(),
+          markdownText: document.markdownText,
+        }),
+        "",
+      );
+      setStatus("전체 문서 quick prompt를 열었습니다.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "전체 문서 quick prompt를 열 수 없습니다.";
+      setStatus(message);
+    }
+  }
+
   function editInlineAnnotation(annotationId: string) {
     const annotation = annotations.find((candidate) => candidate.id === annotationId);
     if (!annotation || annotation.type !== "note") {
@@ -782,6 +878,25 @@ export function AnnotatorPage() {
               {isCliInstalling ? "Installing" : isCliInstalled ? "CLI installed" : "Install CLI"}
             </Button>
           ) : null}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+              <Button
+                aria-label="Create quick prompt from entire document"
+                type="button"
+                variant="outline"
+                disabled={!document.markdownText.trim()}
+                onClick={requestDocumentQuickPrompt}
+              >
+                <Zap data-icon="inline-start" aria-hidden="true" />
+                Quick prompt
+              </Button>
+              }
+            />
+            <TooltipContent>
+              {document.markdownText.trim() ? "전체 문서를 quick prompt 컨텍스트로 첨부" : "문서가 비어 있습니다."}
+            </TooltipContent>
+          </Tooltip>
           <Button type="button" onClick={copyExport}>
             <ClipboardCopy data-icon="inline-start" aria-hidden="true" />
             Copy prompt
@@ -869,6 +984,11 @@ export function AnnotatorPage() {
                     onEditInlineAnnotation={editInlineAnnotation}
                     onRequestBlockComment={requestBlockComment}
                     onRequestBlockDelete={requestBlockDelete}
+                    blockQuickPromptAction={{
+                      accessibleName: "Create quick prompt from Markdown block",
+                      tooltip: "블럭을 quick prompt 컨텍스트로 첨부",
+                      onRequest: requestBlockQuickPrompt,
+                    }}
                   />
                 </CardContent>
               </Card>
@@ -917,6 +1037,22 @@ export function AnnotatorPage() {
                   >
                     <StickyNote aria-hidden="true" />
                   </Button>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                      <Button
+                        aria-label="Create quick prompt from selected text"
+                        size="icon-sm"
+                        type="button"
+                        variant="ghost"
+                        onClick={requestSelectionQuickPrompt}
+                      >
+                        <Zap aria-hidden="true" />
+                      </Button>
+                      }
+                    />
+                    <TooltipContent>선택 영역을 quick prompt 컨텍스트로 첨부</TooltipContent>
+                  </Tooltip>
                 </div>
               ) : null}
             </div>
@@ -1153,6 +1289,25 @@ export function AnnotatorPage() {
         onCommentChange={setComment}
         onSubmit={saveDialogAnnotation}
         components={annotationDialogComponents}
+      />
+
+      <QuickPromptDialog
+        open={quickPromptContext !== null}
+        context={quickPromptContext}
+        promptText={quickPromptText}
+        onPromptTextChange={setQuickPromptText}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetQuickPromptState();
+          }
+        }}
+        target={standaloneQuickPromptTarget}
+        status={quickPromptStatus}
+        errorMessage={quickPromptError}
+        onSend={async () => {
+          setQuickPromptStatus("failed");
+          setQuickPromptError(standaloneQuickPromptTarget.unavailableReason ?? "Agent target is unavailable.");
+        }}
       />
 
       <footer className="border-t bg-card px-4 py-2 text-xs text-muted-foreground">{status}</footer>

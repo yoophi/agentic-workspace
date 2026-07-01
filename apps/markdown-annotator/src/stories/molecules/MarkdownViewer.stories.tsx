@@ -266,5 +266,12 @@ export const BlockActions: Story = {
     onRequestBlockDelete: (block) => {
       console.log("delete block", block.id);
     },
+    blockQuickPromptAction: {
+      accessibleName: "Create quick prompt from Markdown block",
+      tooltip: "블럭을 quick prompt 컨텍스트로 첨부",
+      onRequest: (block) => {
+        console.log("quick prompt block", block.id);
+      },
+    },
   },
 };
