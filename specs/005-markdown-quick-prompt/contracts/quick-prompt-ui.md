@@ -32,6 +32,8 @@ Formatted prompt는 다음 정보를 포함해야 한다.
 `MarkdownViewer` 소비 앱은 quick prompt action을 optional로 제공할 수 있다.
 
 - Block toolbar에 block quick prompt action을 표시할 수 있어야 한다.
+- Selection toolbar에는 non-empty text region selection 후 quick annotate lightning icon button을 표시해야 한다.
+- Selection toolbar quick annotate button은 현재 selection context를 사용해 prompt composition dialog를 열어야 하며, 클릭만으로 agent-run에 전송하면 안 된다.
 - Selection toolbar는 app page가 소유하되, same context builder를 사용해야 한다.
 - Document-level quick prompt action은 page/header/prompt panel 같은 app-local 위치가 소유한다.
 - quick prompt action이 없으면 기존 annotation/delete/comment UI는 현재처럼 동작해야 한다.
@@ -46,6 +48,8 @@ Prompt composition UI는 다음 상태를 지원해야 한다.
 - `sending`: 중복 전송 방지를 위해 send action이 잠긴다.
 - `failed`: target reject 또는 delivery failure를 표시하고 재시도/수정이 가능하다.
 - `sent`: 요청이 target에 접수되었음을 표시한다.
+
+Selection toolbar에서 열린 prompt composition UI는 `selection` scope preview를 유지해야 하며, 사용자가 send를 누를 때 dialog textarea의 현재 prompt text를 전송 payload에 포함해야 한다.
 
 ## Agent Target Contract
 

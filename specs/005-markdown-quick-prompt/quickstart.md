@@ -33,7 +33,8 @@ pnpm storybook:annotator
 
 Expected stories:
 
-- Selection quick prompt state
+- Selection toolbar quick annotate state
+- Selection quick prompt dialog state
 - Block quick prompt action state
 - Document quick prompt action state
 - Empty selection/block/document state
@@ -44,6 +45,7 @@ Expected stories:
 Expected outcome:
 
 - Lightning icon controls are visible in the correct surfaces.
+- After selecting text, the selection toolbar includes a quick annotate lightning button.
 - Tooltip and accessible labels communicate the action and disabled reason.
 - Prompt composition shows context scope and length state before send.
 
@@ -52,13 +54,14 @@ Expected outcome:
 1. Run `pnpm dev:annotator`.
 2. Open the sample Markdown document.
 3. Select a non-empty text range.
-4. Trigger the selection quick prompt lightning action.
-5. Enter a prompt such as `이 선택 영역을 더 명확하게 고쳐줘`.
-6. Confirm the context preview says `선택 영역` and shows the selected text.
-7. Confirm send is disabled or blocked with a clear unavailable-target reason when no agent target is connected.
-8. Trigger a block quick prompt from a paragraph, list item, table, code block, and Mermaid block.
-9. Trigger a document quick prompt.
-10. Try empty document and empty/whitespace block fixtures.
+4. Confirm the selection toolbar appears and includes the quick annotate lightning action.
+5. Trigger the selection toolbar quick annotate lightning action.
+6. Enter a prompt such as `이 선택 영역을 더 명확하게 고쳐줘`.
+7. Confirm the context preview says `선택 영역` and shows the selected text.
+8. Confirm send is disabled or blocked with a clear unavailable-target reason when no agent target is connected.
+9. Trigger a block quick prompt from a paragraph, list item, table, code block, and Mermaid block.
+10. Trigger a document quick prompt.
+11. Try empty document and empty/whitespace block fixtures.
 
 Expected outcome:
 
@@ -71,12 +74,15 @@ Expected outcome:
 1. Run `pnpm dev:workbench`.
 2. Open a project worktree session with an active agent panel.
 3. Open a Markdown file in the workspace Markdown view.
-4. Trigger a block or document quick prompt.
-5. Enter prompt text and send.
+4. Select a non-empty text range and trigger quick annotate from the selection toolbar.
+5. Enter prompt text in the dialog and send.
+6. Trigger a block or document quick prompt.
+7. Enter prompt text and send.
 
 Expected outcome:
 
 - The formatted prompt is delivered through the active agent prompt target.
+- The receiving agent-run contains the exact prompt text entered in the dialog plus the attached Markdown context.
 - If the agent is busy, the app follows the existing queue/disabled policy.
 - The receiving agent conversation contains the quick prompt request and attached context.
 

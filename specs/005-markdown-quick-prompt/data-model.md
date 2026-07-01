@@ -104,6 +104,7 @@ Icon-only quick prompt 진입점의 표시/상호작용 상태이다.
 **Fields**:
 
 - `scopeKind`: `selection` | `block` | `document`
+- `surface`: `selection-toolbar` | `block-toolbar` | `document-action`
 - `enabled`: 실행 가능 여부
 - `disabledReason`: 실행 불가 사유
 - `tooltip`: hover/focus 설명
@@ -112,5 +113,23 @@ Icon-only quick prompt 진입점의 표시/상호작용 상태이다.
 **Validation Rules**:
 
 - icon-only button은 `accessibleName`이 있어야 한다.
+- `scopeKind=selection`의 canonical surface는 `selection-toolbar`이며, non-empty selection이 있을 때 toolbar 안에 quick annotate 버튼이 표시되어야 한다.
 - `enabled=false`이면 사용자에게 이유를 알 수 있는 tooltip 또는 nearby state가 있어야 한다.
 - keyboard focus로 도달 가능해야 한다.
+
+## QuickPromptDialogState
+
+Quick annotate 버튼 실행 후 사용자 prompt 입력을 받는 다이얼로그 상태이다.
+
+**Fields**:
+
+- `open`: 다이얼로그 표시 여부
+- `draft`: 현재 `PromptDraft`
+- `submitLabel`: 전송 action 표시명
+- `targetState`: 현재 `AgentTarget` availability snapshot
+
+**Validation Rules**:
+
+- quick annotate 버튼 클릭은 prompt text를 즉시 전송하지 않고, 먼저 `open=true` 상태의 다이얼로그를 만들어야 한다.
+- 사용자가 입력한 `draft.promptText`가 비어 있지 않고 target/context가 유효할 때만 전송할 수 있다.
+- 전송 payload는 dialog에 입력된 prompt text를 사용해야 하며 기본 prompt로 대체하면 안 된다.
