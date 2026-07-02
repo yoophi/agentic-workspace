@@ -312,9 +312,12 @@ export function AgentRunPanel({
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const handledExternalPromptRequestIdRef = useRef<string | null>(null);
 
+  // 세션 재진입 시 불필요한 refetch를 막는 신선도 정책(specs/007 research R7).
+  // agent 카탈로그는 환경 변수 기반이라 세션 중 사실상 불변이다.
   const agentsQuery = useQuery({
     queryKey: agentRunQueryKeys.agents,
     queryFn: listAgents,
+    staleTime: 5 * 60_000,
   });
   const agents = agentsQuery.data ?? [];
 
@@ -322,10 +325,12 @@ export function AgentRunPanel({
   const settingsQuery = useQuery({
     queryKey: settingsQueryKey,
     queryFn: () => getAgentRunSettings(workingDirectory),
+    staleTime: 30_000,
   });
   const appCommandSettingsQuery = useQuery({
     queryKey: agentRunQueryKeys.settings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
     queryFn: () => getAgentRunSettings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
+    staleTime: 30_000,
   });
   const saveSettingsMutation = useMutation({
     mutationFn: saveAgentRunSettings,
@@ -339,6 +344,7 @@ export function AgentRunPanel({
   const goalQuery = useQuery({
     queryKey: goalQueryKey,
     queryFn: () => getGoal(workingDirectory),
+    staleTime: 10_000,
   });
   const activeGoal = goalQuery.data ?? null;
 

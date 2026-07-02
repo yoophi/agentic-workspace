@@ -105,9 +105,9 @@
 
 ### Implementation for User Story 3
 
-- [ ] T023 [P] [US3] `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`의 `GitWorkspaceTab`에서 `historyQuery.enabled = historyView === "list"`, `graphQuery.enabled = historyView === "graph"` 적용, 새로고침 버튼·Refreshing badge가 enabled query 기준으로 동작하도록 정리
-- [ ] T024 [P] [US3] `apps/agentic-workbench/src/features/agent-run/ui/agent-run-panel.tsx`의 query 캐시 정책: `agentsQuery` staleTime 5분, `settingsQuery`/`appCommandSettingsQuery` staleTime 30초, `goalQuery` staleTime 10초 (contracts §6)
-- [ ] T025 [US3] US3 검증: quickstart S4 수행(perf 로그에 `list_worktree_git_history` 미실행, List 전환 정상, Graph 복귀 즉시 표시) + 세션 재진입 시 agent query refetch 없음 확인 + `pnpm --filter agentic-workbench check-types`
+- [x] T023 [P] [US3] `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`의 `GitWorkspaceTab`에서 `historyQuery.enabled = historyView === "list"`, `graphQuery.enabled = historyView === "graph"` 적용, 새로고침 버튼·Refreshing badge가 enabled query 기준으로 동작하도록 정리
+- [x] T024 [P] [US3] `apps/agentic-workbench/src/features/agent-run/ui/agent-run-panel.tsx`의 query 캐시 정책: `agentsQuery` staleTime 5분, `settingsQuery`/`appCommandSettingsQuery` staleTime 30초, `goalQuery` staleTime 10초 (contracts §6)
+- [x] T025 [US3] US3 검증: quickstart S4 수행(perf 로그에 `list_worktree_git_history` 미실행, List 전환 정상, Graph 복귀 즉시 표시) + 세션 재진입 시 agent query refetch 없음 확인 + `pnpm --filter agentic-workbench check-types`
 
 **Checkpoint**: US1~US3 — 초기 조회 세트가 최소화된 상태.
 

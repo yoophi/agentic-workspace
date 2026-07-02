@@ -331,7 +331,10 @@ function GitWorkspaceTab({
   const [staleCommitSelection, setStaleCommitSelection] = useState<StaleSelection | null>(null);
   const [viewMode, setViewMode] = useState<"commit" | "worktree">("commit");
   const [worktreeFilePath, setWorktreeFilePath] = useState<string | null>(null);
+  // 선택된 view의 query만 실행한다(specs/007 research R6). 반대 view는 전환
+  // 시점에 로드되고, 이미 캐시가 있으면 즉시 표시된다.
   const historyQuery = useInfiniteQuery({
+    enabled: historyView === "list",
     queryKey: worktreeGitQueryKeys.history(worktree.path),
     queryFn: ({ pageParam }) =>
       listWorktreeGitHistory(worktree.path, {
@@ -344,6 +347,7 @@ function GitWorkspaceTab({
     ...autoRefreshQueryOptions,
   });
   const graphQuery = useInfiniteQuery({
+    enabled: historyView === "graph",
     queryKey: worktreeGitQueryKeys.graph(worktree.path),
     queryFn: ({ pageParam }) =>
       getWorktreeGitGraph(worktree.path, {
@@ -473,8 +477,12 @@ function GitWorkspaceTab({
                   disabled={statusQuery.isFetching || historyQuery.isFetching || graphQuery.isFetching}
                   onClick={() => {
                     void statusQuery.refetch();
-                    void historyQuery.refetch();
-                    void graphQuery.refetch();
+                    // 비활성(enabled=false) view의 refetch는 no-op이므로 선택된 view만 갱신된다.
+                    if (historyView === "list") {
+                      void historyQuery.refetch();
+                    } else {
+                      void graphQuery.refetch();
+                    }
                     if (selectedCommitHash) {
                       void commitDetailQuery.refetch();
                     }
