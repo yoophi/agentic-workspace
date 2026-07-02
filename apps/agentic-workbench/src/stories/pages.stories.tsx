@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
+import { createPlaceholderWorktree } from "@/app/model/session-route";
 import { ProjectDetailPage } from "@/pages/project-detail/ui/project-detail-page";
 import { ProjectDashboardPage } from "@/pages/project-dashboard/ui/project-dashboard-page";
 import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";
@@ -181,6 +182,17 @@ export const WorktreeSessionClean: Story = {
     <ProjectWorktreeSessionPage
       project={sampleProjects[0]}
       worktree={sampleWorktrees[0]}
+      onBack={() => undefined}
+    />
+  ),
+};
+
+// worktree 목록 도착 전 placeholder 상태: status "확인 중" badge가 표시된다.
+export const WorktreeSessionMetadataLoading: Story = {
+  render: () => (
+    <ProjectWorktreeSessionPage
+      project={sampleProjects[0]}
+      worktree={createPlaceholderWorktree(sampleWorktrees[0].path)}
       onBack={() => undefined}
     />
   ),

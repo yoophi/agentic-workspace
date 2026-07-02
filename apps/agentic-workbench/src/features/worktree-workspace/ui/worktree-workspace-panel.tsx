@@ -238,9 +238,18 @@ export function WorktreeWorkspacePanel({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium">Workspace</span>
-              <Badge variant={worktree.status === "dirty" ? "destructive" : "secondary"} className="shrink-0">
-                {worktree.status}
-              </Badge>
+              {worktree.status === "unknown" ? (
+                <Badge variant="outline" className="shrink-0 text-muted-foreground">
+                  확인 중
+                </Badge>
+              ) : (
+                <Badge
+                  variant={worktree.status === "dirty" ? "destructive" : "secondary"}
+                  className="shrink-0"
+                >
+                  {worktree.status}
+                </Badge>
+              )}
             </div>
             <EllipsisPopoverText
               value={worktree.path}

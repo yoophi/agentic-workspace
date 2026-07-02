@@ -24,6 +24,24 @@ type ProjectWorktreeSessionPageProps = {
   onOpenSettings?: () => void;
 };
 
+// status가 아직 계산되지 않은(placeholder/includeStatus:false) worktree는
+// "확인 중"으로 표시한다(specs/007 US1).
+export function WorktreeStatusBadge({ status }: { status: GitWorktree["status"] }) {
+  if (status === "unknown") {
+    return (
+      <Badge variant="outline" className="shrink-0 text-muted-foreground">
+        확인 중
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge variant={status === "dirty" ? "destructive" : "secondary"} className="shrink-0">
+      {status}
+    </Badge>
+  );
+}
+
 export function ProjectWorktreeSessionPage({
   worktree,
   onOpenSettings,
@@ -53,14 +71,9 @@ export function ProjectWorktreeSessionPage({
                     contentClassName="font-mono text-xs"
                   />
                   <Badge variant="outline" className="max-w-44 shrink-0 truncate font-mono">
-                    {worktree.branch || "-"}
+                    {worktree.branch || (worktree.status === "unknown" ? "…" : "-")}
                   </Badge>
-                  <Badge
-                    variant={worktree.status === "dirty" ? "destructive" : "secondary"}
-                    className="shrink-0"
-                  >
-                    {worktree.status}
-                  </Badge>
+                  <WorktreeStatusBadge status={worktree.status} />
                 </div>
               }
             />

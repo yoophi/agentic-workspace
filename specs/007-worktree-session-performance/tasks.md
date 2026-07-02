@@ -58,18 +58,18 @@
 
 ### Tests for User Story 1 (constitution-required) ⚠️
 
-- [ ] T008 [P] [US1] `apps/agentic-workbench/src-tauri/src/infrastructure/git_cli_worktree_provider.rs` 테스트 모듈에 `include_status=false`면 status가 `Unknown`/`can_delete=false`이고 prunable 판정은 유지되는 단위 테스트 추가(구현 전 FAIL 확인)
-- [ ] T009 [P] [US1] `apps/agentic-workbench/src/app/model/session-route.test.ts`에 placeholder worktree 구성·목록 도착 시 교체·path 불일치 시 invalid 판정 로직 테스트 추가(구현 전 FAIL 확인)
+- [x] T008 [P] [US1] `apps/agentic-workbench/src-tauri/src/infrastructure/git_cli_worktree_provider.rs` 테스트 모듈에 `include_status=false`면 status가 `Unknown`/`can_delete=false`이고 prunable 판정은 유지되는 단위 테스트 추가(구현 전 FAIL 확인)
+- [x] T009 [P] [US1] `apps/agentic-workbench/src/app/model/session-route.test.ts`에 placeholder worktree 구성·목록 도착 시 교체·path 불일치 시 invalid 판정 로직 테스트 추가(구현 전 FAIL 확인)
 
 ### Implementation for User Story 1
 
-- [ ] T010 [US1] domain/port 확장: `apps/agentic-workbench/src-tauri/src/domain/git_worktree.rs`의 `GitWorktreeStatus`에 `Unknown` 추가, `domain/git_worktree_provider.rs`의 `list_worktrees`에 `include_status: bool` 파라미터 추가
-- [ ] T011 [US1] 구현 연결: `infrastructure/git_cli_worktree_provider.rs`(include_status=false 시 `has_changes` 생략), `application/git_worktree_service.rs`, `inbound/tauri_commands.rs`의 `list_git_worktrees`에 `include_status: Option<bool>`(기본 true) 전달 — T008 테스트 통과
-- [ ] T012 [P] [US1] frontend 타입/repository: `apps/agentic-workbench/src/entities/project/model/git-worktree.ts`의 status에 `"unknown"` 추가, `entities/project/api/git-worktree-repository.ts`의 `listGitWorktrees`에 `{ includeStatus?: boolean }` 옵션 추가
-- [ ] T013 [US1] route shell 우선 렌더링: `apps/agentic-workbench/src/app/model/session-route.ts`에 placeholder 구성/교체/invalid 판정 헬퍼 구현(T009 테스트 통과), `app/App.tsx`의 `ProjectWorktreeSessionRoute`가 placeholder로 즉시 페이지를 렌더링하고 `includeStatus: false`로 목록을 조회하도록 변경
-- [ ] T014 [US1] 페이지 상태 UI: `apps/agentic-workbench/src/pages/project-worktree-session/ui/project-worktree-session-page.tsx`에 `unknown` status badge(확인 중 표시)와 worktree 검증 실패 상태 UI 추가
-- [ ] T015 [P] [US1] Storybook: 세션 페이지의 메타데이터 로딩(unknown)·검증 실패 상태 스토리를 `apps/agentic-workbench/src/stories/pages.stories.tsx`에 추가
-- [ ] T016 [US1] US1 검증: quickstart S1 수행(골격 1초 이내, status badge 갱신, 잘못된 경로 오류, worktree당 `git status` 미실행, 프로젝트 상세 badge 회귀 없음) + `pnpm --filter agentic-workbench check-types && pnpm --filter agentic-workbench test`
+- [x] T010 [US1] domain/port 확장: `apps/agentic-workbench/src-tauri/src/domain/git_worktree.rs`의 `GitWorktreeStatus`에 `Unknown` 추가, `domain/git_worktree_provider.rs`의 `list_worktrees`에 `include_status: bool` 파라미터 추가
+- [x] T011 [US1] 구현 연결: `infrastructure/git_cli_worktree_provider.rs`(include_status=false 시 `has_changes` 생략), `application/git_worktree_service.rs`, `inbound/tauri_commands.rs`의 `list_git_worktrees`에 `include_status: Option<bool>`(기본 true) 전달 — T008 테스트 통과
+- [x] T012 [P] [US1] frontend 타입/repository: `apps/agentic-workbench/src/entities/project/model/git-worktree.ts`의 status에 `"unknown"` 추가, `entities/project/api/git-worktree-repository.ts`의 `listGitWorktrees`에 `{ includeStatus?: boolean }` 옵션 추가
+- [x] T013 [US1] route shell 우선 렌더링: `apps/agentic-workbench/src/app/model/session-route.ts`에 placeholder 구성/교체/invalid 판정 헬퍼 구현(T009 테스트 통과), `app/App.tsx`의 `ProjectWorktreeSessionRoute`가 placeholder로 즉시 페이지를 렌더링하고 `includeStatus: false`로 목록을 조회하도록 변경
+- [x] T014 [US1] 페이지 상태 UI: `apps/agentic-workbench/src/pages/project-worktree-session/ui/project-worktree-session-page.tsx`에 `unknown` status badge(확인 중 표시)와 worktree 검증 실패 상태 UI 추가
+- [x] T015 [P] [US1] Storybook: 세션 페이지의 메타데이터 로딩(unknown)·검증 실패 상태 스토리를 `apps/agentic-workbench/src/stories/pages.stories.tsx`에 추가
+- [x] T016 [US1] US1 검증: quickstart S1 수행(골격 1초 이내, status badge 갱신, 잘못된 경로 오류, worktree당 `git status` 미실행, 프로젝트 상세 badge 회귀 없음) + `pnpm --filter agentic-workbench check-types && pnpm --filter agentic-workbench test`
 
 **Checkpoint**: US1 단독으로 MVP — 세션 진입 체감 속도 개선이 독립 검증된다.
 

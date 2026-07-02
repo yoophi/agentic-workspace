@@ -17,6 +17,9 @@ pub enum GitWorktreeStatus {
     Clean,
     Prunable,
     Dirty,
+    /// status 계산을 건너뛴 경우(`include_status=false`). clean/dirty 판정이
+    /// 필요한 화면은 기본 옵션으로 조회한다(specs/007 research R5).
+    Unknown,
 }
 
 #[derive(Debug, Clone, Deserialize)]

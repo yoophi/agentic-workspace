@@ -452,6 +452,7 @@ function worktreeStatusLabel(status: GitWorktreeStatus) {
     clean: "변경사항없음",
     prunable: "prune 가능",
     dirty: "변경사항 있음",
+    unknown: "확인 중",
   };
 
   return labelByStatus[status];

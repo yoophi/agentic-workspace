@@ -293,9 +293,16 @@ pub async fn list_git_branches(working_directory: String) -> Result<Vec<GitBranc
 }
 
 #[tauri::command]
-pub async fn list_git_worktrees(working_directory: String) -> Result<Vec<GitWorktree>, String> {
+pub async fn list_git_worktrees(
+    working_directory: String,
+    include_status: Option<bool>,
+) -> Result<Vec<GitWorktree>, String> {
     run_blocking_command("list_git_worktrees", move || {
-        git_worktree_service::list_git_worktrees(&GitCliWorktreeProvider, working_directory)
+        git_worktree_service::list_git_worktrees(
+            &GitCliWorktreeProvider,
+            working_directory,
+            include_status.unwrap_or(true),
+        )
     })
     .await
 }
