@@ -35,15 +35,36 @@ export type AgentRunSettings = {
   commandOverrides?: AgentCommandOverrides;
 };
 
+// 실제 agent catalog id와 동일한 집합(이슈 #121의 claude_code/pi는 예시 표기).
+export type AgentType = "codex" | "claude-code" | "opencode" | "pi-coding-agent";
+
+/**
+ * agent 실행 프로필(specs/008). 같은 type을 서로 다른 command/env 조합으로
+ * 복수 등록할 수 있다. 기본 프로필의 id는 catalog agent id와 동일하다.
+ */
+export type AgentProfile = {
+  id: string;
+  name: string;
+  agentType: AgentType;
+  command?: string | null;
+  env?: Record<string, string>;
+  enabled: boolean;
+  builtIn: boolean;
+};
+
 export type AgentCommandOverrides = {
   globalCommand?: string | null;
+  /** legacy(command-only) 데이터. 신규 UI에서는 편집하지 않고 seed 매핑에만 쓴다. */
   agentCommands?: Record<string, string>;
+  globalEnv?: Record<string, string>;
+  profiles?: AgentProfile[];
 };
 
 export type AgentCommandSource =
   | "agentOverride"
   | "globalOverride"
-  | "defaultCommand";
+  | "defaultCommand"
+  | "profileCommand";
 
 export type CommandResolutionResult = {
   agentId: string;
@@ -120,6 +141,8 @@ export type AgentRunRequest = {
   agentId: string;
   cwd: string;
   agentCommand?: string;
+  /** 해석·병합 완료된 환경변수(globalEnv ⊕ profile.env). runner는 주입만 한다. */
+  agentEnv?: Record<string, string>;
   stdioBufferLimitMb?: number;
   autoAllow?: boolean;
   resumeSessionId?: string;

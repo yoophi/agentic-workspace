@@ -738,6 +738,7 @@ mod tests {
             checkout_id: Some("co".into()),
             cwd: Some("/tmp".into()),
             agent_command: None,
+            agent_env: None,
             stdio_buffer_limit_mb: None,
             auto_allow: None,
             run_id: None,

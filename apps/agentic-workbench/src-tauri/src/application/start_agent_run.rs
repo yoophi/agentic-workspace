@@ -317,6 +317,7 @@ mod tests {
             checkout_id: None,
             cwd: None,
             agent_command: None,
+            agent_env: None,
             stdio_buffer_limit_mb: None,
             auto_allow: None,
             permission_mode: None,
