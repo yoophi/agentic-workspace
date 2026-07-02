@@ -39,8 +39,41 @@ pub struct AgentRunSettings {
 pub struct AgentCommandOverrides {
     #[serde(default)]
     pub global_command: Option<String>,
+    /// legacy(command-only) 데이터. 신규 UI는 편집하지 않고 기본 프로필 seed의
+    /// command 초기값 매핑에만 사용한다(specs/008 research R2).
     #[serde(default)]
     pub agent_commands: BTreeMap<String, String>,
+    #[serde(default)]
+    pub global_env: BTreeMap<String, String>,
+    #[serde(default)]
+    pub profiles: Vec<AgentProfile>,
+}
+
+/// 기본 프로필 4종. 실제 agent catalog id와 동일해야 legacy agentCommands 매핑과
+/// 세션 재사용(agent id 기반)이 무변경으로 호환된다(specs/008 research R3).
+pub const BUILT_IN_AGENT_TYPES: &[&str] = &["codex", "claude-code", "opencode", "pi-coding-agent"];
+
+/// agent 실행 프로필(specs/008). 기본 프로필의 id는 catalog agent id와 동일해
+/// 세션 재사용 등 agent id 기반 기존 흐름과 호환된다.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    pub agent_type: String,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub built_in: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -49,6 +82,7 @@ pub enum AgentCommandSource {
     AgentOverride,
     GlobalOverride,
     DefaultCommand,
+    ProfileCommand,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

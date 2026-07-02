@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 import {
   getAgentRunSettings,
@@ -42,18 +43,20 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   );
   const [draft, setDraft] = useState<CommandOverrideDraft>({
     globalCommand: "",
-    agentCommands: {},
+    globalEnv: [],
+    profiles: [],
   });
 
   useEffect(() => {
-    setDraft(createCommandOverrideDraft(savedOverrides, agents));
-  }, [agents, savedOverrides]);
+    setDraft(createCommandOverrideDraft(savedOverrides));
+  }, [savedOverrides]);
 
   const saveMutation = useMutation({
     mutationFn: saveAgentRunSettings,
     onSuccess: async (saved) => {
-      setDraft(createCommandOverrideDraft(saved.commandOverrides, agents));
+      setDraft(createCommandOverrideDraft(saved.commandOverrides));
       await queryClient.invalidateQueries({ queryKey: settingsQueryKey });
+      toast.success("설정을 저장했습니다.");
     },
   });
 
@@ -73,7 +76,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         stopOnPermission: false,
         promptTemplate: "",
       },
-      commandOverrides: commandOverridePayload(draft),
+      commandOverrides: commandOverridePayload(draft, savedOverrides),
     };
     saveMutation.mutate(settings);
   }
@@ -89,7 +92,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         <div>
           <h1 className="text-2xl font-semibold tracking-normal">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            ACP agent 실행 명령 override를 관리합니다.
+            ACP agent 프로필(실행 명령·환경변수)을 관리합니다.
           </p>
         </div>
         {onBack && (
@@ -107,7 +110,6 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
         <AgentCommandOverrideEditor
           agents={agents}
           draft={draft}
-          savedOverrides={savedOverrides}
           isSaving={saveMutation.isPending}
           loadError={loadError}
           saveError={saveMutation.isError ? String(saveMutation.error) : null}

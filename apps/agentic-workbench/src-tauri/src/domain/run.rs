@@ -70,6 +70,9 @@ pub struct AgentRunRequest {
     pub checkout_id: Option<String>,
     pub cwd: Option<String>,
     pub agent_command: Option<String>,
+    /// 해석·병합 완료된 환경변수(globalEnv ⊕ profile.env). runner는 주입만 한다.
+    #[serde(default)]
+    pub agent_env: Option<std::collections::BTreeMap<String, String>>,
     pub stdio_buffer_limit_mb: Option<usize>,
     pub auto_allow: Option<bool>,
     pub permission_mode: Option<PermissionMode>,

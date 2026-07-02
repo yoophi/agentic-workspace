@@ -44,6 +44,7 @@ import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";
 import { ProjectWorktreeSessionPage } from "@/pages/project-worktree-session/ui/project-worktree-session-page";
 import { SettingsPage } from "@/pages/settings/ui/settings-page";
 import { Button } from "@/components/ui/button";
+import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 
 export function App() {
@@ -313,6 +314,8 @@ export function App() {
         }}
         onConfirm={confirmDeleteProject}
       />
+
+      <Toaster position="bottom-right" />
     </main>
   );
 }

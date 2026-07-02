@@ -84,7 +84,8 @@ import {
   navigatePromptHistory,
   removeQueuedPrompt,
   removeUserMessage,
-  resolveRequestAgentCommand,
+  resolveRequestAgentLaunch,
+  resolveSelectedProfileId,
   resetPromptHistoryCursor,
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
@@ -93,7 +94,11 @@ import type {
   QueuedPrompt,
   UsageContext,
 } from "@/features/agent-run/model/run-panel-state";
-import { APP_COMMAND_OVERRIDE_SETTINGS_KEY } from "@/features/agent-command-override/model/command-overrides";
+import {
+  APP_COMMAND_OVERRIDE_SETTINGS_KEY,
+  builtInProfileDefaultName,
+  effectiveProfiles,
+} from "@/features/agent-command-override/model/command-overrides";
 import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { StreamingMarkdown } from "@/features/agent-run/ui/agent-run-markdown";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
@@ -337,6 +342,17 @@ export function AgentRunPanel({
     queryFn: () => getAgentRunSettings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
     ...agentRunSettingsQueryOptions,
   });
+  // 세션 시작 선택지 = enabled 프로필(specs/008 FR-011). selectedAgentId에는
+  // profile id를 저장하고, provider 흐름(세션 조회 등)에는 agentType을 쓴다.
+  const enabledProfiles = useMemo(
+    () =>
+      effectiveProfiles(appCommandSettingsQuery.data?.commandOverrides).filter(
+        (profile) => profile.enabled,
+      ),
+    [appCommandSettingsQuery.data?.commandOverrides],
+  );
+  const selectedProfile = enabledProfiles.find((profile) => profile.id === selectedAgentId);
+  const providerAgentId = selectedProfile?.agentType ?? selectedAgentId;
   const saveSettingsMutation = useMutation({
     mutationFn: saveAgentRunSettings,
     onSuccess: async () => {
@@ -400,17 +416,23 @@ export function AgentRunPanel({
   }, [goalQueryKey, queryClient, workingDirectory]);
 
   const sessionsQuery = useQuery({
-    queryKey: agentRunQueryKeys.sessions(selectedAgentId, workingDirectory),
-    queryFn: () => listProviderSessions(selectedAgentId, workingDirectory),
-    enabled: sessionMode === "reuse" && Boolean(selectedAgentId),
+    queryKey: agentRunQueryKeys.sessions(providerAgentId, workingDirectory),
+    queryFn: () => listProviderSessions(providerAgentId, workingDirectory),
+    enabled: sessionMode === "reuse" && Boolean(providerAgentId),
   });
   const sessions = sessionsQuery.data ?? [];
 
   useEffect(() => {
-    if (!selectedAgentId && agents[0]) {
-      setSelectedAgentId(agents[0].id);
+    // 저장값이 없거나(빈 문자열) disabled/삭제된 프로필이면 첫 enabled 프로필로
+    // 폴백한다. 설정 로드(hydration) 이후에도 동일 규칙이 적용된다.
+    if (enabledProfiles.length === 0) {
+      return;
     }
-  }, [agents, selectedAgentId]);
+    const resolved = resolveSelectedProfileId(enabledProfiles, selectedAgentId);
+    if (resolved !== selectedAgentId) {
+      setSelectedAgentId(resolved);
+    }
+  }, [enabledProfiles, selectedAgentId]);
 
   // agent를 바꾸면 이전 provider의 세션 선택은 더 이상 유효하지 않다.
   useEffect(() => {
@@ -684,7 +706,7 @@ export function AgentRunPanel({
     sessionMode,
   ]);
 
-  const selectedAgent = agents.find((agent) => agent.id === selectedAgentId);
+  const selectedAgent = agents.find((agent) => agent.id === providerAgentId);
   const modelOptions = useMemo<SelectOption[]>(() => {
     const advertisedModels = selectedAgent?.models ?? [];
     if (advertisedModels.length === 0) {
@@ -838,8 +860,10 @@ export function AgentRunPanel({
     setIsAwaitingPromptResponse(true);
 
     const reuseSession = sessionMode === "reuse" && Boolean(selectedSessionId);
-    const agentCommand = resolveRequestAgentCommand({
-      agentId: selectedAgentId,
+    // 선택된 프로필의 command/env를 해석한다(specs/008). agentId는 프로필의
+    // agentType(= provider id)으로, 세션 재사용 등 기존 흐름과 호환된다.
+    const launch = resolveRequestAgentLaunch({
+      profileId: selectedAgentId,
       agents,
       overrides: appCommandSettingsQuery.data?.commandOverrides,
     });
@@ -848,9 +872,10 @@ export function AgentRunPanel({
       await startAgentRun({
         runId,
         goal,
-        agentId: selectedAgentId,
+        agentId: launch?.agentId ?? selectedAgentId,
         cwd: workingDirectory,
-        ...(agentCommand ? { agentCommand } : {}),
+        ...(launch?.agentCommand ? { agentCommand: launch.agentCommand } : {}),
+        ...(launch?.agentEnv ? { agentEnv: launch.agentEnv } : {}),
         stdioBufferLimitMb: 50,
         permissionMode,
         ...(modelId !== "providerDefault" ? { modelId } : {}),
@@ -1246,16 +1271,19 @@ export function AgentRunPanel({
                       <Select
                         value={selectedAgentId}
                         onValueChange={setSelectedAgentId}
-                        disabled={agentsQuery.isLoading}
+                        disabled={agentsQuery.isLoading || appCommandSettingsQuery.isLoading}
                       >
                         <SelectTrigger className="w-full sm:w-56">
-                          <SelectValue placeholder="Agent 선택" />
+                          <SelectValue placeholder="Agent 프로필 선택" />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectGroup>
-                            {agents.map((agent) => (
-                              <SelectItem key={agent.id} value={agent.id}>
-                                {agent.label}
+                            {enabledProfiles.map((profile) => (
+                              <SelectItem key={profile.id} value={profile.id}>
+                                {profile.name}
+                                {profile.name !== builtInProfileDefaultName(profile.agentType)
+                                  ? ` · ${builtInProfileDefaultName(profile.agentType)}`
+                                  : ""}
                               </SelectItem>
                             ))}
                           </SelectGroup>

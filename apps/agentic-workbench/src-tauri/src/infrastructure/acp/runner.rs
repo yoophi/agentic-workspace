@@ -121,7 +121,9 @@ where
         let mut child = Command::new(&program)
             .args(&agent_argv[1..])
             .current_dir(&workspace)
-            .env("PATH", enriched_path())
+            // 프로필/global env(specs/008)와 보강 PATH를 함께 주입한다. env value는
+            // 로그·오류에 노출하지 않는다.
+            .envs(spawn_env_vars(request.agent_env.as_ref(), &enriched_path()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -265,6 +267,31 @@ where
             stderr_task,
         })
     }
+}
+
+/// spawn에 적용할 env 목록(specs/008 R4). 사용자 env를 그대로 주입하되, PATH는
+/// `사용자 PATH:보강 PATH`로 결합해 npx/node 탐색이 깨지지 않게 한다.
+fn spawn_env_vars(
+    agent_env: Option<&std::collections::BTreeMap<String, String>>,
+    enriched: &str,
+) -> Vec<(String, String)> {
+    let mut vars: Vec<(String, String)> = Vec::new();
+    let mut path_value = enriched.to_string();
+
+    if let Some(env) = agent_env {
+        for (key, value) in env {
+            if key == "PATH" {
+                if !value.trim().is_empty() {
+                    path_value = format!("{value}:{enriched}");
+                }
+            } else {
+                vars.push((key.clone(), value.clone()));
+            }
+        }
+    }
+
+    vars.push(("PATH".to_string(), path_value));
+    vars
 }
 
 fn spawn_agent_error_context(agent_command: &str, program: &str) -> String {
@@ -1166,6 +1193,7 @@ mod tests {
     use super::{
         context_size_candidates, resume_session_id, run_prompt_sequence,
         session_config_option_value, should_reissue_missing_session, spawn_agent_error_context,
+        spawn_env_vars,
     };
     use crate::{
         domain::{
@@ -1204,6 +1232,35 @@ mod tests {
             stop_on_permission: true,
             delay_ms: 0,
         }
+    }
+
+    #[test]
+    fn spawn_env_vars_injects_user_env_and_combines_path_with_enriched() {
+        let user_env = std::collections::BTreeMap::from([
+            ("FOO".to_string(), "bar".to_string()),
+            ("PATH".to_string(), "/custom/bin".to_string()),
+        ]);
+
+        let vars = spawn_env_vars(Some(&user_env), "/usr/bin:/bin");
+
+        assert!(vars.contains(&("FOO".to_string(), "bar".to_string())));
+        assert!(
+            vars.contains(&("PATH".to_string(), "/custom/bin:/usr/bin:/bin".to_string())),
+            "user PATH entries come first, enriched PATH is appended",
+        );
+    }
+
+    #[test]
+    fn spawn_env_vars_keeps_enriched_path_when_user_env_has_no_path() {
+        let user_env =
+            std::collections::BTreeMap::from([("FOO".to_string(), "bar".to_string())]);
+
+        let vars = spawn_env_vars(Some(&user_env), "/usr/bin:/bin");
+
+        assert!(vars.contains(&("PATH".to_string(), "/usr/bin:/bin".to_string())));
+
+        let vars = spawn_env_vars(None, "/usr/bin:/bin");
+        assert_eq!(vars, vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]);
     }
 
     #[test]

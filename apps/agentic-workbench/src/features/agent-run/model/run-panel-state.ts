@@ -6,8 +6,9 @@ import type { RunEventEnvelope, TimelineItem } from "@/entities/agent-run/model"
 import type {
   AgentCommandOverrides,
   AgentDescriptor,
+  AgentProfile,
 } from "@/entities/agent-run/model/types";
-import { resolveAgentCommand } from "@/features/agent-command-override/model/command-overrides";
+import { resolveAgentProfileLaunch } from "@/features/agent-command-override/model/command-overrides";
 
 export type QueuedPrompt = {
   id: string;
@@ -56,20 +57,47 @@ export type PromptHistoryNavigationResult = {
   nextState: PromptHistoryState;
 };
 
-export function resolveRequestAgentCommand({
-  agentId,
+/**
+ * 저장된 선택(profile id)이 enabled 프로필이 아니면 첫 enabled 프로필로
+ * 폴백한다(specs/008 R6). enabled 프로필이 없으면 빈 문자열.
+ */
+export function resolveSelectedProfileId(
+  enabledProfiles: AgentProfile[],
+  candidateId: string,
+): string {
+  if (enabledProfiles.some((profile) => profile.id === candidateId)) {
+    return candidateId;
+  }
+  return enabledProfiles[0]?.id ?? "";
+}
+
+/**
+ * 세션 시작 request에 담을 실행 구성(specs/008). 선택된 프로필의 command/env를
+ * 해석하되, catalog 기본 command는 request에 싣지 않는다(백엔드가 기본을 안다).
+ */
+export function resolveRequestAgentLaunch({
+  profileId,
   agents,
   overrides,
 }: {
-  agentId: string;
+  profileId: string;
   agents: AgentDescriptor[];
   overrides: AgentCommandOverrides | null | undefined;
-}) {
-  const resolution = resolveAgentCommand({ agentId, agents, overrides });
-  if (!resolution || resolution.source === "defaultCommand") {
-    return undefined;
+}): {
+  agentId: string;
+  agentCommand?: string;
+  agentEnv?: Record<string, string>;
+} | null {
+  const launch = resolveAgentProfileLaunch({ profileId, overrides, agents });
+  if (!launch) {
+    return null;
   }
-  return resolution.command;
+
+  return {
+    agentId: launch.agentId,
+    ...(launch.source === "defaultCommand" ? {} : { agentCommand: launch.command }),
+    ...(Object.keys(launch.env).length > 0 ? { agentEnv: launch.env } : {}),
+  };
 }
 
 export function isOverrideCommandFailure(message: string) {
