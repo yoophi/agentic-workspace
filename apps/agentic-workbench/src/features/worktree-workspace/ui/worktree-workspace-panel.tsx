@@ -74,6 +74,7 @@ import {
   useVirtualRows,
 } from "@yoophi/git-ui";
 import {
+  extractTocEntries,
   formatAnnotationsForAgent,
   isFullBlockAnnotation,
   parseMarkdownToBlocks,
@@ -90,6 +91,7 @@ import {
   buildViewerAnnotationMaps,
   getSelectionAnchors,
   getSelectionRects,
+  scrollToBlock,
   type SelectionRect,
 } from "@yoophi/markdown-annotation-react";
 import {
@@ -104,6 +106,7 @@ import { annotationDialogComponents } from "@/features/worktree-workspace/ui/ann
 import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
+import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type WorktreeWorkspacePanelProps = {
@@ -1068,6 +1071,7 @@ function MarkdownWorkspaceTab({
     () => parseMarkdownToBlocks(previewQuery.data?.content ?? ""),
     [previewQuery.data?.content],
   );
+  const tocEntries = useMemo(() => extractTocEntries(blocks), [blocks]);
   const annotations = selectedFilePath ? (annotationsByFile[selectedFilePath] ?? []) : [];
   const annotationPrompt = useMemo(
     () =>
@@ -1486,7 +1490,7 @@ function MarkdownWorkspaceTab({
                     </div>
                   ) : null}
                 </div>
-                <aside className="grid content-start gap-3">
+                <aside className="flex flex-col gap-3">
                   <div className="rounded-md border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-sm font-medium">Annotations</h3>
@@ -1558,6 +1562,12 @@ function MarkdownWorkspaceTab({
                       </pre>
                     </div>
                   ) : null}
+                  <MarkdownPreviewToc
+                    className="sticky bottom-4 mt-auto shadow-sm"
+                    entries={tocEntries}
+                    key={selectedFilePath}
+                    onEntrySelect={(entry) => scrollToBlock(previewPaneRef.current, entry.blockId)}
+                  />
                 </aside>
               </div>
             ) : null}
