@@ -13,7 +13,8 @@ import {
   navigatePromptHistory,
   removeQueuedPrompt,
   removeUserMessage,
-  resolveRequestAgentCommand,
+  resolveRequestAgentLaunch,
+  resolveSelectedProfileId,
   updateQueuedPrompt,
 } from "./run-panel-state";
 import type { RunEventState } from "./run-panel-state";
@@ -31,23 +32,76 @@ function runningState(overrides: Partial<RunEventState> = {}): RunEventState {
 }
 
 describe("run panel state", () => {
-  it("injects only override agent commands into run requests", () => {
+  it("injects only overridden commands and merged env into run requests", () => {
     const agents = [{ id: "codex", label: "Codex", command: "codex-default" }];
 
+    // legacy agentCommands는 기본 프로필 command로 매핑된다(specs/008 R2).
     expect(
-      resolveRequestAgentCommand({
-        agentId: "codex",
+      resolveRequestAgentLaunch({
+        profileId: "codex",
         agents,
         overrides: { agentCommands: { codex: "codex-acp" } },
       }),
-    ).toBe("codex-acp");
+    ).toEqual({ agentId: "codex", agentCommand: "codex-acp" });
+
+    // catalog 기본 command만 해석되면 request에 command를 싣지 않는다.
     expect(
-      resolveRequestAgentCommand({
-        agentId: "codex",
+      resolveRequestAgentLaunch({ profileId: "codex", agents, overrides: {} }),
+    ).toEqual({ agentId: "codex" });
+
+    // env는 병합 결과가 실린다(프로필 값 우선).
+    expect(
+      resolveRequestAgentLaunch({
+        profileId: "codex",
         agents,
-        overrides: {},
+        overrides: {
+          globalEnv: { FOO: "global" },
+          profiles: [
+            {
+              id: "codex",
+              name: "Codex",
+              agentType: "codex",
+              command: null,
+              env: { FOO: "profile" },
+              enabled: true,
+              builtIn: true,
+            },
+          ],
+        },
       }),
-    ).toBeUndefined();
+    ).toEqual({ agentId: "codex", agentEnv: { FOO: "profile" } });
+
+    // 알 수 없는 프로필은 null.
+    expect(
+      resolveRequestAgentLaunch({ profileId: "missing", agents, overrides: {} }),
+    ).toBeNull();
+  });
+
+  it("falls back to the first enabled profile when the stored id is missing or disabled", () => {
+    const profiles = [
+      {
+        id: "codex",
+        name: "Codex",
+        agentType: "codex" as const,
+        command: null,
+        env: {},
+        enabled: true,
+        builtIn: true,
+      },
+      {
+        id: "custom-1",
+        name: "Custom",
+        agentType: "claude-code" as const,
+        command: null,
+        env: {},
+        enabled: true,
+        builtIn: false,
+      },
+    ];
+
+    expect(resolveSelectedProfileId(profiles, "custom-1")).toBe("custom-1");
+    expect(resolveSelectedProfileId(profiles, "disabled-or-missing")).toBe("codex");
+    expect(resolveSelectedProfileId([], "anything")).toBe("");
   });
 
   it("detects override command failures from runner messages", () => {

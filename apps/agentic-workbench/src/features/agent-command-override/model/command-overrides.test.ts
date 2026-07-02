@@ -8,6 +8,7 @@ import {
   effectiveProfiles,
   normalizeCommandOverrides,
   resolveAgentCommand,
+  resolveAgentProfileLaunch,
 } from "./command-overrides";
 
 const agents: AgentDescriptor[] = [
@@ -158,5 +159,89 @@ describe("effectiveProfiles (specs/008 seed + legacy 매핑)", () => {
     expect(profiles.find((profile) => profile.id === "claude-code")?.name).toBe("Claude 수정본");
     expect(profiles.find((profile) => profile.id === "custom-1")).toBeDefined();
     expect(profiles.filter((profile) => profile.builtIn)).toHaveLength(4);
+  });
+});
+
+describe("resolveAgentProfileLaunch (specs/008 contracts §3)", () => {
+  const overrides: AgentCommandOverrides = {
+    globalCommand: "global-cmd",
+    globalEnv: { SHARED: "global", FOO: "global-foo" },
+    profiles: [
+      {
+        id: "codex",
+        name: "Codex",
+        agentType: "codex",
+        command: "profile-cmd",
+        env: { FOO: "profile-foo", ONLY: "profile" },
+        enabled: true,
+        builtIn: true,
+      },
+      {
+        id: "custom-1",
+        name: "Codex 기본명령",
+        agentType: "codex",
+        command: null,
+        env: {},
+        enabled: true,
+        builtIn: false,
+      },
+    ],
+  };
+
+  it("merges env with profile values winning over global", () => {
+    const launch = resolveAgentProfileLaunch({ profileId: "codex", overrides, agents });
+
+    expect(launch).toEqual({
+      agentId: "codex",
+      command: "profile-cmd",
+      env: { SHARED: "global", FOO: "profile-foo", ONLY: "profile" },
+      source: "profileCommand",
+    });
+  });
+
+  it("falls back profile.command → globalCommand → catalog default", () => {
+    const withoutGlobal: AgentCommandOverrides = {
+      profiles: overrides.profiles,
+    };
+
+    expect(
+      resolveAgentProfileLaunch({ profileId: "custom-1", overrides, agents })?.command,
+    ).toBe("global-cmd");
+    expect(
+      resolveAgentProfileLaunch({ profileId: "custom-1", overrides, agents })?.source,
+    ).toBe("globalOverride");
+    expect(
+      resolveAgentProfileLaunch({ profileId: "custom-1", overrides: withoutGlobal, agents })
+        ?.command,
+    ).toBe("codex-default");
+    expect(
+      resolveAgentProfileLaunch({ profileId: "custom-1", overrides: withoutGlobal, agents })
+        ?.source,
+    ).toBe("defaultCommand");
+  });
+
+  it("resolves seeded built-in profiles even when nothing is stored", () => {
+    const launch = resolveAgentProfileLaunch({
+      profileId: "claude-code",
+      overrides: {},
+      agents,
+    });
+
+    expect(launch?.agentId).toBe("claude-code");
+    expect(launch?.command).toBe("claude-default");
+    expect(launch?.env).toEqual({});
+  });
+
+  it("returns null for unknown profiles or missing commands", () => {
+    expect(
+      resolveAgentProfileLaunch({ profileId: "missing", overrides, agents }),
+    ).toBeNull();
+    expect(
+      resolveAgentProfileLaunch({
+        profileId: "custom-1",
+        overrides: { profiles: overrides.profiles },
+        agents: [],
+      }),
+    ).toBeNull();
   });
 });

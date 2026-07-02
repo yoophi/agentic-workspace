@@ -142,6 +142,59 @@ export function resolveAgentCommand({
   };
 }
 
+export type AgentProfileLaunch = {
+  /** 실행 provider = 프로필의 agentType(세션 재사용 등 agent id 기반 흐름용). */
+  agentId: string;
+  command: string;
+  /** globalEnv ⊕ profile.env — 동일 key는 프로필 값 우선(specs/008 R4). */
+  env: Record<string, string>;
+  source: AgentCommandSource;
+};
+
+/**
+ * 선택된 프로필의 실행 구성(command + env)을 해석한다(contracts §3).
+ * command 폴백: profile.command → globalCommand → catalog 기본.
+ */
+export function resolveAgentProfileLaunch({
+  profileId,
+  overrides,
+  agents,
+}: {
+  profileId: string;
+  overrides: AgentCommandOverrides | null | undefined;
+  agents: AgentDescriptor[];
+}): AgentProfileLaunch | null {
+  const normalized = normalizeCommandOverrides(overrides);
+  const profile = effectiveProfiles(normalized).find((entry) => entry.id === profileId.trim());
+  if (!profile) {
+    return null;
+  }
+
+  const env = { ...normalizeEnv(normalized.globalEnv), ...normalizeEnv(profile.env) };
+
+  if (profile.command) {
+    return { agentId: profile.agentType, command: profile.command, env, source: "profileCommand" };
+  }
+
+  if (normalized.globalCommand) {
+    return {
+      agentId: profile.agentType,
+      command: normalized.globalCommand,
+      env,
+      source: "globalOverride",
+    };
+  }
+
+  const defaultCommand = agents
+    .find((agent) => agent.id === profile.agentType)
+    ?.command.trim();
+  if (!defaultCommand) {
+    return null;
+  }
+
+  return { agentId: profile.agentType, command: defaultCommand, env, source: "defaultCommand" };
+}
+
 export function sourceLabel(source: AgentCommandSource) {
   switch (source) {
     case "agentOverride":

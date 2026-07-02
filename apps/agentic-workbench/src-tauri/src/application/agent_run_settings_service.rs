@@ -82,6 +82,22 @@ pub fn effective_profiles(overrides: &AgentCommandOverrides) -> Vec<AgentProfile
     profiles
 }
 
+/// 실행 env 병합(specs/008 R4): globalEnv ⊕ 프로필 env, 동일 key는 프로필 우선.
+pub fn merged_profile_env(
+    overrides: &AgentCommandOverrides,
+    profile_id: &str,
+) -> BTreeMap<String, String> {
+    let normalized = normalize_command_overrides(overrides.clone());
+    let mut merged = normalized.global_env.clone();
+    if let Some(profile) = effective_profiles(&normalized)
+        .into_iter()
+        .find(|profile| profile.id == profile_id.trim())
+    {
+        merged.extend(profile.env);
+    }
+    merged
+}
+
 fn built_in_profile_default_name(agent_type: &str) -> String {
     match agent_type {
         "codex" => "Codex".to_string(),
@@ -510,6 +526,48 @@ mod tests {
 
         assert!(error.contains("built-in agent profile"));
         assert!(!error.contains("hunter2"), "env value must not leak into errors");
+    }
+
+    #[test]
+    fn merged_profile_env_prefers_profile_values_over_global() {
+        let overrides = AgentCommandOverrides {
+            global_env: BTreeMap::from([
+                ("SHARED".to_string(), "global".to_string()),
+                ("FOO".to_string(), "global-foo".to_string()),
+            ]),
+            profiles: vec![AgentProfile {
+                env: BTreeMap::from([
+                    ("FOO".to_string(), "profile-foo".to_string()),
+                    ("ONLY".to_string(), "profile".to_string()),
+                ]),
+                ..profile("codex", true, true)
+            }],
+            ..Default::default()
+        };
+
+        let merged = merged_profile_env(&overrides, "codex");
+
+        assert_eq!(
+            merged,
+            BTreeMap::from([
+                ("SHARED".to_string(), "global".to_string()),
+                ("FOO".to_string(), "profile-foo".to_string()),
+                ("ONLY".to_string(), "profile".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn merged_profile_env_returns_global_env_for_unknown_profiles() {
+        let overrides = AgentCommandOverrides {
+            global_env: BTreeMap::from([("SHARED".to_string(), "global".to_string())]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            merged_profile_env(&overrides, "missing"),
+            BTreeMap::from([("SHARED".to_string(), "global".to_string())])
+        );
     }
 
     #[test]
