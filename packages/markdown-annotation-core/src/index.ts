@@ -14,6 +14,8 @@ export {
   type MermaidStartToken,
 } from "./mermaid/detect-mermaid-block";
 export { parseMarkdownToBlocks } from "./parse/parse-markdown-to-blocks";
+export { extractTocEntries } from "./toc/extract-toc-entries";
+export { stripInlineMarkdown } from "./toc/strip-inline-markdown";
 export type {
   AnnotationAnchor,
   AnnotationDraft,
@@ -23,4 +25,6 @@ export type {
   MermaidBlockMetadata,
   MermaidDetectionReason,
   MarkdownDocument,
+  TocEntry,
+  TocLevel,
 } from "./types";
