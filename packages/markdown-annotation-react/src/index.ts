@@ -1,4 +1,6 @@
 export { MarkdownViewer, type MarkdownViewerProps } from "./MarkdownViewer";
+export { MarkdownToc, type MarkdownTocProps } from "./MarkdownToc";
+export { scrollToBlock, type ScrollToBlockOptions } from "./scroll-to-block";
 export {
   buildViewerAnnotationMaps,
   type ViewerAnnotationMaps,

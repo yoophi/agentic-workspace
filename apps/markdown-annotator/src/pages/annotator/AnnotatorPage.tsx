@@ -4,6 +4,8 @@ import {
   FileText,
   FolderOpen,
   MessageSquarePlus,
+  PanelLeftClose,
+  PanelLeftOpen,
   StickyNote,
   Terminal,
   Trash2,
@@ -49,9 +51,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import type { AnnotationAnchor, AnnotationDraft, AnnotationType } from "@/entities/annotation";
 import {
+  extractTocEntries,
   formatAnnotationsForAgent,
   parseMarkdownToBlocks,
   type AgentPromptGoal,
+  type TocEntry,
 } from "@yoophi/markdown-annotation-core";
 import {
   checkCliInstalled,
@@ -69,6 +73,7 @@ import {
 } from "@/features/open-document/openMarkdownDocument";
 import {
   AnnotationInputDialog,
+  MarkdownToc,
   MarkdownViewer,
   annotationTypes,
   buildViewerAnnotationMaps,
@@ -77,6 +82,7 @@ import {
   getSelectionAnchors,
   getSelectionRects,
   requiresComment,
+  scrollToBlock,
   type SelectionRect,
 } from "@yoophi/markdown-annotation-react";
 import {
@@ -151,11 +157,13 @@ export function AnnotatorPage() {
   const [isDocumentRefreshing, setDocumentRefreshing] = useState(false);
   const [documentReloadError, setDocumentReloadError] = useState<string | null>(null);
   const [staleDocument, setStaleDocument] = useState<StaleSelection | null>(null);
+  const [isTocOpen, setTocOpen] = useState(true);
 
   const title = document.fileName;
   const isReloadableDocument =
     isTauriRuntime() && !document.absolutePath.startsWith("examples/markdown-annotator/");
   const blocks = useMemo(() => parseMarkdownToBlocks(document.markdownText), [document.markdownText]);
+  const tocEntries = useMemo(() => extractTocEntries(blocks), [blocks]);
   const exportText = useMemo(
     () =>
       formatAnnotationsForAgent(document.fileName, annotations, blocks, {
@@ -529,6 +537,10 @@ export function AnnotatorPage() {
       .catch(() => setCliInstalled(false));
   }, []);
 
+  function handleTocEntrySelect(entry: TocEntry) {
+    scrollToBlock(documentPaneRef.current, entry.blockId);
+  }
+
   function requestSelectionNote() {
     if (!selection || activeSelectionAnchors().length === 0) {
       setStatus("텍스트를 선택하세요.");
@@ -741,7 +753,48 @@ export function AnnotatorPage() {
         </div>
       </header>
 
-      <section className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_420px]">
+      <section
+        className={
+          tocEntries.length > 0
+            ? "grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_420px]"
+            : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_420px]"
+        }
+      >
+        {tocEntries.length > 0 ? (
+          <div className="flex min-h-0 border-r bg-card">
+            {isTocOpen ? (
+              <div className="flex min-h-0 w-64 flex-col">
+                <div className="flex items-center justify-between border-b px-3 py-2">
+                  <h2 className="text-sm font-medium">Contents</h2>
+                  <Button
+                    aria-label="Collapse table of contents"
+                    size="icon-sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setTocOpen(false)}
+                  >
+                    <PanelLeftClose aria-hidden="true" />
+                  </Button>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto p-2">
+                  <MarkdownToc entries={tocEntries} onEntrySelect={handleTocEntrySelect} />
+                </div>
+              </div>
+            ) : (
+              <div className="p-2">
+                <Button
+                  aria-label="Expand table of contents"
+                  size="icon-sm"
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setTocOpen(true)}
+                >
+                  <PanelLeftOpen aria-hidden="true" />
+                </Button>
+              </div>
+            )}
+          </div>
+        ) : null}
         <div className="min-h-0 bg-muted/30">
           <ScrollArea className="h-full">
             <div className="relative mx-auto max-w-5xl p-6" ref={documentPaneRef} onMouseUp={scheduleCaptureSelection}>
