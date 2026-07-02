@@ -1,6 +1,9 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { CopyIcon, FolderIcon, InfoIcon, SendIcon } from "lucide-react";
 import { StickToBottom } from "use-stick-to-bottom";
+import { extractTocEntries, parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
+
+import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -314,6 +317,46 @@ export const ContentAndAgentParts: Story = {
             <ScrollButton />
           </div>
         </StickToBottom>
+      </div>
+    </div>
+  ),
+};
+
+function entriesFromMarkdown(markdown: string) {
+  return extractTocEntries(parseMarkdownToBlocks(markdown));
+}
+
+const previewTocEntries = entriesFromMarkdown(
+  ["# 계획 문서", "", "## 배경", "", "### 문제 정의", "", "## 설계", "", "### 대안 비교", "", "#### h4는 목차에 없음", "", "## 결론"].join("\n"),
+);
+
+const previewTocLongEntries = entriesFromMarkdown(
+  Array.from({ length: 30 }, (_, index) =>
+    [`## Section ${index + 1}`, "", `### Detail ${index + 1}`, ""].join("\n"),
+  ).join("\n"),
+);
+
+export const MarkdownPreviewTocStates: Story = {
+  render: () => (
+    <div className="grid max-w-3xl gap-6">
+      <div>
+        <p className="mb-2 text-sm font-medium text-muted-foreground">접힘 (기본)</p>
+        <MarkdownPreviewToc entries={previewTocEntries} />
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-medium text-muted-foreground">펼침</p>
+        <MarkdownPreviewToc defaultOpen entries={previewTocEntries} />
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-medium text-muted-foreground">긴 목록 (자체 스크롤)</p>
+        <MarkdownPreviewToc defaultOpen entries={previewTocLongEntries} />
+      </div>
+      <div>
+        <p className="mb-2 text-sm font-medium text-muted-foreground">빈 entries (아래에 아무것도 렌더되지 않음)</p>
+        <div className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">
+          <MarkdownPreviewToc entries={[]} />
+          h1~h3 heading이 없는 문서에서는 TOC UI가 표시되지 않습니다.
+        </div>
       </div>
     </div>
   ),
