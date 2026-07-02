@@ -914,8 +914,7 @@ export function ChangesPanel({ selectedRepository }: ChangesPanelProps) {
               />
               <span>
                 {historyCommits.length} /{" "}
-                {historyQuery.data?.pages[historyQuery.data.pages.length - 1]?.page.totalCount ??
-                  historyCommits.length}{" "}
+                {historyQuery.data?.pages[0]?.page.totalCount ?? historyCommits.length}{" "}
                 commits loaded
                 {historyQuery.isFetchingNextPage ? " · loading older commits" : ""}
               </span>

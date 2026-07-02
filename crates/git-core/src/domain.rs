@@ -38,8 +38,13 @@ impl GitCommitHistory {
 pub struct GitCommitPage {
     pub offset: usize,
     pub limit: usize,
-    pub total_count: usize,
+    /// 전체 commit 수. 첫 페이지(offset 0, cursor 없음)에서만 계산되고 이후
+    /// 페이지는 None이다 — 소비자는 첫 페이지 값을 유지한다(AW specs/007 R8).
+    pub total_count: Option<usize>,
     pub has_more: bool,
+    /// 요청 cursor가 현재 이력에 없어 목록을 처음부터 다시 로드해야 함을 표시.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_invalidated: Option<bool>,
 }
 
 impl GitCommitPage {
@@ -47,8 +52,31 @@ impl GitCommitPage {
         Self {
             offset,
             limit,
-            total_count,
+            total_count: Some(total_count),
             has_more: offset.saturating_add(loaded_count) < total_count,
+            cursor_invalidated: None,
+        }
+    }
+
+    /// count를 생략한 후속 페이지. has_more는 limit+1 조회로 판정한 값을 받는다.
+    pub fn without_total(offset: usize, limit: usize, has_more: bool) -> Self {
+        Self {
+            offset,
+            limit,
+            total_count: None,
+            has_more,
+            cursor_invalidated: None,
+        }
+    }
+
+    /// cursor 무효(rebase 등) 폴백 페이지. 소비자는 누적 목록을 초기화한다.
+    pub fn invalidated(offset: usize, limit: usize) -> Self {
+        Self {
+            offset,
+            limit,
+            total_count: None,
+            has_more: false,
+            cursor_invalidated: Some(true),
         }
     }
 }
@@ -116,25 +144,8 @@ impl GitGraphCommit {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitGraphPage {
-    pub offset: usize,
-    pub limit: usize,
-    pub total_count: usize,
-    pub has_more: bool,
-}
-
-impl GitGraphPage {
-    pub fn new(offset: usize, limit: usize, total_count: usize, loaded_count: usize) -> Self {
-        Self {
-            offset,
-            limit,
-            total_count,
-            has_more: offset.saturating_add(loaded_count) < total_count,
-        }
-    }
-}
+/// graph 페이지 정보는 history와 필드·규칙이 동일하다(직렬화 shape 포함).
+pub type GitGraphPage = GitCommitPage;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

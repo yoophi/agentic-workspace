@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FolderGit2Icon } from "lucide-react";
 import {
   Group as ResizablePanelGroup,
@@ -14,6 +14,8 @@ import {
 } from "@/features/agent-run/ui/agent-run-panel";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import { Badge } from "@/components/ui/badge";
+import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge";
+import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectWorktreeSessionPageProps = {
@@ -29,6 +31,10 @@ export function ProjectWorktreeSessionPage({
 }: ProjectWorktreeSessionPageProps) {
   const [workspacePromptRequest, setWorkspacePromptRequest] =
     useState<AgentPromptRequest | null>(null);
+
+  useEffect(() => {
+    measureSessionMilestone("session:shell-rendered");
+  }, []);
 
   return (
     <div className="flex h-[calc(100svh-3rem)] min-h-0 flex-col gap-4 overflow-hidden">
@@ -48,14 +54,9 @@ export function ProjectWorktreeSessionPage({
                     contentClassName="font-mono text-xs"
                   />
                   <Badge variant="outline" className="max-w-44 shrink-0 truncate font-mono">
-                    {worktree.branch || "-"}
+                    {worktree.branch || (worktree.status === "unknown" ? "…" : "-")}
                   </Badge>
-                  <Badge
-                    variant={worktree.status === "dirty" ? "destructive" : "secondary"}
-                    className="shrink-0"
-                  >
-                    {worktree.status}
-                  </Badge>
+                  <WorktreeStatusBadge status={worktree.status} />
                 </div>
               }
             />

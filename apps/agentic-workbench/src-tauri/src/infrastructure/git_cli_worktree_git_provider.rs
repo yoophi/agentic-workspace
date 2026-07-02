@@ -16,8 +16,9 @@ impl WorktreeGitProvider for GitCliWorktreeGitProvider {
         working_directory: &str,
         limit: usize,
         offset: usize,
+        cursor: Option<&str>,
     ) -> Result<GitCommitHistory, String> {
-        GitCliHistoryReader.list_history(working_directory, limit, offset, &[], &[])
+        GitCliHistoryReader.list_history(working_directory, limit, offset, cursor, &[], &[])
     }
 
     fn get_commit_graph(
@@ -25,8 +26,9 @@ impl WorktreeGitProvider for GitCliWorktreeGitProvider {
         working_directory: &str,
         limit: usize,
         offset: usize,
+        cursor: Option<&str>,
     ) -> Result<GitCommitGraph, String> {
-        GitCliHistoryReader.get_commit_graph(working_directory, limit, offset, &[], &[])
+        GitCliHistoryReader.get_commit_graph(working_directory, limit, offset, cursor, &[], &[])
     }
 
     fn get_commit_detail(

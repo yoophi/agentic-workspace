@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { DiffViewer } from "@yoophi/git-ui";
+import { DiffViewer, HistoryGraphView, refsByTarget } from "@yoophi/git-ui";
+import type { GitCommitGraph } from "@yoophi/git-graph";
 import { useState } from "react";
 
 import type { Project } from "@/entities/project/model/types";
@@ -19,6 +20,10 @@ import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-tool
 import { WorktreeChangesPanel as WorktreeChangeReviewPanel } from "@/features/worktree-change-review/ui/worktree-changes-panel";
 import { WorktreeChangesPanel as AgentRunWorktreeChangesPanel } from "@/features/worktree-changes/ui/worktree-changes-panel";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
+import {
+  computeGitGraphRows,
+  getMaxGraphLane,
+} from "@/features/worktree-workspace/model/git-graph-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -398,4 +403,48 @@ export const AgentRunNarrowLongPath: Story = {
       />
     </div>
   ),
+};
+
+
+// 1,200개 commit을 로드해도 viewport 근처 row만 DOM에 존재하는지 확인하는
+// virtualization 스토리(specs/007 US4, R11).
+const largeGraph: GitCommitGraph = (() => {
+  const commits = Array.from({ length: 1_200 }, (_, index) => ({
+    hash: `commit-${index.toString().padStart(6, "0")}`,
+    shortHash: `c${index.toString().padStart(6, "0")}`,
+    parents: index === 1_199 ? [] : [`commit-${(index + 1).toString().padStart(6, "0")}`],
+    message: `feat: incremental change #${1_200 - index}`,
+    author: index % 3 === 0 ? "Yoophi" : "Agent",
+    date: new Date(Date.UTC(2026, 5, 30) - index * 3_600_000).toISOString(),
+    isHead: index === 0,
+    isMerge: false,
+  }));
+
+  return {
+    commits,
+    refs: [{ name: "main", target: commits[0].hash, kind: "localBranch" as const }],
+    page: { offset: 0, limit: 300, totalCount: 1_200, hasMore: false },
+    layoutHints: { rowHeight: 32, maxInitialLanes: 10 },
+  };
+})();
+
+export const VirtualizedHistoryGraphLargeRepo: Story = {
+  render: () => {
+    const graphRows = computeGitGraphRows(largeGraph.commits);
+
+    return (
+      <div className="h-[480px] overflow-auto rounded-md border bg-background p-2">
+        <HistoryGraphView
+          graph={largeGraph}
+          graphRefs={refsByTarget(largeGraph.refs)}
+          graphRows={graphRows}
+          maxGraphLane={getMaxGraphLane(graphRows)}
+          onSelectCommit={() => undefined}
+          hasNextPage={false}
+          isFetchingNextPage={false}
+          onLoadMore={() => undefined}
+        />
+      </div>
+    );
+  },
 };

@@ -30,7 +30,7 @@ use crate::{
         run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
         saved_prompt::{SavedPrompt, SavedPromptDraft},
         worktree_change::WorktreeChange,
-        worktree_file::{WorktreeFileEntry, WorktreeTextFile},
+        worktree_file::{WorktreeFileEntry, WorktreeFileListScope, WorktreeTextFile},
         worktree_git::{
             GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff as WorktreeGitFileDiff,
         },
@@ -52,6 +52,7 @@ use crate::{
         json_goal_repository::JsonGoalRepository,
         json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
+        perf_log::run_blocking_command,
         tauri_run_event_sink::TauriRunEventSink,
         window_manager,
     },
@@ -276,76 +277,126 @@ pub fn save_agent_run_settings(
 }
 
 #[tauri::command]
-pub fn list_git_remotes(working_directory: String) -> Result<Vec<GitRemote>, String> {
-    git_remote_service::list_git_remotes(&GitCliRemoteProvider, working_directory)
+pub async fn list_git_remotes(working_directory: String) -> Result<Vec<GitRemote>, String> {
+    run_blocking_command("list_git_remotes", move || {
+        git_remote_service::list_git_remotes(&GitCliRemoteProvider, working_directory)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_git_branches(working_directory: String) -> Result<Vec<GitBranch>, String> {
-    git_branch_service::list_git_branches(&GitCliBranchProvider, working_directory)
+pub async fn list_git_branches(working_directory: String) -> Result<Vec<GitBranch>, String> {
+    run_blocking_command("list_git_branches", move || {
+        git_branch_service::list_git_branches(&GitCliBranchProvider, working_directory)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_git_worktrees(working_directory: String) -> Result<Vec<GitWorktree>, String> {
-    git_worktree_service::list_git_worktrees(&GitCliWorktreeProvider, working_directory)
+pub async fn list_git_worktrees(
+    working_directory: String,
+    include_status: Option<bool>,
+) -> Result<Vec<GitWorktree>, String> {
+    run_blocking_command("list_git_worktrees", move || {
+        git_worktree_service::list_git_worktrees(
+            &GitCliWorktreeProvider,
+            working_directory,
+            include_status.unwrap_or(true),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_worktree_changes(working_directory: String) -> Result<Vec<WorktreeChange>, String> {
-    worktree_changes_service::list_worktree_changes(
-        &GitCliWorktreeChangeProvider,
-        working_directory,
-    )
+pub async fn list_worktree_changes(
+    working_directory: String,
+) -> Result<Vec<WorktreeChange>, String> {
+    run_blocking_command("list_worktree_changes", move || {
+        worktree_changes_service::list_worktree_changes(
+            &GitCliWorktreeChangeProvider,
+            working_directory,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn create_git_worktree(
+pub async fn create_git_worktree(
     working_directory: String,
     input: GitWorktreeCreateDraft,
 ) -> Result<(), String> {
-    git_worktree_service::create_git_worktree(&GitCliWorktreeProvider, working_directory, input)
+    run_blocking_command("create_git_worktree", move || {
+        git_worktree_service::create_git_worktree(&GitCliWorktreeProvider, working_directory, input)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_git_worktree(working_directory: String, path: String) -> Result<(), String> {
-    git_worktree_service::delete_git_worktree(&GitCliWorktreeProvider, working_directory, path)
+pub async fn delete_git_worktree(working_directory: String, path: String) -> Result<(), String> {
+    run_blocking_command("delete_git_worktree", move || {
+        git_worktree_service::delete_git_worktree(&GitCliWorktreeProvider, working_directory, path)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_worktree_changes(working_directory: String) -> Result<GitWorktreeChanges, String> {
-    git_worktree_changes_service::get_worktree_changes(
-        &git_core::GitCliWorktreeStatusReader,
-        working_directory,
-    )
+pub async fn get_worktree_changes(working_directory: String) -> Result<GitWorktreeChanges, String> {
+    run_blocking_command("get_worktree_changes", move || {
+        git_worktree_changes_service::get_worktree_changes(
+            &git_core::GitCliWorktreeStatusReader,
+            working_directory,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_worktree_file_diff(
+pub async fn get_worktree_file_diff(
     working_directory: String,
     path: String,
 ) -> Result<GitWorktreeFileDiff, String> {
-    git_worktree_changes_service::get_worktree_file_diff(
-        &git_core::GitCliWorktreeStatusReader,
-        working_directory,
-        path,
-    )
+    run_blocking_command("get_worktree_file_diff", move || {
+        git_worktree_changes_service::get_worktree_file_diff(
+            &git_core::GitCliWorktreeStatusReader,
+            working_directory,
+            path,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn list_worktree_files(working_directory: String) -> Result<Vec<WorktreeFileEntry>, String> {
-    worktree_file_service::list_worktree_files(&FsWorktreeFileProvider, working_directory)
+pub async fn list_worktree_files(
+    working_directory: String,
+    scope: Option<WorktreeFileListScope>,
+) -> Result<Vec<WorktreeFileEntry>, String> {
+    run_blocking_command("list_worktree_files", move || {
+        worktree_file_service::list_worktree_files(
+            &FsWorktreeFileProvider,
+            working_directory,
+            scope,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn read_worktree_text_file(
+pub async fn read_worktree_text_file(
     working_directory: String,
     path: String,
 ) -> Result<WorktreeTextFile, String> {
-    worktree_file_service::read_worktree_text_file(&FsWorktreeFileProvider, working_directory, path)
+    run_blocking_command("read_worktree_text_file", move || {
+        worktree_file_service::read_worktree_text_file(
+            &FsWorktreeFileProvider,
+            working_directory,
+            path,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn start_worktree_watcher(
+pub async fn start_worktree_watcher(
     app: AppHandle,
     window: tauri::Window,
     state: State<'_, WorktreeWatcherState>,
@@ -354,12 +405,17 @@ pub fn start_worktree_watcher(
     let window_label = window.label().to_string();
     let target_label = window_label.clone();
     let event_app = app.clone();
-    let handle = watch_worktree(working_directory, move |event| {
-        if let Err(error) = event_app.emit_to(target_label.as_str(), WORKTREE_CHANGED_EVENT, event)
-        {
-            eprintln!("Failed to emit worktree change event: {error}");
-        }
-    })?;
+    // watcher 시작은 내부에서 `git rev-parse`를 실행하므로 blocking pool에서 수행한다.
+    let handle = run_blocking_command("start_worktree_watcher", move || {
+        watch_worktree(working_directory, move |event| {
+            if let Err(error) =
+                event_app.emit_to(target_label.as_str(), WORKTREE_CHANGED_EVENT, event)
+            {
+                eprintln!("Failed to emit worktree change event: {error}");
+            }
+        })
+    })
+    .await?;
     let mut handles = state
         .handles
         .lock()
@@ -378,57 +434,73 @@ pub fn stop_worktree_watcher(
 }
 
 #[tauri::command]
-pub fn list_worktree_git_history(
+pub async fn list_worktree_git_history(
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
+    cursor: Option<String>,
 ) -> Result<GitCommitHistory, String> {
-    worktree_git_service::list_worktree_git_history(
-        &GitCliWorktreeGitProvider,
-        working_directory,
-        max_count,
-        offset,
-    )
+    run_blocking_command("list_worktree_git_history", move || {
+        worktree_git_service::list_worktree_git_history(
+            &GitCliWorktreeGitProvider,
+            working_directory,
+            max_count,
+            offset,
+            cursor,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_worktree_git_graph(
+pub async fn get_worktree_git_graph(
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
+    cursor: Option<String>,
 ) -> Result<GitCommitGraph, String> {
-    worktree_git_service::get_worktree_git_graph(
-        &GitCliWorktreeGitProvider,
-        working_directory,
-        max_count,
-        offset,
-    )
+    run_blocking_command("get_worktree_git_graph", move || {
+        worktree_git_service::get_worktree_git_graph(
+            &GitCliWorktreeGitProvider,
+            working_directory,
+            max_count,
+            offset,
+            cursor,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_worktree_commit_detail(
+pub async fn get_worktree_commit_detail(
     working_directory: String,
     commit_hash: String,
 ) -> Result<GitCommitDetail, String> {
-    worktree_git_service::get_worktree_commit_detail(
-        &GitCliWorktreeGitProvider,
-        working_directory,
-        commit_hash,
-    )
+    run_blocking_command("get_worktree_commit_detail", move || {
+        worktree_git_service::get_worktree_commit_detail(
+            &GitCliWorktreeGitProvider,
+            working_directory,
+            commit_hash,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn get_worktree_commit_file_diff(
+pub async fn get_worktree_commit_file_diff(
     working_directory: String,
     commit_hash: String,
     path: String,
 ) -> Result<WorktreeGitFileDiff, String> {
-    worktree_git_service::get_worktree_commit_file_diff(
-        &GitCliWorktreeGitProvider,
-        working_directory,
-        commit_hash,
-        path,
-    )
+    run_blocking_command("get_worktree_commit_file_diff", move || {
+        worktree_git_service::get_worktree_commit_file_diff(
+            &GitCliWorktreeGitProvider,
+            working_directory,
+            commit_hash,
+            path,
+        )
+    })
+    .await
 }
 
 #[tauri::command]

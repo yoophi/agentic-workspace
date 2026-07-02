@@ -48,6 +48,7 @@ where
             &repository_path,
             limit,
             offset,
+            None,
             &included_refs,
             &excluded_refs,
         )
@@ -73,6 +74,7 @@ where
             &repository_path,
             limit,
             offset,
+            None,
             &included_refs,
             &excluded_refs,
         )
@@ -216,6 +218,7 @@ mod tests {
             _repository_path: &str,
             limit: usize,
             offset: usize,
+            _cursor: Option<&str>,
             included_refs: &[String],
             excluded_refs: &[String],
         ) -> Result<GitCommitHistory, String> {
@@ -240,6 +243,7 @@ mod tests {
             _repository_path: &str,
             limit: usize,
             offset: usize,
+            _cursor: Option<&str>,
             included_refs: &[String],
             excluded_refs: &[String],
         ) -> Result<GitCommitGraph, String> {

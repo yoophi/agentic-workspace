@@ -14,8 +14,14 @@ export type GitCommitSummary = {
 export type GitCommitPage = {
   offset: number;
   limit: number;
-  totalCount: number;
+  /**
+   * 전체 commit 수. 첫 페이지(offset 0, cursor 없음)에서만 채워지고 이후
+   * 페이지는 null이다 — 소비자는 첫 페이지 값을 유지한다(AW specs/007 R8).
+   */
+  totalCount: number | null;
   hasMore: boolean;
+  /** 요청 cursor가 현재 이력에 없어 목록을 처음부터 다시 로드해야 함을 표시. */
+  cursorInvalidated?: boolean | null;
 };
 
 export type GitCommitHistory = {
@@ -72,6 +78,8 @@ export type GitFileDiff = {
 export type GitCommitQueryOptions = {
   maxCount?: number;
   offset?: number;
+  /** 마지막으로 받은 commit hash. 이력 재작성 감지와 count/refs 생략에 쓰인다. */
+  cursor?: string;
   includedRefs?: string[];
   excludedRefs?: string[];
 };

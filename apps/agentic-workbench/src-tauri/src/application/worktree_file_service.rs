@@ -1,14 +1,15 @@
 use crate::domain::{
-    worktree_file::{WorktreeFileEntry, WorktreeTextFile},
+    worktree_file::{WorktreeFileEntry, WorktreeFileListScope, WorktreeTextFile},
     worktree_file_provider::WorktreeFileProvider,
 };
 
 pub fn list_worktree_files(
     provider: &impl WorktreeFileProvider,
     working_directory: String,
+    scope: Option<WorktreeFileListScope>,
 ) -> Result<Vec<WorktreeFileEntry>, String> {
     let working_directory = normalize_required(working_directory, "Working directory")?;
-    provider.list_files(&working_directory)
+    provider.list_files(&working_directory, &scope.unwrap_or_default())
 }
 
 pub fn read_worktree_text_file(
@@ -38,7 +39,11 @@ mod tests {
     struct FakeWorktreeFileProvider;
 
     impl WorktreeFileProvider for FakeWorktreeFileProvider {
-        fn list_files(&self, working_directory: &str) -> Result<Vec<WorktreeFileEntry>, String> {
+        fn list_files(
+            &self,
+            working_directory: &str,
+            _scope: &WorktreeFileListScope,
+        ) -> Result<Vec<WorktreeFileEntry>, String> {
             Ok(vec![WorktreeFileEntry {
                 name: "src".into(),
                 path: format!("{working_directory}/src"),
@@ -66,7 +71,7 @@ mod tests {
 
     #[test]
     fn trims_working_directory_for_file_listing() {
-        let files = list_worktree_files(&FakeWorktreeFileProvider, " /repo/worktree ".into())
+        let files = list_worktree_files(&FakeWorktreeFileProvider, " /repo/worktree ".into(), None)
             .expect("files should load");
 
         assert_eq!(files[0].path, "/repo/worktree/src");

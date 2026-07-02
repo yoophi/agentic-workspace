@@ -45,6 +45,11 @@ import {
 } from "@/entities/agent-run/api/goal-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
+  agentCatalogQueryOptions,
+  agentRunSettingsQueryOptions,
+  goalQueryOptions,
+} from "@/entities/agent-run/api/query-options";
+import {
   appendOneTimelineItem,
   eventGroups,
   toTimelineItem,
@@ -312,9 +317,12 @@ export function AgentRunPanel({
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const handledExternalPromptRequestIdRef = useRef<string | null>(null);
 
+  // 세션 재진입 시 불필요한 refetch를 막는 신선도 정책(specs/007 research R7)은
+  // entities/agent-run/api/query-options에서 key 단위로 정의된다.
   const agentsQuery = useQuery({
     queryKey: agentRunQueryKeys.agents,
     queryFn: listAgents,
+    ...agentCatalogQueryOptions,
   });
   const agents = agentsQuery.data ?? [];
 
@@ -322,10 +330,12 @@ export function AgentRunPanel({
   const settingsQuery = useQuery({
     queryKey: settingsQueryKey,
     queryFn: () => getAgentRunSettings(workingDirectory),
+    ...agentRunSettingsQueryOptions,
   });
   const appCommandSettingsQuery = useQuery({
     queryKey: agentRunQueryKeys.settings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
     queryFn: () => getAgentRunSettings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
+    ...agentRunSettingsQueryOptions,
   });
   const saveSettingsMutation = useMutation({
     mutationFn: saveAgentRunSettings,
@@ -339,6 +349,7 @@ export function AgentRunPanel({
   const goalQuery = useQuery({
     queryKey: goalQueryKey,
     queryFn: () => getGoal(workingDirectory),
+    ...goalQueryOptions,
   });
   const activeGoal = goalQuery.data ?? null;
 

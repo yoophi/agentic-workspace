@@ -21,6 +21,7 @@ import {
 import {
   buildProjectWorktreeRoute,
   readWorktreePath,
+  resolveSessionWorktree,
 } from "@/app/model/session-route";
 import {
   listGitWorktrees,
@@ -29,6 +30,7 @@ import {
 import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-options";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary";
+import { markSessionRouteEntered } from "@/shared/lib/session-perf";
 import { formatWorktreeWindowTitle } from "@/entities/project/lib/worktree-window-title";
 import type { DashboardAction } from "@/entities/project/model";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
@@ -380,17 +382,30 @@ function ProjectWorktreeSessionRoute({
   const [searchParams] = useSearchParams();
   const project = projects.find((project) => project.id === projectId);
   const decodedWorktreePath = readWorktreePath(searchParams);
+
+  useEffect(() => {
+    markSessionRouteEntered();
+  }, [projectId, decodedWorktreePath]);
+  // 세션 route는 URL의 worktree 경로를 우선 신뢰해 shell을 먼저 렌더링하므로,
+  // 목록 조회는 검증·메타데이터 보강 용도다. worktree별 git status 계산을 생략해
+  // blocking git 명령 수를 1회로 줄인다(specs/007 research R4, R5).
   const worktreesQuery = useQuery({
     queryKey: project
-      ? projectQueryKeys.gitWorktrees(project.workingDirectory)
-      : ["git-worktrees", "missing-project"],
-    queryFn: () => listGitWorktrees(project?.workingDirectory ?? ""),
+      ? projectQueryKeys.gitWorktreeRefs(project.workingDirectory)
+      : ["git-worktree-refs", "missing-project"],
+    queryFn: () =>
+      listGitWorktrees(project?.workingDirectory ?? "", { includeStatus: false }),
     enabled: Boolean(project),
     ...gitStateRefreshQueryOptions,
   });
-  const worktree = worktreesQuery.data?.find(
-    (worktree) => worktree.path === decodedWorktreePath,
-  );
+  const resolution = resolveSessionWorktree({
+    worktreePath: decodedWorktreePath,
+    worktrees: worktreesQuery.data,
+  });
+  const worktree =
+    resolution.kind === "placeholder" || resolution.kind === "resolved"
+      ? resolution.worktree
+      : null;
   const windowTitle =
     project && worktree
       ? formatWorktreeWindowTitle(project.name, worktree.path)
@@ -415,20 +430,53 @@ function ProjectWorktreeSessionRoute({
     );
   }
 
+  if (project && resolution.kind === "invalid") {
+    return (
+      <SessionRouteFallback
+        message="선택한 worktree를 찾을 수 없습니다. 삭제되었거나 경로가 잘못되었을 수 있습니다."
+        detail={decodedWorktreePath}
+        standalone={standalone}
+        onBack={onBack ? () => onBack(project.id) : undefined}
+      />
+    );
+  }
+
+  return (
+    <SessionRouteFallback
+      message={
+        isLoading
+          ? "작업 화면을 불러오는 중입니다."
+          : "선택한 worktree를 찾을 수 없습니다."
+      }
+      standalone={standalone}
+      onBack={
+        !standalone && onBack && projectId ? () => onBack(projectId) : undefined
+      }
+    />
+  );
+}
+
+function SessionRouteFallback({
+  message,
+  detail,
+  standalone,
+  onBack,
+}: {
+  message: string;
+  detail?: string;
+  standalone: boolean;
+  onBack?: () => void;
+}) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
-        {isLoading || worktreesQuery.isLoading
-          ? "작업 화면을 불러오는 중입니다."
-          : "선택한 worktree를 찾을 수 없습니다."}
-      </p>
+      <div className="rounded-md border bg-background px-3 py-2">
+        <p className="text-sm text-muted-foreground">{message}</p>
+        {detail ? (
+          <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{detail}</p>
+        ) : null}
+      </div>
       {!standalone && onBack && (
-        <Button
-          type="button"
-          variant="outline"
-          className="w-fit"
-          onClick={() => (projectId ? onBack(projectId) : undefined)}
-        >
+        <Button type="button" variant="outline" className="w-fit" onClick={onBack}>
           프로젝트
         </Button>
       )}

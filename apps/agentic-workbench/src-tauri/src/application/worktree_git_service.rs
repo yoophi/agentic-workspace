@@ -12,6 +12,7 @@ pub fn list_worktree_git_history(
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
+    cursor: Option<String>,
 ) -> Result<GitCommitHistory, String> {
     let working_directory = normalize_required(working_directory, "Working directory")?;
     provider.list_history(
@@ -20,6 +21,7 @@ pub fn list_worktree_git_history(
             .unwrap_or(DEFAULT_HISTORY_LIMIT)
             .clamp(1, MAX_LIMIT),
         offset.unwrap_or(0),
+        normalize_cursor(&cursor),
     )
 }
 
@@ -28,13 +30,22 @@ pub fn get_worktree_git_graph(
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
+    cursor: Option<String>,
 ) -> Result<GitCommitGraph, String> {
     let working_directory = normalize_required(working_directory, "Working directory")?;
     provider.get_commit_graph(
         &working_directory,
         max_count.unwrap_or(DEFAULT_GRAPH_LIMIT).clamp(1, MAX_LIMIT),
         offset.unwrap_or(0),
+        normalize_cursor(&cursor),
     )
+}
+
+fn normalize_cursor(cursor: &Option<String>) -> Option<&str> {
+    cursor
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
 }
 
 pub fn get_worktree_commit_detail(

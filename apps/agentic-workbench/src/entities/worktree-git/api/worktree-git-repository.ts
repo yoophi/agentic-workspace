@@ -10,6 +10,11 @@ import type {
 export type WorktreeGitPageOptions = {
   maxCount?: number;
   offset?: number;
+  /**
+   * 마지막으로 받은 commit hash. 이력 재작성(rebase 등)을 감지하고, cursor가
+   * 있는 페이지는 백엔드가 count/refs 재계산을 생략한다(specs/007 R8).
+   */
+  cursor?: string;
 };
 
 export async function listWorktreeGitHistory(
@@ -20,6 +25,7 @@ export async function listWorktreeGitHistory(
     workingDirectory,
     maxCount: options.maxCount ?? 100,
     offset: options.offset ?? 0,
+    cursor: options.cursor,
   });
 }
 
@@ -31,6 +37,7 @@ export async function getWorktreeGitGraph(
     workingDirectory,
     maxCount: options.maxCount ?? 300,
     offset: options.offset ?? 0,
+    cursor: options.cursor,
   });
 }
 

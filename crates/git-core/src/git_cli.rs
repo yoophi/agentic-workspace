@@ -20,19 +20,38 @@ impl GitHistoryReader for GitCliHistoryReader {
         repository_path: &str,
         limit: usize,
         offset: usize,
+        cursor: Option<&str>,
         included_refs: &[String],
         excluded_refs: &[String],
     ) -> Result<GitCommitHistory, String> {
         let revisions = git_history_revisions(included_refs, excluded_refs, false);
-        let total_count = git_revision_count(repository_path, &revisions)?;
 
-        if total_count == 0 {
+        if let Some(cursor) = cursor {
+            if !commit_exists(repository_path, cursor)? {
+                return Ok(GitCommitHistory::new(
+                    Vec::new(),
+                    GitCommitPage::invalidated(offset, limit),
+                ));
+            }
+        }
+
+        // count는 첫 페이지에서만 계산한다. 후속 페이지는 limit+1 조회로
+        // has_more만 판정해 전체 이력 순회를 반복하지 않는다.
+        let is_first_page = offset == 0 && cursor.is_none();
+        let total_count = if is_first_page {
+            Some(git_revision_count(repository_path, &revisions)?)
+        } else {
+            None
+        };
+
+        if total_count == Some(0) {
             return Ok(GitCommitHistory::new(
                 Vec::new(),
-                GitCommitPage::new(offset, limit, total_count, 0),
+                GitCommitPage::new(offset, limit, 0, 0),
             ));
         }
 
+        let fetch_limit = if total_count.is_some() { limit } else { limit + 1 };
         let output = Command::new("git")
             .args([
                 "-C",
@@ -41,7 +60,7 @@ impl GitHistoryReader for GitCliHistoryReader {
                 "--pretty=format:%H%x00%s%x00%an%x00%cI%x1e",
                 &format!("--skip={offset}"),
                 "-n",
-                &limit.to_string(),
+                &fetch_limit.to_string(),
             ])
             .args(&revisions)
             .output()
@@ -56,13 +75,10 @@ impl GitHistoryReader for GitCliHistoryReader {
 
         let stdout = String::from_utf8(output.stdout)
             .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
-        let commits = parse_commit_history(&stdout)?;
-        let loaded_count = commits.len();
+        let mut commits = parse_commit_history(&stdout)?;
+        let page = finalize_page(&mut commits, total_count, offset, limit);
 
-        Ok(GitCommitHistory::new(
-            commits,
-            GitCommitPage::new(offset, limit, total_count, loaded_count),
-        ))
+        Ok(GitCommitHistory::new(commits, page))
     }
 
     fn get_commit_graph(
@@ -70,78 +86,98 @@ impl GitHistoryReader for GitCliHistoryReader {
         repository_path: &str,
         limit: usize,
         offset: usize,
+        cursor: Option<&str>,
         included_refs: &[String],
         excluded_refs: &[String],
     ) -> Result<GitCommitGraph, String> {
         let revisions = git_history_revisions(included_refs, excluded_refs, true);
-        let total_count = git_revision_count(repository_path, &revisions)?;
 
-        if total_count == 0 {
-            return Ok(GitCommitGraph::new(
-                Vec::new(),
-                Vec::new(),
-                GitGraphPage::new(offset, limit, total_count, 0),
-                GitGraphLayoutHints::default_row_layout(),
-            ));
+        if let Some(cursor) = cursor {
+            if !commit_exists(repository_path, cursor)? {
+                return Ok(GitCommitGraph::new(
+                    Vec::new(),
+                    Vec::new(),
+                    GitGraphPage::invalidated(offset, limit),
+                    GitGraphLayoutHints::default_row_layout(),
+                ));
+            }
         }
 
-        let head_hash = git_head_hash(repository_path)?;
-        let log_output = Command::new("git")
-            .args([
-                "-C",
-                repository_path,
-                "log",
-                "--exclude=refs/stash",
-                "--topo-order",
-                "--date=iso-strict",
-                "--pretty=format:%H%x00%h%x00%P%x00%s%x00%an%x00%cI%x1e",
-                &format!("--skip={offset}"),
-                "-n",
-                &limit.to_string(),
-            ])
-            .args(&revisions)
-            .output()
-            .map_err(|error| format!("Failed to run git: {error}"))?;
+        let is_first_page = offset == 0 && cursor.is_none();
+        let fetch_limit = if is_first_page { limit } else { limit + 1 };
+        let run_log = || -> Result<String, String> {
+            let log_output = Command::new("git")
+                .args([
+                    "-C",
+                    repository_path,
+                    "log",
+                    "--exclude=refs/stash",
+                    "--topo-order",
+                    "--date=iso-strict",
+                    "--pretty=format:%H%x00%h%x00%P%x00%s%x00%an%x00%cI%x1e",
+                    &format!("--skip={offset}"),
+                    "-n",
+                    &fetch_limit.to_string(),
+                ])
+                .args(&revisions)
+                .output()
+                .map_err(|error| format!("Failed to run git: {error}"))?;
 
-        if !log_output.status.success() {
-            return Err(git_error_message(
-                &log_output.stderr,
-                "Failed to read Git commit graph.",
-            ));
-        }
+            if !log_output.status.success() {
+                return Err(git_error_message(
+                    &log_output.stderr,
+                    "Failed to read Git commit graph.",
+                ));
+            }
 
-        let refs_output = Command::new("git")
-            .args([
-                "-C",
-                repository_path,
-                "for-each-ref",
-                "--format=%(objectname)%00%(*objectname)%00%(refname)%00%(refname:short)",
-                "refs/heads",
-                "refs/remotes",
-                "refs/tags",
-            ])
-            .output()
-            .map_err(|error| format!("Failed to run git: {error}"))?;
+            String::from_utf8(log_output.stdout)
+                .map_err(|error| format!("Git returned invalid UTF-8: {error}"))
+        };
 
-        if !refs_output.status.success() {
-            return Err(git_error_message(
-                &refs_output.stderr,
-                "Failed to read Git refs.",
-            ));
-        }
+        // 첫 페이지: 서로 독립인 count/head/log/refs 조회를 병렬 실행한다
+        // (AW specs/007 research R9). 후속 페이지: log 1회만 실행한다.
+        let (total_count, head_hash, log_stdout, refs) = if is_first_page {
+            let (count_result, head_result, log_result, refs_result) = std::thread::scope(|scope| {
+                let count = scope.spawn(|| git_revision_count(repository_path, &revisions));
+                let head = scope.spawn(|| git_head_hash(repository_path));
+                let log = scope.spawn(run_log);
+                let refs = scope.spawn(|| read_graph_refs(repository_path));
 
-        let log_stdout = String::from_utf8(log_output.stdout)
-            .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
-        let refs_stdout = String::from_utf8(refs_output.stdout)
-            .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
-        let commits = parse_commit_graph_history(&log_stdout, &head_hash)?;
-        let refs = parse_graph_refs(&refs_stdout)?;
-        let loaded_count = commits.len();
+                (
+                    count.join(),
+                    head.join(),
+                    log.join(),
+                    refs.join(),
+                )
+            });
+            let join_error = |_| "Git graph worker thread panicked.".to_string();
+            let total_count = count_result.map_err(join_error)??;
+            let head_hash = head_result.map_err(join_error)??;
+            let log_stdout = log_result.map_err(join_error)??;
+            let refs = refs_result.map_err(join_error)??;
+
+            if total_count == 0 {
+                return Ok(GitCommitGraph::new(
+                    Vec::new(),
+                    Vec::new(),
+                    GitGraphPage::new(offset, limit, 0, 0),
+                    GitGraphLayoutHints::default_row_layout(),
+                ));
+            }
+
+            (Some(total_count), head_hash, log_stdout, refs)
+        } else {
+            let head_hash = git_head_hash(repository_path)?;
+            (None, head_hash, run_log()?, Vec::new())
+        };
+
+        let mut commits = parse_commit_graph_history(&log_stdout, &head_hash)?;
+        let page = finalize_page(&mut commits, total_count, offset, limit);
 
         Ok(GitCommitGraph::new(
             commits,
             refs,
-            GitGraphPage::new(offset, limit, total_count, loaded_count),
+            page,
             GitGraphLayoutHints::default_row_layout(),
         ))
     }
@@ -230,6 +266,24 @@ impl GitHistoryReader for GitCliHistoryReader {
     }
 }
 
+/// 페이지 메타 계산을 history/graph가 공유한다. total이 없으면(limit+1 조회)
+/// 초과분으로 has_more를 판정하고 commits를 limit로 자른다.
+fn finalize_page<T>(
+    commits: &mut Vec<T>,
+    total_count: Option<usize>,
+    offset: usize,
+    limit: usize,
+) -> GitCommitPage {
+    match total_count {
+        Some(total_count) => GitCommitPage::new(offset, limit, total_count, commits.len()),
+        None => {
+            let has_more = commits.len() > limit;
+            commits.truncate(limit);
+            GitCommitPage::without_total(offset, limit, has_more)
+        }
+    }
+}
+
 fn git_revision_count(repository_path: &str, revisions: &[String]) -> Result<usize, String> {
     let output = Command::new("git")
         .args([
@@ -279,6 +333,49 @@ fn git_history_revisions(
     }
 
     vec!["HEAD".to_string()]
+}
+
+/// cursor(commit hash)가 현재 저장소에 존재하는지 확인한다.
+fn commit_exists(repository_path: &str, commit_hash: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            repository_path,
+            "rev-parse",
+            "--verify",
+            "--quiet",
+            &format!("{commit_hash}^{{commit}}"),
+        ])
+        .output()
+        .map_err(|error| format!("Failed to run git: {error}"))?;
+
+    Ok(output.status.success())
+}
+
+fn read_graph_refs(repository_path: &str) -> Result<Vec<GitGraphRef>, String> {
+    let refs_output = Command::new("git")
+        .args([
+            "-C",
+            repository_path,
+            "for-each-ref",
+            "--format=%(objectname)%00%(*objectname)%00%(refname)%00%(refname:short)",
+            "refs/heads",
+            "refs/remotes",
+            "refs/tags",
+        ])
+        .output()
+        .map_err(|error| format!("Failed to run git: {error}"))?;
+
+    if !refs_output.status.success() {
+        return Err(git_error_message(
+            &refs_output.stderr,
+            "Failed to read Git refs.",
+        ));
+    }
+
+    let refs_stdout = String::from_utf8(refs_output.stdout)
+        .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
+    parse_graph_refs(&refs_stdout)
 }
 
 fn git_head_hash(repository_path: &str) -> Result<String, String> {
@@ -476,8 +573,17 @@ pub struct GitCliWorktreeStatusReader;
 
 impl GitWorktreeStatusReader for GitCliWorktreeStatusReader {
     fn status(&self, repository_path: &str) -> Result<GitWorktreeChanges, String> {
+        // --no-optional-locks: status가 .git/index를 다시 쓰지 않게 해 파일
+        // watcher 기반 소비 앱의 되먹임을 차단한다(AW specs/007 research R2).
         let output = Command::new("git")
-            .args(["-C", repository_path, "status", "--porcelain=v1", "-uall"])
+            .args([
+                "--no-optional-locks",
+                "-C",
+                repository_path,
+                "status",
+                "--porcelain=v1",
+                "-uall",
+            ])
             .output()
             .map_err(|error| format!("Failed to run git status: {error}"))?;
 
@@ -730,5 +836,122 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
         assert_eq!(changes.conflicted_count, 1);
         assert_eq!(changes.files[4].old_path.as_deref(), Some("old.ts"));
         assert_eq!(changes.files[4].path, "renamed.ts");
+    }
+}
+
+/// cursor 페이지네이션과 count/refs 첫 페이지 한정을 실제 git 저장소 fixture로
+/// 검증한다(AW specs/007 research R8).
+#[cfg(test)]
+mod pagination_tests {
+    use std::{fs, path::Path, process::Command};
+
+    use super::GitCliHistoryReader;
+    use crate::ports::GitHistoryReader;
+
+    struct FixtureRepo {
+        dir: tempfile::TempDir,
+    }
+
+    impl FixtureRepo {
+        fn path(&self) -> &str {
+            self.dir.path().to_str().expect("fixture path should be utf-8")
+        }
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(args)
+            .output()
+            .expect("git should run");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    fn init_fixture_repo(commit_count: usize) -> FixtureRepo {
+        let dir = tempfile::tempdir().expect("fixture dir should be created");
+        let path = dir.path();
+        run_git(path, &["init", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test"]);
+
+        for index in 0..commit_count {
+            fs::write(path.join("file.txt"), format!("content {index}"))
+                .expect("fixture file should be written");
+            run_git(path, &["add", "."]);
+            run_git(path, &["commit", "-m", &format!("commit {index}")]);
+        }
+
+        FixtureRepo { dir }
+    }
+
+    #[test]
+    fn graph_first_page_has_total_and_refs_but_later_pages_skip_them() {
+        let repo = init_fixture_repo(3);
+
+        let first_page = GitCliHistoryReader
+            .get_commit_graph(repo.path(), 2, 0, None, &[], &[])
+            .expect("first graph page should load");
+
+        assert_eq!(first_page.page.total_count, Some(3));
+        assert!(first_page.page.has_more);
+        assert!(!first_page.refs.is_empty(), "first page should include refs");
+        assert_eq!(first_page.commits.len(), 2);
+
+        let cursor = first_page.commits.last().expect("page has commits").hash.clone();
+        let second_page = GitCliHistoryReader
+            .get_commit_graph(repo.path(), 2, 2, Some(&cursor), &[], &[])
+            .expect("second graph page should load");
+
+        assert_eq!(second_page.page.total_count, None, "count must be skipped");
+        assert!(second_page.refs.is_empty(), "refs must be skipped");
+        assert_eq!(second_page.commits.len(), 1);
+        assert!(!second_page.page.has_more);
+        assert_ne!(second_page.commits[0].hash, first_page.commits[1].hash);
+    }
+
+    #[test]
+    fn history_pages_continue_after_cursor_without_recounting() {
+        let repo = init_fixture_repo(3);
+
+        let first_page = GitCliHistoryReader
+            .list_history(repo.path(), 2, 0, None, &[], &[])
+            .expect("first history page should load");
+
+        assert_eq!(first_page.page.total_count, Some(3));
+        assert!(first_page.page.has_more);
+
+        let cursor = first_page.commits.last().expect("page has commits").hash.clone();
+        let second_page = GitCliHistoryReader
+            .list_history(repo.path(), 2, 2, Some(&cursor), &[], &[])
+            .expect("second history page should load");
+
+        assert_eq!(second_page.page.total_count, None);
+        assert_eq!(second_page.commits.len(), 1);
+        assert!(!second_page.page.has_more);
+    }
+
+    #[test]
+    fn invalid_cursor_is_flagged_for_frontend_reset() {
+        let repo = init_fixture_repo(2);
+
+        let page = GitCliHistoryReader
+            .get_commit_graph(
+                repo.path(),
+                2,
+                2,
+                Some("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"),
+                &[],
+                &[],
+            )
+            .expect("invalid cursor should not error");
+
+        assert_eq!(page.page.cursor_invalidated, Some(true));
+        assert!(page.commits.is_empty());
+        assert!(!page.page.has_more);
     }
 }

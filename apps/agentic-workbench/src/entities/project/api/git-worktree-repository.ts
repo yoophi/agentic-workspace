@@ -9,8 +9,19 @@ import type {
   GitWorktreeFileDiff,
 } from "@/entities/project/model/git-worktree-changes";
 
-export async function listGitWorktrees(workingDirectory: string) {
-  return invoke<GitWorktree[]>("list_git_worktrees", { workingDirectory });
+export type ListGitWorktreesOptions = {
+  /** false면 worktree별 clean/dirty 계산을 건너뛰고 status가 "unknown"으로 온다. */
+  includeStatus?: boolean;
+};
+
+export async function listGitWorktrees(
+  workingDirectory: string,
+  options?: ListGitWorktreesOptions,
+) {
+  return invoke<GitWorktree[]>("list_git_worktrees", {
+    workingDirectory,
+    includeStatus: options?.includeStatus,
+  });
 }
 
 export async function createGitWorktree(

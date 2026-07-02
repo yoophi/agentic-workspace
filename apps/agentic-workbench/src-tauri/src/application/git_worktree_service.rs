@@ -11,9 +11,10 @@ use crate::domain::{
 pub fn list_git_worktrees(
     provider: &impl GitWorktreeProvider,
     working_directory: String,
+    include_status: bool,
 ) -> Result<Vec<GitWorktree>, String> {
     let working_directory = normalize_required_path(working_directory, "Working directory")?;
-    provider.list_worktrees(&working_directory)
+    provider.list_worktrees(&working_directory, include_status)
 }
 
 pub fn create_git_worktree(
@@ -136,7 +137,11 @@ mod tests {
     }
 
     impl GitWorktreeProvider for FakeGitWorktreeProvider {
-        fn list_worktrees(&self, working_directory: &str) -> Result<Vec<GitWorktree>, String> {
+        fn list_worktrees(
+            &self,
+            working_directory: &str,
+            _include_status: bool,
+        ) -> Result<Vec<GitWorktree>, String> {
             assert_eq!(working_directory, "/repo");
             Ok(self.worktrees.clone())
         }
@@ -174,7 +179,8 @@ mod tests {
             ..Default::default()
         };
 
-        let worktrees = list_git_worktrees(&provider, " /repo ".into()).expect("list succeeds");
+        let worktrees =
+            list_git_worktrees(&provider, " /repo ".into(), true).expect("list succeeds");
 
         assert_eq!(worktrees.len(), 1);
         assert_eq!(worktrees[0].path, "/repo");
