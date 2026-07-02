@@ -32,12 +32,11 @@ export function HistoryGraphView({
 }: HistoryGraphViewProps) {
   const rowHeight = graph.layoutHints.rowHeight || 32;
   // 로드된 row 전체를 그리지 않고 viewport 근처만 렌더한다(AW specs/007 R11).
-  const { containerRef, startIndex, endIndex, totalHeight } = useVirtualRows({
+  const { containerRef, startIndex, endExclusive, totalHeight } = useVirtualRows({
     rowCount: graph.commits.length,
     rowHeight,
   });
-  const visibleCommits =
-    endIndex >= startIndex ? graph.commits.slice(startIndex, endIndex + 1) : [];
+  const visibleCommits = graph.commits.slice(startIndex, endExclusive);
 
   return (
     <div className="overflow-hidden rounded-md border">

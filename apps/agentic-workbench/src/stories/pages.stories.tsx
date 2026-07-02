@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { createPlaceholderWorktree } from "@/app/model/session-route";
+import { createPlaceholderWorktree } from "@/entities/project/model/git-worktree";
 import { ProjectDetailPage } from "@/pages/project-detail/ui/project-detail-page";
 import { ProjectDashboardPage } from "@/pages/project-dashboard/ui/project-dashboard-page";
 import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";

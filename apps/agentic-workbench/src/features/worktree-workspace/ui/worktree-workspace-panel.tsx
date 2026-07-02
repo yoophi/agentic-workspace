@@ -36,6 +36,7 @@ import {
   getWorktreeFileDiff,
 } from "@/entities/project/api/git-worktree-repository";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
+import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge";
 import { worktreeFileQueryKeys } from "@/entities/worktree-file/api/query-keys";
 import {
   listWorktreeFiles,
@@ -43,6 +44,7 @@ import {
   startWorktreeWatcher,
   stopWorktreeWatcher,
 } from "@/entities/worktree-file/api/worktree-file-repository";
+import { isMarkdownPath } from "@/entities/worktree-file/lib/is-markdown-path";
 import type { WorktreeFileEntry } from "@/entities/worktree-file/model/types";
 import { worktreeGitQueryKeys } from "@/entities/worktree-git/api/query-keys";
 import {
@@ -65,6 +67,9 @@ import {
   InfiniteLoadSentinel,
   WorktreeChangesView,
   combineGitCommitGraphPages,
+  combineGitCommitHistoryPages,
+  getNextGitPageParam,
+  initialGitPageParam,
   refsByTarget,
   useVirtualRows,
 } from "@yoophi/git-ui";
@@ -216,7 +221,7 @@ export function WorktreeWorkspacePanel({
         refetchType: activeTab === "git" ? "none" : "active",
       });
       void queryClient.invalidateQueries({
-        queryKey: ["worktree-files", "text-file", worktree.path],
+        queryKey: worktreeFileQueryKeys.textFiles(worktree.path),
         refetchType: activeTab === "git" ? "none" : "active",
       });
       void queryClient.invalidateQueries({ queryKey: projectQueryKeys.worktreeChanges(worktree.path) });
@@ -258,18 +263,7 @@ export function WorktreeWorkspacePanel({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <span className="truncate text-sm font-medium">Workspace</span>
-              {worktree.status === "unknown" ? (
-                <Badge variant="outline" className="shrink-0 text-muted-foreground">
-                  확인 중
-                </Badge>
-              ) : (
-                <Badge
-                  variant={worktree.status === "dirty" ? "destructive" : "secondary"}
-                  className="shrink-0"
-                >
-                  {worktree.status}
-                </Badge>
-              )}
+              <WorktreeStatusBadge status={worktree.status} />
             </div>
             <EllipsisPopoverText
               value={worktree.path}
@@ -348,14 +342,8 @@ function GitWorkspaceTab({
         offset: pageParam.offset,
         cursor: pageParam.cursor,
       }),
-    initialPageParam: { offset: 0 } as { offset: number; cursor?: string },
-    getNextPageParam: (lastPage) =>
-      lastPage.page.hasMore
-        ? {
-            offset: lastPage.page.offset + lastPage.commits.length,
-            cursor: lastPage.commits[lastPage.commits.length - 1]?.hash,
-          }
-        : undefined,
+    initialPageParam: initialGitPageParam,
+    getNextPageParam: getNextGitPageParam,
     ...autoRefreshQueryOptions,
   });
   const graphQuery = useInfiniteQuery({
@@ -367,14 +355,8 @@ function GitWorkspaceTab({
         offset: pageParam.offset,
         cursor: pageParam.cursor,
       }),
-    initialPageParam: { offset: 0 } as { offset: number; cursor?: string },
-    getNextPageParam: (lastPage) =>
-      lastPage.page.hasMore
-        ? {
-            offset: lastPage.page.offset + lastPage.commits.length,
-            cursor: lastPage.commits[lastPage.commits.length - 1]?.hash,
-          }
-        : undefined,
+    initialPageParam: initialGitPageParam,
+    getNextPageParam: getNextGitPageParam,
     ...autoRefreshQueryOptions,
   });
 
@@ -388,20 +370,16 @@ function GitWorkspaceTab({
   );
 
   useEffect(() => {
-    if (historyCursorInvalidated) {
-      void gitQueryClient.resetQueries({
-        queryKey: worktreeGitQueryKeys.history(worktree.path),
-      });
+    const invalidatedKeys = [
+      [historyCursorInvalidated, worktreeGitQueryKeys.history(worktree.path)] as const,
+      [graphCursorInvalidated, worktreeGitQueryKeys.graph(worktree.path)] as const,
+    ];
+    for (const [invalidated, queryKey] of invalidatedKeys) {
+      if (invalidated) {
+        void gitQueryClient.resetQueries({ queryKey });
+      }
     }
-  }, [gitQueryClient, historyCursorInvalidated, worktree.path]);
-
-  useEffect(() => {
-    if (graphCursorInvalidated) {
-      void gitQueryClient.resetQueries({
-        queryKey: worktreeGitQueryKeys.graph(worktree.path),
-      });
-    }
-  }, [gitQueryClient, graphCursorInvalidated, worktree.path]);
+  }, [gitQueryClient, graphCursorInvalidated, historyCursorInvalidated, worktree.path]);
   const statusQuery = useQuery({
     queryKey: projectQueryKeys.worktreeChanges(worktree.path),
     queryFn: () => getWorktreeChanges(worktree.path),
@@ -437,7 +415,7 @@ function GitWorkspaceTab({
     queryFn: () => getWorktreeFileDiff(worktree.path, worktreeFilePath ?? ""),
   });
   const historyData = useMemo(
-    () => combineGitHistoryPages(historyQuery.data?.pages ?? []),
+    () => combineGitCommitHistoryPages(historyQuery.data?.pages ?? []),
     [historyQuery.data?.pages],
   );
   const graphData = useMemo(
@@ -778,11 +756,11 @@ function CommitListView({
   onLoadMore: () => void;
 }) {
   // 로드된 commit 전체를 그리지 않고 viewport 근처 row만 렌더한다(specs/007 R11).
-  const { containerRef, startIndex, endIndex, totalHeight } = useVirtualRows({
+  const { containerRef, startIndex, endExclusive, totalHeight } = useVirtualRows({
     rowCount: commits.length,
     rowHeight: COMMIT_LIST_ROW_HEIGHT,
   });
-  const visibleCommits = endIndex >= startIndex ? commits.slice(startIndex, endIndex + 1) : [];
+  const visibleCommits = commits.slice(startIndex, endExclusive);
 
   return (
     <div className="overflow-hidden rounded-md border text-sm">
@@ -1825,15 +1803,6 @@ function filterMarkdownTreeEntries(entries: WorktreeFileEntry[]) {
   );
 }
 
-function isMarkdownPath(path: string) {
-  const normalized = path.toLowerCase();
-  return (
-    normalized.endsWith(".md") ||
-    normalized.endsWith(".markdown") ||
-    normalized.endsWith(".mdx")
-  );
-}
-
 function pathDepth(path: string) {
   return Math.max(path.split("/").filter(Boolean).length - 1, 0);
 }
@@ -1847,27 +1816,6 @@ function formatBytes(bytes: number) {
   const exponent = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / 1024 ** exponent;
   return `${value >= 10 || exponent === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[exponent]}`;
-}
-
-function combineGitHistoryPages(pages: Array<{ commits: GitCommitSummary[]; page: GitCommitGraph["page"] }>) {
-  if (pages.length === 0) {
-    return null;
-  }
-
-  const commits = pages.flatMap((page) => page.commits);
-  const lastPage = pages[pages.length - 1].page;
-
-  return {
-    commits,
-    page: {
-      ...lastPage,
-      offset: 0,
-      limit: commits.length,
-      hasMore: lastPage.hasMore,
-      // totalCount는 첫 페이지에서만 계산된다(specs/007 R8).
-      totalCount: lastPage.totalCount ?? pages[0].page.totalCount,
-    },
-  };
 }
 
 function formatDate(value: string) {

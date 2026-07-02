@@ -208,30 +208,13 @@ fn should_descend(entry: &DirEntry) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
-
     use super::*;
     use crate::domain::worktree_file::{WorktreeFileListKind, WorktreeFileListScope};
     use crate::domain::worktree_file_provider::WorktreeFileProvider;
 
-    static FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
-    struct FixtureDir {
-        path: PathBuf,
-    }
-
-    impl Drop for FixtureDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn init_fixture() -> FixtureDir {
-        let path = std::env::temp_dir().join(format!(
-            "worktree-file-scope-{}-{}",
-            std::process::id(),
-            FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst),
-        ));
+    fn init_fixture() -> tempfile::TempDir {
+        let fixture = tempfile::tempdir().expect("fixture dir should be created");
+        let path = fixture.path();
         fs::create_dir_all(path.join("docs/nested")).expect("fixture dirs");
         fs::create_dir_all(path.join("src/deep")).expect("fixture dirs");
         fs::write(path.join("README.md"), "# readme").expect("fixture file");
@@ -240,7 +223,7 @@ mod tests {
         fs::write(path.join("docs/nested/deep.md"), "# deep").expect("fixture file");
         fs::write(path.join("src/app.ts"), "export {}").expect("fixture file");
         fs::write(path.join("src/deep/inner.ts"), "export {}").expect("fixture file");
-        FixtureDir { path }
+        fixture
     }
 
     fn relative_paths(entries: &[crate::domain::worktree_file::WorktreeFileEntry]) -> Vec<String> {
@@ -261,7 +244,7 @@ mod tests {
 
         let entries = FsWorktreeFileProvider
             .list_files(
-                fixture.path.to_str().expect("utf-8 path"),
+                fixture.path().to_str().expect("utf-8 path"),
                 &WorktreeFileListScope {
                     kind: WorktreeFileListKind::Markdown,
                     ..Default::default()
@@ -284,7 +267,7 @@ mod tests {
 
         let entries = FsWorktreeFileProvider
             .list_files(
-                fixture.path.to_str().expect("utf-8 path"),
+                fixture.path().to_str().expect("utf-8 path"),
                 &WorktreeFileListScope {
                     dir: Some("src".to_string()),
                     depth: Some(1),
@@ -306,7 +289,7 @@ mod tests {
 
         let error = FsWorktreeFileProvider
             .list_files(
-                fixture.path.to_str().expect("utf-8 path"),
+                fixture.path().to_str().expect("utf-8 path"),
                 &WorktreeFileListScope {
                     dir: Some("../outside".to_string()),
                     ..Default::default()

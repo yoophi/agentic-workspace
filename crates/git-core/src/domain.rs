@@ -144,49 +144,8 @@ impl GitGraphCommit {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct GitGraphPage {
-    pub offset: usize,
-    pub limit: usize,
-    /// GitCommitPage와 동일한 규칙: 첫 페이지에서만 Some.
-    pub total_count: Option<usize>,
-    pub has_more: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cursor_invalidated: Option<bool>,
-}
-
-impl GitGraphPage {
-    pub fn new(offset: usize, limit: usize, total_count: usize, loaded_count: usize) -> Self {
-        Self {
-            offset,
-            limit,
-            total_count: Some(total_count),
-            has_more: offset.saturating_add(loaded_count) < total_count,
-            cursor_invalidated: None,
-        }
-    }
-
-    pub fn without_total(offset: usize, limit: usize, has_more: bool) -> Self {
-        Self {
-            offset,
-            limit,
-            total_count: None,
-            has_more,
-            cursor_invalidated: None,
-        }
-    }
-
-    pub fn invalidated(offset: usize, limit: usize) -> Self {
-        Self {
-            offset,
-            limit,
-            total_count: None,
-            has_more: false,
-            cursor_invalidated: Some(true),
-        }
-    }
-}
+/// graph 페이지 정보는 history와 필드·규칙이 동일하다(직렬화 shape 포함).
+pub type GitGraphPage = GitCommitPage;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -14,6 +14,7 @@ import {
 } from "@/features/agent-run/ui/agent-run-panel";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import { Badge } from "@/components/ui/badge";
+import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge";
 import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
@@ -23,24 +24,6 @@ type ProjectWorktreeSessionPageProps = {
   onBack?: () => void;
   onOpenSettings?: () => void;
 };
-
-// status가 아직 계산되지 않은(placeholder/includeStatus:false) worktree는
-// "확인 중"으로 표시한다(specs/007 US1).
-export function WorktreeStatusBadge({ status }: { status: GitWorktree["status"] }) {
-  if (status === "unknown") {
-    return (
-      <Badge variant="outline" className="shrink-0 text-muted-foreground">
-        확인 중
-      </Badge>
-    );
-  }
-
-  return (
-    <Badge variant={status === "dirty" ? "destructive" : "secondary"} className="shrink-0">
-      {status}
-    </Badge>
-  );
-}
 
 export function ProjectWorktreeSessionPage({
   worktree,

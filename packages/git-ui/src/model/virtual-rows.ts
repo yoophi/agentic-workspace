@@ -1,10 +1,12 @@
 /**
  * 고정 높이 row virtualization의 순수 계산부(AW specs/007 research R11).
  * scroll 좌표 → 렌더할 row 범위. hook(use-virtual-rows)이 이 함수를 소비한다.
+ * `endExclusive`는 배타 경계라 소비자는 `rows.slice(startIndex, endExclusive)`
+ * 한 줄로 쓰고, 빈 목록도 별도 guard 없이 자연히 빈 배열이 된다.
  */
 export type VirtualRowRange = {
   startIndex: number;
-  endIndex: number;
+  endExclusive: number;
   totalHeight: number;
 };
 
@@ -26,10 +28,10 @@ export function computeVirtualRowRange({
   containerOffsetTop: number;
   overscan?: number;
 }): VirtualRowRange {
-  const totalHeight = rowCount * rowHeight;
+  const totalHeight = Math.max(0, rowCount * rowHeight);
 
   if (rowCount === 0 || rowHeight <= 0) {
-    return { startIndex: 0, endIndex: -1, totalHeight: Math.max(0, totalHeight) };
+    return { startIndex: 0, endExclusive: 0, totalHeight };
   }
 
   const visibleTop = Math.max(0, scrollTop - containerOffsetTop);
@@ -38,10 +40,10 @@ export function computeVirtualRowRange({
     rowCount - 1,
     Math.max(0, Math.floor(visibleTop / rowHeight) - overscan),
   );
-  const endIndex = Math.min(
-    rowCount - 1,
-    Math.ceil(visibleBottom / rowHeight) + overscan,
+  const endExclusive = Math.min(
+    rowCount,
+    Math.ceil(visibleBottom / rowHeight) + overscan + 1,
   );
 
-  return { startIndex, endIndex, totalHeight };
+  return { startIndex, endExclusive, totalHeight };
 }

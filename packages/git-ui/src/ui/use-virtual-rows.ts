@@ -38,17 +38,24 @@ export function useVirtualRows({
     }
 
     const scrollParent = findScrollParent(container);
+    // containerOffsetTop은 스크롤 중에는 불변이다. scroll 핸들러에서
+    // getBoundingClientRect(강제 layout)를 반복하지 않도록 캐시하고,
+    // 레이아웃이 실제로 바뀌는 ResizeObserver에서만 다시 잰다.
+    let containerOffsetTop = 0;
+
+    const measureOffset = () => {
+      containerOffsetTop = scrollParent
+        ? container.getBoundingClientRect().top -
+          scrollParent.getBoundingClientRect().top +
+          scrollParent.scrollTop
+        : container.getBoundingClientRect().top + window.scrollY;
+    };
 
     const updateRange = () => {
       const viewportHeight = scrollParent
         ? scrollParent.clientHeight
         : window.innerHeight;
       const scrollTop = scrollParent ? scrollParent.scrollTop : window.scrollY;
-      const containerOffsetTop = scrollParent
-        ? container.getBoundingClientRect().top -
-          scrollParent.getBoundingClientRect().top +
-          scrollParent.scrollTop
-        : container.getBoundingClientRect().top + window.scrollY;
 
       setRange((current) => {
         const next = computeVirtualRowRange({
@@ -61,24 +68,29 @@ export function useVirtualRows({
         });
 
         return current.startIndex === next.startIndex &&
-          current.endIndex === next.endIndex &&
+          current.endExclusive === next.endExclusive &&
           current.totalHeight === next.totalHeight
           ? current
           : next;
       });
     };
 
+    const remeasure = () => {
+      measureOffset();
+      updateRange();
+    };
+
     const scrollTarget: HTMLElement | Window = scrollParent ?? window;
     scrollTarget.addEventListener("scroll", updateRange, { passive: true });
     const resizeObserver =
-      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateRange);
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(remeasure);
     if (resizeObserver) {
       if (scrollParent) {
         resizeObserver.observe(scrollParent);
       }
       resizeObserver.observe(container);
     }
-    updateRange();
+    remeasure();
 
     return () => {
       scrollTarget.removeEventListener("scroll", updateRange);

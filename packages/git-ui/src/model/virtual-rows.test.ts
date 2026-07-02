@@ -14,7 +14,7 @@ describe("computeVirtualRowRange", () => {
     });
 
     expect(range.startIndex).toBe(95);
-    expect(range.endIndex).toBe(115);
+    expect(range.endExclusive).toBe(116);
     expect(range.totalHeight).toBe(32_000);
   });
 
@@ -29,7 +29,7 @@ describe("computeVirtualRowRange", () => {
     });
 
     expect(range.startIndex).toBe(0);
-    expect(range.endIndex).toBe(10);
+    expect(range.endExclusive).toBe(11);
   });
 
   it("clamps to the available rows", () => {
@@ -42,10 +42,10 @@ describe("computeVirtualRowRange", () => {
     });
 
     expect(range.startIndex).toBeLessThanOrEqual(4);
-    expect(range.endIndex).toBe(4);
+    expect(range.endExclusive).toBe(5);
   });
 
-  it("handles empty lists", () => {
+  it("handles empty lists without a consumer-side guard", () => {
     const range = computeVirtualRowRange({
       rowCount: 0,
       rowHeight: 32,
@@ -54,7 +54,9 @@ describe("computeVirtualRowRange", () => {
       containerOffsetTop: 0,
     });
 
-    expect(range.endIndex).toBe(-1);
+    expect(range.startIndex).toBe(0);
+    expect(range.endExclusive).toBe(0);
+    expect([].slice(range.startIndex, range.endExclusive)).toEqual([]);
     expect(range.totalHeight).toBe(0);
   });
 });

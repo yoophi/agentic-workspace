@@ -1,4 +1,9 @@
-import type { GitWorktree } from "@/entities/project/model/git-worktree";
+import {
+  createPlaceholderWorktree,
+  type GitWorktree,
+} from "@/entities/project/model/git-worktree";
+
+export { createPlaceholderWorktree };
 
 const WORKTREE_PATH_PARAM = "worktreePath";
 
@@ -16,21 +21,6 @@ export type SessionWorktreeResolution =
   | { kind: "placeholder"; worktree: GitWorktree }
   | { kind: "resolved"; worktree: GitWorktree }
   | { kind: "invalid" };
-
-/**
- * URL의 worktree 경로로 세션 화면을 즉시 렌더링하기 위한 placeholder.
- * 목록 응답이 도착하면 실제 메타데이터로 교체된다(specs/007 research R4).
- */
-export function createPlaceholderWorktree(path: string): GitWorktree {
-  return {
-    path,
-    head: null,
-    branch: null,
-    status: "unknown",
-    pruneReason: null,
-    canDelete: false,
-  };
-}
 
 /**
  * 세션 route의 worktree 결정 규칙:

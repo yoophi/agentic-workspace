@@ -82,13 +82,13 @@ pub fn watch_worktree(
     let mut watcher = RecommendedWatcher::new(
         move |result: notify::Result<notify::Event>| match result {
             Ok(event) => {
-                let class = classify_event(&event.paths, &git_paths);
+                let (class, representative) = classify_event(&event.paths, &git_paths);
                 let kind = match class {
                     EventClass::Ignored => return,
                     EventClass::File => WorktreeChangeKind::File,
                     EventClass::Git => WorktreeChangeKind::Git,
                 };
-                let changed_path = representative_path(&event.paths, &git_paths, class)
+                let changed_path = representative
                     .and_then(|path| path.to_str())
                     .unwrap_or(&fallback_path)
                     .to_string();
@@ -154,40 +154,29 @@ pub(crate) fn run_debounce_loop(
     }
 }
 
-pub(crate) fn classify_event(paths: &[PathBuf], git_paths: &[PathBuf]) -> EventClass {
+/// 이벤트 분류와 대표 경로(분류를 결정한 첫 경로)를 한 번의 순회로 계산한다.
+pub(crate) fn classify_event<'a>(
+    paths: &'a [PathBuf],
+    git_paths: &[PathBuf],
+) -> (EventClass, Option<&'a PathBuf>) {
     let mut class = EventClass::Ignored;
+    let mut representative: Option<&PathBuf> = None;
 
     for path in paths {
         if is_git_metadata_path(path, git_paths) {
             if is_significant_git_change(path) {
-                return EventClass::Git;
+                return (EventClass::Git, Some(path));
             }
             continue;
         }
 
-        if !is_excluded_workspace_path(path) {
+        if class == EventClass::Ignored && !is_excluded_workspace_path(path) {
             class = EventClass::File;
+            representative = Some(path);
         }
     }
 
-    class
-}
-
-fn representative_path<'a>(
-    paths: &'a [PathBuf],
-    git_paths: &[PathBuf],
-    class: EventClass,
-) -> Option<&'a PathBuf> {
-    match class {
-        EventClass::Git => paths
-            .iter()
-            .find(|path| is_git_metadata_path(path, git_paths) && is_significant_git_change(path)),
-        EventClass::File => paths.iter().find(|path| {
-            !is_git_metadata_path(path, git_paths) && !is_excluded_workspace_path(path)
-        }),
-        EventClass::Ignored => None,
-    }
-    .or_else(|| paths.first())
+    (class, representative.or_else(|| paths.first()))
 }
 
 fn is_git_metadata_path(path: &Path, git_paths: &[PathBuf]) -> bool {
@@ -208,14 +197,18 @@ fn is_significant_git_change(path: &Path) -> bool {
         return false;
     }
 
-    let components: Vec<&str> = path
-        .components()
-        .filter_map(|component| component.as_os_str().to_str())
-        .collect();
-    if components.contains(&"logs") {
-        return false;
+    // 단일 순회, 할당 없음: watcher 콜백은 이벤트 폭주 구간의 hot loop다.
+    let mut has_refs = false;
+    for component in path.components() {
+        let component = component.as_os_str();
+        if component == "logs" {
+            return false;
+        }
+        if component == "refs" {
+            has_refs = true;
+        }
     }
-    if components.contains(&"refs") {
+    if has_refs {
         return true;
     }
 
@@ -301,22 +294,20 @@ mod tests {
     #[test]
     fn ignores_all_excluded_directories() {
         for dir in ["node_modules", "target", "dist", ".next", "build", "coverage", ".turbo"] {
-            let class = classify_event(&[format!("/repo/{dir}/output.js").into()], &git_paths());
+            let (class, _) = classify_event(&[format!("/repo/{dir}/output.js").into()], &git_paths());
             assert_eq!(class, EventClass::Ignored, "{dir} should be ignored");
         }
 
         assert_eq!(
-            classify_event(&["/repo/src/main.ts".into()], &git_paths()),
+            classify_event(&["/repo/src/main.ts".into()], &git_paths()).0,
             EventClass::File,
         );
-        // 무시 대상과 유효 변경이 섞이면 유효 변경을 따른다.
-        assert_eq!(
-            classify_event(
-                &["/repo/dist/output.js".into(), "/repo/src/main.ts".into()],
-                &git_paths(),
-            ),
-            EventClass::File,
-        );
+        // 무시 대상과 유효 변경이 섞이면 유효 변경을 따르고, 대표 경로는 유효 변경이다.
+        let mixed_paths: Vec<std::path::PathBuf> =
+            vec!["/repo/dist/output.js".into(), "/repo/src/main.ts".into()];
+        let (class, representative) = classify_event(&mixed_paths, &git_paths());
+        assert_eq!(class, EventClass::File);
+        assert_eq!(representative.map(|p| p.to_str().unwrap()), Some("/repo/src/main.ts"));
     }
 
     // (b) .git 내부 이벤트 세분화: index/*.lock/FETCH_HEAD 단독 변화는 미발행,
@@ -330,7 +321,7 @@ mod tests {
             "/repo/.git/FETCH_HEAD",
         ] {
             assert_eq!(
-                classify_event(&[insignificant.into()], &git_paths()),
+                classify_event(&[insignificant.into()], &git_paths()).0,
                 EventClass::Ignored,
                 "{insignificant} alone should not emit",
             );
@@ -343,7 +334,7 @@ mod tests {
             "/repo/.git/MERGE_HEAD",
         ] {
             assert_eq!(
-                classify_event(&[significant.into()], &git_paths()),
+                classify_event(&[significant.into()], &git_paths()).0,
                 EventClass::Git,
                 "{significant} should emit a git event",
             );

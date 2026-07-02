@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { GitCommitGraph, GitGraphCommit } from "@yoophi/git-graph";
 
-import { combineGitCommitGraphPages } from "./commit-graph";
+import {
+  combineGitCommitGraphPages,
+  combineGitCommitHistoryPages,
+  getNextGitPageParam,
+} from "./commit-graph";
 
 function commit(hash: string): GitGraphCommit {
   return {
@@ -69,5 +73,47 @@ describe("combineGitCommitGraphPages", () => {
     const combined = combineGitCommitGraphPages([firstPage, secondPage]);
 
     expect(combined?.commits.map((entry) => entry.hash)).toEqual(["aaa", "bbb"]);
+  });
+});
+
+describe("getNextGitPageParam", () => {
+  it("advances offset and carries the last commit hash as cursor", () => {
+    const next = getNextGitPageParam({
+      commits: [{ hash: "aaa" }, { hash: "bbb" }],
+      page: { hasMore: true, offset: 2 },
+    });
+
+    expect(next).toEqual({ offset: 4, cursor: "bbb" });
+  });
+
+  it("stops when there are no more pages", () => {
+    expect(
+      getNextGitPageParam({ commits: [{ hash: "aaa" }], page: { hasMore: false, offset: 0 } }),
+    ).toBeUndefined();
+  });
+});
+
+describe("combineGitCommitHistoryPages", () => {
+  it("keeps first-page totalCount and dedupes commits", () => {
+    const combined = combineGitCommitHistoryPages([
+      {
+        commits: [
+          { hash: "aaa", message: "a", author: "T", date: "2026-07-02" },
+          { hash: "bbb", message: "b", author: "T", date: "2026-07-02" },
+        ],
+        page: { offset: 0, limit: 2, totalCount: 3, hasMore: true },
+      },
+      {
+        commits: [
+          { hash: "bbb", message: "b", author: "T", date: "2026-07-02" },
+          { hash: "ccc", message: "c", author: "T", date: "2026-07-02" },
+        ],
+        page: { offset: 2, limit: 2, totalCount: null, hasMore: false },
+      },
+    ]);
+
+    expect(combined?.commits.map((entry) => entry.hash)).toEqual(["aaa", "bbb", "ccc"]);
+    expect(combined?.page.totalCount).toBe(3);
+    expect(combined?.page.hasMore).toBe(false);
   });
 });

@@ -1,5 +1,11 @@
 // 그래프 페이지 결합 + ref 인덱싱(소비처에서 데이터 준비에 사용)
-export { combineGitCommitGraphPages } from "./model/commit-graph";
+export {
+  combineGitCommitGraphPages,
+  combineGitCommitHistoryPages,
+  getNextGitPageParam,
+  initialGitPageParam,
+  type GitPageParam,
+} from "./model/commit-graph";
 export { refsByTarget } from "./model/graph-render";
 export { computeVirtualRowRange, type VirtualRowRange } from "./model/virtual-rows";
 

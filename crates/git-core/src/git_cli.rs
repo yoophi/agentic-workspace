@@ -76,14 +76,7 @@ impl GitHistoryReader for GitCliHistoryReader {
         let stdout = String::from_utf8(output.stdout)
             .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
         let mut commits = parse_commit_history(&stdout)?;
-
-        let page = if let Some(total_count) = total_count {
-            GitCommitPage::new(offset, limit, total_count, commits.len())
-        } else {
-            let has_more = commits.len() > limit;
-            commits.truncate(limit);
-            GitCommitPage::without_total(offset, limit, has_more)
-        };
+        let page = finalize_page(&mut commits, total_count, offset, limit);
 
         Ok(GitCommitHistory::new(commits, page))
     }
@@ -179,14 +172,7 @@ impl GitHistoryReader for GitCliHistoryReader {
         };
 
         let mut commits = parse_commit_graph_history(&log_stdout, &head_hash)?;
-
-        let page = if let Some(total_count) = total_count {
-            GitGraphPage::new(offset, limit, total_count, commits.len())
-        } else {
-            let has_more = commits.len() > limit;
-            commits.truncate(limit);
-            GitGraphPage::without_total(offset, limit, has_more)
-        };
+        let page = finalize_page(&mut commits, total_count, offset, limit);
 
         Ok(GitCommitGraph::new(
             commits,
@@ -277,6 +263,24 @@ impl GitHistoryReader for GitCliHistoryReader {
         }
 
         Ok(file_diff_from_output(commit_hash, file_path, &output.stdout))
+    }
+}
+
+/// 페이지 메타 계산을 history/graph가 공유한다. total이 없으면(limit+1 조회)
+/// 초과분으로 has_more를 판정하고 commits를 limit로 자른다.
+fn finalize_page<T>(
+    commits: &mut Vec<T>,
+    total_count: Option<usize>,
+    offset: usize,
+    limit: usize,
+) -> GitCommitPage {
+    match total_count {
+        Some(total_count) => GitCommitPage::new(offset, limit, total_count, commits.len()),
+        None => {
+            let has_more = commits.len() > limit;
+            commits.truncate(limit);
+            GitCommitPage::without_total(offset, limit, has_more)
+        }
     }
 }
 
@@ -839,35 +843,22 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 /// 검증한다(AW specs/007 research R8).
 #[cfg(test)]
 mod pagination_tests {
-    use std::{
-        fs,
-        path::PathBuf,
-        process::Command,
-        sync::atomic::{AtomicUsize, Ordering},
-    };
+    use std::{fs, path::Path, process::Command};
 
     use super::GitCliHistoryReader;
     use crate::ports::GitHistoryReader;
 
-    static FIXTURE_COUNTER: AtomicUsize = AtomicUsize::new(0);
-
     struct FixtureRepo {
-        path: PathBuf,
+        dir: tempfile::TempDir,
     }
 
     impl FixtureRepo {
         fn path(&self) -> &str {
-            self.path.to_str().expect("fixture path should be utf-8")
+            self.dir.path().to_str().expect("fixture path should be utf-8")
         }
     }
 
-    impl Drop for FixtureRepo {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
-        }
-    }
-
-    fn run_git(repo: &PathBuf, args: &[&str]) {
+    fn run_git(repo: &Path, args: &[&str]) {
         let output = Command::new("git")
             .arg("-C")
             .arg(repo)
@@ -882,24 +873,20 @@ mod pagination_tests {
     }
 
     fn init_fixture_repo(commit_count: usize) -> FixtureRepo {
-        let path = std::env::temp_dir().join(format!(
-            "git-core-pagination-{}-{}",
-            std::process::id(),
-            FIXTURE_COUNTER.fetch_add(1, Ordering::SeqCst),
-        ));
-        fs::create_dir_all(&path).expect("fixture dir should be created");
-        run_git(&path, &["init", "-b", "main"]);
-        run_git(&path, &["config", "user.email", "test@example.com"]);
-        run_git(&path, &["config", "user.name", "Test"]);
+        let dir = tempfile::tempdir().expect("fixture dir should be created");
+        let path = dir.path();
+        run_git(path, &["init", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test"]);
 
         for index in 0..commit_count {
             fs::write(path.join("file.txt"), format!("content {index}"))
                 .expect("fixture file should be written");
-            run_git(&path, &["add", "."]);
-            run_git(&path, &["commit", "-m", &format!("commit {index}")]);
+            run_git(path, &["add", "."]);
+            run_git(path, &["commit", "-m", &format!("commit {index}")]);
         }
 
-        FixtureRepo { path }
+        FixtureRepo { dir }
     }
 
     #[test]
