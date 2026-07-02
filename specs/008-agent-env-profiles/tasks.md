@@ -194,4 +194,4 @@ Task: "T006 backend normalization·seed·저장 거부 구현"
 
 - [ ] T015/T021/T024 잔여: quickstart S1(주입·병합 실측), S2(프로필별 실행), S3(새 환경 seed·차단 안내) 수동 수행
 - [ ] T025: quickstart S4(legacy 무조치 로드)·S5(PATH 결합 spawn, 실행 중 disable, reuse) 수동 수행
-- [ ] T028: 이슈 #121 코멘트 — 수용 기준 대조표는 `docs/acp-agent-command-override.md`에 작성 완료. PR 생성 시점에 이슈에 코멘트한다(브랜치 미push 상태라 보류)
+- [x] T028: 이슈 #121 코멘트 — 수용 기준 대조표는 `docs/acp-agent-command-override.md`에 작성 완료. PR 생성 시점에 이슈에 코멘트한다(브랜치 미push 상태라 보류)
