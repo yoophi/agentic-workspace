@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  activateRunStartQueuedPrompt,
   addUserMessage,
   applyRunEvent,
+  appendQueuedPrompt,
   appendPromptHistory,
   buildSteerPrompt,
+  createQueuedPrompt,
+  createRunStartQueuedPrompt,
+  dequeueRunStartQueuedPrompt,
+  hasUserMessage,
   initialPromptHistoryState,
   insertQueuedPrompt,
   isOverrideCommandFailure,
@@ -15,6 +21,7 @@ import {
   removeUserMessage,
   resolveRequestAgentLaunch,
   resolveSelectedProfileId,
+  shouldAutoDispatchQueuedPrompt,
   updateQueuedPrompt,
 } from "./run-panel-state";
 import type { RunEventState } from "./run-panel-state";
@@ -172,6 +179,73 @@ describe("run panel state", () => {
     expect(completedState.activeRunId).toBe("run-active");
   });
 
+  it("activates a queued first-run prompt on promptSent without duplicating it", () => {
+    const firstPrompt = createRunStartQueuedPrompt({
+      id: "queued-first",
+      text: " first prompt ",
+    });
+    expect(firstPrompt).toEqual({
+      id: "queued-first",
+      text: "first prompt",
+      source: "first-run",
+      dispatchAfterRunStart: true,
+    });
+
+    const awaitingState = applyRunEvent(
+      runningState({
+        isAwaitingPromptResponse: false,
+        queuedPrompts: [firstPrompt!],
+      }),
+      {
+        runId: "run-active",
+        event: { type: "lifecycle", status: "promptSent", message: "sent" },
+      },
+    );
+    const duplicateState = applyRunEvent(awaitingState, {
+      runId: "run-active",
+      event: { type: "lifecycle", status: "promptSent", message: "sent" },
+    });
+
+    expect(awaitingState.queuedPrompts).toEqual([]);
+    expect(awaitingState.items.map((item) => item.event.type)).toEqual([
+      "lifecycle",
+      "userMessage",
+    ]);
+    expect(hasUserMessage(awaitingState.items, "run-active", "first prompt")).toBe(true);
+    expect(
+      duplicateState.items.filter(
+        (item) => item.event.type === "userMessage" && item.event.text === "first prompt",
+      ),
+    ).toHaveLength(1);
+  });
+
+  it("keeps prompt output after queued first-run prompt activation", () => {
+    const firstPrompt = createRunStartQueuedPrompt({
+      id: "queued-first",
+      text: "first prompt",
+    });
+    const afterPromptSent = applyRunEvent(
+      runningState({
+        isAwaitingPromptResponse: false,
+        queuedPrompts: [firstPrompt!],
+      }),
+      {
+        runId: "run-active",
+        event: { type: "lifecycle", status: "promptSent", message: "sent" },
+      },
+    );
+    const withOutput = applyRunEvent(afterPromptSent, {
+      runId: "run-active",
+      event: { type: "agentMessage", text: "answer" },
+    });
+
+    expect(withOutput.items.map((item) => item.event.type)).toEqual([
+      "lifecycle",
+      "userMessage",
+      "agentMessage",
+    ]);
+  });
+
   it("finishes the run and preserves the error event in the timeline", () => {
     const nextState = applyRunEvent(
       runningState({
@@ -203,6 +277,74 @@ describe("run panel state", () => {
 
     expect(nextQueue.map((item) => item.id)).toEqual(["c", "a", "b"]);
     expect(queue.map((item) => item.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("rejects blank queued prompts and appends nonblank prompts without duplicate ids", () => {
+    const blankPrompt = createQueuedPrompt({ id: "blank", text: " \n " });
+    const queuedPrompt = createQueuedPrompt({ id: "a", text: " first " });
+
+    expect(blankPrompt).toBeNull();
+    expect(queuedPrompt).toEqual({
+      id: "a",
+      text: "first",
+      source: "manual-queue",
+    });
+    expect(appendQueuedPrompt([], blankPrompt)).toEqual([]);
+    expect(appendQueuedPrompt([queuedPrompt!], queuedPrompt)).toEqual([queuedPrompt]);
+  });
+
+  it("does not auto-dispatch queued prompts that wait for run startup", () => {
+    const firstPrompt = createRunStartQueuedPrompt({
+      id: "queued-first",
+      text: "first prompt",
+    });
+    const manualPrompt = createQueuedPrompt({
+      id: "queued-manual",
+      text: "manual prompt",
+    });
+
+    expect(shouldAutoDispatchQueuedPrompt([])).toBe(false);
+    expect(shouldAutoDispatchQueuedPrompt([firstPrompt!])).toBe(false);
+    expect(shouldAutoDispatchQueuedPrompt([manualPrompt!])).toBe(true);
+  });
+
+  it("dequeues only prompts that are waiting for run startup", () => {
+    const firstPrompt = createRunStartQueuedPrompt({
+      id: "queued-first",
+      text: "first prompt",
+    });
+    const secondPrompt = createQueuedPrompt({
+      id: "queued-second",
+      text: "second prompt",
+    });
+    const queue = [firstPrompt!, secondPrompt!];
+
+    expect(dequeueRunStartQueuedPrompt(queue)).toEqual({
+      queue: [secondPrompt],
+      queuedPrompt: firstPrompt,
+    });
+    expect(dequeueRunStartQueuedPrompt([secondPrompt!])).toEqual({
+      queue: [secondPrompt],
+      queuedPrompt: null,
+    });
+  });
+
+  it("activates a run-start queued prompt without adding a duplicate user message", () => {
+    const firstPrompt = createRunStartQueuedPrompt({
+      id: "queued-first",
+      text: "first prompt",
+    });
+    const items = addUserMessage([], "run-active", "first prompt");
+
+    const result = activateRunStartQueuedPrompt({
+      queue: [firstPrompt!],
+      items,
+      runId: "run-active",
+    });
+
+    expect(result.queue).toEqual([]);
+    expect(result.queuedPrompt).toEqual(firstPrompt);
+    expect(result.items).toHaveLength(1);
   });
 
   it("returns the same queue reference for invalid move requests", () => {
@@ -246,6 +388,7 @@ describe("run panel state", () => {
       index: 1,
     });
     expect(insertQueuedPrompt(removed.queue, removed.queuedPrompt!, removed.index)).toEqual(queue);
+    expect(insertQueuedPrompt(queue, queue[0], 1)).toBe(queue);
     expect(removeQueuedPrompt(queue, "missing")).toEqual({
       queue,
       queuedPrompt: null,

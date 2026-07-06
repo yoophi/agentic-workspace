@@ -13,7 +13,15 @@ import { resolveAgentProfileLaunch } from "@/features/agent-command-override/mod
 export type QueuedPrompt = {
   id: string;
   text: string;
+  source?: QueuedPromptSource;
+  dispatchAfterRunStart?: boolean;
 };
+
+export type QueuedPromptSource =
+  | "first-run"
+  | "manual-queue"
+  | "saved-prompt"
+  | "external-request";
 
 export type UsageContext = {
   used: number;
@@ -283,7 +291,17 @@ export function applyRunEvent(
   }
 
   if (envelope.event.status === "promptSent") {
-    return { ...nextState, isAwaitingPromptResponse: true };
+    const activated = activateRunStartQueuedPrompt({
+      queue: nextState.queuedPrompts,
+      items: nextState.items,
+      runId: envelope.runId,
+    });
+    return {
+      ...nextState,
+      items: activated.items,
+      queuedPrompts: activated.queue,
+      isAwaitingPromptResponse: true,
+    };
   }
   if (envelope.event.status === "promptCompleted") {
     return { ...nextState, isAwaitingPromptResponse: false };
@@ -306,6 +324,19 @@ export function addUserMessage(
   );
 }
 
+export function hasUserMessage(
+  items: TimelineItem[],
+  runId: string,
+  text: string,
+) {
+  return items.some(
+    (item) =>
+      item.runId === runId &&
+      item.event.type === "userMessage" &&
+      item.event.text === text,
+  );
+}
+
 export function removeUserMessage(
   items: TimelineItem[],
   runId: string,
@@ -321,6 +352,94 @@ export function removeUserMessage(
     return items;
   }
   return [...items.slice(0, index), ...items.slice(index + 1)];
+}
+
+export function createQueuedPrompt({
+  id,
+  text,
+  source = "manual-queue",
+  dispatchAfterRunStart = false,
+}: {
+  id: string;
+  text: string;
+  source?: QueuedPromptSource;
+  dispatchAfterRunStart?: boolean;
+}): QueuedPrompt | null {
+  const normalizedText = text.trim();
+  if (!normalizedText) {
+    return null;
+  }
+
+  return {
+    id,
+    text: normalizedText,
+    source,
+    ...(dispatchAfterRunStart ? { dispatchAfterRunStart: true } : {}),
+  };
+}
+
+export function createRunStartQueuedPrompt({
+  id,
+  text,
+  source = "first-run",
+}: {
+  id: string;
+  text: string;
+  source?: QueuedPromptSource;
+}) {
+  return createQueuedPrompt({
+    id,
+    text,
+    source,
+    dispatchAfterRunStart: true,
+  });
+}
+
+export function appendQueuedPrompt(
+  queue: QueuedPrompt[],
+  queuedPrompt: QueuedPrompt | null,
+) {
+  if (!queuedPrompt || queue.some((item) => item.id === queuedPrompt.id)) {
+    return queue;
+  }
+
+  return [...queue, queuedPrompt];
+}
+
+export function shouldAutoDispatchQueuedPrompt(queue: QueuedPrompt[]) {
+  return queue.length > 0 && !queue[0].dispatchAfterRunStart;
+}
+
+export function dequeueRunStartQueuedPrompt(queue: QueuedPrompt[]) {
+  const [firstPrompt, ...remainingQueue] = queue;
+  if (!firstPrompt?.dispatchAfterRunStart) {
+    return { queue, queuedPrompt: null };
+  }
+
+  return { queue: remainingQueue, queuedPrompt: firstPrompt };
+}
+
+export function activateRunStartQueuedPrompt({
+  queue,
+  items,
+  runId,
+}: {
+  queue: QueuedPrompt[];
+  items: TimelineItem[];
+  runId: string;
+}) {
+  const result = dequeueRunStartQueuedPrompt(queue);
+  if (!result.queuedPrompt) {
+    return { queue, items, queuedPrompt: null };
+  }
+
+  return {
+    queue: result.queue,
+    items: hasUserMessage(items, runId, result.queuedPrompt.text)
+      ? items
+      : addUserMessage(items, runId, result.queuedPrompt.text),
+    queuedPrompt: result.queuedPrompt,
+  };
 }
 
 export function moveQueuedPrompt(
@@ -379,6 +498,10 @@ export function insertQueuedPrompt(
   queuedPrompt: QueuedPrompt,
   index: number,
 ) {
+  if (queue.some((item) => item.id === queuedPrompt.id)) {
+    return queue;
+  }
+
   const nextQueue = [...queue];
   nextQueue.splice(Math.max(0, Math.min(index, nextQueue.length)), 0, queuedPrompt);
   return nextQueue;
