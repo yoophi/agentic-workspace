@@ -12,6 +12,7 @@ pub mod git_worktree_changes;
 pub mod git_worktree_provider;
 pub mod goal;
 pub mod goal_repository;
+pub mod mcp_title_control;
 pub mod project;
 pub mod project_repository;
 pub mod provider_session;

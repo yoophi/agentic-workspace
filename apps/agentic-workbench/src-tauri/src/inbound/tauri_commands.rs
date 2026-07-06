@@ -1,6 +1,6 @@
 use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     process::Command,
     sync::{Arc, Mutex},
 };
@@ -52,6 +52,7 @@ use crate::{
         json_goal_repository::JsonGoalRepository,
         json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
+        mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv, McpServerState},
         perf_log::run_blocking_command,
         tauri_run_event_sink::TauriRunEventSink,
         window_manager,
@@ -609,14 +610,37 @@ fn normalize_run_request(mut request: AgentRunRequest) -> AgentRunRequest {
     request
 }
 
+fn inject_mcp_launch_env(request: &mut AgentRunRequest, env: McpLaunchEnv) {
+    let agent_env = request.agent_env.get_or_insert_with(BTreeMap::new);
+    agent_env.insert(AW_MCP_URL_ENV.to_string(), env.url.clone());
+    agent_env.insert(AW_MCP_TOKEN_ENV.to_string(), env.token.clone());
+    agent_env.insert(AW_MCP_RUN_ID_ENV.to_string(), env.run_id.clone());
+    request.mcp_servers.push(env.server_config());
+    request.goal = with_mcp_agent_instructions(&request.goal, &env.agent_instructions());
+}
+
+fn with_mcp_agent_instructions(goal: &str, instructions: &str) -> String {
+    format!(
+        "{instructions}\n---\n\nUser request:\n{goal}",
+        instructions = instructions.trim(),
+        goal = goal.trim()
+    )
+}
+
 #[tauri::command]
 pub async fn start_agent_run(
     app: AppHandle,
     window: tauri::Window,
     state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
     request: AgentRunRequest,
 ) -> Result<AgentRun, String> {
     let mut request = normalize_run_request(request);
+    let run_id = request
+        .run_id
+        .clone()
+        .ok_or_else(|| "agent run id is unavailable after normalization".to_string())?;
+    inject_mcp_launch_env(&mut request, mcp_state.launch_env(&run_id));
     let catalog = ConfigurableAgentCatalog::from_env();
     if request
         .agent_command
@@ -739,6 +763,7 @@ mod tests {
             cwd: Some("/tmp".into()),
             agent_command: None,
             agent_env: None,
+            mcp_servers: Vec::new(),
             stdio_buffer_limit_mb: None,
             auto_allow: None,
             run_id: None,
@@ -749,6 +774,61 @@ mod tests {
             context_size: None,
             ralph_loop: None,
         }
+    }
+
+    #[test]
+    fn inject_mcp_launch_env_preserves_existing_user_env() {
+        let mut request = sample_request();
+        request.agent_env = Some(BTreeMap::from([
+            ("USER_VALUE".to_string(), "keep".to_string()),
+            ("PATH".to_string(), "/custom/bin".to_string()),
+        ]));
+
+        inject_mcp_launch_env(
+            &mut request,
+            McpLaunchEnv {
+                url: "http://127.0.0.1:1000/mcp".into(),
+                token: "secret".into(),
+                run_id: "run-1".into(),
+            },
+        );
+
+        let env = request.agent_env.unwrap();
+        assert_eq!(env.get("USER_VALUE").map(String::as_str), Some("keep"));
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/custom/bin"));
+        assert_eq!(
+            env.get(AW_MCP_URL_ENV).map(String::as_str),
+            Some("http://127.0.0.1:1000/mcp")
+        );
+        assert_eq!(
+            env.get(AW_MCP_TOKEN_ENV).map(String::as_str),
+            Some("secret")
+        );
+        assert_eq!(
+            env.get(AW_MCP_RUN_ID_ENV).map(String::as_str),
+            Some("run-1")
+        );
+        assert_eq!(request.mcp_servers.len(), 1);
+        assert_eq!(
+            serde_json::to_value(&request.mcp_servers).unwrap(),
+            serde_json::json!([
+                {
+                    "type": "http",
+                    "name": "agentic_workbench",
+                    "url": "http://127.0.0.1:1000/mcp",
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer secret"
+                        }
+                    ]
+                }
+            ])
+        );
+        assert!(request.goal.contains("Agentic Workbench MCP tools"));
+        assert!(request.goal.contains("set_window_title"));
+        assert!(request.goal.contains("runId`: `run-1`"));
+        assert!(request.goal.contains("User request:\ndo it"));
     }
 
     // 회귀 방지: 과거 start_agent_run이 resume 필드를 None으로 덮어써 재사용이

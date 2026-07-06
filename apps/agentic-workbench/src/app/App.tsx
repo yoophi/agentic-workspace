@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SettingsIcon } from "lucide-react";
@@ -31,7 +32,11 @@ import { gitStateRefreshQueryOptions } from "@/entities/project/api/query-option
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary";
 import { markSessionRouteEntered } from "@/shared/lib/session-perf";
-import { formatWorktreeWindowTitle } from "@/entities/project/lib/worktree-window-title";
+import {
+  formatWorktreeWindowTitle,
+  normalizeAgentWindowTitle,
+  resolveWorktreeWindowTitle,
+} from "@/entities/project/lib/worktree-window-title";
 import type { DashboardAction } from "@/entities/project/model";
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project, ProjectInput } from "@/entities/project/model/types";
@@ -46,6 +51,13 @@ import { SettingsPage } from "@/pages/settings/ui/settings-page";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+
+const MCP_WINDOW_TITLE_EVENT = "workspace://mcp-window-title";
+const MCP_WINDOW_TITLE_FALLBACK_EVENT = "mcp-window-title-fallback";
+
+type McpWindowTitleEvent = {
+  title: string;
+};
 
 export function App() {
   const navigate = useNavigate();
@@ -409,10 +421,55 @@ function ProjectWorktreeSessionRoute({
     resolution.kind === "placeholder" || resolution.kind === "resolved"
       ? resolution.worktree
       : null;
-  const windowTitle =
+  const defaultWindowTitle =
     project && worktree
       ? formatWorktreeWindowTitle(project.name, worktree.path)
       : "ACP Worktree Session";
+  const [agentWindowTitle, setAgentWindowTitle] = useState<string | null>(null);
+  const windowTitle = resolveWorktreeWindowTitle(defaultWindowTitle, agentWindowTitle);
+
+  useEffect(() => {
+    setAgentWindowTitle(null);
+  }, [projectId, decodedWorktreePath]);
+
+  useEffect(() => {
+    if (!standalone) {
+      return;
+    }
+
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    const applyTitle = (title: string) => {
+      if (disposed) {
+        return;
+      }
+      const normalized = normalizeAgentWindowTitle(title);
+      if (normalized) {
+        setAgentWindowTitle(normalized);
+      }
+    };
+    const handleFallback = (event: Event) => {
+      const payload = (event as CustomEvent<McpWindowTitleEvent>).detail;
+      if (payload?.title) {
+        applyTitle(payload.title);
+      }
+    };
+
+    window.addEventListener(MCP_WINDOW_TITLE_FALLBACK_EVENT, handleFallback);
+    listen<McpWindowTitleEvent>(MCP_WINDOW_TITLE_EVENT, (event) => applyTitle(event.payload.title))
+      .then((dispose) => {
+        unlisten = dispose;
+      })
+      .catch((error) => {
+        console.error("Failed to listen for MCP window title events", error);
+      });
+
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.removeEventListener(MCP_WINDOW_TITLE_FALLBACK_EVENT, handleFallback);
+    };
+  }, [standalone]);
 
   useEffect(() => {
     if (!standalone) {
