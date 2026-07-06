@@ -52,7 +52,6 @@ export function PromptCommandAutocomplete({
         "absolute left-4 right-4 top-3 z-20 max-h-56 overflow-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-md",
         className,
       )}
-      onMouseDown={(event) => event.preventDefault()}
     >
       {message ? (
         <div className="px-3 py-2 text-sm text-muted-foreground">{message}</div>
@@ -70,7 +69,16 @@ export function PromptCommandAutocomplete({
                 selected && "bg-muted text-foreground",
               )}
               onMouseEnter={() => onHighlight(index)}
-              onClick={() => onSelect(candidate)}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                onHighlight(index);
+                onSelect(candidate);
+              }}
+              onClick={(event) => {
+                if (event.detail === 0) {
+                  onSelect(candidate);
+                }
+              }}
             >
               <span className="min-w-0 flex-1">
                 <span className="block truncate font-mono font-medium">

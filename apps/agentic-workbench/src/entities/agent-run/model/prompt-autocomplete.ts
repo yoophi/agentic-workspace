@@ -13,6 +13,12 @@ export type PromptDraftSelection = {
   cursorEnd: number;
 };
 
+export type AvailableCommandCandidateScope = {
+  runId?: string | null;
+  agentId?: string | null;
+  workingDirectory?: string | null;
+};
+
 const triggerPrefixes = new Set(["$", "/"]);
 
 function isTokenBoundary(char: string | undefined) {
@@ -67,6 +73,53 @@ export function normalizeToolCommandCandidates(
       seen.add(key);
       return true;
     });
+}
+
+export function availableCommandCandidatesFromSessionUpdate(
+  updatePayload: unknown,
+  scope: AvailableCommandCandidateScope,
+): AgentToolCommandCandidate[] {
+  const update = unwrapSessionUpdate(updatePayload);
+  if (!update || readString(update.sessionUpdate) !== "available_commands_update") {
+    return [];
+  }
+
+  const availableCommands = Array.isArray(update.availableCommands)
+    ? update.availableCommands
+    : [];
+
+  return normalizeToolCommandCandidates(
+    availableCommands.flatMap((rawCommand, index) => {
+      if (!rawCommand || typeof rawCommand !== "object") {
+        return [];
+      }
+
+      const command = rawCommand as Record<string, unknown>;
+      const name = readString(command.name)?.trim() ?? "";
+      if (!name) {
+        return [];
+      }
+
+      const description = readString(command.description)?.trim() || null;
+      const source = name.startsWith("$") ? "extension" : "appCommand";
+
+      return [
+        {
+          id: `available-command:${name}:${index}`,
+          name,
+          description,
+          insertText: name,
+          source,
+          scope,
+        },
+      ];
+    }),
+  );
+}
+
+export function isAvailableCommandsSessionUpdate(updatePayload: unknown) {
+  const update = unwrapSessionUpdate(updatePayload);
+  return readString(update?.sessionUpdate) === "available_commands_update";
 }
 
 export function filterToolCommandCandidates(
@@ -130,4 +183,20 @@ export function replacePromptAutocompleteTrigger(
     cursorStart: nextCursor,
     cursorEnd: nextCursor,
   };
+}
+
+function unwrapSessionUpdate(payload: unknown): Record<string, unknown> | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const value = payload as Record<string, unknown>;
+  if (value.update && typeof value.update === "object") {
+    return value.update as Record<string, unknown>;
+  }
+  return value;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : null;
 }

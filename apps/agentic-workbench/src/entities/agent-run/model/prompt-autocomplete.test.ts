@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  availableCommandCandidatesFromSessionUpdate,
   clampHighlightedIndex,
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
@@ -95,5 +96,57 @@ describe("prompt autocomplete helpers", () => {
         { ...candidates[1], id: "blank-insert", insertText: " " },
       ]).map((item) => item.id),
     ).toEqual(["session:set_window_title"]);
+  });
+
+  it("extracts available command candidates from session updates", () => {
+    const extracted = availableCommandCandidatesFromSessionUpdate(
+      {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [
+          {
+            name: "mcp",
+            description: "List configured Model Context Protocol (MCP) tools.",
+            input: null,
+          },
+          {
+            name: "$speckit-analyze",
+            description: "Analyze spec artifacts.",
+            input: null,
+          },
+          { name: " ", description: "ignored" },
+        ],
+      },
+      { runId: "run-1", agentId: "codex", workingDirectory: "/repo" },
+    );
+
+    expect(extracted).toMatchObject([
+      {
+        name: "mcp",
+        description: "List configured Model Context Protocol (MCP) tools.",
+        insertText: "mcp",
+        source: "appCommand",
+        scope: { runId: "run-1", agentId: "codex", workingDirectory: "/repo" },
+      },
+      {
+        name: "$speckit-analyze",
+        description: "Analyze spec artifacts.",
+        insertText: "$speckit-analyze",
+        source: "extension",
+      },
+    ]);
+  });
+
+  it("extracts available command candidates from wrapped session/update payloads", () => {
+    expect(
+      availableCommandCandidatesFromSessionUpdate(
+        {
+          update: {
+            sessionUpdate: "available_commands_update",
+            availableCommands: [{ name: "status", description: "Display status." }],
+          },
+        },
+        { runId: null, agentId: "codex", workingDirectory: "/repo" },
+      ).map((item) => item.name),
+    ).toEqual(["status"]);
   });
 });
