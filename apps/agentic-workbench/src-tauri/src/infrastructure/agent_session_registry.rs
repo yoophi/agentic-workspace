@@ -215,6 +215,7 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::AppState;
+    use crate::ports::permission::{PermissionDecision, PermissionDecisionPort};
     use crate::ports::session_registry::{ReserveRunError, SessionRegistry};
 
     #[tokio::test]
@@ -304,6 +305,45 @@ mod tests {
         );
         assert!(state.cancel_run("run-a").await);
         assert_eq!(state.owner_of("run-a").await, None);
+    }
+
+    #[tokio::test]
+    async fn cancel_run_clears_owner_and_permission_state_for_that_run() {
+        let state = AppState::default();
+        state
+            .reserve_run("run-a".into(), Some("workbench-a".into()))
+            .await
+            .unwrap();
+        state
+            .reserve_run("run-b".into(), Some("workbench-a".into()))
+            .await
+            .unwrap();
+        let permissions = state.permissions();
+        let first = permissions
+            .create_waiter("run-a".to_string(), "permission-a".to_string())
+            .await;
+        let second = permissions
+            .create_waiter("run-b".to_string(), "permission-b".to_string())
+            .await;
+
+        assert!(state.cancel_run("run-a").await);
+
+        assert_eq!(state.owner_of("run-a").await, None);
+        assert_eq!(
+            state.owner_of("run-b").await.as_deref(),
+            Some("workbench-a")
+        );
+        assert!(first.await.is_err());
+        permissions
+            .respond(
+                "permission-b",
+                PermissionDecision {
+                    option_id: "allow".to_string(),
+                },
+            )
+            .await
+            .expect("other run permission should remain active");
+        assert_eq!(second.await.expect("decision").option_id, "allow");
     }
 
     #[tokio::test]

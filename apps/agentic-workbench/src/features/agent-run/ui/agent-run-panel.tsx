@@ -161,11 +161,15 @@ import { cn } from "@/lib/utils";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type AgentRunPanelProps = {
+  panelId?: string;
   workingDirectory: string;
   scrollHeader?: ReactNode;
   onRunSettled?: () => void;
+  onRunStateChange?: (state: { isRunning: boolean; activeRunId: string | null }) => void;
   initialInputMode?: AgentInputMode;
   externalPromptRequest?: AgentPromptRequest | null;
+  enableGoalContinuation?: boolean;
+  persistSettings?: boolean;
   onOpenSettings?: () => void;
 };
 
@@ -286,11 +290,15 @@ const fallbackModelDescriptions: Record<string, string> = {
 };
 
 export function AgentRunPanel({
+  panelId = "agent-run",
   workingDirectory,
   scrollHeader,
   onRunSettled,
+  onRunStateChange,
   initialInputMode = "prompt",
   externalPromptRequest = null,
+  enableGoalContinuation = true,
+  persistSettings = true,
   onOpenSettings,
 }: AgentRunPanelProps) {
   const queryClient = useQueryClient();
@@ -339,6 +347,7 @@ export function AgentRunPanel({
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
   const [inputMode, setInputMode] = useState<AgentInputMode>(initialInputMode);
   const activeRunIdRef = useRef<string | null>(null);
+  const onRunStateChangeRef = useRef(onRunStateChange);
   const activeGoalRef = useRef<ThreadGoal | null>(null);
   const activePromptSentRef = useRef(false);
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
@@ -363,6 +372,7 @@ export function AgentRunPanel({
   const settingsQuery = useQuery({
     queryKey: settingsQueryKey,
     queryFn: () => getAgentRunSettings(workingDirectory),
+    enabled: persistSettings,
     ...agentRunSettingsQueryOptions,
   });
   const appCommandSettingsQuery = useQuery({
@@ -393,6 +403,7 @@ export function AgentRunPanel({
   const goalQuery = useQuery({
     queryKey: goalQueryKey,
     queryFn: () => getGoal(workingDirectory),
+    enabled: enableGoalContinuation,
     ...goalQueryOptions,
   });
   const activeGoal = goalQuery.data ?? null;
@@ -420,6 +431,10 @@ export function AgentRunPanel({
   });
 
   const recordRunGoalProgress = useCallback(async () => {
+    if (!enableGoalContinuation) {
+      runStartedAtRef.current = null;
+      return;
+    }
     const goal = activeGoalRef.current;
     if (!goal || !["active", "budgetLimited"].includes(goal.status)) {
       return;
@@ -441,7 +456,7 @@ export function AgentRunPanel({
     } finally {
       runStartedAtRef.current = null;
     }
-  }, [goalQueryKey, queryClient, workingDirectory]);
+  }, [enableGoalContinuation, goalQueryKey, queryClient, workingDirectory]);
 
   const sessionsQuery = useQuery({
     queryKey: agentRunQueryKeys.sessions(providerAgentId, workingDirectory),
@@ -486,6 +501,10 @@ export function AgentRunPanel({
   }, [selectedAgentId]);
 
   useEffect(() => {
+    if (!persistSettings) {
+      settingsHydratedRef.current = true;
+      return;
+    }
     if (settingsHydratedRef.current || settingsQuery.isLoading) {
       return;
     }
@@ -527,6 +546,7 @@ export function AgentRunPanel({
     settingsQuery.error,
     settingsQuery.isError,
     settingsQuery.isLoading,
+    persistSettings,
   ]);
 
   function changeInputMode(nextMode: AgentInputMode) {
@@ -543,6 +563,9 @@ export function AgentRunPanel({
   }
 
   useEffect(() => {
+    if (!persistSettings) {
+      return;
+    }
     if (!settingsHydratedRef.current || !selectedAgentId || !workingDirectory.trim()) {
       return;
     }
@@ -585,12 +608,21 @@ export function AgentRunPanel({
     selectedAgentId,
     sessionMode,
     workingDirectory,
+    persistSettings,
   ]);
 
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
     setAvailableCommandCandidates([]);
   }, [activeRunId]);
+
+  useEffect(() => {
+    onRunStateChangeRef.current = onRunStateChange;
+  }, [onRunStateChange]);
+
+  useEffect(() => {
+    onRunStateChangeRef.current?.({ isRunning, activeRunId });
+  }, [activeRunId, isRunning]);
 
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
@@ -736,6 +768,10 @@ export function AgentRunPanel({
   }, [activeRunId, directPrompt, isAwaitingPromptResponse, isRunning, queuedPrompts]);
 
   useEffect(() => {
+    if (!enableGoalContinuation) {
+      goalContinuationPendingRef.current = false;
+      return;
+    }
     const sessionReady = sessionMode === "new" || Boolean(selectedSessionId);
     if (
       !shouldStartGoalContinuation({
@@ -791,6 +827,7 @@ export function AgentRunPanel({
     selectedAgentId,
     selectedSessionId,
     sessionMode,
+    enableGoalContinuation,
   ]);
 
   const selectedAgent = agents.find((agent) => agent.id === providerAgentId);
@@ -1533,7 +1570,7 @@ export function AgentRunPanel({
         orientation="vertical"
         className="flex h-full min-h-0 w-full flex-col"
       >
-        <ResizablePanel id="agent-run-timeline" minSize="220px">
+        <ResizablePanel id={`${panelId}-timeline`} minSize="220px">
           <div ref={timelineScrollRef} className="h-full min-h-0 overflow-auto">
             <div className="flex flex-col">
           {scrollHeader}
@@ -1656,21 +1693,23 @@ export function AgentRunPanel({
                 </SystemMessage>
               )}
 
-              <GoalStatusPanel
-                goal={activeGoal}
-                isLoading={goalQuery.isLoading}
-                isMutating={
-                  createGoalMutation.isPending ||
-                  updateGoalMutation.isPending ||
-                  clearGoalMutation.isPending
-                }
-                onCreate={() => openGoalDialog(null)}
-                onEdit={() => openGoalDialog(activeGoal)}
-                onPause={() => void setGoalStatus("paused")}
-                onResume={() => void setGoalStatus("active")}
-                onComplete={() => void setGoalStatus("complete")}
-                onClear={() => void clearCurrentGoal()}
-              />
+              {enableGoalContinuation && (
+                <GoalStatusPanel
+                  goal={activeGoal}
+                  isLoading={goalQuery.isLoading}
+                  isMutating={
+                    createGoalMutation.isPending ||
+                    updateGoalMutation.isPending ||
+                    clearGoalMutation.isPending
+                  }
+                  onCreate={() => openGoalDialog(null)}
+                  onEdit={() => openGoalDialog(activeGoal)}
+                  onPause={() => void setGoalStatus("paused")}
+                  onResume={() => void setGoalStatus("active")}
+                  onComplete={() => void setGoalStatus("complete")}
+                  onClear={() => void clearCurrentGoal()}
+                />
+              )}
 
               <div className="flex flex-col">
                 <div className="flex flex-wrap gap-1.5 border-b pb-3" role="tablist" aria-label="ACP event filter">
@@ -1721,7 +1760,7 @@ export function AgentRunPanel({
         </ResizableHandle>
 
         <ResizablePanel
-          id="agent-run-prompt"
+          id={`${panelId}-prompt`}
           defaultSize="300px"
           minSize="180px"
           maxSize="560px"

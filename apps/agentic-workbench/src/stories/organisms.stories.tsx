@@ -16,6 +16,7 @@ import {
   type CommandOverrideDraft,
 } from "@/features/agent-command-override/model/command-override-form";
 import { AgentRunPanel } from "@/features/agent-run/ui/agent-run-panel";
+import { WorktreeAgentRunArea } from "@/features/agent-run/ui/worktree-agent-run-area";
 import { DeleteProjectDialog } from "@/features/project-delete/ui/delete-project-dialog";
 import { ProjectFormDialog } from "@/features/project-form/ui/project-form-dialog";
 import { ProjectTable } from "@/features/project-list/ui/project-table";
@@ -285,6 +286,45 @@ export const AgentRun: Story = {
   render: () => (
     <AgentRunPanel workingDirectory="/Users/yoophi/project/agentic-workbench" />
   ),
+};
+
+export const WorktreeAgentRunAreaMainOnly: Story = {
+  render: () => (
+    <div className="mx-auto h-[720px] max-w-5xl overflow-hidden border">
+      <WorktreeAgentRunArea worktree={sampleWorktrees[1]} />
+    </div>
+  ),
+};
+
+export const WorktreeAgentRunAreaWithAnnotationPrompt: Story = {
+  render: function WorktreeAgentRunAreaWithAnnotationPromptStory() {
+    const [request, setRequest] = useState({ id: "storybook-annotation-1", text: "" });
+
+    return (
+      <div className="mx-auto flex h-[720px] max-w-5xl flex-col gap-3">
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() =>
+              setRequest({
+                id: crypto.randomUUID(),
+                text: "현재 active agent panel에서 이 annotation prompt를 검토해 주세요.",
+              })
+            }
+          >
+            Send annotation prompt
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden border">
+          <WorktreeAgentRunArea
+            worktree={sampleWorktrees[1]}
+            externalPromptRequest={request.text ? request : null}
+          />
+        </div>
+      </div>
+    );
+  },
 };
 
 export const AgentRunQueuedFirstPrompt: Story = {
