@@ -8,6 +8,8 @@ import {
   AgentRunMermaidDiagram,
   StreamingMarkdown,
 } from "@/features/agent-run/ui/agent-run-markdown";
+import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
+import type { AgentToolCommandCandidate } from "@/entities/agent-run/model";
 import { AgentCommandOverrideEditor } from "@/features/agent-command-override/ui/agent-command-override-editor";
 import {
   createCommandOverrideDraft,
@@ -434,6 +436,82 @@ export const SavedPrompts: Story = {
 
 export const SavedPromptsDisabled: Story = {
   render: () => <SavedPromptToolbarStory disabled />,
+};
+
+const promptCommandCandidates: AgentToolCommandCandidate[] = [
+  {
+    id: "session:set_window_title",
+    name: "set_window_title",
+    description: "Change the current Worktree Session window title.",
+    insertText: "$set_window_title",
+    source: "sessionTool",
+    scope: { runId: "run-1", agentId: "codex", workingDirectory: "/repo" },
+  },
+  {
+    id: "app:goal",
+    name: "goal",
+    description: "Manage the current long-running goal.",
+    insertText: "/goal",
+    source: "appCommand",
+    scope: { agentId: "codex", workingDirectory: "/repo" },
+  },
+  {
+    id: "session:very_long_tool_name",
+    name: "very_long_tool_name_that_must_not_resize_the_prompt_panel",
+    description:
+      "A long description that should remain contained inside the suggestion row without overlapping prompt controls.",
+    insertText: "$very_long_tool_name_that_must_not_resize_the_prompt_panel",
+    source: "sessionTool",
+    scope: { runId: "run-1", agentId: "codex", workingDirectory: "/repo" },
+  },
+];
+
+export const PromptCommandAutocompleteStates: Story = {
+  render: () => (
+    <div className="grid gap-6">
+      {[
+        { title: "Loading", status: "loading" as const, candidates: [], highlightedIndex: -1 },
+        {
+          title: "Ready",
+          status: "ready" as const,
+          candidates: promptCommandCandidates.slice(0, 2),
+          highlightedIndex: 0,
+        },
+        {
+          title: "Many candidates",
+          status: "ready" as const,
+          candidates: promptCommandCandidates,
+          highlightedIndex: 1,
+        },
+        { title: "No match", status: "noMatch" as const, candidates: [], highlightedIndex: -1 },
+        { title: "Empty", status: "empty" as const, candidates: [], highlightedIndex: -1 },
+        {
+          title: "Long content",
+          status: "ready" as const,
+          candidates: [promptCommandCandidates[2]],
+          highlightedIndex: 0,
+        },
+      ].map((state) => (
+        <Card key={state.title}>
+          <CardHeader>
+            <CardTitle>{state.title}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="relative h-24 rounded-md border bg-background">
+              <PromptCommandAutocomplete
+                open
+                status={state.status}
+                candidates={state.candidates}
+                highlightedIndex={state.highlightedIndex}
+                onHighlight={() => undefined}
+                onSelect={() => undefined}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
+  ),
 };
 
 export const AgentRunResizablePrompt: Story = {

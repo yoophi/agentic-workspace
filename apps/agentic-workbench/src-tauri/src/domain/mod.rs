@@ -2,6 +2,7 @@ pub mod acp_session;
 pub mod agent;
 pub mod agent_run_settings;
 pub mod agent_run_settings_repository;
+pub mod agent_tool_candidate;
 pub mod events;
 pub mod git_branch;
 pub mod git_branch_provider;

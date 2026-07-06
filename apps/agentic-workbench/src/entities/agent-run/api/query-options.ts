@@ -13,3 +13,9 @@ export const agentRunSettingsQueryOptions = {
 export const goalQueryOptions = {
   staleTime: 10_000,
 } as const;
+
+export const agentToolCommandCandidateQueryOptions = {
+  staleTime: 5_000,
+  gcTime: 30_000,
+  retry: false,
+} as const;

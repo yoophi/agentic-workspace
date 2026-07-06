@@ -207,7 +207,10 @@ mod tests {
     fn include_status_false_keeps_prunable_judgement() {
         let worktree = GitCliWorktreeProvider
             .to_worktree(
-                record("/nonexistent/worktree", Some("gitdir file points to non-existent location")),
+                record(
+                    "/nonexistent/worktree",
+                    Some("gitdir file points to non-existent location"),
+                ),
                 false,
                 false,
             )

@@ -7,7 +7,9 @@ use std::{
 use walkdir::{DirEntry, WalkDir};
 
 use crate::domain::{
-    worktree_file::{WorktreeFileEntry, WorktreeFileListKind, WorktreeFileListScope, WorktreeTextFile},
+    worktree_file::{
+        WorktreeFileEntry, WorktreeFileListKind, WorktreeFileListScope, WorktreeTextFile,
+    },
     worktree_file_provider::WorktreeFileProvider,
 };
 
@@ -26,7 +28,12 @@ impl WorktreeFileProvider for FsWorktreeFileProvider {
         let root = canonical_root(working_directory)?;
         // dir이 있으면 그 하위만 순회한다(폴더 펼침용 lazy loading, R10).
         // 상대 경로는 항상 worktree root 기준으로 유지해 트리 표시가 안정적이다.
-        let base = match scope.dir.as_deref().map(str::trim).filter(|dir| !dir.is_empty()) {
+        let base = match scope
+            .dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|dir| !dir.is_empty())
+        {
             Some(dir) => resolve_worktree_path(&root, dir)?,
             None => root.clone(),
         };
@@ -164,7 +171,11 @@ fn filter_markdown_entries(entries: Vec<WorktreeFileEntry>) -> Vec<WorktreeFileE
 
         // 파일 경로의 모든 조상 디렉터리를 기록한다(경로 자신은 파일이므로 제외).
         let mut ancestor = String::new();
-        for segment in entry.relative_path.split('/').filter(|segment| !segment.is_empty()) {
+        for segment in entry
+            .relative_path
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+        {
             if ancestor.is_empty() {
                 ancestor = segment.to_string();
             } else {
@@ -227,7 +238,10 @@ mod tests {
     }
 
     fn relative_paths(entries: &[crate::domain::worktree_file::WorktreeFileEntry]) -> Vec<String> {
-        entries.iter().map(|entry| entry.relative_path.clone()).collect()
+        entries
+            .iter()
+            .map(|entry| entry.relative_path.clone())
+            .collect()
     }
 
     #[test]
@@ -258,7 +272,10 @@ mod tests {
         assert!(paths.contains(&"docs/guide.md".to_string()));
         assert!(paths.contains(&"docs/nested/deep.md".to_string()));
         assert!(!paths.contains(&"main.ts".to_string()));
-        assert!(!paths.contains(&"src".to_string()), "markdown 없는 디렉터리는 제외");
+        assert!(
+            !paths.contains(&"src".to_string()),
+            "markdown 없는 디렉터리는 제외"
+        );
     }
 
     #[test]
@@ -279,7 +296,10 @@ mod tests {
 
         assert!(paths.contains(&"src/app.ts".to_string()));
         assert!(paths.contains(&"src/deep".to_string()));
-        assert!(!paths.contains(&"src/deep/inner.ts".to_string()), "depth 1은 직계만");
+        assert!(
+            !paths.contains(&"src/deep/inner.ts".to_string()),
+            "depth 1은 직계만"
+        );
         assert!(!paths.contains(&"README.md".to_string()));
     }
 

@@ -7,7 +7,10 @@ use std::{
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
-    application::mcp_title_control_service::TitleControlRegistry,
+    application::{
+        agent_tool_candidate_service::AgentToolCandidateRegistry,
+        mcp_title_control_service::TitleControlRegistry,
+    },
     infrastructure::{acp::runner::AcpSession, permission_broker::PermissionBroker},
     ports::session_registry::{ReserveRunError, SessionRegistry},
 };
@@ -100,6 +103,12 @@ impl AppState {
 }
 
 impl TitleControlRegistry for AppState {
+    async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
+        self.active_owner_of(run_id).await
+    }
+}
+
+impl AgentToolCandidateRegistry for AppState {
     async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
         self.active_owner_of(run_id).await
     }

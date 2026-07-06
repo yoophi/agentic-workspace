@@ -8,9 +8,7 @@ use std::{
 /// stderr 전용이며 외부 소비 계약이 아니다(specs/007 research R12).
 pub fn perf_log_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("AW_PERF_LOG").is_ok_and(|value| value == "1")
-    })
+    *ENABLED.get_or_init(|| std::env::var("AW_PERF_LOG").is_ok_and(|value| value == "1"))
 }
 
 pub fn log_command(name: &str, wait: Duration, run: Duration) {

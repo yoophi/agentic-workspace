@@ -5,6 +5,8 @@ import type {
   AgentRun,
   AgentRunRequest,
   AgentRunSettings,
+  AgentToolCommandCandidateQuery,
+  AgentToolCommandCandidateResponse,
   PermissionMode,
   ProviderSession,
   RunEventEnvelope,
@@ -16,6 +18,14 @@ export async function listAgents() {
 
 export async function listProviderSessions(agentId: string, cwd?: string) {
   return invoke<ProviderSession[]>("list_provider_sessions", { agentId, cwd });
+}
+
+export async function listAgentToolCommandCandidates(
+  input: AgentToolCommandCandidateQuery,
+) {
+  return invoke<AgentToolCommandCandidateResponse>("list_agent_tool_command_candidates", {
+    input,
+  });
 }
 
 export async function getAgentRunSettings(workingDirectory: string) {

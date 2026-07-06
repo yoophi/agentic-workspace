@@ -1,6 +1,9 @@
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
 
+use crate::domain::agent_tool_candidate::{
+    AgentToolCandidate, AgentToolCandidateScope, AgentToolCandidateSource,
+};
 use crate::domain::mcp_title_control::{
     TitleChangeFailureCode, TitleChangeRequest, TitleChangeResult,
 };
@@ -31,6 +34,28 @@ pub fn tools_list_result() -> Value {
             }
         ]
     })
+}
+
+pub fn tool_command_candidates(
+    run_id: Option<&str>,
+    agent_id: &str,
+    working_directory: &str,
+) -> Vec<AgentToolCandidate> {
+    vec![AgentToolCandidate {
+        id: format!("session:{SET_WINDOW_TITLE_TOOL}"),
+        name: SET_WINDOW_TITLE_TOOL.to_string(),
+        description: Some(
+            "Change the current Worktree Session window title for the active agent run."
+                .to_string(),
+        ),
+        insert_text: format!("${SET_WINDOW_TITLE_TOOL}"),
+        source: AgentToolCandidateSource::SessionTool,
+        scope: AgentToolCandidateScope {
+            run_id: run_id.map(str::to_string),
+            agent_id: Some(agent_id.to_string()),
+            working_directory: Some(working_directory.to_string()),
+        },
+    }]
 }
 
 pub fn parse_title_change_request(
@@ -102,7 +127,7 @@ pub fn origin_allowed(headers: &HeaderMap) -> bool {
 mod tests {
     use super::{
         SET_WINDOW_TITLE_TOOL, is_authorized, origin_allowed, parse_title_change_request,
-        tools_list_result, unsupported_tool_result,
+        tool_command_candidates, tools_list_result, unsupported_tool_result,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use serde_json::json;
@@ -113,6 +138,15 @@ mod tests {
         let tools = result["tools"].as_array().unwrap();
         assert_eq!(tools.len(), 1);
         assert_eq!(tools[0]["name"], SET_WINDOW_TITLE_TOOL);
+    }
+
+    #[test]
+    fn tool_command_candidates_expose_prompt_insert_token() {
+        let candidates = tool_command_candidates(Some("run-1"), "codex", "/repo");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].name, SET_WINDOW_TITLE_TOOL);
+        assert_eq!(candidates[0].insert_text, "$set_window_title");
+        assert_eq!(candidates[0].scope.run_id.as_deref(), Some("run-1"));
     }
 
     #[test]
