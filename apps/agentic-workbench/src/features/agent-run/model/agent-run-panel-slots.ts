@@ -3,19 +3,19 @@ export const MAIN_AGENT_RUN_PANEL_ID = "main-agent-run";
 export type AgentRunPanelKind = "main" | "extra";
 export type AgentRunPanelCloseState = "open" | "confirmingClose" | "closing";
 
+export type AgentPromptRequest = {
+  id: string;
+  text: string;
+};
+
 export type AgentRunPanelSlot = {
   id: string;
   kind: AgentRunPanelKind;
   title: string;
-  externalPromptRequest: AgentPanelPromptRequest | null;
+  externalPromptRequest: AgentPromptRequest | null;
   isRunning: boolean;
   activeRunId: string | null;
   closeState: AgentRunPanelCloseState;
-};
-
-export type AgentPanelPromptRequest = {
-  id: string;
-  text: string;
 };
 
 export type AgentPanelRunState = {
@@ -28,14 +28,13 @@ export type WorktreeAgentRunAreaState = {
   slots: AgentRunPanelSlot[];
   activePanelId: string;
   nextExtraSequence: number;
-  lastPromptTarget: { panelId: string; title: string } | null;
 };
 
 export type RoutedPromptResult =
   | {
       routed: true;
       state: WorktreeAgentRunAreaState;
-      target: AgentRunPanelSlot;
+      target: { id: string; title: string };
     }
   | {
       routed: false;
@@ -43,11 +42,15 @@ export type RoutedPromptResult =
       reason: "empty" | "missing-target" | "closing-target";
     };
 
-export function createMainAgentRunSlot(): AgentRunPanelSlot {
+function createSlot(
+  kind: AgentRunPanelKind,
+  id: string,
+  title: string,
+): AgentRunPanelSlot {
   return {
-    id: MAIN_AGENT_RUN_PANEL_ID,
-    kind: "main",
-    title: "Main",
+    id,
+    kind,
+    title,
     externalPromptRequest: null,
     isRunning: false,
     activeRunId: null,
@@ -57,34 +60,22 @@ export function createMainAgentRunSlot(): AgentRunPanelSlot {
 
 export function createInitialAgentRunAreaState(): WorktreeAgentRunAreaState {
   return {
-    slots: [createMainAgentRunSlot()],
+    slots: [createSlot("main", MAIN_AGENT_RUN_PANEL_ID, "Main")],
     activePanelId: MAIN_AGENT_RUN_PANEL_ID,
     nextExtraSequence: 1,
-    lastPromptTarget: null,
-  };
-}
-
-export function createExtraPanelSlot(sequence: number): AgentRunPanelSlot {
-  return {
-    id: `extra-agent-run-${sequence}`,
-    kind: "extra",
-    title: `Extra ${sequence}`,
-    externalPromptRequest: null,
-    isRunning: false,
-    activeRunId: null,
-    closeState: "open",
   };
 }
 
 export function addExtraPanel(
   state: WorktreeAgentRunAreaState,
 ): WorktreeAgentRunAreaState {
-  const nextSlot = createExtraPanelSlot(state.nextExtraSequence);
+  const sequence = state.nextExtraSequence;
+  const nextSlot = createSlot("extra", `extra-agent-run-${sequence}`, `Extra ${sequence}`);
   return {
     ...state,
     slots: [...state.slots, nextSlot],
     activePanelId: nextSlot.id,
-    nextExtraSequence: state.nextExtraSequence + 1,
+    nextExtraSequence: sequence + 1,
   };
 }
 
@@ -92,7 +83,10 @@ export function selectPanel(
   state: WorktreeAgentRunAreaState,
   panelId: string,
 ): WorktreeAgentRunAreaState {
-  if (!state.slots.some((slot) => slot.id === panelId)) {
+  if (
+    state.activePanelId === panelId ||
+    !state.slots.some((slot) => slot.id === panelId)
+  ) {
     return state;
   }
   return { ...state, activePanelId: panelId };
@@ -132,7 +126,7 @@ export function updatePanelRunState(
 export function routePromptToActivePanel(
   state: WorktreeAgentRunAreaState,
   text: string,
-  createId: () => string,
+  requestId: string,
 ): RoutedPromptResult {
   const nextText = text.trim();
   if (!nextText) {
@@ -147,13 +141,12 @@ export function routePromptToActivePanel(
     return { routed: false, state, reason: "closing-target" };
   }
 
-  const request: AgentPanelPromptRequest = {
-    id: createId(),
+  const request: AgentPromptRequest = {
+    id: requestId,
     text: nextText,
   };
   const nextState = {
     ...state,
-    lastPromptTarget: { panelId: target.id, title: target.title },
     slots: state.slots.map((slot) =>
       slot.id === target.id ? { ...slot, externalPromptRequest: request } : slot,
     ),
@@ -162,7 +155,7 @@ export function routePromptToActivePanel(
   return {
     routed: true,
     state: nextState,
-    target: { ...target, externalPromptRequest: request },
+    target: { id: target.id, title: target.title },
   };
 }
 
@@ -170,58 +163,41 @@ export function requestClosePanel(
   state: WorktreeAgentRunAreaState,
   panelId: string,
 ): WorktreeAgentRunAreaState {
-  const slot = state.slots.find((item) => item.id === panelId);
-  if (!slot || slot.kind === "main" || slot.closeState !== "open") {
+  const slot = findExtraSlot(state, panelId);
+  if (!slot || slot.closeState !== "open") {
     return state;
   }
   if (!slot.isRunning || !slot.activeRunId) {
-    return removePanel(state, panelId);
+    return removeClosedPanel(state, panelId);
   }
-  return {
-    ...state,
-    slots: state.slots.map((item) =>
-      item.id === panelId ? { ...item, closeState: "confirmingClose" } : item,
-    ),
-  };
+  return setSlotCloseState(state, panelId, "confirmingClose");
 }
 
 export function cancelClosePanel(
   state: WorktreeAgentRunAreaState,
   panelId: string,
 ): WorktreeAgentRunAreaState {
-  return {
-    ...state,
-    slots: state.slots.map((slot) =>
-      slot.id === panelId && slot.kind === "extra" && slot.closeState === "confirmingClose"
-        ? { ...slot, closeState: "open" }
-        : slot,
-    ),
-  };
+  const slot = findExtraSlot(state, panelId);
+  if (!slot || slot.closeState !== "confirmingClose") {
+    return state;
+  }
+  return setSlotCloseState(state, panelId, "open");
 }
 
 export function confirmClosePanel(
   state: WorktreeAgentRunAreaState,
   panelId: string,
 ): { state: WorktreeAgentRunAreaState; activeRunId: string | null } {
-  const slot = state.slots.find((item) => item.id === panelId);
-  if (!slot || slot.kind === "main") {
-    return { state, activeRunId: null };
-  }
-  if (slot.closeState === "closing") {
+  const slot = findExtraSlot(state, panelId);
+  if (!slot || slot.closeState === "closing") {
     return { state, activeRunId: null };
   }
   if (!slot.isRunning || !slot.activeRunId) {
-    return { state: removePanel(state, panelId), activeRunId: null };
+    return { state: removeClosedPanel(state, panelId), activeRunId: null };
   }
-
   return {
     activeRunId: slot.activeRunId,
-    state: {
-      ...state,
-      slots: state.slots.map((item) =>
-        item.id === panelId ? { ...item, closeState: "closing" } : item,
-      ),
-    },
+    state: setSlotCloseState(state, panelId, "closing"),
   };
 }
 
@@ -229,23 +205,8 @@ export function removeClosedPanel(
   state: WorktreeAgentRunAreaState,
   panelId: string,
 ): WorktreeAgentRunAreaState {
-  const slot = state.slots.find((item) => item.id === panelId);
-  if (!slot || slot.kind === "main") {
-    return state;
-  }
-  return removePanel(state, panelId);
-}
-
-export function getRunningPanelCount(state: WorktreeAgentRunAreaState): number {
-  return state.slots.filter((slot) => slot.isRunning).length;
-}
-
-function removePanel(
-  state: WorktreeAgentRunAreaState,
-  panelId: string,
-): WorktreeAgentRunAreaState {
-  const slot = state.slots.find((item) => item.id === panelId);
-  if (!slot || slot.kind === "main") {
+  const slot = findExtraSlot(state, panelId);
+  if (!slot) {
     return state;
   }
 
@@ -260,5 +221,30 @@ function removePanel(
     ...state,
     slots: remainingSlots,
     activePanelId,
+  };
+}
+
+export function getRunningPanelCount(state: WorktreeAgentRunAreaState): number {
+  return state.slots.filter((slot) => slot.isRunning).length;
+}
+
+function findExtraSlot(
+  state: WorktreeAgentRunAreaState,
+  panelId: string,
+): AgentRunPanelSlot | null {
+  const slot = state.slots.find((item) => item.id === panelId);
+  return slot && slot.kind === "extra" ? slot : null;
+}
+
+function setSlotCloseState(
+  state: WorktreeAgentRunAreaState,
+  panelId: string,
+  closeState: AgentRunPanelCloseState,
+): WorktreeAgentRunAreaState {
+  return {
+    ...state,
+    slots: state.slots.map((slot) =>
+      slot.id === panelId ? { ...slot, closeState } : slot,
+    ),
   };
 }

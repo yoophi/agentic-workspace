@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DiffViewer } from "@yoophi/git-ui";
 import {
@@ -81,6 +81,11 @@ import {
   buildGoalContinuationPrompt,
   shouldStartGoalContinuation,
 } from "@/features/agent-run/model/goal-continuation";
+import type {
+  AgentPanelRunState,
+  AgentPromptRequest,
+  AgentRunPanelKind,
+} from "@/features/agent-run/model/agent-run-panel-slots";
 import {
   activateRunStartQueuedPrompt,
   addUserMessage,
@@ -165,20 +170,16 @@ type AgentRunPanelProps = {
   workingDirectory: string;
   scrollHeader?: ReactNode;
   onRunSettled?: () => void;
-  onRunStateChange?: (state: { isRunning: boolean; activeRunId: string | null }) => void;
+  onRunStateChange?: (state: AgentPanelRunState) => void;
   initialInputMode?: AgentInputMode;
   externalPromptRequest?: AgentPromptRequest | null;
-  enableGoalContinuation?: boolean;
-  persistSettings?: boolean;
+  variant?: AgentRunPanelKind;
   onOpenSettings?: () => void;
 };
 
 type AgentInputMode = "prompt" | "ralphLoop";
 
-export type AgentPromptRequest = {
-  id: string;
-  text: string;
-};
+export type { AgentPromptRequest };
 
 const defaultPrompt = "";
 // 백엔드(MAX_RALPH_ITERATIONS)와 맞춘 자동 반복 상한. 입력은 이 값으로 제한된다.
@@ -289,7 +290,7 @@ const fallbackModelDescriptions: Record<string, string> = {
   "claude-haiku-4-5": "Use Claude's fast Haiku model.",
 };
 
-export function AgentRunPanel({
+export const AgentRunPanel = memo(function AgentRunPanel({
   panelId = "agent-run",
   workingDirectory,
   scrollHeader,
@@ -297,10 +298,11 @@ export function AgentRunPanel({
   onRunStateChange,
   initialInputMode = "prompt",
   externalPromptRequest = null,
-  enableGoalContinuation = true,
-  persistSettings = true,
+  variant = "main",
   onOpenSettings,
 }: AgentRunPanelProps) {
+  const enableGoalContinuation = variant === "main";
+  const persistSettings = variant === "main";
   const queryClient = useQueryClient();
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [sessionMode, setSessionMode] = useState<AgentRunSessionMode>("new");
@@ -621,8 +623,8 @@ export function AgentRunPanel({
   }, [onRunStateChange]);
 
   useEffect(() => {
-    onRunStateChangeRef.current?.({ isRunning, activeRunId });
-  }, [activeRunId, isRunning]);
+    onRunStateChangeRef.current?.({ panelId, isRunning, activeRunId });
+  }, [activeRunId, isRunning, panelId]);
 
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
@@ -2370,7 +2372,7 @@ export function AgentRunPanel({
       />
     </div>
   );
-}
+});
 
 type GoalStatusPanelProps = {
   goal: ThreadGoal | null;

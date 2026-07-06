@@ -98,17 +98,13 @@ describe("agent run panel slots", () => {
 
   it("routes trimmed prompts to the active open panel", () => {
     const state = addExtraPanel(createInitialAgentRunAreaState());
-    const result = routePromptToActivePanel(state, "  review this  ", () => "request-1");
+    const result = routePromptToActivePanel(state, "  review this  ", "request-1");
 
     expect(result.routed).toBe(true);
     if (!result.routed) {
       return;
     }
-    expect(result.target.id).toBe("extra-agent-run-1");
-    expect(result.state.lastPromptTarget).toEqual({
-      panelId: "extra-agent-run-1",
-      title: "Extra 1",
-    });
+    expect(result.target).toEqual({ id: "extra-agent-run-1", title: "Extra 1" });
     expect(result.state.slots[1].externalPromptRequest).toEqual({
       id: "request-1",
       text: "review this",
@@ -117,7 +113,7 @@ describe("agent run panel slots", () => {
 
   it("rejects empty prompts and prompts routed to closing panels", () => {
     const state = addExtraPanel(createInitialAgentRunAreaState());
-    expect(routePromptToActivePanel(state, "   ", () => "ignored")).toEqual({
+    expect(routePromptToActivePanel(state, "   ", "ignored")).toEqual({
       routed: false,
       state,
       reason: "empty",
@@ -131,7 +127,7 @@ describe("agent run panel slots", () => {
     const confirming = requestClosePanel(running, "extra-agent-run-1");
     const { state: closing } = confirmClosePanel(confirming, "extra-agent-run-1");
 
-    expect(routePromptToActivePanel(closing, "late prompt", () => "late")).toEqual({
+    expect(routePromptToActivePanel(closing, "late prompt", "late")).toEqual({
       routed: false,
       state: closing,
       reason: "closing-target",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangleIcon, FolderGit2Icon } from "lucide-react";
 
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
@@ -19,18 +19,19 @@ import {
   routePromptToActivePanel,
   selectPanel,
   updatePanelRunState,
+  type AgentPanelRunState,
 } from "@/features/agent-run/model/agent-run-panel-slots";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 import { SystemMessage } from "@/components/ui/system-message";
 import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
@@ -47,14 +48,9 @@ export function WorktreeAgentRunArea({
   onOpenSettings,
 }: WorktreeAgentRunAreaProps) {
   const [state, setState] = useState(createInitialAgentRunAreaState);
-  const stateRef = useRef(state);
   const handledExternalPromptRequestIdRef = useRef<string | null>(null);
   const [targetMessage, setTargetMessage] = useState<string | null>(null);
   const [closeError, setCloseError] = useState<string | null>(null);
-
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
 
   useEffect(() => {
     if (
@@ -66,9 +62,9 @@ export function WorktreeAgentRunArea({
 
     handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
     const result = routePromptToActivePanel(
-      stateRef.current,
+      state,
       externalPromptRequest.text,
-      () => externalPromptRequest.id,
+      externalPromptRequest.id,
     );
 
     if (result.routed) {
@@ -80,25 +76,42 @@ export function WorktreeAgentRunArea({
     if (result.reason === "closing-target") {
       setTargetMessage("닫히는 중인 agent 패널에는 prompt를 보낼 수 없습니다.");
     }
-  }, [externalPromptRequest]);
+  }, [externalPromptRequest, state]);
 
-  const handleRunStateChange = useCallback(
-    (panelId: string, runState: { isRunning: boolean; activeRunId: string | null }) => {
-      setState((current) =>
-        updatePanelRunState(current, {
-          panelId,
-          isRunning: runState.isRunning,
-          activeRunId: runState.activeRunId,
-        }),
-      );
-    },
-    [],
-  );
+  const handleRunStateChange = useCallback((report: AgentPanelRunState) => {
+    setState((current) => updatePanelRunState(current, report));
+  }, []);
+
+  const handleSelectPanel = useCallback((panelId: string) => {
+    setState((current) => selectPanel(current, panelId));
+  }, []);
+
+  const handleAddExtraPanel = useCallback(() => {
+    setState(addExtraPanel);
+  }, []);
 
   const handleClosePanel = useCallback((panelId: string) => {
     setCloseError(null);
     setState((current) => requestClosePanel(current, panelId));
   }, []);
+
+  const scrollHeader = useMemo(
+    () => (
+      <div className="sticky top-0 z-20 flex min-w-0 items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur">
+        <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
+        <EllipsisPopoverText
+          value={worktree.path}
+          className="min-w-0 flex-1 font-mono text-xs text-muted-foreground"
+          contentClassName="font-mono text-xs"
+        />
+        <Badge variant="outline" className="max-w-44 shrink-0 truncate font-mono">
+          {worktree.branch || (worktree.status === "unknown" ? "…" : "-")}
+        </Badge>
+        <WorktreeStatusBadge status={worktree.status} />
+      </div>
+    ),
+    [worktree.branch, worktree.path, worktree.status],
+  );
 
   const confirmingCloseSlot = state.slots.find(
     (slot) => slot.closeState === "confirmingClose",
@@ -107,7 +120,7 @@ export function WorktreeAgentRunArea({
 
   async function confirmRunningClose(panelId: string) {
     setCloseError(null);
-    const closeResult = confirmClosePanel(stateRef.current, panelId);
+    const closeResult = confirmClosePanel(state, panelId);
     setState(closeResult.state);
 
     if (closeResult.activeRunId) {
@@ -126,8 +139,8 @@ export function WorktreeAgentRunArea({
       <AgentRunPanelTabs
         slots={state.slots}
         activePanelId={state.activePanelId}
-        onSelectPanel={(panelId) => setState((current) => selectPanel(current, panelId))}
-        onAddExtraPanel={() => setState(addExtraPanel)}
+        onSelectPanel={handleSelectPanel}
+        onAddExtraPanel={handleAddExtraPanel}
         onClosePanel={handleClosePanel}
       />
 
@@ -169,29 +182,15 @@ export function WorktreeAgentRunArea({
               workingDirectory={worktree.path}
               externalPromptRequest={slot.externalPromptRequest}
               onOpenSettings={onOpenSettings}
-              enableGoalContinuation={slot.kind === "main"}
-              persistSettings={slot.kind === "main"}
-              onRunStateChange={(runState) => handleRunStateChange(slot.id, runState)}
-              scrollHeader={
-                <div className="sticky top-0 z-20 flex min-w-0 items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur">
-                  <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <EllipsisPopoverText
-                    value={worktree.path}
-                    className="min-w-0 flex-1 font-mono text-xs text-muted-foreground"
-                    contentClassName="font-mono text-xs"
-                  />
-                  <Badge variant="outline" className="max-w-44 shrink-0 truncate font-mono">
-                    {worktree.branch || (worktree.status === "unknown" ? "…" : "-")}
-                  </Badge>
-                  <WorktreeStatusBadge status={worktree.status} />
-                </div>
-              }
+              variant={slot.kind}
+              onRunStateChange={handleRunStateChange}
+              scrollHeader={scrollHeader}
             />
           </div>
         ))}
       </div>
 
-      <Dialog
+      <AlertDialog
         open={Boolean(confirmingCloseSlot)}
         onOpenChange={(open) => {
           if (!open && confirmingCloseSlot) {
@@ -199,22 +198,17 @@ export function WorktreeAgentRunArea({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>실행 중인 extra 패널 닫기</DialogTitle>
-            <DialogDescription>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>실행 중인 extra 패널 닫기</AlertDialogTitle>
+            <AlertDialogDescription>
               {confirmingCloseSlot?.title ?? "Extra"} 패널에서 agent가 실행 중입니다. 실행을
               취소하고 패널을 닫거나, 닫기를 취소할 수 있습니다.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                닫기 취소
-              </Button>
-            </DialogClose>
-            <Button
-              type="button"
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>닫기 취소</AlertDialogCancel>
+            <AlertDialogAction
               variant="destructive"
               onClick={() => {
                 if (confirmingCloseSlot) {
@@ -223,10 +217,10 @@ export function WorktreeAgentRunArea({
               }}
             >
               실행 취소 후 닫기
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
