@@ -285,6 +285,28 @@ export const AgentRun: Story = {
   ),
 };
 
+export const AgentRunQueuedFirstPrompt: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Starts the Storybook mock run from an external first prompt so the queued prompt state appears before the mock lifecycle response.",
+      },
+    },
+  },
+  render: () => (
+    <div className="mx-auto h-[720px] max-w-5xl">
+      <AgentRunPanel
+        workingDirectory="/Users/yoophi/project/agentic-workbench"
+        externalPromptRequest={{
+          id: "storybook-first-run-queued-prompt",
+          text: "첫 실행 프롬프트를 queue 상태로 먼저 표시해 주세요.",
+        }}
+      />
+    </div>
+  ),
+};
+
 export const AgentRunMermaidOutput: Story = {
   render: () => (
     <div className="max-w-3xl rounded-lg border p-4">

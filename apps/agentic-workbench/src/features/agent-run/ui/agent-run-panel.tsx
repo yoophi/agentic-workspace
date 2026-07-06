@@ -73,9 +73,13 @@ import {
   shouldStartGoalContinuation,
 } from "@/features/agent-run/model/goal-continuation";
 import {
+  activateRunStartQueuedPrompt,
   addUserMessage,
+  appendQueuedPrompt,
   appendPromptHistory,
   buildSteerPrompt,
+  createQueuedPrompt,
+  createRunStartQueuedPrompt,
   initialPromptHistoryState,
   insertQueuedPrompt,
   isOverrideCommandFailure,
@@ -87,11 +91,13 @@ import {
   resolveRequestAgentLaunch,
   resolveSelectedProfileId,
   resetPromptHistoryCursor,
+  shouldAutoDispatchQueuedPrompt,
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
 import type {
   PromptHistoryDirection,
   QueuedPrompt,
+  QueuedPromptSource,
   UsageContext,
 } from "@/features/agent-run/model/run-panel-state";
 import {
@@ -315,6 +321,7 @@ export function AgentRunPanel({
   const activeRunIdRef = useRef<string | null>(null);
   const activeGoalRef = useRef<ThreadGoal | null>(null);
   const activePromptSentRef = useRef(false);
+  const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const runStartedAtRef = useRef<number | null>(null);
   const usageContextRef = useRef<UsageContext | null>(null);
   const goalContinuationPendingRef = useRef(false);
@@ -546,6 +553,10 @@ export function AgentRunPanel({
   }, [activeRunId]);
 
   useEffect(() => {
+    queuedPromptsRef.current = queuedPrompts;
+  }, [queuedPrompts]);
+
+  useEffect(() => {
     activeGoalRef.current = activeGoal;
   }, [activeGoal]);
 
@@ -593,6 +604,23 @@ export function AgentRunPanel({
       if (timelineEvent.type === "lifecycle") {
         if (timelineEvent.status === "promptSent") {
           activePromptSentRef.current = true;
+          const activated = activateRunStartQueuedPrompt({
+            queue: queuedPromptsRef.current,
+            items,
+            runId: envelope.runId,
+          });
+          if (activated.queuedPrompt) {
+            queuedPromptsRef.current = activated.queue;
+            setQueuedPrompts(activated.queue);
+            setDirectPrompt(activated.queuedPrompt.text);
+            setItems((currentItems) =>
+              activateRunStartQueuedPrompt({
+                queue: [activated.queuedPrompt!],
+                items: currentItems,
+                runId: envelope.runId,
+              }).items,
+            );
+          }
           setIsAwaitingPromptResponse(true);
         }
         if (timelineEvent.status === "promptCompleted") {
@@ -621,7 +649,12 @@ export function AgentRunPanel({
   }, [onRunSettled, recordRunGoalProgress]);
 
   useEffect(() => {
-    if (!activeRunId || !isRunning || isAwaitingPromptResponse || queuedPrompts.length === 0) {
+    if (
+      !activeRunId ||
+      !isRunning ||
+      isAwaitingPromptResponse ||
+      !shouldAutoDispatchQueuedPrompt(queuedPrompts)
+    ) {
       return;
     }
 
@@ -802,26 +835,39 @@ export function AgentRunPanel({
       return;
     }
 
-    handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
     const nextPrompt = externalPromptRequest.text.trim();
     if (!nextPrompt) {
+      handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
       return;
     }
 
     if (activeRunIdRef.current && isRunning) {
-      enqueuePrompt(nextPrompt);
+      handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
+      enqueuePrompt(nextPrompt, "external-request");
       return;
     }
 
     setInputMode("prompt");
     setRalphLoopEnabled(false);
     setIsRalphSettingsDialogOpen(false);
-    void startRun(nextPrompt, { ralphLoopEnabled: false }).then((started) => {
+    if (
+      !selectedAgentId ||
+      (sessionMode === "reuse" && !selectedSessionId)
+    ) {
+      setPrompt(nextPrompt);
+      return;
+    }
+
+    handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
+    void startRun(nextPrompt, {
+      ralphLoopEnabled: false,
+      queuedPromptSource: "external-request",
+    }).then((started) => {
       if (!started) {
         setPrompt(nextPrompt);
       }
     });
-  }, [externalPromptRequest, isRunning]);
+  }, [externalPromptRequest, isRunning, selectedAgentId, selectedSessionId, sessionMode]);
 
   async function run() {
     const goal = prompt.trim();
@@ -838,6 +884,7 @@ export function AgentRunPanel({
       queuedPrompts?: QueuedPrompt[];
       displayPrompt?: string;
       ralphLoopEnabled?: boolean;
+      queuedPromptSource?: QueuedPromptSource;
     } = {},
   ) {
     if (!selectedAgentId || !goal) {
@@ -846,13 +893,22 @@ export function AgentRunPanel({
 
     const runId = crypto.randomUUID();
     const displayPrompt = options.displayPrompt ?? goal;
+    const runStartQueuedPrompt = createRunStartQueuedPrompt({
+      id: `${runId}:initial-prompt`,
+      text: displayPrompt,
+      source: options.queuedPromptSource ?? "first-run",
+    });
+    const nextQueuedPrompts = runStartQueuedPrompt
+      ? [runStartQueuedPrompt, ...(options.queuedPrompts ?? [])]
+      : (options.queuedPrompts ?? []);
     setError(null);
-    setItems(addUserMessage([], runId, displayPrompt));
-    setQueuedPrompts(options.queuedPrompts ?? []);
+    setItems([]);
+    queuedPromptsRef.current = nextQueuedPrompts;
+    setQueuedPrompts(nextQueuedPrompts);
     setUsageContext(null);
     usageContextRef.current = null;
     runStartedAtRef.current = Date.now();
-    setDirectPrompt(displayPrompt);
+    setDirectPrompt(null);
     activePromptSentRef.current = false;
     activeRunIdRef.current = runId;
     setActiveRunId(runId);
@@ -900,8 +956,10 @@ export function AgentRunPanel({
       return true;
     } catch (caughtError) {
       setError(String(caughtError));
-      setPrompt(goal);
+      setPrompt(displayPrompt);
       setItems((currentItems) => removeUserMessage(currentItems, runId, displayPrompt));
+      queuedPromptsRef.current = [];
+      setQueuedPrompts([]);
       setDirectPrompt(null);
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
@@ -913,13 +971,23 @@ export function AgentRunPanel({
     }
   }
 
-  function enqueuePrompt(promptText = prompt) {
+  function enqueuePrompt(
+    promptText = prompt,
+    source: QueuedPromptSource = "manual-queue",
+  ) {
     const nextPrompt = promptText.trim();
     if (!nextPrompt) {
       return;
     }
 
-    setQueuedPrompts((current) => [...current, { id: crypto.randomUUID(), text: nextPrompt }]);
+    setQueuedPrompts((current) => {
+      const next = appendQueuedPrompt(
+        current,
+        createQueuedPrompt({ id: crypto.randomUUID(), text: nextPrompt, source }),
+      );
+      queuedPromptsRef.current = next;
+      return next;
+    });
     if (promptText === prompt) {
       setPrompt(defaultPrompt);
     }
@@ -932,11 +1000,11 @@ export function AgentRunPanel({
     }
 
     if (isRunning || activeRunIdRef.current) {
-      enqueuePrompt(nextPrompt);
+      enqueuePrompt(nextPrompt, "saved-prompt");
       return;
     }
 
-    await startRun(nextPrompt);
+    await startRun(nextPrompt, { queuedPromptSource: "saved-prompt" });
   }
 
   function recordPromptHistory(promptText: string) {
