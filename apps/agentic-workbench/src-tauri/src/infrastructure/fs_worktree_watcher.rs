@@ -293,8 +293,17 @@ mod tests {
     // (a) 파일 목록 화면과 동일한 제외 목록(EXCLUDED_DIRS) 전체가 무시된다.
     #[test]
     fn ignores_all_excluded_directories() {
-        for dir in ["node_modules", "target", "dist", ".next", "build", "coverage", ".turbo"] {
-            let (class, _) = classify_event(&[format!("/repo/{dir}/output.js").into()], &git_paths());
+        for dir in [
+            "node_modules",
+            "target",
+            "dist",
+            ".next",
+            "build",
+            "coverage",
+            ".turbo",
+        ] {
+            let (class, _) =
+                classify_event(&[format!("/repo/{dir}/output.js").into()], &git_paths());
             assert_eq!(class, EventClass::Ignored, "{dir} should be ignored");
         }
 
@@ -307,7 +316,10 @@ mod tests {
             vec!["/repo/dist/output.js".into(), "/repo/src/main.ts".into()];
         let (class, representative) = classify_event(&mixed_paths, &git_paths());
         assert_eq!(class, EventClass::File);
-        assert_eq!(representative.map(|p| p.to_str().unwrap()), Some("/repo/src/main.ts"));
+        assert_eq!(
+            representative.map(|p| p.to_str().unwrap()),
+            Some("/repo/src/main.ts")
+        );
     }
 
     // (b) .git 내부 이벤트 세분화: index/*.lock/FETCH_HEAD 단독 변화는 미발행,
@@ -348,7 +360,9 @@ mod tests {
         let (emitted_sender, emitted_receiver) = mpsc::channel();
         let handle = thread::spawn(move || {
             run_debounce_loop(receiver, Duration::from_millis(50), move |event| {
-                emitted_sender.send(event).expect("test channel should accept event");
+                emitted_sender
+                    .send(event)
+                    .expect("test channel should accept event");
             });
         });
 
@@ -363,10 +377,15 @@ mod tests {
         let event = emitted_receiver
             .recv_timeout(Duration::from_millis(500))
             .expect("debounced event should be emitted");
-        assert!(matches!(event.kind, WorktreeChangeKind::Git), "git kind should win the merge");
+        assert!(
+            matches!(event.kind, WorktreeChangeKind::Git),
+            "git kind should win the merge"
+        );
         assert_eq!(event.changed_path, "/repo/.git/HEAD");
         assert!(
-            emitted_receiver.recv_timeout(Duration::from_millis(100)).is_err(),
+            emitted_receiver
+                .recv_timeout(Duration::from_millis(100))
+                .is_err(),
             "only one merged event should be emitted",
         );
 

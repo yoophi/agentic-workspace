@@ -8,8 +8,9 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     application::{
-        agent_run_settings_service, cancel_agent_run::CancelAgentRunUseCase, git_branch_service,
-        git_remote_service, git_worktree_changes_service, git_worktree_service, goal_service,
+        agent_run_settings_service, agent_tool_candidate_service::AgentToolCandidateService,
+        cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
+        git_worktree_changes_service, git_worktree_service, goal_service,
         list_provider_sessions::ListProviderSessionsUseCase, project_service, saved_prompt_service,
         send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
         start_agent_run::StartAgentRunUseCase, worktree_changes_service, worktree_file_service,
@@ -20,6 +21,7 @@ use crate::{
         agent_run_settings::{
             APP_COMMAND_OVERRIDE_SETTINGS_KEY, AgentCommandSource, AgentRunSettings,
         },
+        agent_tool_candidate::{AgentToolCandidateQuery, AgentToolCandidateResponse},
         git_branch::GitBranch,
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
@@ -52,6 +54,7 @@ use crate::{
         json_goal_repository::JsonGoalRepository,
         json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
+        mcp::title_tool,
         mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv, McpServerState},
         perf_log::run_blocking_command,
         tauri_run_event_sink::TauriRunEventSink,
@@ -675,6 +678,23 @@ pub async fn start_agent_run(
         .execute(runner, sink, request, Some(owner_window_label))
         .await
         .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn list_agent_tool_command_candidates(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    input: AgentToolCandidateQuery,
+) -> Result<AgentToolCandidateResponse, String> {
+    let owner_window_label = window.label().to_string();
+    let candidates = title_tool::tool_command_candidates(
+        input.run_id.as_deref(),
+        &input.agent_id,
+        &input.working_directory,
+    );
+    AgentToolCandidateService::new(state.inner().clone())
+        .list_candidates(&owner_window_label, input, candidates)
+        .await
 }
 
 #[tauri::command]

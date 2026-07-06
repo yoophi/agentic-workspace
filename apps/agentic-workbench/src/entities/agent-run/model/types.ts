@@ -168,6 +168,37 @@ export type ProviderSession = {
   source: string | null;
 };
 
+export type AgentToolCommandCandidateStatus = "loading" | "ready" | "empty" | "error";
+
+export type AgentToolCommandCandidateSource = "sessionTool" | "appCommand" | "extension";
+
+export type AgentToolCommandCandidateScope = {
+  runId?: string | null;
+  agentId?: string | null;
+  workingDirectory?: string | null;
+};
+
+export type AgentToolCommandCandidate = {
+  id: string;
+  name: string;
+  description: string | null;
+  insertText: string;
+  source: AgentToolCommandCandidateSource;
+  scope: AgentToolCommandCandidateScope;
+};
+
+export type AgentToolCommandCandidateQuery = {
+  runId?: string | null;
+  agentId: string;
+  workingDirectory: string;
+  sessionMode: AgentRunSessionMode;
+};
+
+export type AgentToolCommandCandidateResponse = {
+  status: AgentToolCommandCandidateStatus;
+  candidates: AgentToolCommandCandidate[];
+};
+
 export type PermissionMode =
   | "default"
   | "auto"

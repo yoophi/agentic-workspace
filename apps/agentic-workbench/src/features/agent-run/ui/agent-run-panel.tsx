@@ -29,6 +29,7 @@ import {
   getAgentRunSettings,
   listenRunEvents,
   listAgents,
+  listAgentToolCommandCandidates,
   listProviderSessions,
   respondAgentPermission,
   saveAgentRunSettings,
@@ -47,11 +48,18 @@ import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
   agentCatalogQueryOptions,
   agentRunSettingsQueryOptions,
+  agentToolCommandCandidateQueryOptions,
   goalQueryOptions,
 } from "@/entities/agent-run/api/query-options";
 import {
   appendOneTimelineItem,
+  availableCommandCandidatesFromSessionUpdate,
+  clampHighlightedIndex,
   eventGroups,
+  filterToolCommandCandidates,
+  findPromptAutocompleteTrigger,
+  isAvailableCommandsSessionUpdate,
+  replacePromptAutocompleteTrigger,
   toTimelineItem,
 } from "@/entities/agent-run/model";
 import type { TimelineRunEvent } from "@/entities/agent-run/model";
@@ -60,6 +68,7 @@ import type {
   EventGroup,
   AgentRunSessionMode,
   AgentRunSettings,
+  AgentToolCommandCandidate,
   GoalStatus,
   PermissionMode,
   ProviderSession,
@@ -107,6 +116,7 @@ import {
 } from "@/features/agent-command-override/model/command-overrides";
 import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { StreamingMarkdown } from "@/features/agent-run/ui/agent-run-markdown";
+import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -300,6 +310,16 @@ export function AgentRunPanel({
   const [ralphStopOnPermission, setRalphStopOnPermission] = useState(false);
   const [ralphPromptTemplate, setRalphPromptTemplate] = useState(RALPH_DEFAULT_PROMPT);
   const [prompt, setPrompt] = useState(defaultPrompt);
+  const [promptSelection, setPromptSelection] = useState({ start: 0, end: 0 });
+  const [autocompleteHighlightedIndex, setAutocompleteHighlightedIndex] = useState(0);
+  const [availableCommandCandidates, setAvailableCommandCandidates] = useState<
+    AgentToolCommandCandidate[]
+  >([]);
+  const [autocompleteSuppression, setAutocompleteSuppression] = useState<{
+    text: string;
+    cursorStart: number;
+    cursorEnd: number;
+  } | null>(null);
   const [promptHistory, setPromptHistory] = useState(initialPromptHistoryState);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
@@ -327,6 +347,7 @@ export function AgentRunPanel({
   const goalContinuationPendingRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
+  const promptTextareaElementRef = useRef<HTMLTextAreaElement | null>(null);
   const handledExternalPromptRequestIdRef = useRef<string | null>(null);
 
   // 세션 재진입 시 불필요한 refetch를 막는 신선도 정책(specs/007 research R7)은
@@ -428,6 +449,24 @@ export function AgentRunPanel({
     enabled: sessionMode === "reuse" && Boolean(providerAgentId),
   });
   const sessions = sessionsQuery.data ?? [];
+
+  const toolCommandCandidatesQuery = useQuery({
+    queryKey: agentRunQueryKeys.toolCommandCandidates(
+      activeRunId,
+      providerAgentId,
+      workingDirectory,
+      sessionMode,
+    ),
+    queryFn: () =>
+      listAgentToolCommandCandidates({
+        runId: activeRunId,
+        agentId: providerAgentId,
+        workingDirectory,
+        sessionMode,
+      }),
+    enabled: Boolean(providerAgentId && workingDirectory.trim()),
+    ...agentToolCommandCandidateQueryOptions,
+  });
 
   useEffect(() => {
     // 저장값이 없거나(빈 문자열) disabled/삭제된 프로필이면 첫 enabled 프로필로
@@ -550,6 +589,7 @@ export function AgentRunPanel({
 
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
+    setAvailableCommandCandidates([]);
   }, [activeRunId]);
 
   useEffect(() => {
@@ -584,6 +624,20 @@ export function AgentRunPanel({
       }
 
       const timelineEvent: TimelineRunEvent = envelope.event;
+      if (timelineEvent.type === "raw") {
+        const nextCandidates = availableCommandCandidatesFromSessionUpdate(
+          timelineEvent.payload,
+          {
+            runId: envelope.runId,
+            agentId: providerAgentId,
+            workingDirectory,
+          },
+        );
+        if (isAvailableCommandsSessionUpdate(timelineEvent.payload)) {
+          setAvailableCommandCandidates(nextCandidates);
+        }
+      }
+
       setItems((currentItems) =>
         addRunEventItem(currentItems, envelope.runId, timelineEvent),
       );
@@ -646,7 +700,7 @@ export function AgentRunPanel({
     return () => {
       unlisten();
     };
-  }, [onRunSettled, recordRunGoalProgress]);
+  }, [onRunSettled, providerAgentId, recordRunGoalProgress, workingDirectory]);
 
   useEffect(() => {
     if (
@@ -791,6 +845,73 @@ export function AgentRunPanel({
   const selectedContextSizeOption = contextSizeOptions.find(
     (option) => option.value === contextSize,
   );
+  const autocompleteTrigger = useMemo(
+    () => {
+      const trigger =
+        inputMode === "prompt"
+          ? findPromptAutocompleteTrigger(prompt, promptSelection.start, promptSelection.end)
+          : null;
+      if (
+        trigger &&
+        autocompleteSuppression &&
+        autocompleteSuppression.text === prompt &&
+        autocompleteSuppression.cursorStart === promptSelection.start &&
+        autocompleteSuppression.cursorEnd === promptSelection.end
+      ) {
+        return null;
+      }
+      return trigger;
+    },
+    [
+      autocompleteSuppression,
+      inputMode,
+      prompt,
+      promptSelection.end,
+      promptSelection.start,
+    ],
+  );
+  const autocompleteSourceCandidates = useMemo(
+    () => [
+      ...(toolCommandCandidatesQuery.data?.candidates ?? []),
+      ...availableCommandCandidates,
+    ],
+    [availableCommandCandidates, toolCommandCandidatesQuery.data?.candidates],
+  );
+  const autocompleteCandidates = useMemo(
+    () =>
+      autocompleteTrigger
+        ? filterToolCommandCandidates(
+            autocompleteSourceCandidates,
+            autocompleteTrigger.query,
+          )
+        : [],
+    [autocompleteSourceCandidates, autocompleteTrigger],
+  );
+  const autocompleteStatus = useMemo(() => {
+    if (!autocompleteTrigger) {
+      return "empty" as const;
+    }
+    if (autocompleteCandidates.length > 0) {
+      return "ready" as const;
+    }
+    if (toolCommandCandidatesQuery.isLoading && autocompleteSourceCandidates.length === 0) {
+      return "loading" as const;
+    }
+    if (toolCommandCandidatesQuery.isError && autocompleteSourceCandidates.length === 0) {
+      return "error" as const;
+    }
+    if (autocompleteSourceCandidates.length === 0) {
+      return "empty" as const;
+    }
+    return "noMatch" as const;
+  }, [
+    autocompleteCandidates.length,
+    autocompleteSourceCandidates.length,
+    autocompleteTrigger,
+    toolCommandCandidatesQuery.isError,
+    toolCommandCandidatesQuery.isLoading,
+  ]);
+  const isAutocompleteOpen = Boolean(autocompleteTrigger);
   const visibleItems = useMemo(
     () => (filter === "all" ? items : items.filter((item) => item.group === filter)),
     [filter, items],
@@ -826,6 +947,12 @@ export function AgentRunPanel({
     ? canQueuePrompt
     : canSteerPrompt;
   const canCancel = Boolean(activeRunId && isRunning);
+
+  useEffect(() => {
+    setAutocompleteHighlightedIndex((current) =>
+      clampHighlightedIndex(current, autocompleteCandidates.length),
+    );
+  }, [autocompleteCandidates.length]);
 
   useEffect(() => {
     if (
@@ -1012,8 +1139,95 @@ export function AgentRunPanel({
   }
 
   function updatePromptDraft(nextPrompt: string) {
+    setAutocompleteSuppression(null);
     setPrompt(nextPrompt);
     setPromptHistory((current) => resetPromptHistoryCursor(current));
+  }
+
+  function updatePromptSelection(target: HTMLTextAreaElement) {
+    promptTextareaElementRef.current = target;
+    setPromptSelection({
+      start: target.selectionStart,
+      end: target.selectionEnd,
+    });
+  }
+
+  function selectAutocompleteCandidate(candidate: AgentToolCommandCandidate) {
+    if (!autocompleteTrigger) {
+      return;
+    }
+    const nextDraft = replacePromptAutocompleteTrigger(
+      {
+        text: prompt,
+        cursorStart: promptSelection.start,
+        cursorEnd: promptSelection.end,
+      },
+      autocompleteTrigger,
+      candidate,
+    );
+    setPrompt(nextDraft.text);
+    setPromptSelection({
+      start: nextDraft.cursorStart,
+      end: nextDraft.cursorEnd,
+    });
+    setAutocompleteSuppression({
+      text: nextDraft.text,
+      cursorStart: nextDraft.cursorStart,
+      cursorEnd: nextDraft.cursorEnd,
+    });
+    setPromptHistory((current) => resetPromptHistoryCursor(current));
+    window.requestAnimationFrame(() => {
+      const textarea = promptTextareaElementRef.current;
+      if (!textarea) {
+        return;
+      }
+      textarea.focus();
+      textarea.setSelectionRange(nextDraft.cursorStart, nextDraft.cursorEnd);
+    });
+  }
+
+  function handleAutocompleteKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (!isAutocompleteOpen) {
+      return false;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setAutocompleteSuppression({
+        text: prompt,
+        cursorStart: promptSelection.start,
+        cursorEnd: promptSelection.end,
+      });
+      return true;
+    }
+    if (autocompleteCandidates.length === 0) {
+      return false;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setAutocompleteHighlightedIndex((current) =>
+        clampHighlightedIndex(current + 1, autocompleteCandidates.length),
+      );
+      return true;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setAutocompleteHighlightedIndex((current) =>
+        clampHighlightedIndex(current - 1, autocompleteCandidates.length),
+      );
+      return true;
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      const index = clampHighlightedIndex(
+        autocompleteHighlightedIndex,
+        autocompleteCandidates.length,
+      );
+      if (index >= 0) {
+        selectAutocompleteCandidate(autocompleteCandidates[index]);
+      }
+      return true;
+    }
+    return false;
   }
 
   function handlePromptHistoryNavigation(
@@ -1597,7 +1811,15 @@ export function AgentRunPanel({
               onSendPrompt={(savedPrompt) => void sendSavedPrompt(savedPrompt)}
             />
           )}
-          <div className="min-h-0 flex-1">
+          <div className="relative min-h-0 flex-1">
+            <PromptCommandAutocomplete
+              open={isAutocompleteOpen}
+              status={autocompleteStatus}
+              candidates={autocompleteCandidates}
+              highlightedIndex={autocompleteHighlightedIndex}
+              onHighlight={setAutocompleteHighlightedIndex}
+              onSelect={selectAutocompleteCandidate}
+            />
             <PromptInputTextarea
               disableAutosize
               placeholder={
@@ -1606,7 +1828,14 @@ export function AgentRunPanel({
                   : "선택한 worktree에서 실행할 작업을 입력하세요."
               }
               className="h-full min-h-0 resize-none overflow-auto px-4"
+              onFocus={(event) => updatePromptSelection(event.currentTarget)}
+              onSelect={(event) => updatePromptSelection(event.currentTarget)}
+              onKeyUp={(event) => updatePromptSelection(event.currentTarget)}
               onKeyDown={(event) => {
+                promptTextareaElementRef.current = event.currentTarget;
+                if (handleAutocompleteKeyDown(event)) {
+                  return;
+                }
                 if (event.key === "ArrowUp") {
                   if (handlePromptHistoryNavigation(event, "previous")) {
                     return;

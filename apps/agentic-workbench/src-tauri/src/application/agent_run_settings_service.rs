@@ -525,7 +525,10 @@ mod tests {
         let error = save_settings(&repository, settings).expect_err("invariant violation");
 
         assert!(error.contains("built-in agent profile"));
-        assert!(!error.contains("hunter2"), "env value must not leak into errors");
+        assert!(
+            !error.contains("hunter2"),
+            "env value must not leak into errors"
+        );
     }
 
     #[test]
