@@ -16,7 +16,7 @@ use inbound::tauri_commands::{
     start_agent_run, start_worktree_watcher, stop_worktree_watcher, update_goal, update_project,
     update_saved_prompt,
 };
-use infrastructure::agent_session_registry::AppState;
+use infrastructure::{agent_session_registry::AppState, mcp::McpServerState};
 use tauri::{
     Manager, WindowEvent,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -30,6 +30,7 @@ const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
 const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
+    let app_state = AppState::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(build_native_menu)
@@ -39,6 +40,12 @@ pub fn run() {
             }
         })
         .setup(|_app| {
+            let mcp_state = McpServerState::start(
+                _app.handle().clone(),
+                _app.state::<AppState>().inner().clone(),
+            )?;
+            _app.manage(mcp_state);
+
             #[cfg(debug_assertions)]
             {
                 if infrastructure::devtools::should_open_devtools()
@@ -64,7 +71,7 @@ pub fn run() {
                 }
             }
         })
-        .manage(AppState::default())
+        .manage(app_state)
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             list_projects,

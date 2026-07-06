@@ -7,6 +7,7 @@ use std::{
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
+    application::mcp_title_control_service::TitleControlRegistry,
     infrastructure::{acp::runner::AcpSession, permission_broker::PermissionBroker},
     ports::session_registry::{ReserveRunError, SessionRegistry},
 };
@@ -55,6 +56,14 @@ impl AppState {
         self.run_owners.lock().await.get(run_id).cloned()
     }
 
+    pub async fn active_owner_of(&self, run_id: &str) -> Option<String> {
+        let has_active_run = self.runs.lock().await.contains_key(run_id);
+        if !has_active_run {
+            return None;
+        }
+        self.run_owners.lock().await.get(run_id).cloned()
+    }
+
     #[allow(dead_code)]
     pub async fn approve_window_close(&self, label: String) {
         self.window_close_approvals.lock().await.insert(label);
@@ -87,6 +96,12 @@ impl AppState {
         }
 
         owned_run_ids
+    }
+}
+
+impl TitleControlRegistry for AppState {
+    async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
+        self.active_owner_of(run_id).await
     }
 }
 

@@ -30,7 +30,10 @@ use crate::{
     domain::{
         acp_session::AcpSessionRecord,
         events::{LifecycleStatus, RalphLoopStatus, RunEvent},
-        run::{AgentRunRequest, ContextSizePreset, PermissionMode, RalphLoopRequest, ResumePolicy},
+        run::{
+            AgentMcpServerConfig, AgentRunRequest, ContextSizePreset, PermissionMode,
+            RalphLoopRequest, ResumePolicy,
+        },
     },
     infrastructure::acp::{
         client::{AcpClient, lifecycle},
@@ -187,6 +190,21 @@ where
                 format!("{agent_name} {agent_version}").trim().to_string(),
             ),
         );
+        let session_mcp_servers = if init.agent_capabilities.mcp_capabilities.http {
+            request.mcp_servers.clone()
+        } else {
+            if !request.mcp_servers.is_empty() {
+                sink.emit(
+                    &run_id,
+                    RunEvent::Diagnostic {
+                        message:
+                            "agent does not advertise HTTP MCP support; skipping MCP server setup"
+                                .to_string(),
+                    },
+                );
+            }
+            Vec::new()
+        };
 
         let resume_policy = request.resume_policy.unwrap_or_default();
         let session_setup = if let Some(session_id) =
@@ -204,12 +222,13 @@ where
                 &session_id,
                 init.agent_capabilities.load_session,
                 resume_policy,
+                &session_mcp_servers,
                 &run_id,
                 &sink,
             )
             .await?
         } else {
-            create_agent_session(&peer, &workspace).await?
+            create_agent_session(&peer, &workspace, &session_mcp_servers).await?
         };
         let session_id = session_setup.session_id;
         sink.emit(
@@ -257,6 +276,7 @@ where
             session_response: session_setup.response,
             session_record,
             session_store: self.session_store.clone(),
+            mcp_servers: session_mcp_servers,
             in_flight: Mutex::new(()),
         });
 
@@ -610,6 +630,7 @@ pub struct AcpSession {
     session_response: Value,
     session_record: AcpSessionRecord,
     session_store: Arc<dyn AcpSessionStore>,
+    mcp_servers: Vec<AgentMcpServerConfig>,
     in_flight: Mutex<()>,
 }
 
@@ -658,7 +679,9 @@ impl SessionHandle for AcpSession {
                                 .into(),
                         },
                     );
-                    let new_session = create_agent_session(&self.peer, &self.workspace).await?;
+                    let new_session =
+                        create_agent_session(&self.peer, &self.workspace, &self.mcp_servers)
+                            .await?;
                     let new_id = new_session.session_id;
                     sink.emit(
                         &self.run_id,
@@ -743,8 +766,12 @@ struct AcpCreatedSession {
     response: Value,
 }
 
-async fn create_agent_session(peer: &RpcPeer, workspace: &PathBuf) -> Result<AcpCreatedSession> {
-    let params = serde_json::to_value(NewSessionRequest::new(workspace.clone()))?;
+async fn create_agent_session(
+    peer: &RpcPeer,
+    workspace: &PathBuf,
+    mcp_servers: &[AgentMcpServerConfig],
+) -> Result<AcpCreatedSession> {
+    let params = new_session_params(workspace, mcp_servers)?;
     let response = peer
         .request("session/new", params)
         .await
@@ -760,6 +787,15 @@ async fn create_agent_session(peer: &RpcPeer, workspace: &PathBuf) -> Result<Acp
         session_id,
         response,
     })
+}
+
+fn new_session_params(workspace: &PathBuf, mcp_servers: &[AgentMcpServerConfig]) -> Result<Value> {
+    let mut params = serde_json::to_value(NewSessionRequest::new(workspace.clone()))?;
+    let Value::Object(ref mut object) = params else {
+        bail!("session/new params must serialize to an object");
+    };
+    object.insert("mcpServers".to_string(), serde_json::to_value(mcp_servers)?);
+    Ok(params)
 }
 
 async fn apply_run_configuration<S>(
@@ -1108,6 +1144,7 @@ async fn resume_or_create_session<S>(
     session_id: &str,
     load_supported: bool,
     resume_policy: ResumePolicy,
+    mcp_servers: &[AgentMcpServerConfig],
     run_id: &str,
     sink: &S,
 ) -> Result<AcpCreatedSession>
@@ -1124,7 +1161,7 @@ where
                 message: "agent does not support session/load; starting a new session".to_string(),
             },
         );
-        return create_agent_session(peer, workspace).await;
+        return create_agent_session(peer, workspace, mcp_servers).await;
     }
 
     match load_agent_session(peer, session_id, workspace).await {
@@ -1139,7 +1176,7 @@ where
                     message: format!("resume failed ({error}); starting a new session"),
                 },
             );
-            create_agent_session(peer, workspace).await
+            create_agent_session(peer, workspace, mcp_servers).await
         }
         Err(error) => Err(error),
     }
@@ -1191,14 +1228,17 @@ fn is_session_not_found(err: &RpcError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        context_size_candidates, resume_session_id, run_prompt_sequence,
+        context_size_candidates, new_session_params, resume_session_id, run_prompt_sequence,
         session_config_option_value, should_reissue_missing_session, spawn_agent_error_context,
         spawn_env_vars,
     };
     use crate::{
         domain::{
             events::{RalphLoopStatus, RunEvent},
-            run::{ContextSizePreset, RalphLoopRequest, ResumePolicy},
+            run::{
+                AgentMcpHttpHeader, AgentMcpServerConfig, ContextSizePreset, RalphLoopRequest,
+                ResumePolicy,
+            },
         },
         ports::event_sink::RunEventSink,
     };
@@ -1252,15 +1292,17 @@ mod tests {
 
     #[test]
     fn spawn_env_vars_keeps_enriched_path_when_user_env_has_no_path() {
-        let user_env =
-            std::collections::BTreeMap::from([("FOO".to_string(), "bar".to_string())]);
+        let user_env = std::collections::BTreeMap::from([("FOO".to_string(), "bar".to_string())]);
 
         let vars = spawn_env_vars(Some(&user_env), "/usr/bin:/bin");
 
         assert!(vars.contains(&("PATH".to_string(), "/usr/bin:/bin".to_string())));
 
         let vars = spawn_env_vars(None, "/usr/bin:/bin");
-        assert_eq!(vars, vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]);
+        assert_eq!(
+            vars,
+            vec![("PATH".to_string(), "/usr/bin:/bin".to_string())]
+        );
     }
 
     #[test]
@@ -1270,6 +1312,39 @@ mod tests {
         assert!(message.contains("failed to spawn ACP agent command"));
         assert!(message.contains("missing-acp --flag"));
         assert!(message.contains("missing-acp"));
+    }
+
+    #[test]
+    fn new_session_params_include_mcp_servers() {
+        let params = new_session_params(
+            &std::path::PathBuf::from("/work/project"),
+            &[AgentMcpServerConfig::Http {
+                name: "agentic_workbench".to_string(),
+                url: "http://127.0.0.1:1000/mcp".to_string(),
+                headers: vec![AgentMcpHttpHeader {
+                    name: "Authorization".to_string(),
+                    value: "Bearer secret".to_string(),
+                }],
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(
+            params["mcpServers"],
+            json!([
+                {
+                    "type": "http",
+                    "name": "agentic_workbench",
+                    "url": "http://127.0.0.1:1000/mcp",
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer secret"
+                        }
+                    ]
+                }
+            ])
+        );
     }
 
     #[test]

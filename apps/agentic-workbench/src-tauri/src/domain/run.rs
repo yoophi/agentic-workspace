@@ -73,6 +73,9 @@ pub struct AgentRunRequest {
     /// 해석·병합 완료된 환경변수(globalEnv ⊕ profile.env). runner는 주입만 한다.
     #[serde(default)]
     pub agent_env: Option<std::collections::BTreeMap<String, String>>,
+    /// ACP `session/new`에 전달할 run-scoped MCP 서버 목록.
+    #[serde(default)]
+    pub mcp_servers: Vec<AgentMcpServerConfig>,
     pub stdio_buffer_limit_mb: Option<usize>,
     pub auto_allow: Option<bool>,
     pub permission_mode: Option<PermissionMode>,
@@ -82,6 +85,24 @@ pub struct AgentRunRequest {
     pub resume_session_id: Option<String>,
     pub resume_policy: Option<ResumePolicy>,
     pub ralph_loop: Option<RalphLoopRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentMcpServerConfig {
+    Http {
+        name: String,
+        url: String,
+        #[serde(default)]
+        headers: Vec<AgentMcpHttpHeader>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentMcpHttpHeader {
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

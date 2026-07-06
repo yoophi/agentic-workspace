@@ -318,6 +318,7 @@ mod tests {
             cwd: None,
             agent_command: None,
             agent_env: None,
+            mcp_servers: Vec::new(),
             stdio_buffer_limit_mb: None,
             auto_allow: None,
             permission_mode: None,

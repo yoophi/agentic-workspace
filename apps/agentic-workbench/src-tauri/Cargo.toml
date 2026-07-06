@@ -16,6 +16,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 agent-client-protocol = "0.15.0"
 anyhow = "1.0"
+axum = "0.7"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 libc = "0.2"
 notify = "6"
@@ -27,6 +28,7 @@ walkdir = "2"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tokio = { version = "1.48", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tower-http = "0.5"
 uuid = { version = "1.18", features = ["v4"] }
 git-core = { path = "../../../crates/git-core" }
 
