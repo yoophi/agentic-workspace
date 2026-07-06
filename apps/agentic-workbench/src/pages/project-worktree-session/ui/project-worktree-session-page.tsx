@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { FolderGit2Icon } from "lucide-react";
 import {
   Group as ResizablePanelGroup,
   Panel as ResizablePanel,
@@ -8,15 +7,10 @@ import {
 
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import type { Project } from "@/entities/project/model/types";
-import {
-  AgentRunPanel,
-  type AgentPromptRequest,
-} from "@/features/agent-run/ui/agent-run-panel";
+import type { AgentPromptRequest } from "@/features/agent-run/ui/agent-run-panel";
+import { WorktreeAgentRunArea } from "@/features/agent-run/ui/worktree-agent-run-area";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
-import { Badge } from "@/components/ui/badge";
-import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge";
 import { measureSessionMilestone } from "@/shared/lib/session-perf";
-import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type ProjectWorktreeSessionPageProps = {
   project: Project;
@@ -41,24 +35,10 @@ export function ProjectWorktreeSessionPage({
       <ResizablePanelGroup orientation="horizontal" className="min-h-0 flex-1">
         <ResizablePanel id="project-worktree-session-agent" defaultSize="40%" minSize="360px">
           <div className="h-full min-h-0">
-            <AgentRunPanel
-              workingDirectory={worktree.path}
+            <WorktreeAgentRunArea
+              worktree={worktree}
               externalPromptRequest={workspacePromptRequest}
               onOpenSettings={onOpenSettings}
-              scrollHeader={
-                <div className="sticky top-0 z-20 flex min-w-0 items-center gap-2 border-b bg-background/95 px-3 py-2 backdrop-blur">
-                  <FolderGit2Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <EllipsisPopoverText
-                    value={worktree.path}
-                    className="min-w-0 flex-1 font-mono text-xs text-muted-foreground"
-                    contentClassName="font-mono text-xs"
-                  />
-                  <Badge variant="outline" className="max-w-44 shrink-0 truncate font-mono">
-                    {worktree.branch || (worktree.status === "unknown" ? "…" : "-")}
-                  </Badge>
-                  <WorktreeStatusBadge status={worktree.status} />
-                </div>
-              }
             />
           </div>
         </ResizablePanel>
