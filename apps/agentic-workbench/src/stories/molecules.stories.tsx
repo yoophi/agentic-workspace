@@ -2,8 +2,10 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { CopyIcon, FolderIcon, InfoIcon, SendIcon } from "lucide-react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { extractTocEntries, parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
+import { MarkdownViewer, MermaidExpandedView } from "@yoophi/markdown-annotation-react";
 
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
+import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -358,6 +360,37 @@ export const MarkdownPreviewTocStates: Story = {
           h1~h3 heading이 없는 문서에서는 TOC UI가 표시되지 않습니다.
         </div>
       </div>
+    </div>
+  ),
+};
+
+export const WorktreeMarkdownPreviewMermaidExpanded: Story = {
+  render: () => (
+    <div className="grid max-w-3xl gap-6">
+      <MarkdownViewer
+        blocks={parseMarkdownToBlocks([
+          "# Preview diagram",
+          "",
+          "```mermaid",
+          "flowchart LR",
+          "  A[Markdown file] --> B[Preview panel]",
+          "  B --> C[Open expanded Mermaid modal]",
+          "  C --> D[Return to worktree session]",
+          "```",
+        ].join("\n"))}
+        components={markdownViewerComponents}
+      />
+      <MermaidExpandedView
+        blockId="storybook-aw-preview-expanded-mermaid"
+        components={markdownViewerComponents}
+        defaultExpanded
+        source={[
+          "flowchart LR",
+          "  A[Worktree preview] --> B[Expanded modal]",
+          "  B --> C[Zoom and inspect]",
+          "  C --> D[Close without changing panel state]",
+        ].join("\n")}
+      />
     </div>
   ),
 };

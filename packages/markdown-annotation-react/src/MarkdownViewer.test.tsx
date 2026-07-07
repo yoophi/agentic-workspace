@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 
 import { MarkdownViewer } from "./MarkdownViewer";
-import type { MarkdownViewerComponents, ViewerButtonProps, ViewerTooltipProps } from "./types";
+import type {
+  MarkdownViewerComponents,
+  MermaidExpandedDialogContentProps,
+  MermaidExpandedDialogRootProps,
+  MermaidExpandedDialogTriggerProps,
+  ViewerButtonProps,
+  ViewerTooltipProps,
+} from "./types";
 
 function Button({ children, ...props }: ViewerButtonProps) {
   return <button {...props}>{children}</button>;
@@ -14,9 +21,36 @@ function Tooltip({ children }: ViewerTooltipProps) {
   return children as ReactElement;
 }
 
+function DialogRoot({ children, open }: MermaidExpandedDialogRootProps) {
+  return <div data-dialog-open={open ? "true" : "false"}>{children}</div>;
+}
+
+function DialogTrigger({ children }: MermaidExpandedDialogTriggerProps) {
+  return children;
+}
+
+function DialogContent({ children, description, title }: MermaidExpandedDialogContentProps) {
+  return (
+    <section data-mermaid-expanded-content>
+      <h2>{title}</h2>
+      <p>{description}</p>
+      {children}
+    </section>
+  );
+}
+
 const components: MarkdownViewerComponents = {
   Button,
   Tooltip,
+};
+
+const expandedComponents: MarkdownViewerComponents = {
+  ...components,
+  MermaidExpandedDialog: {
+    Content: DialogContent,
+    Root: DialogRoot,
+    Trigger: DialogTrigger,
+  },
 };
 
 function codeBlock(overrides: Partial<MarkdownBlock>): MarkdownBlock {
@@ -70,6 +104,32 @@ describe("MarkdownViewer", () => {
     expect(html).toContain('data-mermaid-status="loading"');
     expect(html).toContain('aria-label="Delete block"');
     expect(html).toContain('aria-label="Comment on block"');
+  });
+
+  it("wires optional expanded controls for mermaid blocks without changing fallback timing", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownViewer
+        blocks={[
+          codeBlock({
+            content: "flowchart TD\n  A --> B",
+            rawContent: "```\nflowchart TD\n  A --> B\n```",
+            language: undefined,
+            mermaid: {
+              detected: true,
+              reason: "leading-declaration",
+              declaration: "flowchart",
+              source: "flowchart TD\n  A --> B",
+            },
+          }),
+        ]}
+        components={expandedComponents}
+      />,
+    );
+
+    expect(html).toContain("data-mermaid-expanded-view");
+    expect(html).toContain('data-dialog-open="false"');
+    expect(html).toContain('data-mermaid-status="loading"');
+    expect(html).not.toContain('data-mermaid-expanded-trigger="true"');
   });
 
   it("keeps mermaid fallback source isolated to the affected block", () => {

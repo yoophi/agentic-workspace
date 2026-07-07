@@ -2,16 +2,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@yoophi/markdown-annotation-react", () => ({
-  MermaidDiagram: ({
-    renderActions,
+  MermaidExpandedView: ({
     source,
   }: {
-    renderActions?: React.ReactNode;
+    blockId: string;
+    components: unknown;
     source: string;
   }) =>
     source.trim() && !source.includes("broken") ? (
       <div data-mermaid-status="rendered">
-        {renderActions}
+        <button
+          type="button"
+          aria-label="Open Mermaid diagram in full screen"
+          data-agent-run-mermaid-expanded-trigger="true"
+        >
+          Expand
+        </button>
         {source}
       </div>
     ) : (

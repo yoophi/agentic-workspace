@@ -66,6 +66,10 @@
     @apply my-4 max-h-[32rem] max-w-full overflow-auto rounded-lg border bg-background p-4;
   }
 
+  .markdown-viewer__mermaid-actions {
+    @apply mb-2 flex justify-end;
+  }
+
   .markdown-viewer__mermaid {
     @apply text-center;
   }
@@ -130,6 +134,22 @@
     height: 100%;
     max-width: 100% !important;
     width: 100%;
+  }
+
+  .markdown-viewer__mermaid-expanded-toolbar {
+    @apply absolute right-12 top-3 z-10 flex items-center gap-1 rounded-md border bg-background/95 p-1 shadow-sm;
+  }
+
+  .markdown-viewer__mermaid-expanded-zoom-label {
+    @apply min-w-12 text-center text-xs tabular-nums text-muted-foreground;
+  }
+
+  .markdown-viewer__mermaid-expanded-body {
+    @apply flex min-h-0 min-w-0 overflow-auto rounded-md border bg-background p-2;
+  }
+
+  .markdown-viewer__mermaid-expanded-zoom-frame {
+    @apply m-auto flex shrink-0 items-center justify-center transition-[width,height] duration-150;
   }
 
   .markdown-viewer table {

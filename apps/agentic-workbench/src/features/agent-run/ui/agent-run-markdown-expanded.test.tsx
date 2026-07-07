@@ -2,20 +2,41 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@yoophi/markdown-annotation-react", () => ({
-  MermaidDiagram: ({
+  MermaidExpandedView: ({
     blockId,
-    fit,
-    renderActions,
+    defaultExpanded,
     source,
   }: {
     blockId: string;
-    fit?: boolean;
-    renderActions?: React.ReactNode;
+    components: unknown;
+    defaultExpanded?: boolean;
     source: string;
+    triggerDataAttribute?: string;
   }) => (
-    <div data-mermaid-status="rendered" data-block-id={blockId} data-mermaid-fit={fit ? "true" : undefined}>
-      {renderActions}
+    <div data-mermaid-status="rendered" data-block-id={blockId}>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded={defaultExpanded ? "true" : "false"}
+        aria-label="Open Mermaid diagram in full screen"
+        data-agent-run-mermaid-expanded-trigger="true"
+      >
+        Expand
+      </button>
       <svg role="img">{source}</svg>
+    </div>
+  ),
+  MermaidExpandedBody: ({
+    blockId,
+    source,
+    zoomPercent,
+  }: {
+    blockId: string;
+    source: string;
+    zoomPercent: number;
+  }) => (
+    <div data-mermaid-status="rendered" data-block-id={`${blockId}-expanded`} data-mermaid-fit="true">
+      <div style={{ height: `${zoomPercent}%`, width: `${zoomPercent}%` }}>{source}</div>
     </div>
   ),
 }));

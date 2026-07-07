@@ -44,12 +44,36 @@ export type ViewerTooltipProps = {
   children: ReactElement;
 };
 
+export type MermaidExpandedDialogRootProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+};
+
+export type MermaidExpandedDialogTriggerProps = {
+  children: ReactElement;
+  tooltip: ReactNode;
+};
+
+export type MermaidExpandedDialogContentProps = {
+  title: ReactNode;
+  description: ReactNode;
+  children: ReactNode;
+};
+
+export type MermaidExpandedDialogComponents = {
+  Root: ComponentType<MermaidExpandedDialogRootProps>;
+  Trigger: ComponentType<MermaidExpandedDialogTriggerProps>;
+  Content: ComponentType<MermaidExpandedDialogContentProps>;
+};
+
 /**
  * 키트 비종속화를 위해 주입하는 UI primitive 모음.
  */
 export type MarkdownViewerComponents = {
   Button: ComponentType<ViewerButtonProps>;
   Tooltip: ComponentType<ViewerTooltipProps>;
+  MermaidExpandedDialog?: MermaidExpandedDialogComponents;
 };
 
 export type TypeSelectOption = {
