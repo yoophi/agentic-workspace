@@ -188,6 +188,8 @@ pub enum GitGraphRefKind {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitCommitFileChange {
+    /// Current path exposed by commit-detail data. Rename entries currently
+    /// expose the new path; previous rename paths are not represented here.
     pub path: String,
     pub status: String,
 }
