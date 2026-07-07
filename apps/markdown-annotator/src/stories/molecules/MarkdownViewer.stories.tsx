@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
-import { MarkdownViewer } from "@yoophi/markdown-annotation-react";
+import { MarkdownViewer, MermaidExpandedView } from "@yoophi/markdown-annotation-react";
 import { markdownViewerComponents } from "@/shared/ui/markdown-viewer-components";
 
 const meta = {
@@ -82,6 +82,28 @@ flowchart LR
 \`\`\`
 `),
   },
+};
+
+export const MermaidExpandedModal: Story = {
+  args: {
+    blocks: [],
+  },
+  render: () => (
+    <div className="max-w-3xl">
+      <MermaidExpandedView
+        blockId="storybook-ma-expanded-mermaid"
+        components={markdownViewerComponents}
+        defaultExpanded
+        source={[
+          "flowchart LR",
+          "  A[Open document] --> B[Render Mermaid diagram]",
+          "  B --> C[Open expanded modal]",
+          "  C --> D[Inspect large diagram]",
+          "  D --> E[Return to annotation]",
+        ].join("\n")}
+      />
+    </div>
+  ),
 };
 
 const blockActionMarkdown = `# Block Actions

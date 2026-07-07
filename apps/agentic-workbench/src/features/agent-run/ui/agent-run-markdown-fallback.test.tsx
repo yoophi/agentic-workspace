@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@yoophi/markdown-annotation-react", () => ({
-  MermaidDiagram: ({ source }: { blockId: string; source: string }) =>
+  MermaidExpandedView: ({ source }: { blockId: string; source: string }) =>
     source.trim() && !source.includes("broken") ? (
       <div data-mermaid-status="rendered">{source}</div>
     ) : (

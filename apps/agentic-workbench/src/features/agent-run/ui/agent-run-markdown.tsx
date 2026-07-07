@@ -2,8 +2,15 @@ import { useEffect, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { MermaidDiagram } from "@yoophi/markdown-annotation-react";
-import { Maximize2Icon, ScanIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
+import {
+  MermaidExpandedBody,
+  MermaidExpandedView,
+  type MarkdownViewerComponents,
+  type MermaidExpandedDialogContentProps,
+  type MermaidExpandedDialogRootProps,
+  type MermaidExpandedDialogTriggerProps,
+  type ViewerTooltipProps,
+} from "@yoophi/markdown-annotation-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -30,20 +37,9 @@ import { cn } from "@/lib/utils";
 import { ExternalLink } from "@/shared/ui/external-link";
 
 const AGENT_RUN_MERMAID_RENDER_DEBOUNCE_MS = 250;
-const AGENT_RUN_MERMAID_EXPANDED_FIT_ZOOM = 1;
-const AGENT_RUN_MERMAID_EXPANDED_MIN_ZOOM = 0.5;
-const AGENT_RUN_MERMAID_EXPANDED_MAX_ZOOM = 2.5;
-const AGENT_RUN_MERMAID_EXPANDED_ZOOM_STEP = 0.25;
 
 function codeSource(children: ReactNode) {
   return Array.isArray(children) ? children.join("") : String(children ?? "");
-}
-
-function clampExpandedMermaidZoom(zoom: number) {
-  return Math.min(
-    AGENT_RUN_MERMAID_EXPANDED_MAX_ZOOM,
-    Math.max(AGENT_RUN_MERMAID_EXPANDED_MIN_ZOOM, zoom),
-  );
 }
 
 function useDebouncedAgentRunMermaidPayload({
@@ -72,6 +68,68 @@ type AgentRunMermaidDiagramProps = {
   source: string;
 };
 
+function AgentRunMermaidTooltip({ content, align, children }: ViewerTooltipProps) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{children}</TooltipTrigger>
+        <TooltipContent align={align}>{content}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function AgentRunMermaidDialogRoot({
+  children,
+  onOpenChange,
+  open,
+}: MermaidExpandedDialogRootProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      {children}
+    </Dialog>
+  );
+}
+
+function AgentRunMermaidDialogTrigger({ children, tooltip }: MermaidExpandedDialogTriggerProps) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DialogTrigger asChild>{children}</DialogTrigger>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function AgentRunMermaidDialogContent({
+  children,
+  description,
+  title,
+}: MermaidExpandedDialogContentProps) {
+  return (
+    <DialogContent className="grid h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-[calc(100vw-2rem)]">
+      <DialogHeader className="min-w-0 pr-40">
+        <DialogTitle>{title}</DialogTitle>
+        <DialogDescription className="sr-only">{description}</DialogDescription>
+      </DialogHeader>
+      {children}
+    </DialogContent>
+  );
+}
+
+const agentRunMermaidComponents: MarkdownViewerComponents = {
+  Button,
+  MermaidExpandedDialog: {
+    Content: AgentRunMermaidDialogContent,
+    Root: AgentRunMermaidDialogRoot,
+    Trigger: AgentRunMermaidDialogTrigger,
+  },
+  Tooltip: AgentRunMermaidTooltip,
+};
+
 export function AgentRunMermaidExpandedBody({
   blockId,
   source,
@@ -81,20 +139,7 @@ export function AgentRunMermaidExpandedBody({
   source: string;
   zoomPercent: number;
 }) {
-  return (
-    <div className="flex min-h-0 min-w-0 overflow-auto rounded-md border bg-background p-2">
-      {/* 줌은 transform 대신 박스 크기로 표현한다. transform: scale은 레이아웃
-         크기를 바꾸지 않아 100% 초과 확대 시 overflow 컨테이너가 스크롤을 만들지
-         못하고 가장자리가 잘린다. m-auto는 fit보다 작을 때 중앙 정렬, 넘칠 때
-         0으로 접혀 스크롤(팬) 가능하게 한다. */}
-      <div
-        className="m-auto flex shrink-0 items-center justify-center transition-[width,height] duration-150"
-        style={{ height: `${zoomPercent}%`, width: `${zoomPercent}%` }}
-      >
-        <MermaidDiagram fit blockId={`${blockId}-expanded`} source={source} />
-      </div>
-    </div>
-  );
+  return <MermaidExpandedBody blockId={blockId} source={source} zoomPercent={zoomPercent} />;
 }
 
 export function AgentRunMermaidDiagram({
@@ -102,124 +147,19 @@ export function AgentRunMermaidDiagram({
   defaultExpanded = false,
   source,
 }: AgentRunMermaidDiagramProps) {
-  const [expandedOpen, setExpandedOpen] = useState(defaultExpanded);
-  const [expandedZoom, setExpandedZoom] = useState(AGENT_RUN_MERMAID_EXPANDED_FIT_ZOOM);
   const debouncedPayload = useDebouncedAgentRunMermaidPayload({ blockId, source });
-  const expandedZoomPercent = Math.round(expandedZoom * 100);
-
-  function handleExpandedOpenChange(open: boolean) {
-    setExpandedOpen(open);
-
-    if (open) {
-      setExpandedZoom(AGENT_RUN_MERMAID_EXPANDED_FIT_ZOOM);
-    }
-  }
 
   return (
-    <Dialog open={expandedOpen} onOpenChange={handleExpandedOpenChange}>
-      <div className="relative min-w-0 max-w-full overflow-hidden">
-        <MermaidDiagram
-          blockId={debouncedPayload.blockId}
-          source={debouncedPayload.source}
-          renderActions={
-            <div className="mb-2 flex justify-end">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <DialogTrigger asChild>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon-sm"
-                        aria-label="Open Mermaid diagram in full screen"
-                        data-agent-run-mermaid-expanded-trigger="true"
-                      >
-                        <Maximize2Icon />
-                      </Button>
-                    </DialogTrigger>
-                  </TooltipTrigger>
-                  <TooltipContent>Open full screen</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          }
-        />
-      </div>
-      {expandedOpen ? (
-        <DialogContent className="grid h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] gap-3 overflow-hidden p-4 sm:max-w-[calc(100vw-2rem)]">
-          <DialogHeader className="min-w-0 pr-40">
-            <DialogTitle>Mermaid diagram</DialogTitle>
-            <DialogDescription className="sr-only">Expanded agent-run diagram view</DialogDescription>
-          </DialogHeader>
-          <div className="absolute right-12 top-3 z-10 flex items-center gap-1 rounded-md border bg-background/95 p-1 shadow-sm">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Zoom out Mermaid diagram"
-                    onClick={() =>
-                      setExpandedZoom((zoom) =>
-                        clampExpandedMermaidZoom(
-                          zoom - AGENT_RUN_MERMAID_EXPANDED_ZOOM_STEP,
-                        ),
-                      )
-                    }
-                  >
-                    <ZoomOutIcon />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Zoom out</TooltipContent>
-              </Tooltip>
-              <span className="min-w-12 text-center text-xs tabular-nums text-muted-foreground">
-                {expandedZoomPercent}%
-              </span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Zoom in Mermaid diagram"
-                    onClick={() =>
-                      setExpandedZoom((zoom) =>
-                        clampExpandedMermaidZoom(
-                          zoom + AGENT_RUN_MERMAID_EXPANDED_ZOOM_STEP,
-                        ),
-                      )
-                    }
-                  >
-                    <ZoomInIcon />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Zoom in</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label="Fit Mermaid diagram to view"
-                    onClick={() => setExpandedZoom(AGENT_RUN_MERMAID_EXPANDED_FIT_ZOOM)}
-                  >
-                    <ScanIcon />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Fit to view</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          </div>
-          <AgentRunMermaidExpandedBody
-            blockId={debouncedPayload.blockId}
-            source={debouncedPayload.source}
-            zoomPercent={expandedZoomPercent}
-          />
-        </DialogContent>
-      ) : null}
-    </Dialog>
+    <div className="relative min-w-0 max-w-full overflow-hidden">
+      <MermaidExpandedView
+        blockId={debouncedPayload.blockId}
+        components={agentRunMermaidComponents}
+        defaultExpanded={defaultExpanded}
+        description="Expanded agent-run diagram view"
+        source={debouncedPayload.source}
+        triggerDataAttribute="data-agent-run-mermaid-expanded-trigger"
+      />
+    </div>
   );
 }
 

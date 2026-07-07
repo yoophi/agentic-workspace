@@ -26,6 +26,19 @@ export {
   type MermaidFailureCategory,
 } from "./MermaidDiagram";
 export {
+  MERMAID_EXPANDED_FIT_ZOOM,
+  MERMAID_EXPANDED_MAX_ZOOM,
+  MERMAID_EXPANDED_MIN_ZOOM,
+  MERMAID_EXPANDED_ZOOM_STEP,
+  MermaidExpandedBody,
+  MermaidExpandedTrigger,
+  MermaidExpandedView,
+  clampMermaidExpandedZoom,
+  type MermaidExpandedBodyProps,
+  type MermaidExpandedTriggerProps,
+  type MermaidExpandedViewProps,
+} from "./MermaidExpandedView";
+export {
   annotationTypes,
   getAnnotationCommentLabel,
   getAnnotationCommentPlaceholder,
@@ -34,6 +47,10 @@ export {
 export type {
   AnnotationDialogComponents,
   DialogShellProps,
+  MermaidExpandedDialogComponents,
+  MermaidExpandedDialogContentProps,
+  MermaidExpandedDialogRootProps,
+  MermaidExpandedDialogTriggerProps,
   MarkdownViewerBlockNote,
   MarkdownViewerComponents,
   MarkdownViewerInlineAnnotation,
