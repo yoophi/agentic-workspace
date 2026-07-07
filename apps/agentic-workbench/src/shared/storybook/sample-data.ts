@@ -528,6 +528,25 @@ export const sampleGitCommitDetail: GitCommitDetail = {
   ],
 };
 
+export const sampleKoreanGitCommitDetail: GitCommitDetail = {
+  ...sampleGitHistory.commits[0],
+  message: "fix: 한글 파일명 표시",
+  files: [
+    {
+      path: "문서/키오스크.md",
+      status: "A",
+    },
+    {
+      path: "docs/한글-new.md",
+      status: "R100",
+    },
+    {
+      path: "apps/agentic-workbench/src/기능/릴리즈-노트_01.ts",
+      status: "M",
+    },
+  ],
+};
+
 export const sampleGitFileDiff: GitFileDiff = {
   commitHash: sampleGitCommitDetail.hash,
   path: sampleGitCommitDetail.files[0].path,
@@ -537,6 +556,20 @@ export const sampleGitFileDiff: GitFileDiff = {
     "+export function WorktreeWorkspacePanel() {",
     "+  return <section />;",
     "+}",
+  ].join("\n"),
+  isBinary: false,
+  isTruncated: false,
+};
+
+export const sampleKoreanGitFileDiff: GitFileDiff = {
+  commitHash: sampleKoreanGitCommitDetail.hash,
+  path: sampleKoreanGitCommitDetail.files[0].path,
+  content: [
+    "diff --git a/문서/키오스크.md b/문서/키오스크.md",
+    "new file mode 100644",
+    "@@ -0,0 +1,2 @@",
+    "+# 키오스크",
+    "+한글 파일명 표시 검증",
   ].join("\n"),
   isBinary: false,
   isTruncated: false,

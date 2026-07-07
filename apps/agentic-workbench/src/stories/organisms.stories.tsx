@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { DiffViewer, HistoryGraphView, refsByTarget } from "@yoophi/git-ui";
+import { CommitDetailView, DiffViewer, HistoryGraphView, refsByTarget } from "@yoophi/git-ui";
 import type { GitCommitGraph } from "@yoophi/git-graph";
 import { useState } from "react";
 
@@ -34,6 +34,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   sampleAgentRunToolFileChanges,
+  sampleKoreanGitCommitDetail,
+  sampleKoreanGitFileDiff,
   sampleProjects,
   sampleWorktrees,
 } from "@/shared/storybook/sample-data";
@@ -131,6 +133,20 @@ export const WorktreeWorkspace: Story = {
   render: () => (
     <div className="h-[720px] overflow-hidden border">
       <WorktreeWorkspacePanel worktree={sampleWorktrees[1]} />
+    </div>
+  ),
+};
+
+export const CommitDetailKoreanPaths: Story = {
+  render: () => (
+    <div className="max-w-4xl rounded-md border p-4">
+      <CommitDetailView
+        commit={sampleKoreanGitCommitDetail}
+        files={sampleKoreanGitCommitDetail.files}
+        selectedFilePath={sampleKoreanGitFileDiff.path}
+        onSelectFile={() => undefined}
+        diff={sampleKoreanGitFileDiff}
+      />
     </div>
   ),
 };

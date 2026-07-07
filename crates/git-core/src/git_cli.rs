@@ -51,7 +51,11 @@ impl GitHistoryReader for GitCliHistoryReader {
             ));
         }
 
-        let fetch_limit = if total_count.is_some() { limit } else { limit + 1 };
+        let fetch_limit = if total_count.is_some() {
+            limit
+        } else {
+            limit + 1
+        };
         let output = Command::new("git")
             .args([
                 "-C",
@@ -137,19 +141,15 @@ impl GitHistoryReader for GitCliHistoryReader {
         // 첫 페이지: 서로 독립인 count/head/log/refs 조회를 병렬 실행한다
         // (AW specs/007 research R9). 후속 페이지: log 1회만 실행한다.
         let (total_count, head_hash, log_stdout, refs) = if is_first_page {
-            let (count_result, head_result, log_result, refs_result) = std::thread::scope(|scope| {
-                let count = scope.spawn(|| git_revision_count(repository_path, &revisions));
-                let head = scope.spawn(|| git_head_hash(repository_path));
-                let log = scope.spawn(run_log);
-                let refs = scope.spawn(|| read_graph_refs(repository_path));
+            let (count_result, head_result, log_result, refs_result) =
+                std::thread::scope(|scope| {
+                    let count = scope.spawn(|| git_revision_count(repository_path, &revisions));
+                    let head = scope.spawn(|| git_head_hash(repository_path));
+                    let log = scope.spawn(run_log);
+                    let refs = scope.spawn(|| read_graph_refs(repository_path));
 
-                (
-                    count.join(),
-                    head.join(),
-                    log.join(),
-                    refs.join(),
-                )
-            });
+                    (count.join(), head.join(), log.join(), refs.join())
+                });
             let join_error = |_| "Git graph worker thread panicked.".to_string();
             let total_count = count_result.map_err(join_error)??;
             let head_hash = head_result.map_err(join_error)??;
@@ -189,6 +189,8 @@ impl GitHistoryReader for GitCliHistoryReader {
     ) -> Result<GitCommitDetail, String> {
         let metadata_output = Command::new("git")
             .args([
+                "-c",
+                "core.quotePath=false",
                 "-C",
                 repository_path,
                 "show",
@@ -210,6 +212,8 @@ impl GitHistoryReader for GitCliHistoryReader {
             .map_err(|error| format!("Git returned invalid UTF-8: {error}"))?;
         let file_output = Command::new("git")
             .args([
+                "-c",
+                "core.quotePath=false",
                 "-C",
                 repository_path,
                 "diff-tree",
@@ -243,6 +247,8 @@ impl GitHistoryReader for GitCliHistoryReader {
     ) -> Result<GitFileDiff, String> {
         let output = Command::new("git")
             .args([
+                "-c",
+                "core.quotePath=false",
                 "-C",
                 repository_path,
                 "show",
@@ -262,7 +268,11 @@ impl GitHistoryReader for GitCliHistoryReader {
             ));
         }
 
-        Ok(file_diff_from_output(commit_hash, file_path, &output.stdout))
+        Ok(file_diff_from_output(
+            commit_hash,
+            file_path,
+            &output.stdout,
+        ))
     }
 }
 
@@ -385,7 +395,10 @@ fn git_head_hash(repository_path: &str) -> Result<String, String> {
         .map_err(|error| format!("Failed to run git: {error}"))?;
 
     if !output.status.success() {
-        return Err(git_error_message(&output.stderr, "Failed to read Git HEAD."));
+        return Err(git_error_message(
+            &output.stderr,
+            "Failed to read Git HEAD.",
+        ));
     }
 
     let stdout = String::from_utf8(output.stdout)
@@ -418,7 +431,10 @@ fn parse_commit_history(output: &str) -> Result<Vec<GitCommitSummary>, String> {
         .collect()
 }
 
-fn parse_commit_graph_history(output: &str, head_hash: &str) -> Result<Vec<GitGraphCommit>, String> {
+fn parse_commit_graph_history(
+    output: &str,
+    head_hash: &str,
+) -> Result<Vec<GitGraphCommit>, String> {
     output
         .split('\x1e')
         .filter(|record| !record.trim().is_empty())
@@ -517,18 +533,86 @@ fn parse_commit_files(output: &str) -> Result<Vec<GitCommitFileChange>, String> 
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
-            let fields = line.splitn(2, '\t').collect::<Vec<_>>();
+            let fields = line.split('\t').collect::<Vec<_>>();
 
-            if fields.len() != 2 {
+            if fields.len() < 2 {
                 return Err(format!("Git commit file output is invalid: {line}"));
             }
 
-            Ok(GitCommitFileChange::new(
-                fields[1].to_string(),
-                fields[0].to_string(),
-            ))
+            let path = fields
+                .last()
+                .map(|field| displayable_git_path(field))
+                .unwrap_or_default();
+
+            Ok(GitCommitFileChange::new(path, fields[0].to_string()))
         })
         .collect()
+}
+
+fn displayable_git_path(raw_path: &str) -> String {
+    let trimmed = raw_path.trim();
+    let path = if trimmed.len() >= 2 && trimmed.starts_with('"') && trimmed.ends_with('"') {
+        &trimmed[1..trimmed.len() - 1]
+    } else {
+        trimmed
+    };
+
+    if !path.contains('\\') {
+        return path.to_string();
+    }
+
+    decode_git_c_style_path(path)
+}
+
+fn decode_git_c_style_path(path: &str) -> String {
+    let mut bytes = Vec::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            let mut buffer = [0; 4];
+            bytes.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
+            continue;
+        }
+
+        let mut octal = String::new();
+        for _ in 0..3 {
+            match chars.peek().copied() {
+                Some(next) if matches!(next, '0'..='7') => {
+                    octal.push(next);
+                    chars.next();
+                }
+                _ => break,
+            }
+        }
+
+        if !octal.is_empty() {
+            if let Ok(value) = u8::from_str_radix(&octal, 8) {
+                bytes.push(value);
+                continue;
+            }
+        }
+
+        match chars.next() {
+            Some('a') => bytes.push(0x07),
+            Some('b') => bytes.push(0x08),
+            Some('t') => bytes.push(b'\t'),
+            Some('n') => bytes.push(b'\n'),
+            Some('v') => bytes.push(0x0b),
+            Some('f') => bytes.push(0x0c),
+            Some('r') => bytes.push(b'\r'),
+            Some('"') => bytes.push(b'"'),
+            Some('\\') => bytes.push(b'\\'),
+            Some(other) => {
+                bytes.push(b'\\');
+                let mut buffer = [0; 4];
+                bytes.extend_from_slice(other.encode_utf8(&mut buffer).as_bytes());
+            }
+            None => bytes.push(b'\\'),
+        }
+    }
+
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 fn file_diff_from_output(commit_hash: &str, file_path: &str, output: &[u8]) -> GitFileDiff {
@@ -645,7 +729,10 @@ fn run_worktree_diff(
         .map_err(|error| format!("Failed to run git diff: {error}"))?;
 
     if !output.status.success() {
-        return Err(worktree_git_error("Failed to read git diff", &output.stderr));
+        return Err(worktree_git_error(
+            "Failed to read git diff",
+            &output.stderr,
+        ));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -803,6 +890,49 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
     }
 
     #[test]
+    fn decodes_korean_commit_file_paths_from_git_octal_quotes() {
+        let metadata = "abc123\0Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let files = "A\t\"docs/\\355\\225\\234\\352\\270\\200.md\"\n";
+
+        let detail = parse_commit_detail(metadata, files).expect("detail should parse");
+
+        assert_eq!(detail.files[0].path, "docs/한글.md");
+        assert!(!detail.files[0].path.contains("\\355"));
+    }
+
+    #[test]
+    fn preserves_normal_utf8_korean_mixed_and_ascii_commit_file_paths() {
+        let metadata = "abc123\0Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let files = "A\tdocs/한글.md\nM\tsrc/키오스크-test_01.ts\nD\tREADME.md\n";
+
+        let detail = parse_commit_detail(metadata, files).expect("detail should parse");
+
+        assert_eq!(detail.files[0].path, "docs/한글.md");
+        assert_eq!(detail.files[1].path, "src/키오스크-test_01.ts");
+        assert_eq!(detail.files[2].path, "README.md");
+    }
+
+    #[test]
+    fn decodes_rename_commit_file_current_path_from_git_octal_quotes() {
+        let metadata = "abc123\0Rename Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let files = "R100\t\"docs/\\355\\225\\234\\352\\270\\200-old.md\"\t\"docs/\\355\\225\\234\\352\\270\\200-new.md\"\n";
+
+        let detail = parse_commit_detail(metadata, files).expect("detail should parse");
+
+        assert_eq!(detail.files[0].status, "R100");
+        assert_eq!(detail.files[0].path, "docs/한글-new.md");
+        assert!(!detail.files[0].path.contains("\\355"));
+    }
+
+    #[test]
+    fn decodes_unquoted_git_octal_paths_defensively() {
+        assert_eq!(
+            displayable_git_path("docs/\\355\\225\\234\\352\\270\\200.md"),
+            "docs/한글.md",
+        );
+    }
+
+    #[test]
     fn marks_large_file_diff_as_truncated() {
         let output = vec![b'a'; MAX_DIFF_BYTES + 10];
 
@@ -845,7 +975,7 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 mod pagination_tests {
     use std::{fs, path::Path, process::Command};
 
-    use super::GitCliHistoryReader;
+    use super::{git_head_hash, GitCliHistoryReader};
     use crate::ports::GitHistoryReader;
 
     struct FixtureRepo {
@@ -854,7 +984,10 @@ mod pagination_tests {
 
     impl FixtureRepo {
         fn path(&self) -> &str {
-            self.dir.path().to_str().expect("fixture path should be utf-8")
+            self.dir
+                .path()
+                .to_str()
+                .expect("fixture path should be utf-8")
         }
     }
 
@@ -889,6 +1022,36 @@ mod pagination_tests {
         FixtureRepo { dir }
     }
 
+    fn init_empty_fixture_repo() -> FixtureRepo {
+        let dir = tempfile::tempdir().expect("fixture dir should be created");
+        let path = dir.path();
+        run_git(path, &["init", "-b", "main"]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test"]);
+        run_git(path, &["config", "core.quotePath", "true"]);
+
+        FixtureRepo { dir }
+    }
+
+    #[test]
+    fn commit_detail_returns_readable_korean_file_paths_from_real_repo() {
+        let repo = init_empty_fixture_repo();
+        let docs_dir = repo.dir.path().join("문서");
+        fs::create_dir_all(&docs_dir).expect("korean fixture directory should be created");
+        fs::write(docs_dir.join("키오스크.md"), "content")
+            .expect("korean fixture file should be written");
+        run_git(repo.dir.path(), &["add", "."]);
+        run_git(repo.dir.path(), &["commit", "-m", "add korean filename"]);
+        let commit_hash = git_head_hash(repo.path()).expect("head hash should load");
+
+        let detail = GitCliHistoryReader
+            .get_commit_detail(repo.path(), &commit_hash)
+            .expect("commit detail should load");
+
+        assert_eq!(detail.files[0].path, "문서/키오스크.md");
+        assert!(!detail.files[0].path.contains("\\355"));
+    }
+
     #[test]
     fn graph_first_page_has_total_and_refs_but_later_pages_skip_them() {
         let repo = init_fixture_repo(3);
@@ -899,10 +1062,18 @@ mod pagination_tests {
 
         assert_eq!(first_page.page.total_count, Some(3));
         assert!(first_page.page.has_more);
-        assert!(!first_page.refs.is_empty(), "first page should include refs");
+        assert!(
+            !first_page.refs.is_empty(),
+            "first page should include refs"
+        );
         assert_eq!(first_page.commits.len(), 2);
 
-        let cursor = first_page.commits.last().expect("page has commits").hash.clone();
+        let cursor = first_page
+            .commits
+            .last()
+            .expect("page has commits")
+            .hash
+            .clone();
         let second_page = GitCliHistoryReader
             .get_commit_graph(repo.path(), 2, 2, Some(&cursor), &[], &[])
             .expect("second graph page should load");
@@ -925,7 +1096,12 @@ mod pagination_tests {
         assert_eq!(first_page.page.total_count, Some(3));
         assert!(first_page.page.has_more);
 
-        let cursor = first_page.commits.last().expect("page has commits").hash.clone();
+        let cursor = first_page
+            .commits
+            .last()
+            .expect("page has commits")
+            .hash
+            .clone();
         let second_page = GitCliHistoryReader
             .list_history(repo.path(), 2, 2, Some(&cursor), &[], &[])
             .expect("second history page should load");
