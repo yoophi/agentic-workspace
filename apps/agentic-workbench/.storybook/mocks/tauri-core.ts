@@ -161,7 +161,7 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
         binary: false,
       } as T;
     case "list_worktree_files":
-      return sampleWorktreeFiles as T;
+      return filterWorktreeFiles(args?.scope) as T;
     case "read_worktree_text_file": {
       const path = String(args?.path ?? "README.md");
       const file = sampleWorktreeTextFiles[path];
@@ -234,4 +234,35 @@ export async function invoke<T>(command: string, args?: Record<string, unknown>)
     default:
       throw new Error(`Unhandled Storybook Tauri command: ${command}`);
   }
+}
+
+function filterWorktreeFiles(scope: unknown) {
+  const listScope = scope as
+    | {
+        dir?: string;
+        depth?: number;
+      }
+    | undefined;
+  const dir = listScope?.dir?.trim() ?? "";
+  const depth = listScope?.depth ?? null;
+
+  return sampleWorktreeFiles.filter((entry) => {
+    if (dir && !entry.relativePath.startsWith(`${dir}/`)) {
+      return false;
+    }
+
+    const remainingPath = dir
+      ? entry.relativePath.slice(dir.length + 1)
+      : entry.relativePath;
+
+    if (!remainingPath) {
+      return false;
+    }
+
+    if (typeof depth === "number") {
+      return remainingPath.split("/").filter(Boolean).length <= depth;
+    }
+
+    return true;
+  });
 }
