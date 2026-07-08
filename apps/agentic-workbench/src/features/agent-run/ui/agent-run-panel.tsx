@@ -120,6 +120,7 @@ import {
 } from "@/features/agent-command-override/model/command-overrides";
 import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { StreamingMarkdown } from "@/features/agent-run/ui/agent-run-markdown";
+import { PermissionRequestDialog } from "@/features/agent-run/ui/permission-request-dialog";
 import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
 import { Badge } from "@/components/ui/badge";
@@ -2748,79 +2749,6 @@ function RunEventRenderItem({ item }: { item: TimelineRenderItem }) {
   }
 
   return <RunEventItem item={item.item} />;
-}
-
-function PermissionRequestDialog({
-  permission,
-  onSelect,
-}: {
-  permission: Extract<RunEvent, { type: "permission" }> | null;
-  onSelect: (permissionId: string, optionId: string) => Promise<void>;
-}) {
-  const permissionId = permission?.permissionId;
-  const [submittingOptionId, setSubmittingOptionId] = useState<string | null>(null);
-  const submittingPermissionIdRef = useRef<string | null>(null);
-  const isSubmitting =
-    submittingPermissionIdRef.current === permissionId && submittingOptionId !== null;
-
-  useEffect(() => {
-    submittingPermissionIdRef.current = null;
-    setSubmittingOptionId(null);
-  }, [permissionId]);
-
-  async function submitPermission(optionId: string) {
-    if (!permissionId || submittingPermissionIdRef.current === permissionId) {
-      return;
-    }
-
-    submittingPermissionIdRef.current = permissionId;
-    setSubmittingOptionId(optionId);
-
-    try {
-      await onSelect(permissionId, optionId);
-    } catch {
-      submittingPermissionIdRef.current = null;
-      setSubmittingOptionId(null);
-    }
-  }
-
-  return (
-    <Dialog open={Boolean(permissionId)}>
-      <DialogContent showCloseButton={false} className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Permission required</DialogTitle>
-          <DialogDescription>
-            Agent가 작업을 계속하려면 아래 요청에 대한 결정을 선택해야 합니다.
-          </DialogDescription>
-        </DialogHeader>
-        <div className="grid gap-3">
-          <div className="rounded-md border bg-muted/40 p-3">
-            <div className="text-sm font-medium">{permission?.title || "Tool request"}</div>
-            {permission?.input !== undefined && (
-              <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded border bg-background p-3 font-mono text-xs">
-                {JSON.stringify(permission.input, null, 2)}
-              </pre>
-            )}
-          </div>
-        </div>
-        <DialogFooter className="flex-wrap">
-          {permission?.options.map((option) => (
-            <Button
-              key={option.optionId}
-              type="button"
-              variant={option.kind.startsWith("reject") ? "outline" : "default"}
-              disabled={isSubmitting}
-              onClick={() => void submitPermission(option.optionId)}
-            >
-              {submittingOptionId === option.optionId
-                ? "Submitting..."
-                : option.name || option.kind || option.optionId}
-            </Button>
-          ))}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
 }
 
 function RunEventItem({ item }: { item: TimelineItem }) {
