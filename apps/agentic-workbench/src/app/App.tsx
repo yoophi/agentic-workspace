@@ -24,6 +24,7 @@ import {
   readWorktreePath,
   resolveSessionWorktree,
 } from "@/app/model/session-route";
+import { openSettingsWindow } from "@/entities/settings-window/api/settings-window-repository";
 import {
   listGitWorktrees,
   openWorktreeWindow,
@@ -62,7 +63,6 @@ type McpWindowTitleEvent = {
 export function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const projectsQuery = useQuery({
     queryKey: projectQueryKeys.all,
@@ -142,6 +142,11 @@ export function App() {
     );
   }
 
+  function openSettings() {
+    setError(null);
+    void openSettingsWindow().catch((caughtError) => setError(String(caughtError)));
+  }
+
   function handleDashboardAction(action: DashboardAction) {
     if (!action.enabled) {
       return;
@@ -195,8 +200,7 @@ export function App() {
     isLoading: projectsQuery.isLoading,
     errorMessage: projectsQuery.error ? String(projectsQuery.error) : null,
   });
-  const isSettingsPage = location.pathname === "/settings";
-  const returnTo = searchParams.get("returnTo");
+  const isSettingsPage = location.pathname === "/settings-window";
 
   return (
     <main
@@ -213,7 +217,7 @@ export function App() {
       >
         {!isWorktreeSessionPage && !isSettingsPage && (
           <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => navigate("/settings")}>
+            <Button type="button" variant="outline" size="sm" onClick={openSettings}>
               <SettingsIcon data-icon="inline-start" />
               Settings
             </Button>
@@ -270,13 +274,7 @@ export function App() {
                 projects={projects}
                 isLoading={projectsQuery.isLoading}
                 onBack={(projectId) => navigate(`/projects/${projectId}`)}
-                onOpenSettings={() =>
-                  navigate(
-                    `/settings?returnTo=${encodeURIComponent(
-                      `${location.pathname}${location.search}`,
-                    )}`,
-                  )
-                }
+                onOpenSettings={openSettings}
               />
             }
           />
@@ -287,19 +285,13 @@ export function App() {
                 projects={projects}
                 isLoading={projectsQuery.isLoading}
                 standalone
-                onOpenSettings={() =>
-                  navigate(
-                    `/settings?returnTo=${encodeURIComponent(
-                      `${location.pathname}${location.search}`,
-                    )}`,
-                  )
-                }
+                onOpenSettings={openSettings}
               />
             }
           />
           <Route
-            path="/settings"
-            element={<SettingsPage onBack={() => navigate(returnTo || "/")} />}
+            path="/settings-window"
+            element={<SettingsPage />}
           />
         </Routes>
       </div>

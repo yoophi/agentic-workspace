@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -87,21 +88,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
       : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-normal">Settings</h1>
-          <p className="text-sm text-muted-foreground">
-            ACP agent 프로필(실행 명령·환경변수)을 관리합니다.
-          </p>
-        </div>
-        {onBack && (
-          <Button type="button" variant="outline" onClick={onBack}>
-            돌아가기
-          </Button>
-        )}
-      </div>
-
+    <SettingsPageLayout onBack={onBack}>
       {settingsQuery.isLoading || agentsQuery.isLoading ? (
         <p className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
           설정을 불러오는 중입니다.
@@ -117,6 +104,33 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
           onSave={save}
         />
       )}
+    </SettingsPageLayout>
+  );
+}
+
+export function SettingsPageLayout({
+  children,
+  onBack,
+}: {
+  children: ReactNode;
+  onBack?: () => void;
+}) {
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-normal">Settings</h1>
+          <p className="text-sm text-muted-foreground">
+            ACP agent 프로필(실행 명령·환경변수)을 관리합니다.
+          </p>
+        </div>
+        {onBack && (
+          <Button type="button" variant="outline" onClick={onBack}>
+            돌아가기
+          </Button>
+        )}
+      </div>
+      {children}
     </div>
   );
 }

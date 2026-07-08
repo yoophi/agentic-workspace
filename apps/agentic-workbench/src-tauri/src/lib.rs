@@ -12,9 +12,9 @@ use inbound::tauri_commands::{
     list_agent_tool_command_candidates, list_agents, list_git_branches, list_git_remotes,
     list_git_worktrees, list_projects, list_provider_sessions, list_saved_prompts,
     list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
-    open_worktree_window, read_worktree_text_file, record_goal_progress, respond_agent_permission,
-    save_agent_run_settings, send_prompt_to_run, set_run_permission_mode, start_agent_run,
-    start_worktree_watcher, stop_worktree_watcher, update_goal, update_project,
+    open_settings_window, open_worktree_window, read_worktree_text_file, record_goal_progress,
+    respond_agent_permission, save_agent_run_settings, send_prompt_to_run, set_run_permission_mode,
+    start_agent_run, start_worktree_watcher, stop_worktree_watcher, update_goal, update_project,
     update_saved_prompt,
 };
 use infrastructure::{agent_session_registry::AppState, mcp::McpServerState};
@@ -25,6 +25,8 @@ use tauri::{
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 
 const ABOUT_MENU_ID: &str = "about-agentic-workbench";
+const PREFERENCES_MENU_ID: &str = "preferences-agentic-workbench";
+const PREFERENCES_ACCELERATOR: &str = "CmdOrCtrl+,";
 const APP_DISPLAY_NAME: &str = "Agentic Workbench";
 const APP_VERSION: &str = env!("AGENTIC_WORKBENCH_PACKAGE_VERSION");
 const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
@@ -39,6 +41,10 @@ pub fn run() {
         .on_menu_event(|app, event| {
             if event.id() == ABOUT_MENU_ID {
                 show_about_dialog(app);
+            } else if event.id() == PREFERENCES_MENU_ID {
+                if let Err(error) = infrastructure::window_manager::open_settings_window(app) {
+                    show_error_dialog(app, "Could not open Settings", &error);
+                }
             }
         })
         .setup(|_app| {
@@ -112,6 +118,7 @@ pub fn run() {
             list_provider_sessions,
             open_external_url,
             open_worktree_window,
+            open_settings_window,
             start_agent_run,
             cancel_agent_run,
             send_prompt_to_run,
@@ -129,6 +136,13 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         format!("About {APP_DISPLAY_NAME}"),
         true,
         None::<&str>,
+    )?;
+    let preferences_item = MenuItem::with_id(
+        app,
+        preferences_menu_id(),
+        "Preferences...",
+        true,
+        Some(preferences_accelerator()),
     )?;
     let window_menu = Submenu::with_id_and_items(
         app,
@@ -164,6 +178,8 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
                 true,
                 &[
                     &about_item,
+                    &PredefinedMenuItem::separator(app)?,
+                    &preferences_item,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
@@ -230,6 +246,15 @@ fn show_about_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
         .show(|_| {});
 }
 
+fn show_error_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>, title: &str, message: &str) {
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::Ok)
+        .show(|_| {});
+}
+
 fn display_commit_hash() -> &'static str {
     if BUILD_COMMIT_HASH.trim().is_empty() {
         BUILD_COMMIT_FALLBACK
@@ -243,5 +268,28 @@ fn display_commit_tag() -> &'static str {
         BUILD_COMMIT_FALLBACK
     } else {
         BUILD_COMMIT_TAG
+    }
+}
+
+fn preferences_menu_id() -> &'static str {
+    PREFERENCES_MENU_ID
+}
+
+fn preferences_accelerator() -> &'static str {
+    PREFERENCES_ACCELERATOR
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{preferences_accelerator, preferences_menu_id};
+
+    #[test]
+    fn preferences_menu_uses_stable_id() {
+        assert_eq!(preferences_menu_id(), "preferences-agentic-workbench");
+    }
+
+    #[test]
+    fn preferences_menu_uses_standard_macos_accelerator() {
+        assert_eq!(preferences_accelerator(), "CmdOrCtrl+,");
     }
 }

@@ -8,6 +8,9 @@ use crate::infrastructure::devtools;
 
 /// macOS 네이티브 탭 그룹 식별자. 같은 식별자의 세션 창끼리 탭으로 묶인다.
 const TABBING_IDENTIFIER: &str = "acp-session";
+pub const SETTINGS_WINDOW_LABEL: &str = "settings";
+const SETTINGS_WINDOW_TITLE: &str = "Settings";
+const SETTINGS_WINDOW_ROUTE: &str = "/settings-window";
 
 pub fn session_label(session_id: &str) -> String {
     format!("session-{session_id}")
@@ -22,6 +25,10 @@ fn new_session_id() -> String {
 /// 경로 문자가 router matching에 영향을 주지 않도록 한다.
 fn session_url(project_id: &str, worktree_path: &str) -> WebviewUrl {
     WebviewUrl::App(format!("index.html#{}", session_route(project_id, worktree_path)).into())
+}
+
+fn settings_url() -> WebviewUrl {
+    WebviewUrl::App(format!("index.html#{SETTINGS_WINDOW_ROUTE}").into())
 }
 
 fn session_route(project_id: &str, worktree_path: &str) -> String {
@@ -52,6 +59,26 @@ pub fn open_session_window(
 
     let _ = mode;
     build_window(app, &label, project_id, worktree_path, &title).map(|_| ())
+}
+
+pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(SETTINGS_WINDOW_LABEL) {
+        if window.is_minimized().map_err(|error| error.to_string())? {
+            window.unminimize().map_err(|error| error.to_string())?;
+        }
+        window.show().map_err(|error| error.to_string())?;
+        window.set_focus().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, settings_url())
+        .title(SETTINGS_WINDOW_TITLE)
+        .inner_size(920.0, 760.0)
+        .min_inner_size(760.0, 560.0)
+        .build()
+        .map_err(|error| error.to_string())?;
+
+    Ok(())
 }
 
 fn build_window(
@@ -155,7 +182,10 @@ fn non_empty_or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 
 #[cfg(test)]
 mod tests {
-    use super::{session_label, session_route, session_title};
+    use std::path::Path;
+
+    use super::{SETTINGS_WINDOW_LABEL, session_label, session_route, session_title, settings_url};
+    use tauri::WebviewUrl;
 
     #[test]
     fn session_route_keeps_worktree_path_out_of_route_segments() {
@@ -184,6 +214,21 @@ mod tests {
     #[test]
     fn different_session_ids_allow_multiple_windows_for_same_worktree() {
         assert_ne!(session_label("session-a"), session_label("session-b"));
+    }
+
+    #[test]
+    fn settings_window_label_is_fixed_and_not_a_session_label() {
+        assert_eq!(SETTINGS_WINDOW_LABEL, "settings");
+        assert!(!SETTINGS_WINDOW_LABEL.starts_with("session-"));
+    }
+
+    #[test]
+    fn settings_url_uses_dedicated_hash_route() {
+        match settings_url() {
+            WebviewUrl::App(path) => assert_eq!(path, Path::new("index.html#/settings-window")),
+            WebviewUrl::External(_) => panic!("settings window must use an app URL"),
+            _ => panic!("settings window must use an app URL"),
+        }
     }
 
     #[test]

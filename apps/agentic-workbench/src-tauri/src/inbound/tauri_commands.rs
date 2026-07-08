@@ -540,6 +540,11 @@ pub fn open_worktree_window(
 }
 
 #[tauri::command]
+pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
+    window_manager::open_settings_window(&app)
+}
+
+#[tauri::command]
 pub fn open_external_url(url: String) -> Result<(), String> {
     let url = url.trim();
     validate_external_browser_url(url)?;
