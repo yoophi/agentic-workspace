@@ -135,16 +135,16 @@ export function SavedPromptToolbar({
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <div className="flex flex-col gap-2 border-b px-4 py-2">
+    <div className="flex flex-col gap-2 border-b px-4 py-1">
       <div className="flex items-start justify-between gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           {savedPrompts.map((savedPrompt) => (
             <div
               key={savedPrompt.id}
-              className="flex max-w-full items-center gap-1 rounded-full border bg-background p-0.5"
+              className="flex h-7 max-w-full items-center gap-1 rounded-full border bg-background px-0.5"
             >
               <PromptSuggestion
-                size="sm"
+                size="xs"
                 className="min-w-0 max-w-[18rem] justify-start truncate border-transparent"
                 disabled={disabled}
                 onClick={() => onSendPrompt(savedPrompt.prompt)}

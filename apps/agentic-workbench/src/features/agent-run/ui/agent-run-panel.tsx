@@ -10,7 +10,6 @@ import {
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  BotIcon,
   CheckCircleIcon,
   ChevronDownIcon,
   ClockIcon,
@@ -1581,12 +1580,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
             {!isRunning && (
               <div>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex flex-col gap-1.5">
-                    <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight">
-                      <BotIcon />
-                      Agentic coding
-                    </h2>
-                  </div>
                   <div className="flex flex-wrap items-center gap-3">
                     <div className="flex flex-col gap-1.5">
                       <Select
@@ -1676,6 +1669,17 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                           </span>
                         ) : null)}
                     </div>
+                  </div>
+                  <div className="flex shrink-0 items-center">
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={!canStartRun}
+                      onClick={() => void run()}
+                    >
+                      <PlayIcon data-icon="inline-start" />
+                      시작
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -1782,7 +1786,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           isLoading={isRunning}
           className="flex h-full min-h-0 flex-col overflow-hidden rounded-none border-0 bg-transparent p-0 shadow-none"
         >
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-4 py-1">
             <div className="flex gap-1.5" role="tablist" aria-label="Agent input mode">
               <Button
                 type="button"

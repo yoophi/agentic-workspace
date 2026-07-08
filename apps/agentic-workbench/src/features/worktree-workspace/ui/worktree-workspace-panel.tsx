@@ -107,7 +107,6 @@ import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
-import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
@@ -260,19 +259,12 @@ export function WorktreeWorkspacePanel({
 
   return (
     <section className="flex h-full min-h-0 flex-col overflow-hidden border-l bg-background">
-      <header className="flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2">
+      <header className="flex h-11 shrink-0 items-center justify-between gap-3 border-b px-4">
         <div className="flex min-w-0 items-center gap-2">
           <GitPullRequestIcon className="size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-medium">Workspace</span>
-              <WorktreeStatusBadge status={worktree.status} />
-            </div>
-            <EllipsisPopoverText
-              value={worktree.path}
-              className="min-w-0 font-mono text-xs text-muted-foreground"
-              contentClassName="font-mono text-xs"
-            />
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-sm font-medium">Workspace</span>
+            <WorktreeStatusBadge status={worktree.status} />
           </div>
         </div>
         <div className="flex shrink-0 rounded-md border p-0.5" role="tablist" aria-label="Worktree workspace">
@@ -479,13 +471,7 @@ function GitWorkspaceTab({
         <div className="flex h-full min-h-0 flex-col border-r">
           <section className="shrink-0 border-b p-4">
             <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <h2 className="truncate text-sm font-medium">Git status</h2>
-                <p className="mt-1 truncate text-xs text-muted-foreground">
-                  {worktree.branch || "detached"} · {worktree.status}
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-1.5">
+              <div className="flex min-w-0 items-center gap-1.5">
                 {statusQuery.isFetching && !statusQuery.isLoading ? (
                   <Badge variant="secondary">Refreshing</Badge>
                 ) : null}
@@ -493,36 +479,36 @@ function GitWorkspaceTab({
                 <Badge variant="outline" className="font-mono">
                   {worktree.branch || "detached"}
                 </Badge>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label="Git workspace 새로고침"
-                  disabled={statusQuery.isFetching || historyQuery.isFetching || graphQuery.isFetching}
-                  onClick={() => {
-                    void statusQuery.refetch();
-                    // 비활성(enabled=false) view의 refetch는 no-op이므로 선택된 view만 갱신된다.
-                    if (historyView === "list") {
-                      void historyQuery.refetch();
-                    } else {
-                      void graphQuery.refetch();
-                    }
-                    if (selectedCommitHash) {
-                      void commitDetailQuery.refetch();
-                    }
-                    if (selectedCommitHash && selectedDiffPath) {
-                      void fileDiffQuery.refetch();
-                    }
-                  }}
-                >
-                  <RefreshCwIcon
-                    className={cn(
-                      (statusQuery.isFetching || historyQuery.isFetching || graphQuery.isFetching) &&
-                        "animate-spin",
-                    )}
-                  />
-                </Button>
               </div>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Git workspace 새로고침"
+                disabled={statusQuery.isFetching || historyQuery.isFetching || graphQuery.isFetching}
+                onClick={() => {
+                  void statusQuery.refetch();
+                  // 비활성(enabled=false) view의 refetch는 no-op이므로 선택된 view만 갱신된다.
+                  if (historyView === "list") {
+                    void historyQuery.refetch();
+                  } else {
+                    void graphQuery.refetch();
+                  }
+                  if (selectedCommitHash) {
+                    void commitDetailQuery.refetch();
+                  }
+                  if (selectedCommitHash && selectedDiffPath) {
+                    void fileDiffQuery.refetch();
+                  }
+                }}
+              >
+                <RefreshCwIcon
+                  className={cn(
+                    (statusQuery.isFetching || historyQuery.isFetching || graphQuery.isFetching) &&
+                      "animate-spin",
+                  )}
+                />
+              </Button>
             </div>
             <div className="mt-3 flex flex-wrap gap-1.5">
               {statusQuery.isLoading ? (
@@ -543,7 +529,7 @@ function GitWorkspaceTab({
           </section>
 
           <section className="flex min-h-0 flex-1 flex-col">
-            <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
+            <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-1">
               <div className="flex min-w-0 items-center gap-2">
                 <GitCommitIcon className="size-4 shrink-0 text-muted-foreground" />
                 <h2 className="truncate text-sm font-medium">Commit log</h2>
@@ -631,14 +617,12 @@ function GitWorkspaceTab({
       <ResizableHandle
         aria-label="Git workspace detail 영역 크기 조정"
         className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
-        <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
-      </ResizableHandle>
+      />
 
       <ResizablePanel id="git-workspace-detail" minSize="320px">
         <div className="flex h-full min-h-0 flex-col">
-          <header className="shrink-0 border-b px-4 py-3">
-            <div className="flex items-center justify-between gap-2">
+          <header className="shrink-0 border-b">
+            <div className="flex items-center justify-between gap-2 px-4 py-1">
               <div className="flex min-w-0 items-center gap-2">
                 {viewMode === "commit" ? (
                   <GitCommitIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -649,11 +633,6 @@ function GitWorkspaceTab({
                   <h2 className="truncate text-sm font-medium">
                     {viewMode === "commit" ? "Commit detail" : "Working tree"}
                   </h2>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {viewMode === "commit"
-                      ? "commit 선택 시 변경 파일과 diff를 표시합니다."
-                      : "아직 커밋되지 않은 변경을 표시합니다."}
-                  </p>
                 </div>
               </div>
               <div className="flex shrink-0 rounded-md border p-0.5">

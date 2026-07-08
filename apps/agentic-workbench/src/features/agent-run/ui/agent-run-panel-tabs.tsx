@@ -20,7 +20,7 @@ export function AgentRunPanelTabs({
   onClosePanel,
 }: AgentRunPanelTabsProps) {
   return (
-    <div className="flex min-w-0 items-center gap-1 overflow-x-auto border-b bg-background px-2 py-1.5">
+    <div className="flex h-11 min-w-0 items-center gap-1 overflow-x-auto border-b bg-background px-2">
       <div className="flex min-w-0 flex-1 items-center gap-1" role="tablist" aria-label="Agent panels">
         {slots.map((slot) => {
           const isActive = slot.id === activePanelId;

@@ -46,9 +46,7 @@ export function ProjectWorktreeSessionPage({
         <ResizableHandle
           aria-label="Workspace 영역 크기 조정"
           className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
-        </ResizableHandle>
+        />
 
         <ResizablePanel id="project-worktree-session-workspace" minSize="480px">
           <WorktreeWorkspacePanel
