@@ -1,10 +1,17 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useState } from "react";
 
+import { AgentCommandOverrideEditor } from "@/features/agent-command-override/ui/agent-command-override-editor";
+import {
+  createCommandOverrideDraft,
+  type CommandOverrideDraft,
+} from "@/features/agent-command-override/model/command-override-form";
 import { createPlaceholderWorktree } from "@/entities/project/model/git-worktree";
 import { ProjectDetailPage } from "@/pages/project-detail/ui/project-detail-page";
 import { ProjectDashboardPage } from "@/pages/project-dashboard/ui/project-dashboard-page";
 import { ProjectListPage } from "@/pages/project-list/ui/project-list-page";
 import { ProjectWorktreeSessionPage } from "@/pages/project-worktree-session/ui/project-worktree-session-page";
+import { SettingsPageLayout } from "@/pages/settings/ui/settings-page";
 import {
   sampleEmptyProjectDashboard,
   sampleErrorProjectDashboard,
@@ -30,6 +37,77 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+const settingsAgents = [
+  {
+    id: "codex",
+    label: "Codex",
+    command: "npx -y @agentclientprotocol/codex-acp",
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    command: "npx -y @agentclientprotocol/claude-agent-acp",
+  },
+];
+
+function SettingsPageStory({
+  longContent = false,
+  loadError = null,
+}: {
+  longContent?: boolean;
+  loadError?: string | null;
+}) {
+  const [draft, setDraft] = useState<CommandOverrideDraft>(() =>
+    createCommandOverrideDraft({
+      globalCommand: longContent
+        ? "npx -y @agentclientprotocol/codex-acp --profile storybook --with-a-long-command-fragment-for-window-layout-validation"
+        : "npx -y @agentclientprotocol/codex-acp",
+      globalEnv: longContent
+        ? {
+            HTTPS_PROXY: "http://127.0.0.1:8888",
+            STORYBOOK_LONG_ENVIRONMENT_VARIABLE_NAME: "long-value-for-layout-validation",
+          }
+        : { HTTPS_PROXY: "http://127.0.0.1:8888" },
+      profiles: [
+        {
+          id: "codex",
+          name: longContent ? "Codex default profile with long display name" : "Codex",
+          agentType: "codex",
+          command: longContent
+            ? "custom-codex-acp --with-long-flag --and-another-long-flag"
+            : "custom-codex-acp",
+          env: { OPENAI_API_KEY: "sk-..." },
+          enabled: true,
+          builtIn: true,
+        },
+        {
+          id: "custom-claude-proxy",
+          name: "Claude (프록시 경유)",
+          agentType: "claude-code",
+          command: null,
+          env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:8080" },
+          enabled: true,
+          builtIn: false,
+        },
+      ],
+    }),
+  );
+
+  return (
+    <div className="max-w-[920px] rounded-md border bg-muted/30 p-6">
+      <SettingsPageLayout>
+        <AgentCommandOverrideEditor
+          agents={settingsAgents}
+          draft={draft}
+          loadError={loadError}
+          onDraftChange={setDraft}
+          onSave={() => undefined}
+        />
+      </SettingsPageLayout>
+    </div>
+  );
+}
 
 export const ProjectDashboard: Story = {
   render: () => (
@@ -196,4 +274,28 @@ export const WorktreeSessionMetadataLoading: Story = {
       onBack={() => undefined}
     />
   ),
+};
+
+export const SettingsWindow: Story = {
+  render: () => <SettingsPageStory />,
+};
+
+export const SettingsWindowLoading: Story = {
+  render: () => (
+    <div className="max-w-[920px] rounded-md border bg-muted/30 p-6">
+      <SettingsPageLayout>
+        <p className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
+          설정을 불러오는 중입니다.
+        </p>
+      </SettingsPageLayout>
+    </div>
+  ),
+};
+
+export const SettingsWindowError: Story = {
+  render: () => <SettingsPageStory loadError="설정을 불러오지 못했습니다." />,
+};
+
+export const SettingsWindowLongContent: Story = {
+  render: () => <SettingsPageStory longContent />,
 };
