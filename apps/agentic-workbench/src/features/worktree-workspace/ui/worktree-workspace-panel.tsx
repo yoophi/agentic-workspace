@@ -103,6 +103,12 @@ import {
   type StaleSelection,
 } from "@yoophi/workspace-auto-refresh";
 import { annotationDialogComponents } from "@/features/worktree-workspace/ui/annotation-dialog-components";
+import {
+  buildFileTreeRows,
+  isParentDirectoryLoaded,
+  mergeWorktreeFileEntries,
+  type FileTreeRow,
+} from "@/features/worktree-workspace/model/file-tree";
 import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
@@ -116,11 +122,6 @@ type WorktreeWorkspacePanelProps = {
 
 type WorkspaceTabId = "git" | "files" | "markdown";
 type GitHistoryView = "graph" | "list";
-
-type FileTreeRow = WorktreeFileEntry & {
-  depth: number;
-  isExpanded: boolean;
-};
 
 type AnnotationDraftTarget =
   | {
@@ -830,28 +831,10 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
     queryFn: () => readWorktreeTextFile(worktree.path, selectedFilePath ?? ""),
     ...autoRefreshQueryOptions,
   });
-  const loadedEntries = useMemo(() => {
-    const entries = [...(filesQuery.data ?? [])];
-    for (const dirQuery of dirQueries) {
-      entries.push(...(dirQuery.data ?? []));
-    }
-    const seen = new Set<string>();
-    return entries
-      .filter((entry) => {
-        if (seen.has(entry.relativePath)) {
-          return false;
-        }
-        seen.add(entry.relativePath);
-        return true;
-      })
-      .sort((left, right) =>
-        left.relativePath
-          .toLowerCase()
-          .localeCompare(right.relativePath.toLowerCase()),
-      );
-    // dirQueries 배열 identity는 렌더마다 바뀌므로 data 스냅샷으로 의존성을 좁힌다.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filesQuery.data, ...dirQueries.map((dirQuery) => dirQuery.data)]);
+  const loadedEntries = mergeWorktreeFileEntries([
+    filesQuery.data,
+    ...dirQueries.map((dirQuery) => dirQuery.data),
+  ]);
   const rows = useMemo(
     () => buildFileTreeRows(loadedEntries, expandedFolders),
     [loadedEntries, expandedFolders],
@@ -865,9 +848,7 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
     }
     // lazy loading에서는 로드된 디렉터리만 판단 근거가 된다. 부모 디렉터리가
     // 로드되지 않았다면 파일 존재 여부를 알 수 없으므로 stale로 보지 않는다.
-    const parentDir = selectedFilePath.split("/").slice(0, -1).join("/");
-    const isParentLoaded = parentDir === "" || loadedDirs.includes(parentDir);
-    if (!isParentLoaded) {
+    if (!isParentDirectoryLoaded(selectedFilePath, loadedDirs)) {
       return null;
     }
     return findStaleFileSelection({
@@ -1760,36 +1741,6 @@ function EmptyPanel({
   );
 }
 
-function buildFileTreeRows(
-  entries: WorktreeFileEntry[],
-  expandedFolders: ReadonlySet<string>,
-): FileTreeRow[] {
-  return entries
-    .filter((entry) => isEntryVisible(entry, expandedFolders))
-    .map((entry) => ({
-      ...entry,
-      depth: pathDepth(entry.relativePath),
-      isExpanded: entry.isDir && expandedFolders.has(entry.relativePath),
-    }));
-}
-
-function isEntryVisible(
-  entry: WorktreeFileEntry,
-  expandedFolders: ReadonlySet<string>,
-) {
-  const segments = entry.relativePath.split("/").filter(Boolean);
-  let folderPath = "";
-
-  for (const segment of segments.slice(0, -1)) {
-    folderPath = folderPath ? `${folderPath}/${segment}` : segment;
-    if (!expandedFolders.has(folderPath)) {
-      return false;
-    }
-  }
-
-  return true;
-}
-
 function filterMarkdownTreeEntries(entries: WorktreeFileEntry[]) {
   const markdownFiles = entries.filter(
     (entry) => !entry.isDir && isMarkdownPath(entry.relativePath),
@@ -1811,10 +1762,6 @@ function filterMarkdownTreeEntries(entries: WorktreeFileEntry[]) {
       (!entry.isDir && isMarkdownPath(entry.relativePath)) ||
       (entry.isDir && folderPaths.has(entry.relativePath)),
   );
-}
-
-function pathDepth(path: string) {
-  return Math.max(path.split("/").filter(Boolean).length - 1, 0);
 }
 
 function formatBytes(bytes: number) {

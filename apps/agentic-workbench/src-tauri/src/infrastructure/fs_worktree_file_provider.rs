@@ -230,7 +230,9 @@ mod tests {
         fs::create_dir_all(path.join("src/deep")).expect("fixture dirs");
         fs::write(path.join("README.md"), "# readme").expect("fixture file");
         fs::write(path.join("main.ts"), "export {}").expect("fixture file");
+        fs::write(path.join("docs/app.ts"), "export const docs = true;").expect("fixture file");
         fs::write(path.join("docs/guide.md"), "# guide").expect("fixture file");
+        fs::write(path.join("docs/한글 파일.md"), "# 한글 파일").expect("fixture file");
         fs::write(path.join("docs/nested/deep.md"), "# deep").expect("fixture file");
         fs::write(path.join("src/app.ts"), "export {}").expect("fixture file");
         fs::write(path.join("src/deep/inner.ts"), "export {}").expect("fixture file");
@@ -318,5 +320,64 @@ mod tests {
             .expect_err("escape should fail");
 
         assert_eq!(error, "File path must stay inside the worktree.");
+    }
+
+    #[test]
+    fn reads_root_level_text_file_without_regression() {
+        let fixture = init_fixture();
+
+        let file = FsWorktreeFileProvider
+            .read_text_file(fixture.path().to_str().expect("utf-8 path"), "README.md")
+            .expect("root file should read");
+
+        assert_eq!(file.relative_path, "README.md");
+        assert_eq!(file.content, "# readme");
+    }
+
+    #[test]
+    fn reads_nested_text_file_with_root_relative_path() {
+        let fixture = init_fixture();
+
+        let file = FsWorktreeFileProvider
+            .read_text_file(
+                fixture.path().to_str().expect("utf-8 path"),
+                "src/deep/inner.ts",
+            )
+            .expect("nested file should read");
+
+        assert_eq!(file.relative_path, "src/deep/inner.ts");
+        assert_eq!(file.content, "export {}");
+    }
+
+    #[test]
+    fn distinguishes_duplicate_basenames_by_relative_path() {
+        let fixture = init_fixture();
+        let root = fixture.path().to_str().expect("utf-8 path");
+
+        let src_file = FsWorktreeFileProvider
+            .read_text_file(root, "src/app.ts")
+            .expect("src app should read");
+        let docs_file = FsWorktreeFileProvider
+            .read_text_file(root, "docs/app.ts")
+            .expect("docs app should read");
+
+        assert_eq!(src_file.relative_path, "src/app.ts");
+        assert_eq!(docs_file.relative_path, "docs/app.ts");
+        assert_ne!(src_file.content, docs_file.content);
+    }
+
+    #[test]
+    fn reads_korean_and_space_containing_relative_path() {
+        let fixture = init_fixture();
+
+        let file = FsWorktreeFileProvider
+            .read_text_file(
+                fixture.path().to_str().expect("utf-8 path"),
+                "docs/한글 파일.md",
+            )
+            .expect("korean file should read");
+
+        assert_eq!(file.relative_path, "docs/한글 파일.md");
+        assert_eq!(file.content, "# 한글 파일");
     }
 }

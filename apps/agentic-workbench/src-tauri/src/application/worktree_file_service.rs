@@ -84,4 +84,17 @@ mod tests {
 
         assert_eq!(error, "File path is required.");
     }
+
+    #[test]
+    fn preserves_nested_preview_path_for_provider_call() {
+        let file = read_worktree_text_file(
+            &FakeWorktreeFileProvider,
+            "/repo".into(),
+            " src/deep/inner.ts ".into(),
+        )
+        .expect("nested path should be passed to provider");
+
+        assert_eq!(file.relative_path, "src/deep/inner.ts");
+        assert_eq!(file.path, "/repo/src/deep/inner.ts");
+    }
 }
