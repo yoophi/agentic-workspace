@@ -45,6 +45,13 @@ pub fn run() {
                 if let Err(error) = infrastructure::window_manager::open_settings_window(app) {
                     show_error_dialog(app, "Could not open Settings", &error);
                 }
+            } else if let Ok(true) =
+                infrastructure::native_window_menu::focus_window_from_menu_event(
+                    app,
+                    event.id().as_ref(),
+                )
+            {
+                // Window focus menu events are handled by the native menu adapter.
             }
         })
         .setup(|_app| {
@@ -63,6 +70,8 @@ pub fn run() {
                 }
             }
 
+            let _ = infrastructure::native_window_menu::sync_window_menu(_app.handle());
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -77,6 +86,7 @@ pub fn run() {
                         state.cancel_runs_owned_by(&label).await;
                     });
                 }
+                let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }
         })
         .manage(app_state)

@@ -20,6 +20,7 @@ pub mod provider_session;
 pub mod run;
 pub mod saved_prompt;
 pub mod saved_prompt_repository;
+pub mod window_menu;
 pub mod worktree_change;
 pub mod worktree_change_provider;
 pub mod worktree_file;

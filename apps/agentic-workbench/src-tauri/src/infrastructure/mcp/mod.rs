@@ -240,6 +240,7 @@ async fn handle_tool_call(state: &McpRouterState, params: Option<Value>) -> Valu
             format!("Owner Worktree Session window title could not be changed: {error}"),
         ));
     }
+    let _ = crate::infrastructure::native_window_menu::sync_window_menu(&state.app);
     let _ = window.emit(MCP_WINDOW_TITLE_EVENT, &payload);
     if let Ok(serialized) = serde_json::to_string(&payload) {
         let script = format!(
