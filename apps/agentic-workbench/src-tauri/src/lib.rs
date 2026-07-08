@@ -28,6 +28,7 @@ const ABOUT_MENU_ID: &str = "about-agentic-workbench";
 const APP_DISPLAY_NAME: &str = "Agentic Workbench";
 const APP_VERSION: &str = env!("AGENTIC_WORKBENCH_PACKAGE_VERSION");
 const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
+const BUILD_COMMIT_TAG: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_TAG");
 const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
@@ -219,8 +220,9 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
 fn show_about_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     app.dialog()
         .message(format!(
-            "{APP_DISPLAY_NAME}\n\nVersion: {APP_VERSION}\nCommit: {}",
-            display_commit_hash()
+            "{APP_DISPLAY_NAME}\n\nVersion: {APP_VERSION}\nCommit: {}\nTag: {}",
+            display_commit_hash(),
+            display_commit_tag()
         ))
         .title(format!("About {APP_DISPLAY_NAME}"))
         .kind(MessageDialogKind::Info)
@@ -233,5 +235,13 @@ fn display_commit_hash() -> &'static str {
         BUILD_COMMIT_FALLBACK
     } else {
         BUILD_COMMIT_HASH
+    }
+}
+
+fn display_commit_tag() -> &'static str {
+    if BUILD_COMMIT_TAG.trim().is_empty() {
+        BUILD_COMMIT_FALLBACK
+    } else {
+        BUILD_COMMIT_TAG
     }
 }

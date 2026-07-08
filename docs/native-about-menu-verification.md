@@ -9,7 +9,9 @@
 
 - Version은 `apps/agentic-workbench/package.json`의 `version` 값을 빌드 시점에 주입한다.
 - Commit은 빌드 시점의 `GITHUB_SHA`, `COMMIT_SHA`, 또는 `git rev-parse HEAD` 결과를 사용한다.
+- Tag는 빌드 시점의 `GITHUB_REF_TYPE=tag`와 `GITHUB_REF_NAME`, 또는 `git tag --points-at HEAD` 결과를 사용한다.
 - commit hash를 확인할 수 없으면 `unknown`을 표시한다.
+- tag를 확인할 수 없으면 `unknown`을 표시한다.
 
 ## 동작 흐름
 
@@ -20,7 +22,7 @@ flowchart TD
     C --> D[사용자가 About 메뉴 선택]
     D --> E[메뉴 이벤트 처리]
     E --> F[About dialog 표시]
-    F --> G[Version과 Commit 확인]
+    F --> G[Version, Commit, Tag 확인]
 ```
 
 ## 수동 검증
@@ -30,7 +32,8 @@ flowchart TD
 3. Windows/Linux에서는 `Help > About Agentic Workbench`를 선택한다.
 4. dialog에 `Version: 0.1.0`처럼 `package.json` 버전이 표시되는지 확인한다.
 5. dialog에 `Commit: <hash>`가 표시되는지 확인한다.
-6. Git 정보를 사용할 수 없는 빌드 환경에서는 `Commit: unknown`이 표시되고 dialog가 정상적으로 열리는지 확인한다.
+6. dialog에 `Tag: <tag>` 또는 현재 커밋에 tag가 없으면 `Tag: unknown`이 표시되는지 확인한다.
+7. Git 정보를 사용할 수 없는 빌드 환경에서는 `Commit: unknown`, `Tag: unknown`이 표시되고 dialog가 정상적으로 열리는지 확인한다.
 
 ## 자동 검증
 
