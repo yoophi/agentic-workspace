@@ -124,7 +124,7 @@
 - [x] T038 [P] Run AW frontend typecheck with `pnpm --dir apps/agentic-workbench check-types`
 - [x] T039 Run rustfmt check for changed backend files listed in `specs/018-aw-window-menu-list/quickstart.md`
 - [x] T040 Verify no `packages/*`, `crates/*`, or cross-app imports were introduced for this AW-only feature in `apps/agentic-workbench/src-tauri/src/lib.rs`
-- [ ] T041 Run manual native menu validation scenarios 1 through 4 from `specs/018-aw-window-menu-list/quickstart.md`
+- [x] T041 Run manual native menu validation scenarios 1 through 4 from `specs/018-aw-window-menu-list/quickstart.md`
 - [x] T042 Update implementation notes in `specs/018-aw-window-menu-list/quickstart.md` with the commands run and pass/fail results
 
 ---

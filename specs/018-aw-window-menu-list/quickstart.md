@@ -101,4 +101,4 @@ Expected:
 - 2026-07-08: `npm exec --yes -- pnpm --dir apps/agentic-workbench check-types` passed.
 - 2026-07-08: `rustfmt --edition 2024 --check ...` passed for the changed backend files.
 - 2026-07-08: `npm exec --yes -- pnpm --dir apps/agentic-workbench tauri:dev` built and launched the AW dev app successfully.
-- Manual native `Window` menu scenarios still require interactive user confirmation in the launched desktop app.
+- 2026-07-08: Manual native `Window` menu scenarios 1 through 4 were confirmed in the desktop app.
