@@ -9,13 +9,14 @@ import {
   StreamingMarkdown,
 } from "@/features/agent-run/ui/agent-run-markdown";
 import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
-import type { AgentToolCommandCandidate } from "@/entities/agent-run/model";
+import type { AgentToolCommandCandidate, PermissionEvent } from "@/entities/agent-run/model";
 import { AgentCommandOverrideEditor } from "@/features/agent-command-override/ui/agent-command-override-editor";
 import {
   createCommandOverrideDraft,
   type CommandOverrideDraft,
 } from "@/features/agent-command-override/model/command-override-form";
 import { AgentRunPanel } from "@/features/agent-run/ui/agent-run-panel";
+import { PermissionRequestDialog } from "@/features/agent-run/ui/permission-request-dialog";
 import { WorktreeAgentRunArea } from "@/features/agent-run/ui/worktree-agent-run-area";
 import { DeleteProjectDialog } from "@/features/project-delete/ui/delete-project-dialog";
 import { ProjectFormDialog } from "@/features/project-form/ui/project-form-dialog";
@@ -296,6 +297,112 @@ export const AgentRunToolFileChanges: Story = {
       ))}
     </div>
   ),
+};
+
+const longPermissionCommand = [
+  "gh issue create",
+  "--title '긴 permission 다이얼로그 레이아웃 개선'",
+  "--body",
+  JSON.stringify(
+    [
+      "# Background",
+      "AW permission request with a very long markdown body.",
+      "```json",
+      JSON.stringify({ command: "gh issue create", nested: { ready: true } }, null, 2),
+      "```",
+      "x".repeat(4200),
+    ].join("\n"),
+  ),
+].join(" ");
+
+const longPermissionBase: PermissionEvent = {
+  type: "permission",
+  permissionId: "storybook-permission",
+  title: "Execute command",
+  input: {
+    command: longPermissionCommand,
+    cwd: "/Users/yoophi/project/agentic-workspace/apps/agentic-workbench",
+    payload: {
+      kind: "github-issue",
+      body: ["## 변경", "- 긴 command", "- 긴 JSON payload", "- 긴 approval prefix"].join("\n"),
+    },
+  },
+  options: [
+    { optionId: "allow", kind: "allow_once", name: "Allow this command once" },
+    { optionId: "reject", kind: "reject_once", name: "Reject" },
+  ],
+  requiresResponse: true,
+};
+
+function PermissionStoryFrame({
+  permission,
+  narrow = false,
+}: {
+  permission: PermissionEvent;
+  narrow?: boolean;
+}) {
+  return (
+    <div className={narrow ? "min-h-[640px] w-[360px]" : "min-h-[640px]"}>
+      <PermissionRequestDialog permission={permission} onSelect={async () => undefined} />
+    </div>
+  );
+}
+
+export const PermissionRequestDialogLongCommand: Story = {
+  render: () => <PermissionStoryFrame permission={longPermissionBase} />,
+};
+
+export const PermissionRequestDialogLongJsonPayload: Story = {
+  render: () => (
+    <PermissionStoryFrame
+      permission={{
+        ...longPermissionBase,
+        permissionId: "storybook-json-payload",
+        title: "Write JSON payload",
+        input: {
+          command: "node scripts/apply-permission.js",
+          cwd: "/Users/yoophi/project/agentic-workspace",
+          payload: Array.from({ length: 40 }, (_, index) => ({
+            index,
+            path: `apps/agentic-workbench/src/generated/${index}/very-long-file-name-for-layout-validation.ts`,
+            value: "payload ".repeat(20),
+          })),
+        },
+      }}
+    />
+  ),
+};
+
+export const PermissionRequestDialogLongApprovalLabels: Story = {
+  render: () => (
+    <PermissionStoryFrame
+      permission={{
+        ...longPermissionBase,
+        permissionId: "storybook-long-labels",
+        options: [
+          {
+            optionId: "allow-long",
+            kind: "allow_once",
+            name: `${longPermissionCommand} ${"approval scope ".repeat(30)}`,
+          },
+          {
+            optionId: "reject-long",
+            kind: "reject_once",
+            name: `Do not allow ${"this command with a long approval prefix ".repeat(30)}`,
+          },
+        ],
+      }}
+    />
+  ),
+};
+
+export const PermissionRequestDialogNarrowWindow: Story = {
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+  },
+  render: () => <PermissionStoryFrame permission={longPermissionBase} narrow />,
 };
 
 export const AgentRun: Story = {
