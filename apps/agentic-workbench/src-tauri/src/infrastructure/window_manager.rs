@@ -1,6 +1,6 @@
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::{sync::mpsc, time::Duration};
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
 use uuid::Uuid;
 
 #[cfg(debug_assertions)]
@@ -58,7 +58,9 @@ pub fn open_session_window(
     }
 
     let _ = mode;
-    build_window(app, &label, project_id, worktree_path, &title).map(|_| ())
+    build_window(app, &label, project_id, worktree_path, &title).map(|_| {
+        let _ = crate::infrastructure::native_window_menu::sync_window_menu(app);
+    })
 }
 
 pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
@@ -68,6 +70,7 @@ pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         }
         window.show().map_err(|error| error.to_string())?;
         window.set_focus().map_err(|error| error.to_string())?;
+        let _ = crate::infrastructure::native_window_menu::sync_window_menu(app);
         return Ok(());
     }
 
@@ -77,6 +80,22 @@ pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         .min_inner_size(760.0, 560.0)
         .build()
         .map_err(|error| error.to_string())?;
+
+    let _ = crate::infrastructure::native_window_menu::sync_window_menu(app);
+
+    Ok(())
+}
+
+pub fn focus_window_by_label<R: Runtime>(app: &AppHandle<R>, label: &str) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(label) else {
+        return Ok(());
+    };
+
+    if window.is_minimized().map_err(|error| error.to_string())? {
+        window.unminimize().map_err(|error| error.to_string())?;
+    }
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -141,6 +160,7 @@ fn open_as_tab(
                         base_ns.addTabbedWindow_ordered(new_ns, NSWindowOrderingMode::Above);
                     }
                 }
+                let _ = crate::infrastructure::native_window_menu::sync_window_menu(&app);
                 Ok(())
             })();
             let _ = sender.send(result);

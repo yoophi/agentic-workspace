@@ -14,6 +14,7 @@ pub mod saved_prompt_service;
 pub mod send_prompt;
 pub mod set_permission_mode;
 pub mod start_agent_run;
+pub mod window_menu_service;
 pub mod worktree_changes_service;
 pub mod worktree_file_service;
 pub mod worktree_git_service;

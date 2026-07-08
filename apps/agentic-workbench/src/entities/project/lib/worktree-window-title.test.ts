@@ -42,4 +42,18 @@ describe("worktree window title helpers", () => {
     expect(resolveWorktreeWindowTitle("Project / worktree", "Fix state")).toBe("Fix state");
     expect(resolveWorktreeWindowTitle("Project / worktree", null)).toBe("Project / worktree");
   });
+
+  it("keeps duplicate changed titles valid for native menu display", () => {
+    const first = normalizeAgentWindowTitle("Investigate native menu");
+    const second = normalizeAgentWindowTitle("Investigate native menu");
+
+    expect(first).toBe("Investigate native menu");
+    expect(second).toBe("Investigate native menu");
+    expect(resolveWorktreeWindowTitle("Project / one", first)).toBe(
+      "Investigate native menu",
+    );
+    expect(resolveWorktreeWindowTitle("Project / two", second)).toBe(
+      "Investigate native menu",
+    );
+  });
 });
