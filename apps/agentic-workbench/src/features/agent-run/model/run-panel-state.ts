@@ -1,5 +1,8 @@
 import {
   appendOneTimelineItem,
+  appendSessionLifecycleStatusMessage,
+  createSessionIdleLifecycleStatusMessage,
+  createSessionStartLifecycleStatusMessage,
   readAgentThreadStatus,
   isSessionInfoUpdateEvent,
   normalizeSessionUpdatedAt,
@@ -325,8 +328,24 @@ export function applyRunEvent(
     const sessionUpdatedAt = normalizeSessionUpdatedAt(
       readSessionInfoUpdateMetadata(envelope.event)?.updatedAt,
     );
+    const statusMessages =
+      agentThreadStatus?.type === "active"
+        ? [createSessionStartLifecycleStatusMessage(envelope.runId)]
+        : [
+            createSessionIdleLifecycleStatusMessage({
+              runId: envelope.runId,
+              previousStatus: state.agentThreadStatus,
+              nextStatus: agentThreadStatus,
+            }),
+          ];
+    const items = statusMessages.reduce(
+      (currentItems, message) =>
+        appendSessionLifecycleStatusMessage(currentItems, envelope.runId, message),
+      state.items,
+    );
     return {
       ...state,
+      items,
       ...(agentThreadStatus ? { agentThreadStatus } : {}),
       ...(sessionUpdatedAt ? { sessionUpdatedAt } : {}),
       ...(agentThreadStatus?.type === "idle" ? { isAwaitingPromptResponse: false } : {}),

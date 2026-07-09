@@ -35,10 +35,19 @@ describe("agent thread status indicator", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("isSessionInfoUpdateEvent(timelineEvent)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("readSessionInfoUpdateMetadata(timelineEvent)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("readAgentThreadStatus(timelineEvent)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("createSessionStartLifecycleStatusMessage(envelope.runId)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("createSessionIdleLifecycleStatusMessage({");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("appendSessionLifecycleStatusMessage(nextItems, envelope.runId, message)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("dispatchMcpWindowTitle(metadata.title)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("setSessionUpdatedAt(nextSessionUpdatedAt)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("return;");
     expect(AGENT_RUN_PANEL_SOURCE).not.toContain("function isIdleThreadStatusEvent");
+  });
+
+  it("renders session lifecycle status with low emphasis labels", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("if (status === \"sessionCreated\") return \"Session started\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("if (status === \"sessionIdle\") return \"Agent idle\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("return \"bg-muted text-muted-foreground\"");
   });
 
   it("renders session freshness in the run header without putting it in the timeline", () => {
@@ -53,6 +62,7 @@ describe("agent thread status indicator", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("setAvailableCommandCandidates(nextCandidates)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("formatAvailableCommandsSummary(");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("<AvailableCommandsPopover");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain("createSessionStartLifecycleStatusMessage(nextAvailableCommandMetadata");
   });
 
   it("renders available command details without raw input schema JSON", () => {

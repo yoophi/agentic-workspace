@@ -4,6 +4,7 @@ import type {
   EventGroup,
   RunEvent,
   SessionInfoUpdateMetadata,
+  SessionLifecycleStatusMessage,
   TimelineItem,
   ToolFileChange,
 } from "./types";
@@ -86,6 +87,59 @@ export function formatAvailableCommandsSummary(
     return "1 command available";
   }
   return `${count} commands available`;
+}
+
+export function createSessionStartLifecycleStatusMessage(
+  runId: string,
+): SessionLifecycleStatusMessage {
+  return {
+    status: "sessionCreated",
+    label: "Session started",
+    description: "Agent session started.",
+    tone: "info",
+    dedupeKey: `${runId}:sessionCreated`,
+  };
+}
+
+export function createSessionIdleLifecycleStatusMessage({
+  runId,
+  previousStatus,
+  nextStatus,
+}: {
+  runId: string;
+  previousStatus: AgentThreadStatus | null | undefined;
+  nextStatus: AgentThreadStatus | null | undefined;
+}): SessionLifecycleStatusMessage | null {
+  if (previousStatus?.type !== "active" || nextStatus?.type !== "idle") {
+    return null;
+  }
+
+  return {
+    status: "sessionIdle",
+    label: "Agent idle",
+    description: "Ready for the next prompt.",
+    tone: "info",
+    dedupeKey: `${runId}:sessionIdle`,
+  };
+}
+
+export function appendSessionLifecycleStatusMessage(
+  items: TimelineItem[],
+  runId: string,
+  message: SessionLifecycleStatusMessage | null | undefined,
+) {
+  if (!message) {
+    return items;
+  }
+
+  return appendOneTimelineItem(
+    items,
+    toTimelineItem(runId, {
+      type: "lifecycle",
+      status: message.status,
+      message: message.description,
+    }),
+  );
 }
 
 export function toTimelineItem(runId: string, event: TimelineRunEvent): TimelineItem {

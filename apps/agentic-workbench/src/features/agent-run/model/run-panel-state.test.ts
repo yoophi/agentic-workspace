@@ -152,7 +152,7 @@ describe("run panel state", () => {
     expect(nextState.items).toHaveLength(0);
   });
 
-  it("keeps session info updates out of the timeline for the active run", () => {
+  it("keeps session info raw payloads out of the timeline for the active run", () => {
     const state = runningState({
       items: addUserMessage([], "run-active", "before"),
     });
@@ -194,13 +194,18 @@ describe("run panel state", () => {
       },
     });
 
-    expect(activeState.items).toHaveLength(1);
-    expect(idleState.items).toHaveLength(1);
-    expect(metadataOnlyState.items).toHaveLength(1);
+    expect(activeState.items).toHaveLength(2);
+    expect(idleState.items).toHaveLength(2);
+    expect(metadataOnlyState.items).toHaveLength(2);
     expect(metadataOnlyState.items[0].event).toMatchObject({
       type: "userMessage",
       text: "before",
     });
+    expect(metadataOnlyState.items[1]).toMatchObject({
+      group: "lifecycle",
+      body: "sessionCreated: Agent session started.\nsessionIdle: Ready for the next prompt.",
+    });
+    expect(metadataOnlyState.items.map((item) => item.group)).not.toContain("raw");
   });
 
   it("keeps available command updates out of the timeline and stores metadata", () => {
@@ -311,11 +316,19 @@ describe("run panel state", () => {
     );
 
     expect(activeState.agentThreadStatus).toEqual({ type: "active", activeFlags: [] });
+    expect(activeState.items[0]).toMatchObject({
+      group: "lifecycle",
+      body: "sessionCreated: Agent session started.",
+    });
     expect(idleState.agentThreadStatus).toEqual({ type: "idle" });
     expect(idleState.isAwaitingPromptResponse).toBe(false);
+    expect(idleState.items[0]).toMatchObject({
+      group: "lifecycle",
+      body: "sessionIdle: Ready for the next prompt.",
+    });
   });
 
-  it("keeps typed sessionInfo events out of the timeline", () => {
+  it("turns typed active sessionInfo events into concise lifecycle status", () => {
     const nextState = applyRunEvent(runningState(), {
       runId: "run-active",
       event: {
@@ -326,9 +339,48 @@ describe("run panel state", () => {
       },
     });
 
-    expect(nextState.items).toHaveLength(0);
+    expect(nextState.items).toHaveLength(1);
+    expect(nextState.items[0]).toMatchObject({
+      group: "lifecycle",
+      body: "sessionCreated: Agent session started.",
+    });
     expect(nextState.agentThreadStatus).toEqual({ type: "active" });
     expect(nextState.sessionUpdatedAt).toBe("2026-07-02T11:11:12.255Z");
+  });
+
+  it("dedupes repeated lifecycle status messages and resets by run scope", () => {
+    const activeState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: { type: "sessionInfo", threadStatus: { type: "active" } },
+    });
+    const repeatedActiveState = applyRunEvent(activeState, {
+      runId: "run-active",
+      event: { type: "sessionInfo", threadStatus: { type: "active" } },
+    });
+    const idleState = applyRunEvent(repeatedActiveState, {
+      runId: "run-active",
+      event: { type: "sessionInfo", threadStatus: { type: "idle" } },
+    });
+    const repeatedIdleState = applyRunEvent(idleState, {
+      runId: "run-active",
+      event: { type: "sessionInfo", threadStatus: { type: "idle" } },
+    });
+    const nextRunState = applyRunEvent(
+      runningState({ activeRunId: "run-next" }),
+      {
+        runId: "run-next",
+        event: { type: "sessionInfo", threadStatus: { type: "active" } },
+      },
+    );
+
+    expect(repeatedActiveState.items).toHaveLength(1);
+    expect(repeatedActiveState.items[0].body).toBe("sessionCreated: Agent session started.");
+    expect(repeatedIdleState.items).toHaveLength(1);
+    expect(repeatedIdleState.items[0].body).toBe(
+      "sessionCreated: Agent session started.\nsessionIdle: Ready for the next prompt.",
+    );
+    expect(nextRunState.items).toHaveLength(1);
+    expect(nextRunState.items[0].runId).toBe("run-next");
   });
 
   it("preserves agent thread status on metadata-only session info updates", () => {

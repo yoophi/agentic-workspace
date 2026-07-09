@@ -241,6 +241,14 @@ export type SessionInfoUpdateMetadata = {
   updatedAt: string | null;
 };
 
+export type SessionLifecycleStatusMessage = {
+  status: "sessionCreated" | "sessionIdle";
+  label: string;
+  description: string;
+  tone: "info";
+  dedupeKey: string;
+};
+
 export type ToolFileChangeKind =
   | "added"
   | "modified"
@@ -317,6 +325,7 @@ export type LifecycleStatus =
   | "started"
   | "initialized"
   | "sessionCreated"
+  | "sessionIdle"
   | "promptSent"
   | "promptCompleted"
   | "steerPending"
