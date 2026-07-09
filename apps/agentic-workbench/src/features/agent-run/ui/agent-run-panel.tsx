@@ -54,8 +54,11 @@ import {
 } from "@/entities/agent-run/api/query-options";
 import {
   appendOneTimelineItem,
+  appendSessionLifecycleStatusMessage,
   availableCommandCandidatesFromSessionUpdate,
   clampHighlightedIndex,
+  createSessionIdleLifecycleStatusMessage,
+  createSessionStartLifecycleStatusMessage,
   eventGroups,
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
@@ -376,6 +379,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
   const [inputMode, setInputMode] = useState<AgentInputMode>(initialInputMode);
   const activeRunIdRef = useRef<string | null>(null);
+  const agentThreadStatusRef = useRef<AgentThreadStatus>({ type: "unknown" });
   const onRunStateChangeRef = useRef(onRunStateChange);
   const activeGoalRef = useRef<ThreadGoal | null>(null);
   const activePromptSentRef = useRef(false);
@@ -653,6 +657,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, [activeRunId]);
 
   useEffect(() => {
+    agentThreadStatusRef.current = agentThreadStatus;
+  }, [agentThreadStatus]);
+
+  useEffect(() => {
     onRunStateChangeRef.current = onRunStateChange;
   }, [onRunStateChange]);
 
@@ -710,7 +718,25 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         if (nextSessionUpdatedAt) {
           setSessionUpdatedAt(nextSessionUpdatedAt);
         }
+        const statusMessages =
+          nextThreadStatus?.type === "active"
+            ? [createSessionStartLifecycleStatusMessage(envelope.runId)]
+            : [
+                createSessionIdleLifecycleStatusMessage({
+                  runId: envelope.runId,
+                  previousStatus: agentThreadStatusRef.current,
+                  nextStatus: nextThreadStatus,
+                }),
+              ];
+        setItems((currentItems) =>
+          statusMessages.reduce(
+            (nextItems, message) =>
+              appendSessionLifecycleStatusMessage(nextItems, envelope.runId, message),
+            currentItems,
+          ),
+        );
         if (nextThreadStatus) {
+          agentThreadStatusRef.current = nextThreadStatus;
           setAgentThreadStatus(nextThreadStatus);
         }
         if (nextThreadStatus?.type === "idle") {
@@ -1171,6 +1197,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setError(null);
     setItems([]);
     setAgentThreadStatus({ type: "unknown" });
+    agentThreadStatusRef.current = { type: "unknown" };
     setSessionUpdatedAt(null);
     setAvailableCommandMetadata(null);
     queuedPromptsRef.current = nextQueuedPrompts;
@@ -1182,6 +1209,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setUsageContext(null);
     usageContextRef.current = null;
     runStartedAtRef.current = Date.now();
+    setItems((currentItems) =>
+      appendSessionLifecycleStatusMessage(
+        currentItems,
+        runId,
+        createSessionStartLifecycleStatusMessage(runId),
+      ),
+    );
     setDirectPrompt(null);
     activePromptSentRef.current = false;
     activeRunIdRef.current = runId;
@@ -3653,7 +3687,8 @@ function ToolStatusIcon({ status }: { status: string }) {
 function lifecycleStatusLabel(status: string) {
   if (status === "started") return "Started";
   if (status === "initialized") return "Initialized";
-  if (status === "sessionCreated") return "Session created";
+  if (status === "sessionCreated") return "Session started";
+  if (status === "sessionIdle") return "Agent idle";
   if (status === "promptSent") return "Prompt sent";
   if (status === "promptCompleted") return "Prompt completed";
   if (status === "steerPending") return "Steer pending";
@@ -3665,6 +3700,9 @@ function lifecycleStatusLabel(status: string) {
 }
 
 function lifecycleStatusClassName(status: string) {
+  if (status === "sessionCreated" || status === "sessionIdle") {
+    return "bg-muted text-muted-foreground";
+  }
   if (status === "completed" || status === "promptCompleted") {
     return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
   }

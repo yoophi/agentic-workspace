@@ -34,6 +34,7 @@ import {
 } from "@/features/worktree-workspace/model/git-graph-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import {
   sampleAgentRunToolFileChanges,
   sampleKoreanGitCommitDetail,
@@ -556,6 +557,62 @@ export const AgentRunQueuedFirstPrompt: Story = {
           text: "첫 실행 프롬프트를 queue 상태로 먼저 표시해 주세요.",
         }}
       />
+    </div>
+  ),
+};
+
+export const AgentRunSessionLifecycleStatusStates: Story = {
+  render: () => (
+    <div className="mx-auto grid max-w-3xl gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Session lifecycle status</CardTitle>
+          <CardDescription>
+            Start, idle transition, and repeated update dedupe states.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3">
+          <Steps className="rounded-lg border bg-background px-3 py-2" defaultOpen>
+            <StepsTrigger className="items-start">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium text-foreground">Agent run</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  Session started
+                </span>
+              </span>
+            </StepsTrigger>
+            <StepsContent>
+              <StepsItem>
+                <span className="font-medium text-foreground">Session started</span>
+                <span className="ml-2 break-words">Agent session started.</span>
+              </StepsItem>
+            </StepsContent>
+          </Steps>
+          <Steps className="rounded-lg border bg-background px-3 py-2" defaultOpen>
+            <StepsTrigger className="items-start">
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="font-medium text-foreground">Agent run</span>
+                <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  Agent idle
+                </span>
+              </span>
+            </StepsTrigger>
+            <StepsContent>
+              <StepsItem>
+                <span className="font-medium text-foreground">Session started</span>
+                <span className="ml-2 break-words">Agent session started.</span>
+              </StepsItem>
+              <StepsItem>
+                <span className="font-medium text-foreground">Agent idle</span>
+                <span className="ml-2 break-words">Ready for the next prompt.</span>
+              </StepsItem>
+            </StepsContent>
+          </Steps>
+          <div className="rounded-md border border-dashed bg-muted/30 p-3 text-xs text-muted-foreground">
+            Repeated idle updates keep the same single Agent idle line for this run.
+          </div>
+        </CardContent>
+      </Card>
     </div>
   ),
 };

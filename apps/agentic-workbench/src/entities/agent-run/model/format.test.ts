@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendOneTimelineItem,
+  appendSessionLifecycleStatusMessage,
+  createSessionIdleLifecycleStatusMessage,
+  createSessionStartLifecycleStatusMessage,
   formatAvailableCommandsSummary,
   formatSessionFreshnessLabel,
   isSessionInfoUpdateEvent,
@@ -10,6 +13,7 @@ import {
   readSessionInfoUpdateMetadata,
   toTimelineItem,
 } from "@/entities/agent-run/model/format";
+import type { TimelineItem } from "@/entities/agent-run/model/types";
 
 describe("run event formatting", () => {
   it("detects session_info_update raw events in direct, update, params, and wrapped payload shapes", () => {
@@ -204,6 +208,83 @@ describe("run event formatting", () => {
         ],
       }),
     ).toBe("2 commands available");
+  });
+
+  it("creates concise session lifecycle status messages with stable dedupe keys", () => {
+    expect(createSessionStartLifecycleStatusMessage("run-1")).toEqual({
+      status: "sessionCreated",
+      label: "Session started",
+      description: "Agent session started.",
+      tone: "info",
+      dedupeKey: "run-1:sessionCreated",
+    });
+    expect(
+      createSessionIdleLifecycleStatusMessage({
+        runId: "run-1",
+        previousStatus: { type: "active" },
+        nextStatus: { type: "idle" },
+      }),
+    ).toEqual({
+      status: "sessionIdle",
+      label: "Agent idle",
+      description: "Ready for the next prompt.",
+      tone: "info",
+      dedupeKey: "run-1:sessionIdle",
+    });
+  });
+
+  it("does not create idle lifecycle messages for repeated or malformed statuses", () => {
+    expect(
+      createSessionIdleLifecycleStatusMessage({
+        runId: "run-1",
+        previousStatus: { type: "idle" },
+        nextStatus: { type: "idle" },
+      }),
+    ).toBeNull();
+    expect(
+      createSessionIdleLifecycleStatusMessage({
+        runId: "run-1",
+        previousStatus: { type: "active" },
+        nextStatus: { type: "unknown" },
+      }),
+    ).toBeNull();
+    expect(
+      createSessionIdleLifecycleStatusMessage({
+        runId: "run-1",
+        previousStatus: { type: "unknown" },
+        nextStatus: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("appends session lifecycle status messages as deduped lifecycle lines", () => {
+    const started = createSessionStartLifecycleStatusMessage("run-1");
+    const idle = createSessionIdleLifecycleStatusMessage({
+      runId: "run-1",
+      previousStatus: { type: "active" },
+      nextStatus: { type: "idle" },
+    });
+
+    const items = [
+      started,
+      started,
+      idle,
+      idle,
+    ].reduce(
+      (currentItems, message) =>
+        appendSessionLifecycleStatusMessage(currentItems, "run-1", message),
+      [] as TimelineItem[],
+    );
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      group: "lifecycle",
+      title: "Agent run",
+      tone: "info",
+    });
+    expect(items[0].body).toBe(
+      "sessionCreated: Agent session started.\nsessionIdle: Ready for the next prompt.",
+    );
   });
 
   it("keeps non-command raw events as timeline content", () => {
