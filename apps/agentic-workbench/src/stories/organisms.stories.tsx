@@ -26,6 +26,7 @@ import { ProjectWorktreeCard } from "@/features/project-worktree/ui/project-work
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
 import { WorktreeChangesPanel as WorktreeChangeReviewPanel } from "@/features/worktree-change-review/ui/worktree-changes-panel";
 import { WorktreeChangesPanel as AgentRunWorktreeChangesPanel } from "@/features/worktree-changes/ui/worktree-changes-panel";
+import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import {
   computeGitGraphRows,
@@ -38,6 +39,7 @@ import {
   sampleKoreanGitCommitDetail,
   sampleKoreanGitFileDiff,
   sampleProjects,
+  sampleSpeckitFeatures,
   sampleWorktrees,
 } from "@/shared/storybook/sample-data";
 
@@ -134,6 +136,49 @@ export const WorktreeWorkspace: Story = {
   render: () => (
     <div className="h-[720px] overflow-hidden border">
       <WorktreeWorkspacePanel worktree={sampleWorktrees[1]} />
+    </div>
+  ),
+};
+
+export const WorktreeWorkspaceSpeckit: Story = {
+  render: () => (
+    <div className="h-[720px] overflow-hidden border">
+      <WorktreeWorkspacePanel initialTab="speckit" worktree={sampleWorktrees[1]} />
+    </div>
+  ),
+};
+
+export const SpeckitFilesPanelStates: Story = {
+  render: () => (
+    <div className="grid gap-6 lg:grid-cols-2">
+      <div className="h-[620px] overflow-hidden rounded-md border">
+        <SpeckitFilesPanel
+          features={sampleSpeckitFeatures}
+          selectedDocumentPath="specs/021-speckit-files-panel/spec.md"
+          staleDocumentPath={null}
+          onRefresh={() => undefined}
+          onSelectDocument={() => undefined}
+        />
+      </div>
+      <div className="grid gap-4">
+        <div className="h-[290px] overflow-hidden rounded-md border">
+          <SpeckitFilesPanel
+            features={[]}
+            selectedDocumentPath={null}
+            onRefresh={() => undefined}
+            onSelectDocument={() => undefined}
+          />
+        </div>
+        <div className="h-[290px] overflow-hidden rounded-md border">
+          <SpeckitFilesPanel
+            errorMessage="specs 디렉터리를 읽을 수 없습니다."
+            features={[]}
+            selectedDocumentPath={null}
+            onRefresh={() => undefined}
+            onSelectDocument={() => undefined}
+          />
+        </div>
+      </div>
     </div>
   ),
 };

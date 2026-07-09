@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -5,6 +6,11 @@ import {
   autoRefreshQueryOptions,
   findStaleFileSelection,
 } from "@yoophi/workspace-auto-refresh";
+
+const WORKTREE_WORKSPACE_PANEL_SOURCE = readFileSync(
+  new URL("../ui/worktree-workspace-panel.tsx", import.meta.url),
+  "utf8",
+);
 
 describe("workbench workspace auto refresh integration", () => {
   it("uses the shared fallback refresh policy for worktree files", () => {
@@ -25,5 +31,12 @@ describe("workbench workspace auto refresh integration", () => {
       reason: "deleted",
       detectedAt: 1,
     });
+  });
+
+  it("invalidates Speckit file queries through the worktree watcher path", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("worktreeFileQueryKeys.speckit(worktree.path)");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      'activeTab === "speckit" ? "active" : "none"',
+    );
   });
 });
