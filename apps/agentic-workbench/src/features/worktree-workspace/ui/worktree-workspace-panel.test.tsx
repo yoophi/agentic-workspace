@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import type { WorktreeFileEntry } from "@/entities/worktree-file/model/types";
@@ -6,6 +7,11 @@ import {
   isParentDirectoryLoaded,
   mergeWorktreeFileEntries,
 } from "@/features/worktree-workspace/model/file-tree";
+
+const WORKTREE_WORKSPACE_PANEL_SOURCE = readFileSync(
+  new URL("./worktree-workspace-panel.tsx", import.meta.url),
+  "utf8",
+);
 
 function file(relativePath: string, size = 10): WorktreeFileEntry {
   const segments = relativePath.split("/");
@@ -116,5 +122,25 @@ describe("worktree workspace file tree", () => {
     expect(isParentDirectoryLoaded("src/app.ts", ["src"])).toBe(true);
     expect(isParentDirectoryLoaded("src/deep/inner.ts", ["src"])).toBe(false);
     expect(isParentDirectoryLoaded("src/deep/inner.ts", ["src", "src/deep"])).toBe(true);
+  });
+
+  it("connects Speckit document selection to markdown preview state", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      'type WorkspaceTabId = "git" | "files" | "markdown" | "speckit"',
+    );
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("<SpeckitWorkspaceTab worktree={worktree} />");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onSelectDocument={setSelectedDocumentPath}");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      'readWorktreeTextFile(worktree.path, selectedDocumentPath ?? "")',
+    );
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      "<MarkdownViewer blocks={blocks} components={markdownViewerComponents} />",
+    );
+  });
+
+  it("keeps stale Speckit document selection separate from successful preview content", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("staleDocumentSelection");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("선택한 Speckit 문서가 현재 목록에 없습니다");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("Speckit preview를 표시할 수 없습니다.");
   });
 });

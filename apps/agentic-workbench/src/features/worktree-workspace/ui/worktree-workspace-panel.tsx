@@ -10,6 +10,7 @@ import {
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
+  FolderKanbanIcon,
   GitBranchIcon,
   GitCommitIcon,
   GitPullRequestIcon,
@@ -40,6 +41,7 @@ import { WorktreeStatusBadge } from "@/entities/project/ui/worktree-status-badge
 import { worktreeFileQueryKeys } from "@/entities/worktree-file/api/query-keys";
 import {
   listWorktreeFiles,
+  listSpeckitMarkdownFiles,
   readWorktreeTextFile,
   startWorktreeWatcher,
   stopWorktreeWatcher,
@@ -109,17 +111,23 @@ import {
   mergeWorktreeFileEntries,
   type FileTreeRow,
 } from "@/features/worktree-workspace/model/file-tree";
+import {
+  buildSpeckitFeatures,
+  getTaskDocumentPaths,
+} from "@/features/worktree-workspace/model/speckit-files";
 import { measureSessionMilestone } from "@/shared/lib/session-perf";
 import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
+import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
+  initialTab?: WorkspaceTabId;
 };
 
-type WorkspaceTabId = "git" | "files" | "markdown";
+type WorkspaceTabId = "git" | "files" | "markdown" | "speckit";
 type GitHistoryView = "graph" | "list";
 
 type AnnotationDraftTarget =
@@ -144,6 +152,7 @@ const workspaceTabs: Array<{
   { id: "git", label: "Git", icon: GitBranchIcon },
   { id: "files", label: "Files", icon: FileIcon },
   { id: "markdown", label: "Markdown", icon: FileTextIcon },
+  { id: "speckit", label: "Speckit", icon: FolderKanbanIcon },
 ];
 
 function fullBlockAnchor(block: MarkdownBlock): AnnotationAnchor {
@@ -189,8 +198,9 @@ function createAnnotationFromAnchor({
 export function WorktreeWorkspacePanel({
   worktree,
   onSendAnnotationPrompt,
+  initialTab = "git",
 }: WorktreeWorkspacePanelProps) {
-  const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>("git");
+  const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>(initialTab);
   const [gitHistoryView, setGitHistoryView] = useState<GitHistoryView>("graph");
   const queryClient = useQueryClient();
   // watcher 구독을 유지한 채 최신 탭을 참조하기 위한 ref. effect 의존성에 탭을
@@ -226,6 +236,10 @@ export function WorktreeWorkspacePanel({
       void queryClient.invalidateQueries({
         queryKey: worktreeFileQueryKeys.textFiles(worktree.path),
         refetchType: activeTab === "git" ? "none" : "active",
+      });
+      void queryClient.invalidateQueries({
+        queryKey: worktreeFileQueryKeys.speckit(worktree.path),
+        refetchType: activeTab === "speckit" ? "active" : "none",
       });
       void queryClient.invalidateQueries({ queryKey: projectQueryKeys.worktreeChanges(worktree.path) });
 
@@ -300,11 +314,13 @@ export function WorktreeWorkspacePanel({
           />
         ) : selectedTab === "files" ? (
           <FileWorkspaceTab worktree={worktree} />
-        ) : (
+        ) : selectedTab === "markdown" ? (
           <MarkdownWorkspaceTab
             worktree={worktree}
             onSendAnnotationPrompt={onSendAnnotationPrompt}
           />
+        ) : (
+          <SpeckitWorkspaceTab worktree={worktree} />
         )}
       </div>
     </section>
@@ -973,6 +989,146 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
                 <pre className="min-h-0 flex-1 overflow-auto p-3 text-xs leading-5">
                   <code>{previewQuery.data.content}</code>
                 </pre>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
+}
+
+function SpeckitWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
+  const [selectedDocumentPath, setSelectedDocumentPath] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const filesQuery = useQuery({
+    queryKey: worktreeFileQueryKeys.speckit(worktree.path),
+    queryFn: () => listSpeckitMarkdownFiles(worktree.path),
+    ...autoRefreshQueryOptions,
+  });
+  const featuresWithoutProgress = useMemo(
+    () => buildSpeckitFeatures(filesQuery.data ?? []),
+    [filesQuery.data],
+  );
+  const taskDocumentPaths = useMemo(
+    () => getTaskDocumentPaths(featuresWithoutProgress),
+    [featuresWithoutProgress],
+  );
+  const taskQueries = useQueries({
+    queries: taskDocumentPaths.map((path) => ({
+      queryKey: worktreeFileQueryKeys.textFile(worktree.path, path),
+      queryFn: () => readWorktreeTextFile(worktree.path, path),
+      ...autoRefreshQueryOptions,
+    })),
+  });
+  const taskContentsByPath = useMemo(() => {
+    const contents: Record<string, string | undefined> = {};
+    taskDocumentPaths.forEach((path, index) => {
+      contents[path] = taskQueries[index]?.data?.content;
+    });
+    return contents;
+  }, [taskDocumentPaths, taskQueries]);
+  const features = useMemo(
+    () => buildSpeckitFeatures(filesQuery.data ?? [], taskContentsByPath),
+    [filesQuery.data, taskContentsByPath],
+  );
+  const previewQuery = useQuery({
+    enabled: selectedDocumentPath !== null,
+    queryKey: selectedDocumentPath
+      ? worktreeFileQueryKeys.textFile(worktree.path, selectedDocumentPath)
+      : worktreeFileQueryKeys.textFile(worktree.path, ""),
+    queryFn: () => readWorktreeTextFile(worktree.path, selectedDocumentPath ?? ""),
+    ...autoRefreshQueryOptions,
+  });
+  const blocks = useMemo(
+    () => parseMarkdownToBlocks(previewQuery.data?.content ?? ""),
+    [previewQuery.data?.content],
+  );
+  const selectedDocument = features
+    .flatMap((feature) => feature.documents)
+    .find((document) => document.relativePath === selectedDocumentPath);
+  const staleDocumentSelection = useMemo(() => {
+    if (!filesQuery.data || selectedDocumentPath === null) {
+      return null;
+    }
+    return findStaleFileSelection({
+      selectedPath: selectedDocumentPath,
+      availablePaths: features
+        .flatMap((feature) => feature.documents)
+        .map((document) => document.relativePath),
+    });
+  }, [features, filesQuery.data, selectedDocumentPath]);
+
+  function refreshSpeckit() {
+    void filesQuery.refetch();
+    for (const taskQuery of taskQueries) {
+      void taskQuery.refetch();
+    }
+    if (selectedDocumentPath) {
+      void queryClient.invalidateQueries({
+        queryKey: worktreeFileQueryKeys.textFile(worktree.path, selectedDocumentPath),
+      });
+    }
+  }
+
+  return (
+    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
+      <ResizablePanel id="speckit-workspace-list" defaultSize="38%" minSize="280px">
+        <SpeckitFilesPanel
+          errorMessage={filesQuery.isError ? String(filesQuery.error) : undefined}
+          features={features}
+          loading={filesQuery.isLoading}
+          refreshing={filesQuery.isFetching || taskQueries.some((query) => query.isFetching)}
+          selectedDocumentPath={selectedDocumentPath}
+          staleDocumentPath={staleDocumentSelection?.id ?? null}
+          onRefresh={refreshSpeckit}
+          onSelectDocument={setSelectedDocumentPath}
+        />
+      </ResizablePanel>
+
+      <ResizableHandle
+        aria-label="Speckit preview 영역 크기 조정"
+        className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      >
+        <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
+      </ResizableHandle>
+
+      <ResizablePanel id="speckit-workspace-preview" minSize="360px">
+        <div className="flex h-full min-h-0 flex-col">
+          <header className="shrink-0 border-b px-4 py-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-medium">Speckit preview</h2>
+                <p className="truncate font-mono text-xs text-muted-foreground">
+                  {selectedDocument?.relativePath ?? selectedDocumentPath ?? "No Speckit document selected"}
+                </p>
+              </div>
+            </div>
+          </header>
+          <div className="min-h-0 flex-1 overflow-auto p-4">
+            {selectedDocumentPath === null ? (
+              <EmptyPanel
+                title="Speckit 문서를 선택하세요"
+                description="왼쪽 Speckit 목록에서 spec, plan, tasks 문서를 선택하면 preview를 표시합니다."
+              />
+            ) : staleDocumentSelection ? (
+              <EmptyPanel
+                title="선택한 Speckit 문서가 현재 목록에 없습니다"
+                description={`${staleDocumentSelection.id} 문서가 삭제되었거나 이동되었을 수 있습니다.`}
+              />
+            ) : previewQuery.isLoading ? (
+              <InlineState icon={Loader2Icon} title="Speckit 문서를 읽는 중입니다." spinning />
+            ) : previewQuery.isError ? (
+              <InlineState
+                icon={AlertCircleIcon}
+                title="Speckit preview를 표시할 수 없습니다."
+                description={String(previewQuery.error)}
+                variant="destructive"
+              />
+            ) : previewQuery.data ? (
+              <div className="min-w-0">
+                <MarkdownViewer blocks={blocks} components={markdownViewerComponents} />
               </div>
             ) : null}
           </div>

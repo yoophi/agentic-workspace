@@ -24,6 +24,21 @@ export async function listWorktreeFiles(
   });
 }
 
+export async function listSpeckitMarkdownFiles(workingDirectory: string) {
+  try {
+    return await listWorktreeFiles(workingDirectory, {
+      kind: "markdown",
+      dir: "specs",
+    });
+  } catch (error) {
+    const message = String(error);
+    if (message.includes("Failed to resolve file path specs")) {
+      return [];
+    }
+    throw error;
+  }
+}
+
 export async function readWorktreeTextFile(
   workingDirectory: string,
   path: string,

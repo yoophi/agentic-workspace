@@ -255,6 +255,24 @@ export const WorktreeSession: Story = {
   ),
 };
 
+export const WorktreeSessionWithSpeckitFixtures: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Storybook Tauri mocks include specs/* markdown files so the Worktree Session Speckit tab can be selected and inspected.",
+      },
+    },
+  },
+  render: () => (
+    <ProjectWorktreeSessionPage
+      project={sampleProjects[0]}
+      worktree={sampleWorktrees[1]}
+      onBack={() => undefined}
+    />
+  ),
+};
+
 export const WorktreeSessionClean: Story = {
   render: () => (
     <ProjectWorktreeSessionPage
