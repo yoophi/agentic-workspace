@@ -39,6 +39,7 @@ function runningState(overrides: Partial<RunEventState> = {}): RunEventState {
     usageContext: null,
     agentThreadStatus: { type: "unknown" },
     sessionUpdatedAt: null,
+    availableCommandMetadata: null,
     isAwaitingPromptResponse: true,
     isRunning: true,
     activeRunId: "run-active",
@@ -202,13 +203,76 @@ describe("run panel state", () => {
     });
   });
 
-  it("keeps non-session raw events in the timeline for the active run", () => {
+  it("keeps available command updates out of the timeline and stores metadata", () => {
     const nextState = applyRunEvent(runningState(), {
       runId: "run-active",
       event: {
         type: "raw",
         method: "session/update",
-        payload: { sessionUpdate: "available_commands_update" },
+        payload: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            { name: "mcp", description: "List tools.", input: null },
+            {
+              name: "review",
+              description: "Review changes.",
+              input: { hint: "optional review instructions" },
+            },
+          ],
+        },
+      },
+    });
+
+    expect(nextState.items).toHaveLength(0);
+    expect(nextState.availableCommandMetadata?.commands).toMatchObject([
+      { name: "mcp", description: "List tools.", inputHint: null },
+      {
+        name: "review",
+        description: "Review changes.",
+        inputHint: "optional review instructions",
+      },
+    ]);
+  });
+
+  it("suppresses empty and malformed available command updates", () => {
+    const emptyState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [],
+        },
+      },
+    });
+    const malformedState = applyRunEvent(emptyState, {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [null, { description: "bad" }, { name: "valid" }],
+        },
+      },
+    });
+
+    expect(emptyState.items).toHaveLength(0);
+    expect(emptyState.availableCommandMetadata?.commands).toHaveLength(0);
+    expect(malformedState.items).toHaveLength(0);
+    expect(malformedState.availableCommandMetadata?.commands.map((item) => item.name)).toEqual([
+      "valid",
+    ]);
+  });
+
+  it("keeps non-command raw events in the timeline for the active run", () => {
+    const nextState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: { sessionUpdate: "other_update" },
       },
     });
 

@@ -187,6 +187,20 @@ export type AgentToolCommandCandidate = {
   scope: AgentToolCommandCandidateScope;
 };
 
+export type CommandDetailItem = {
+  id: string;
+  name: string;
+  description: string | null;
+  inputHint: string | null;
+  source: AgentToolCommandCandidateSource;
+};
+
+export type AvailableCommandMetadata = {
+  sessionUpdate: "available_commands_update";
+  commands: CommandDetailItem[];
+  updatedAt: number | null;
+};
+
 export type AgentToolCommandCandidateQuery = {
   runId?: string | null;
   agentId: string;

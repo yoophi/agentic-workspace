@@ -46,4 +46,22 @@ describe("agent thread status indicator", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("aria-label=\"Session updated at\"");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("<AgentThreadStatusBadge status={agentThreadStatus} />");
   });
+
+  it("handles available_commands_update as metadata instead of raw timeline output", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("readAvailableCommandMetadata(");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setAvailableCommandMetadata(nextAvailableCommandMetadata)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setAvailableCommandCandidates(nextCandidates)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("formatAvailableCommandsSummary(");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("<AvailableCommandsPopover");
+  });
+
+  it("renders available command details without raw input schema JSON", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("function AvailableCommandsPopover");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("Available commands");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("Input: {command.inputHint}");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("max-h-80 min-w-0 overflow-y-auto");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("min-w-0 break-all font-mono");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("No commands available");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain("JSON.stringify(command");
+  });
 });

@@ -7,6 +7,7 @@ import {
   findPromptAutocompleteTrigger,
   insertionTextForPrefix,
   normalizeToolCommandCandidates,
+  readAvailableCommandMetadata,
   replacePromptAutocompleteTrigger,
 } from "./prompt-autocomplete";
 import type { AgentToolCommandCandidate } from "./types";
@@ -136,6 +137,68 @@ describe("prompt autocomplete helpers", () => {
     ]);
   });
 
+  it("reads available command metadata with descriptions and input hints", () => {
+    const metadata = readAvailableCommandMetadata(
+      {
+        sessionUpdate: "available_commands_update",
+        availableCommands: [
+          {
+            name: "mcp",
+            description: "List configured Model Context Protocol (MCP) tools.",
+            input: null,
+          },
+          {
+            name: "review",
+            description: "Review uncommitted changes.",
+            input: { hint: "optional review instructions" },
+          },
+          {
+            name: "$speckit-implement",
+            description: "Execute tasks.",
+            input: null,
+          },
+          {
+            name: "/status",
+            description: "Show status.",
+            input: "optional filter",
+          },
+        ],
+      },
+      123,
+    );
+
+    expect(metadata).toMatchObject({
+      sessionUpdate: "available_commands_update",
+      updatedAt: 123,
+      commands: [
+        {
+          name: "mcp",
+          description: "List configured Model Context Protocol (MCP) tools.",
+          inputHint: null,
+          source: "appCommand",
+        },
+        {
+          name: "review",
+          description: "Review uncommitted changes.",
+          inputHint: "optional review instructions",
+          source: "appCommand",
+        },
+        {
+          name: "$speckit-implement",
+          description: "Execute tasks.",
+          inputHint: null,
+          source: "extension",
+        },
+        {
+          name: "/status",
+          description: "Show status.",
+          inputHint: "optional filter",
+          source: "appCommand",
+        },
+      ],
+    });
+  });
+
   it("extracts available command candidates from wrapped session/update payloads", () => {
     expect(
       availableCommandCandidatesFromSessionUpdate(
@@ -148,5 +211,72 @@ describe("prompt autocomplete helpers", () => {
         { runId: null, agentId: "codex", workingDirectory: "/repo" },
       ).map((item) => item.name),
     ).toEqual(["status"]);
+  });
+
+  it("reads available command metadata from params and message wrapper payloads", () => {
+    expect(
+      readAvailableCommandMetadata(
+        {
+          params: {
+            update: {
+              sessionUpdate: "available_commands_update",
+              availableCommands: [{ name: "status", description: "Display status." }],
+            },
+          },
+        },
+        1,
+      )?.commands.map((item) => item.name),
+    ).toEqual(["status"]);
+    expect(
+      readAvailableCommandMetadata(
+        {
+          message: {
+            params: {
+              update: {
+                sessionUpdate: "available_commands_update",
+                availableCommands: [{ name: "$skill", description: "Run skill." }],
+              },
+            },
+          },
+        },
+        1,
+      )?.commands.map((item) => item.name),
+    ).toEqual(["$skill"]);
+  });
+
+  it("ignores malformed command entries while preserving valid commands", () => {
+    expect(
+      readAvailableCommandMetadata(
+        {
+          sessionUpdate: "available_commands_update",
+          availableCommands: [
+            null,
+            { description: "Missing name" },
+            { name: " ", description: "Blank name" },
+            { name: "valid", input: { hint: "optional text" } },
+            { name: "bad-input", input: { schema: { type: "object" } } },
+          ],
+        },
+        2,
+      )?.commands,
+    ).toMatchObject([
+      { name: "valid", inputHint: "optional text" },
+      { name: "bad-input", inputHint: null },
+    ]);
+  });
+
+  it("returns empty metadata for missing or invalid availableCommands arrays", () => {
+    expect(
+      readAvailableCommandMetadata(
+        { sessionUpdate: "available_commands_update" },
+        3,
+      ),
+    ).toMatchObject({ commands: [], updatedAt: 3 });
+    expect(
+      readAvailableCommandMetadata(
+        { sessionUpdate: "available_commands_update", availableCommands: "bad" },
+        3,
+      ),
+    ).toMatchObject({ commands: [], updatedAt: 3 });
   });
 });
