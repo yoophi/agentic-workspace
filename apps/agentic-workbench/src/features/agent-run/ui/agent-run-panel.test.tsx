@@ -33,8 +33,17 @@ describe("agent thread status indicator", () => {
 
   it("handles session_info_update without appending raw timeline items", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("isSessionInfoUpdateEvent(timelineEvent)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("readSessionInfoUpdateMetadata(timelineEvent)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("readAgentThreadStatus(timelineEvent)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("dispatchMcpWindowTitle(metadata.title)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setSessionUpdatedAt(nextSessionUpdatedAt)");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("return;");
     expect(AGENT_RUN_PANEL_SOURCE).not.toContain("function isIdleThreadStatusEvent");
+  });
+
+  it("renders session freshness in the run header without putting it in the timeline", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("formatSessionFreshnessLabel(sessionUpdatedAt)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("aria-label=\"Session updated at\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("<AgentThreadStatusBadge status={agentThreadStatus} />");
   });
 });

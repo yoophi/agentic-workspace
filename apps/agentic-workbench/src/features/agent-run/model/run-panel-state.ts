@@ -2,6 +2,8 @@ import {
   appendOneTimelineItem,
   readAgentThreadStatus,
   isSessionInfoUpdateEvent,
+  normalizeSessionUpdatedAt,
+  readSessionInfoUpdateMetadata,
   toTimelineItem,
 } from "@/entities/agent-run/model";
 import type { RunEventEnvelope, TimelineItem } from "@/entities/agent-run/model";
@@ -66,6 +68,7 @@ export type RunEventState = {
   items: TimelineItem[];
   usageContext: UsageContext | null;
   agentThreadStatus: AgentThreadStatus;
+  sessionUpdatedAt: string | null;
   isAwaitingPromptResponse: boolean;
   isRunning: boolean;
   activeRunId: string | null;
@@ -316,9 +319,13 @@ export function applyRunEvent(
 
   if (isSessionInfoUpdateEvent(envelope.event)) {
     const agentThreadStatus = readAgentThreadStatus(envelope.event);
+    const sessionUpdatedAt = normalizeSessionUpdatedAt(
+      readSessionInfoUpdateMetadata(envelope.event)?.updatedAt,
+    );
     return {
       ...state,
       ...(agentThreadStatus ? { agentThreadStatus } : {}),
+      ...(sessionUpdatedAt ? { sessionUpdatedAt } : {}),
       ...(agentThreadStatus?.type === "idle" ? { isAwaitingPromptResponse: false } : {}),
     };
   }

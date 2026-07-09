@@ -34,6 +34,11 @@ import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary";
 import { markSessionRouteEntered } from "@/shared/lib/session-perf";
 import {
+  MCP_WINDOW_TITLE_EVENT,
+  MCP_WINDOW_TITLE_FALLBACK_EVENT,
+  type McpWindowTitleEvent,
+} from "@/shared/lib/workspace-window-title";
+import {
   formatWorktreeWindowTitle,
   normalizeAgentWindowTitle,
   resolveWorktreeWindowTitle,
@@ -52,13 +57,6 @@ import { SettingsPage } from "@/pages/settings/ui/settings-page";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
-
-const MCP_WINDOW_TITLE_EVENT = "workspace://mcp-window-title";
-const MCP_WINDOW_TITLE_FALLBACK_EVENT = "mcp-window-title-fallback";
-
-type McpWindowTitleEvent = {
-  title: string;
-};
 
 export function App() {
   const navigate = useNavigate();

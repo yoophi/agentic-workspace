@@ -14,4 +14,12 @@ describe("App settings entrypoints", () => {
   it("passes the dedicated opener to worktree session routes", () => {
     expect(APP_SOURCE).toContain("onOpenSettings={openSettings}");
   });
+
+  it("uses the shared MCP window title event helper for standalone session titles", () => {
+    expect(APP_SOURCE).toContain("@/shared/lib/workspace-window-title");
+    expect(APP_SOURCE).toContain("MCP_WINDOW_TITLE_EVENT");
+    expect(APP_SOURCE).toContain("MCP_WINDOW_TITLE_FALLBACK_EVENT");
+    expect(APP_SOURCE).toContain("normalizeAgentWindowTitle(title)");
+    expect(APP_SOURCE).toContain("getCurrentWindow().setTitle(windowTitle)");
+  });
 });
