@@ -717,6 +717,18 @@ const promptCommandCandidates: AgentToolCommandCandidate[] = [
   },
 ];
 
+const manyPromptCommandCandidates: AgentToolCommandCandidate[] = [
+  ...promptCommandCandidates,
+  ...Array.from({ length: 18 }, (_, index) => ({
+    id: `session:sample_tool_${index + 1}`,
+    name: `sample_tool_${String(index + 1).padStart(2, "0")}`,
+    description: `Sample command candidate ${index + 1} for scroll and keyboard highlight visibility checks.`,
+    insertText: `$sample_tool_${String(index + 1).padStart(2, "0")}`,
+    source: "sessionTool" as const,
+    scope: { runId: "run-1", agentId: "codex", workingDirectory: "/repo" },
+  })),
+];
+
 export const PromptCommandAutocompleteStates: Story = {
   render: () => (
     <div className="grid gap-6">
@@ -731,8 +743,14 @@ export const PromptCommandAutocompleteStates: Story = {
         {
           title: "Many candidates",
           status: "ready" as const,
-          candidates: promptCommandCandidates,
+          candidates: manyPromptCommandCandidates.slice(0, 8),
           highlightedIndex: 1,
+        },
+        {
+          title: "Scrolled highlight",
+          status: "ready" as const,
+          candidates: manyPromptCommandCandidates,
+          highlightedIndex: manyPromptCommandCandidates.length - 2,
         },
         { title: "No match", status: "noMatch" as const, candidates: [], highlightedIndex: -1 },
         { title: "Empty", status: "empty" as const, candidates: [], highlightedIndex: -1 },

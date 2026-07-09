@@ -65,3 +65,41 @@ describe("agent thread status indicator", () => {
     expect(AGENT_RUN_PANEL_SOURCE).not.toContain("JSON.stringify(command");
   });
 });
+
+describe("prompt command autocomplete keyboard navigation", () => {
+  it("routes autocomplete keyboard handling before prompt history navigation", () => {
+    const autocompleteIndex = AGENT_RUN_PANEL_SOURCE.indexOf(
+      "if (handleAutocompleteKeyDown(event))",
+    );
+    const historyIndex = AGENT_RUN_PANEL_SOURCE.indexOf(
+      "handlePromptHistoryNavigation(event, \"previous\")",
+    );
+
+    expect(autocompleteIndex).toBeGreaterThan(-1);
+    expect(historyIndex).toBeGreaterThan(-1);
+    expect(autocompleteIndex).toBeLessThan(historyIndex);
+  });
+
+  it("handles ArrowUp and ArrowDown by clamping highlighted autocomplete candidates", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("function handleAutocompleteKeyDown");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("event.key === \"ArrowDown\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("event.key === \"ArrowUp\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("clampHighlightedIndex(current + 1, autocompleteCandidates.length)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("clampHighlightedIndex(current - 1, autocompleteCandidates.length)");
+  });
+
+  it("handles Enter, Tab, and Escape without adding multi-select state", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("event.key === \"Escape\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("event.key === \"Enter\" || event.key === \"Tab\"");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("selectAutocompleteCandidate(autocompleteCandidates[index])");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setAutocompleteSuppression({");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain("selectedCommandCandidates");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain("selectedCommands");
+  });
+
+  it("keeps highlighted index clamped when candidate length changes", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("useEffect(() => {\n    setAutocompleteHighlightedIndex((current) =>");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("clampHighlightedIndex(current, autocompleteCandidates.length)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("}, [autocompleteCandidates.length])");
+  });
+});
