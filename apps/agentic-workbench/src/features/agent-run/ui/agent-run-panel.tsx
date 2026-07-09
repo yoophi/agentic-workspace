@@ -59,10 +59,12 @@ import {
   eventGroups,
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
+  formatAvailableCommandsSummary,
   formatSessionFreshnessLabel,
   isAvailableCommandsSessionUpdate,
   isSessionInfoUpdateEvent,
   normalizeSessionUpdatedAt,
+  readAvailableCommandMetadata,
   readAgentThreadStatus,
   readSessionInfoUpdateMetadata,
   replacePromptAutocompleteTrigger,
@@ -76,6 +78,7 @@ import type {
   AgentRunSessionMode,
   AgentRunSettings,
   AgentToolCommandCandidate,
+  AvailableCommandMetadata,
   GoalStatus,
   PermissionMode,
   ProviderSession,
@@ -341,6 +344,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [availableCommandCandidates, setAvailableCommandCandidates] = useState<
     AgentToolCommandCandidate[]
   >([]);
+  const [availableCommandMetadata, setAvailableCommandMetadata] =
+    useState<AvailableCommandMetadata | null>(null);
   const [autocompleteSuppression, setAutocompleteSuppression] = useState<{
     text: string;
     cursorStart: number;
@@ -641,6 +646,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
     setAvailableCommandCandidates([]);
+    setAvailableCommandMetadata(null);
     if (!activeRunId) {
       setSessionUpdatedAt(null);
     }
@@ -714,6 +720,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       }
 
       if (timelineEvent.type === "raw") {
+        const nextAvailableCommandMetadata = readAvailableCommandMetadata(
+          timelineEvent.payload,
+        );
         const nextCandidates = availableCommandCandidatesFromSessionUpdate(
           timelineEvent.payload,
           {
@@ -723,7 +732,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           },
         );
         if (isAvailableCommandsSessionUpdate(timelineEvent.payload)) {
+          setAvailableCommandMetadata(nextAvailableCommandMetadata);
           setAvailableCommandCandidates(nextCandidates);
+          return;
         }
       }
 
@@ -1046,6 +1057,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       ? Math.min(100, Math.round((usageContext.used / usageContext.size) * 100))
       : null;
   const sessionFreshnessLabel = formatSessionFreshnessLabel(sessionUpdatedAt);
+  const availableCommandsSummary = formatAvailableCommandsSummary(
+    availableCommandMetadata,
+  );
   const pendingPermission = useMemo(() => findPendingPermission(items), [items]);
   const canStartRun = Boolean(
     selectedAgentId &&
@@ -1158,6 +1172,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setItems([]);
     setAgentThreadStatus({ type: "unknown" });
     setSessionUpdatedAt(null);
+    setAvailableCommandMetadata(null);
     queuedPromptsRef.current = nextQueuedPrompts;
     setQueuedPrompts(nextQueuedPrompts);
     pendingSteersRef.current = [];
@@ -1992,6 +2007,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                         <span aria-label="Session updated at">
                           {sessionFreshnessLabel}
                         </span>
+                      )}
+                      {availableCommandMetadata && (
+                        <AvailableCommandsPopover
+                          metadata={availableCommandMetadata}
+                          summary={availableCommandsSummary}
+                        />
                       )}
                       <AgentThreadStatusBadge status={agentThreadStatus} />
                     </div>
@@ -3287,6 +3308,66 @@ function QueuedPromptTimeline({
 
 function addRunEventItem(items: TimelineItem[], runId: string, event: TimelineRunEvent) {
   return appendOneTimelineItem(items, toTimelineItem(runId, event));
+}
+
+function AvailableCommandsPopover({
+  metadata,
+  summary,
+}: {
+  metadata: AvailableCommandMetadata;
+  summary: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-muted-foreground"
+          aria-label="Available commands"
+        >
+          {summary}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-96 max-w-[calc(100vw-2rem)] min-w-0 p-0">
+        <div className="min-w-0 border-b px-3 py-2">
+          <div className="text-sm font-medium">Available commands</div>
+          <div className="text-xs text-muted-foreground">{summary}</div>
+        </div>
+        <div className="max-h-80 min-w-0 overflow-y-auto p-2">
+          {metadata.commands.length === 0 ? (
+            <div className="px-2 py-6 text-center text-xs text-muted-foreground">
+              No commands available
+            </div>
+          ) : (
+            <div className="grid min-w-0 gap-1">
+              {metadata.commands.map((command) => (
+                <div
+                  key={command.id}
+                  className="min-w-0 rounded-md border px-2 py-1.5 text-xs"
+                >
+                  <div className="min-w-0 break-all font-mono font-medium text-foreground">
+                    {command.name}
+                  </div>
+                  {command.description && (
+                    <div className="mt-1 line-clamp-2 min-w-0 break-all text-muted-foreground">
+                      {command.description}
+                    </div>
+                  )}
+                  {command.inputHint && (
+                    <div className="mt-1 min-w-0 break-all text-muted-foreground">
+                      Input: {command.inputHint}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 function AgentThreadStatusBadge({ status }: { status: AgentThreadStatus }) {

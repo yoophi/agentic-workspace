@@ -1,5 +1,6 @@
 import type {
   AgentThreadStatus,
+  AvailableCommandMetadata,
   EventGroup,
   RunEvent,
   SessionInfoUpdateMetadata,
@@ -72,6 +73,19 @@ export function formatSessionFreshnessLabel(updatedAt: string | null | undefined
   const hours = String(date.getUTCHours()).padStart(2, "0");
   const minutes = String(date.getUTCMinutes()).padStart(2, "0");
   return `Updated ${year}-${month}-${day} ${hours}:${minutes} UTC`;
+}
+
+export function formatAvailableCommandsSummary(
+  metadata: AvailableCommandMetadata | null | undefined,
+) {
+  const count = metadata?.commands.length ?? 0;
+  if (count === 0) {
+    return "No commands available";
+  }
+  if (count === 1) {
+    return "1 command available";
+  }
+  return `${count} commands available`;
 }
 
 export function toTimelineItem(runId: string, event: TimelineRunEvent): TimelineItem {

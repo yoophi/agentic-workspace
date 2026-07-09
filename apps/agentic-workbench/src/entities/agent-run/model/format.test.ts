@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendOneTimelineItem,
+  formatAvailableCommandsSummary,
   formatSessionFreshnessLabel,
   isSessionInfoUpdateEvent,
   normalizeSessionUpdatedAt,
@@ -155,6 +156,66 @@ describe("run event formatting", () => {
     expect(normalizeSessionUpdatedAt("not-a-date")).toBeNull();
     expect(formatSessionFreshnessLabel(undefined)).toBeNull();
     expect(formatSessionFreshnessLabel("not-a-date")).toBeNull();
+  });
+
+  it("formats available command summaries for empty, singular, and plural counts", () => {
+    expect(formatAvailableCommandsSummary(null)).toBe("No commands available");
+    expect(
+      formatAvailableCommandsSummary({
+        sessionUpdate: "available_commands_update",
+        updatedAt: 1,
+        commands: [],
+      }),
+    ).toBe("No commands available");
+    expect(
+      formatAvailableCommandsSummary({
+        sessionUpdate: "available_commands_update",
+        updatedAt: 1,
+        commands: [
+          {
+            id: "cmd-1",
+            name: "status",
+            description: null,
+            inputHint: null,
+            source: "appCommand",
+          },
+        ],
+      }),
+    ).toBe("1 command available");
+    expect(
+      formatAvailableCommandsSummary({
+        sessionUpdate: "available_commands_update",
+        updatedAt: 1,
+        commands: [
+          {
+            id: "cmd-1",
+            name: "status",
+            description: null,
+            inputHint: null,
+            source: "appCommand",
+          },
+          {
+            id: "cmd-2",
+            name: "$skill",
+            description: null,
+            inputHint: null,
+            source: "extension",
+          },
+        ],
+      }),
+    ).toBe("2 commands available");
+  });
+
+  it("keeps non-command raw events as timeline content", () => {
+    const item = toTimelineItem("run-1", {
+      type: "raw",
+      method: "session/update",
+      payload: { sessionUpdate: "other_update" },
+    });
+
+    expect(item.group).toBe("raw");
+    expect(item.title).toBe("session/update");
+    expect(item.body).toContain("other_update");
   });
 
   it("shows Ralph loop iteration number and status", () => {

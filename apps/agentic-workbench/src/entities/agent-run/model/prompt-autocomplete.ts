@@ -1,4 +1,9 @@
-import type { AgentToolCommandCandidate } from "./types";
+import type {
+  AgentToolCommandCandidate,
+  AgentToolCommandCandidateSource,
+  AvailableCommandMetadata,
+  CommandDetailItem,
+} from "./types";
 
 export type PromptAutocompleteTrigger = {
   prefix: "$" | "/";
@@ -79,47 +84,64 @@ export function availableCommandCandidatesFromSessionUpdate(
   updatePayload: unknown,
   scope: AvailableCommandCandidateScope,
 ): AgentToolCommandCandidate[] {
+  const metadata = readAvailableCommandMetadata(updatePayload);
+  if (!metadata) {
+    return [];
+  }
+
+  return normalizeToolCommandCandidates(
+    metadata.commands.map((command) => ({
+      id: command.id,
+      name: command.name,
+      description: command.description,
+      insertText: command.name,
+      source: command.source,
+      scope,
+    })),
+  );
+}
+
+export function readAvailableCommandMetadata(
+  updatePayload: unknown,
+  receivedAt: number | null = Date.now(),
+): AvailableCommandMetadata | null {
   const update = unwrapSessionUpdate(updatePayload);
   if (!update || readString(update.sessionUpdate) !== "available_commands_update") {
-    return [];
+    return null;
   }
 
   const availableCommands = Array.isArray(update.availableCommands)
     ? update.availableCommands
     : [];
 
-  return normalizeToolCommandCandidates(
-    availableCommands.flatMap((rawCommand, index) => {
-      if (!rawCommand || typeof rawCommand !== "object") {
-        return [];
-      }
-
-      const command = rawCommand as Record<string, unknown>;
-      const name = readString(command.name)?.trim() ?? "";
-      if (!name) {
-        return [];
-      }
-
-      const description = readString(command.description)?.trim() || null;
-      const source = name.startsWith("$") ? "extension" : "appCommand";
-
-      return [
-        {
-          id: `available-command:${name}:${index}`,
-          name,
-          description,
-          insertText: name,
-          source,
-          scope,
-        },
-      ];
-    }),
-  );
+  return {
+    sessionUpdate: "available_commands_update",
+    commands: availableCommands.flatMap(readCommandDetailItem),
+    updatedAt: receivedAt,
+  };
 }
 
 export function isAvailableCommandsSessionUpdate(updatePayload: unknown) {
-  const update = unwrapSessionUpdate(updatePayload);
-  return readString(update?.sessionUpdate) === "available_commands_update";
+  return readAvailableCommandMetadata(updatePayload, null) !== null;
+}
+
+export function formatCommandInputHint(input: unknown) {
+  if (!input) {
+    return null;
+  }
+  if (typeof input === "string") {
+    return input.trim() || null;
+  }
+  if (typeof input !== "object") {
+    return null;
+  }
+
+  const record = input as Record<string, unknown>;
+  const hint = readString(record.hint)?.trim();
+  if (hint) {
+    return hint;
+  }
+  return null;
 }
 
 export function filterToolCommandCandidates(
@@ -194,9 +216,64 @@ function unwrapSessionUpdate(payload: unknown): Record<string, unknown> | null {
   if (value.update && typeof value.update === "object") {
     return value.update as Record<string, unknown>;
   }
+  const params = value.params;
+  if (params && typeof params === "object") {
+    const update = (params as Record<string, unknown>).update;
+    if (update && typeof update === "object") {
+      return update as Record<string, unknown>;
+    }
+  }
+  const message = value.message;
+  if (message && typeof message === "object") {
+    const params = (message as Record<string, unknown>).params;
+    if (params && typeof params === "object") {
+      const update = (params as Record<string, unknown>).update;
+      if (update && typeof update === "object") {
+        return update as Record<string, unknown>;
+      }
+    }
+  }
   return value;
 }
 
 function readString(value: unknown) {
   return typeof value === "string" ? value : null;
+}
+
+function readCommandDetailItem(
+  rawCommand: unknown,
+  index: number,
+): CommandDetailItem[] {
+  if (!rawCommand || typeof rawCommand !== "object") {
+    return [];
+  }
+
+  const command = rawCommand as Record<string, unknown>;
+  const name = readString(command.name)?.trim() ?? "";
+  if (!name) {
+    return [];
+  }
+
+  const description = readString(command.description)?.trim() || null;
+  const inputHint = formatCommandInputHint(command.input);
+  const source = commandSourceForName(name);
+  return [
+    {
+      id: `available-command:${name}:${index}`,
+      name,
+      description,
+      inputHint,
+      source,
+    },
+  ];
+}
+
+function commandSourceForName(name: string): AgentToolCommandCandidateSource {
+  if (name.startsWith("$")) {
+    return "extension";
+  }
+  if (name.startsWith("/")) {
+    return "appCommand";
+  }
+  return "appCommand";
 }

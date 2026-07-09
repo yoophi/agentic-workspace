@@ -3,6 +3,7 @@ import {
   readAgentThreadStatus,
   isSessionInfoUpdateEvent,
   normalizeSessionUpdatedAt,
+  readAvailableCommandMetadata,
   readSessionInfoUpdateMetadata,
   toTimelineItem,
 } from "@/entities/agent-run/model";
@@ -12,6 +13,7 @@ import type {
   AgentCommandOverrides,
   AgentDescriptor,
   AgentProfile,
+  AvailableCommandMetadata,
 } from "@/entities/agent-run/model/types";
 import { resolveAgentProfileLaunch } from "@/features/agent-command-override/model/command-overrides";
 
@@ -69,6 +71,7 @@ export type RunEventState = {
   usageContext: UsageContext | null;
   agentThreadStatus: AgentThreadStatus;
   sessionUpdatedAt: string | null;
+  availableCommandMetadata: AvailableCommandMetadata | null;
   isAwaitingPromptResponse: boolean;
   isRunning: boolean;
   activeRunId: string | null;
@@ -328,6 +331,18 @@ export function applyRunEvent(
       ...(sessionUpdatedAt ? { sessionUpdatedAt } : {}),
       ...(agentThreadStatus?.type === "idle" ? { isAwaitingPromptResponse: false } : {}),
     };
+  }
+
+  if (envelope.event.type === "raw") {
+    const availableCommandMetadata = readAvailableCommandMetadata(
+      envelope.event.payload,
+    );
+    if (availableCommandMetadata) {
+      return {
+        ...state,
+        availableCommandMetadata,
+      };
+    }
   }
 
   const nextState = {
