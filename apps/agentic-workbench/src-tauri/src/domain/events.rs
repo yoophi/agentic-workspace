@@ -82,6 +82,9 @@ pub enum LifecycleStatus {
     SessionCreated,
     PromptSent,
     PromptCompleted,
+    SteerPending,
+    SteerAccepted,
+    SteerRejected,
     Cancelled,
     Completed,
 }

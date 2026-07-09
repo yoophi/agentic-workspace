@@ -17,6 +17,42 @@ use crate::{
 
 type PendingMap = HashMap<u64, oneshot::Sender<std::result::Result<Value, RpcError>>>;
 
+pub struct PendingRpcRequest {
+    id: u64,
+    method: String,
+    rx: oneshot::Receiver<std::result::Result<Value, RpcError>>,
+}
+
+impl PendingRpcRequest {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
+    pub async fn receive(self) -> std::result::Result<Value, RpcError> {
+        match self.rx.await {
+            Ok(result) => result,
+            Err(err) => Err(RpcError {
+                code: -32603,
+                message: format!("connection closed while waiting for {}: {err}", self.method),
+                data: None,
+            }),
+        }
+    }
+
+    pub async fn receive_typed<R>(self) -> std::result::Result<R::Response, RpcError>
+    where
+        R: JsonRpcRequest,
+    {
+        let method = self.method.clone();
+        let result = self.receive().await?;
+        R::Response::from_value(&method, result).map_err(|err| RpcError {
+            code: i32::from(err.code) as i64,
+            message: err.message,
+            data: err.data,
+        })
+    }
+}
+
 /// JSON-RPC 2.0 peer over the agent's stdin/stdout.
 ///
 /// Owns outbound writes, an id counter, and the map of in-flight
@@ -38,11 +74,11 @@ impl RpcPeer {
         }
     }
 
-    pub async fn request(
+    pub async fn start_request(
         &self,
         method: &str,
         params: Value,
-    ) -> std::result::Result<Value, RpcError> {
+    ) -> std::result::Result<PendingRpcRequest, RpcError> {
         let id = {
             let mut next_id = self.next_id.lock().await;
             let id = *next_id;
@@ -60,14 +96,19 @@ impl RpcPeer {
                 data: None,
             });
         }
-        match rx.await {
-            Ok(result) => result,
-            Err(err) => Err(RpcError {
-                code: -32603,
-                message: format!("connection closed while waiting for {method}: {err}"),
-                data: None,
-            }),
-        }
+        Ok(PendingRpcRequest {
+            id,
+            method: method.to_string(),
+            rx,
+        })
+    }
+
+    pub async fn request(
+        &self,
+        method: &str,
+        params: Value,
+    ) -> std::result::Result<Value, RpcError> {
+        self.start_request(method, params).await?.receive().await
     }
 
     pub async fn request_typed<R>(&self, request: R) -> std::result::Result<R::Response, RpcError>
@@ -86,6 +127,15 @@ impl RpcPeer {
             message: err.message,
             data: err.data,
         })
+    }
+
+    pub async fn cancel_request(&self, request_id: u64) -> Result<()> {
+        self.send_value(&json!({
+            "jsonrpc": "2.0",
+            "method": "$/cancel_request",
+            "params": { "requestId": request_id }
+        }))
+        .await
     }
 
     pub(crate) async fn respond_ok(&self, id: Value, result: Value) -> Result<()> {

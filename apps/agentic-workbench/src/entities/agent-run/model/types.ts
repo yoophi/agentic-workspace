@@ -287,6 +287,9 @@ export type LifecycleStatus =
   | "sessionCreated"
   | "promptSent"
   | "promptCompleted"
+  | "steerPending"
+  | "steerAccepted"
+  | "steerRejected"
   | "completed"
   | "cancelled";
 

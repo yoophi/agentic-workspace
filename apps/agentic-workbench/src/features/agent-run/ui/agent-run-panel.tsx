@@ -25,6 +25,7 @@ import {
 
 import {
   cancelAgentRun,
+  cancelCurrentPromptAndSendToRun,
   getAgentRunSettings,
   listenRunEvents,
   listAgents,
@@ -35,6 +36,7 @@ import {
   sendPromptToRun,
   setRunPermissionMode,
   startAgentRun,
+  steerPromptToRun,
 } from "@/entities/agent-run/api/agent-run-repository";
 import {
   clearGoal,
@@ -89,28 +91,35 @@ import {
   activateRunStartQueuedPrompt,
   addUserMessage,
   appendQueuedPrompt,
+  appendPendingSteer,
   appendPromptHistory,
   buildSteerPrompt,
+  createSteerInput,
   createQueuedPrompt,
   createRunStartQueuedPrompt,
+  acceptPendingSteer,
   initialPromptHistoryState,
-  insertQueuedPrompt,
   isOverrideCommandFailure,
   isPromptHistoryNavigationBoundary,
   moveQueuedPrompt as reorderQueuedPrompt,
   navigatePromptHistory,
-  removeQueuedPrompt,
+  moveRejectedSteerToQueue,
+  prepareQueuedPromptSteer,
+  rejectPendingSteer,
+  removeRejectedSteer,
   removeUserMessage,
+  retryRejectedSteer,
   resolveRequestAgentLaunch,
   resolveSelectedProfileId,
   resetPromptHistoryCursor,
-  shouldAutoDispatchQueuedPrompt,
+  shouldAutoDispatchQueuedPromptWithSteers,
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
 import type {
   PromptHistoryDirection,
   QueuedPrompt,
   QueuedPromptSource,
+  SteerInput,
   UsageContext,
 } from "@/features/agent-run/model/run-panel-state";
 import {
@@ -336,6 +345,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [isAwaitingPromptResponse, setIsAwaitingPromptResponse] = useState(false);
   const [directPrompt, setDirectPrompt] = useState<string | null>(null);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
+  const [pendingSteers, setPendingSteers] = useState<SteerInput[]>([]);
+  const [rejectedSteers, setRejectedSteers] = useState<SteerInput[]>([]);
   const [filter, setFilter] = useState<EventGroup | "all">("all");
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -353,6 +364,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const activeGoalRef = useRef<ThreadGoal | null>(null);
   const activePromptSentRef = useRef(false);
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
+  const pendingSteersRef = useRef<SteerInput[]>([]);
+  const rejectedSteersRef = useRef<SteerInput[]>([]);
+  const steerSequenceRef = useRef(0);
   const runStartedAtRef = useRef<number | null>(null);
   const usageContextRef = useRef<UsageContext | null>(null);
   const goalContinuationPendingRef = useRef(false);
@@ -631,6 +645,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, [queuedPrompts]);
 
   useEffect(() => {
+    pendingSteersRef.current = pendingSteers;
+  }, [pendingSteers]);
+
+  useEffect(() => {
+    rejectedSteersRef.current = rejectedSteers;
+  }, [rejectedSteers]);
+
+  useEffect(() => {
     activeGoalRef.current = activeGoal;
   }, [activeGoal]);
 
@@ -714,9 +736,36 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         if (timelineEvent.status === "promptCompleted") {
           setIsAwaitingPromptResponse(false);
         }
+        if (timelineEvent.status === "steerAccepted") {
+          const [accepted] = pendingSteersRef.current;
+          if (accepted) {
+            const next = acceptPendingSteer(pendingSteersRef.current, accepted.id);
+            pendingSteersRef.current = next;
+            setPendingSteers(next);
+          }
+          setIsAwaitingPromptResponse(false);
+        }
+        if (timelineEvent.status === "steerRejected") {
+          const [rejected] = pendingSteersRef.current;
+          if (rejected) {
+            const result = rejectPendingSteer({
+              pendingSteers: pendingSteersRef.current,
+              rejectedSteers: rejectedSteersRef.current,
+              steerInputId: rejected.id,
+              reason: timelineEvent.message,
+            });
+            pendingSteersRef.current = result.pendingSteers;
+            rejectedSteersRef.current = result.rejectedSteers;
+            setPendingSteers(result.pendingSteers);
+            setRejectedSteers(result.rejectedSteers);
+          }
+          setIsAwaitingPromptResponse(false);
+        }
         if (["completed", "cancelled"].includes(timelineEvent.status)) {
           setIsAwaitingPromptResponse(false);
           setQueuedPrompts([]);
+          setPendingSteers([]);
+          setRejectedSteers([]);
           setDirectPrompt(null);
           setIsRunning(false);
           activePromptSentRef.current = false;
@@ -741,7 +790,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       !activeRunId ||
       !isRunning ||
       isAwaitingPromptResponse ||
-      !shouldAutoDispatchQueuedPrompt(queuedPrompts)
+      !shouldAutoDispatchQueuedPromptWithSteers({ queue: queuedPrompts, pendingSteers })
     ) {
       return;
     }
@@ -767,7 +816,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         setIsAwaitingPromptResponse(false);
         setError(String(caughtError));
       });
-  }, [activeRunId, directPrompt, isAwaitingPromptResponse, isRunning, queuedPrompts]);
+  }, [
+    activeRunId,
+    directPrompt,
+    isAwaitingPromptResponse,
+    isRunning,
+    pendingSteers,
+    queuedPrompts,
+  ]);
 
   useEffect(() => {
     if (!enableGoalContinuation) {
@@ -1071,6 +1127,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setItems([]);
     queuedPromptsRef.current = nextQueuedPrompts;
     setQueuedPrompts(nextQueuedPrompts);
+    pendingSteersRef.current = [];
+    rejectedSteersRef.current = [];
+    setPendingSteers([]);
+    setRejectedSteers([]);
     setUsageContext(null);
     usageContextRef.current = null;
     runStartedAtRef.current = Date.now();
@@ -1126,6 +1186,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setItems((currentItems) => removeUserMessage(currentItems, runId, displayPrompt));
       queuedPromptsRef.current = [];
       setQueuedPrompts([]);
+      pendingSteersRef.current = [];
+      rejectedSteersRef.current = [];
+      setPendingSteers([]);
+      setRejectedSteers([]);
       setDirectPrompt(null);
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
@@ -1344,6 +1408,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     } finally {
       await recordRunGoalProgress();
       setQueuedPrompts([]);
+      pendingSteersRef.current = [];
+      rejectedSteersRef.current = [];
+      setPendingSteers([]);
+      setRejectedSteers([]);
       setDirectPrompt(null);
       setIsAwaitingPromptResponse(false);
       setIsRunning(false);
@@ -1378,35 +1446,50 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
   async function steer() {
     const steerPrompt = prompt.trim();
-    const originalPrompt = directPrompt?.trim();
-    const runIdToCancel = activeRunId;
-    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
+    const targetRunId = activeRunId;
 
-    if (!runIdToCancel || !originalPrompt || !steerPrompt) {
+    if (!targetRunId || !directPrompt?.trim() || !steerPrompt) {
       return;
     }
 
-    const nextGoal = buildSteerPrompt(originalPrompt, steerPrompt);
-    const queuedPromptsToKeep = queuedPrompts;
+    const steerInput = createSteerInput({
+      id: crypto.randomUUID(),
+      targetRunId,
+      text: steerPrompt,
+      createdAtSequence: ++steerSequenceRef.current,
+    });
+    if (!steerInput) {
+      return;
+    }
+
     setError(null);
     setPrompt(defaultPrompt);
-    setIsAwaitingPromptResponse(true);
+    pendingSteersRef.current = appendPendingSteer(
+      pendingSteersRef.current,
+      steerInput,
+    );
+    setPendingSteers(pendingSteersRef.current);
 
     try {
-      await cancelAgentRun(runIdToCancel);
-      const started = await startRun(nextGoal, {
-        queuedPrompts: queuedPromptsToKeep,
-        displayPrompt: steerPrompt,
-      });
-      if (!started) {
-        setPrompt(steerPrompt);
-        setQueuedPrompts(queuedPromptsToKeep);
-      }
+      await steerPromptToRun(targetRunId, steerPrompt);
+      const next = acceptPendingSteer(pendingSteersRef.current, steerInput.id);
+      pendingSteersRef.current = next;
+      setPendingSteers(next);
+      recordPromptHistory(steerPrompt);
     } catch (caughtError) {
-      setError(String(caughtError));
-      setPrompt(steerPrompt);
-      setQueuedPrompts(queuedPromptsToKeep);
-      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
+      const result = rejectPendingSteer({
+        pendingSteers: pendingSteersRef.current,
+        rejectedSteers: rejectedSteersRef.current,
+        steerInputId: steerInput.id,
+        reason: String(caughtError),
+      });
+      pendingSteersRef.current = result.pendingSteers;
+      rejectedSteersRef.current = result.rejectedSteers;
+      setPendingSteers(result.pendingSteers);
+      setRejectedSteers(result.rejectedSteers);
+      if (!isSteerUnsupportedError(caughtError)) {
+        setError(String(caughtError));
+      }
     }
   }
 
@@ -1454,51 +1537,188 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }
 
   async function steerQueuedPrompt(queuedPrompt: QueuedPrompt) {
-    const originalPrompt = directPrompt?.trim();
-    const runIdToCancel = activeRunId;
-    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
-
-    if (!runIdToCancel || !originalPrompt) {
+    const targetRunId = activeRunId;
+    if (!targetRunId || !directPrompt?.trim()) {
       return;
     }
 
-    const result = removeQueuedPrompt(queuedPrompts, queuedPrompt.id);
-    if (!result.queuedPrompt) {
+    const result = prepareQueuedPromptSteer({
+      queue: queuedPrompts,
+      queuedPromptId: queuedPrompt.id,
+      targetRunId,
+      steerInputId: crypto.randomUUID(),
+      createdAtSequence: ++steerSequenceRef.current,
+    });
+    if (!result.removedPrompt || !result.steerInput) {
       setError("전송하려던 prompt가 이미 queue에서 제거되었습니다.");
       return;
     }
 
-    const nextGoal = buildSteerPrompt(originalPrompt, result.queuedPrompt.text);
     setError(null);
     setQueuedPrompts(result.queue);
-    setIsAwaitingPromptResponse(true);
-    if (editingPrompt?.id === result.queuedPrompt.id) {
+    queuedPromptsRef.current = result.queue;
+    pendingSteersRef.current = appendPendingSteer(
+      pendingSteersRef.current,
+      result.steerInput,
+    );
+    setPendingSteers(pendingSteersRef.current);
+    if (editingPrompt?.id === result.removedPrompt.id) {
       closeQueuedPromptEditor();
     }
 
-    const restoreQueue = () => {
-      setQueuedPrompts((current) =>
-        current.some((item) => item.id === result.queuedPrompt!.id)
-          ? current
-          : insertQueuedPrompt(current, result.queuedPrompt!, result.index),
+    try {
+      await steerPromptToRun(targetRunId, result.steerInput.text);
+      const next = acceptPendingSteer(pendingSteersRef.current, result.steerInput.id);
+      pendingSteersRef.current = next;
+      setPendingSteers(next);
+      recordPromptHistory(result.steerInput.text);
+    } catch (caughtError) {
+      const rejected = rejectPendingSteer({
+        pendingSteers: pendingSteersRef.current,
+        rejectedSteers: rejectedSteersRef.current,
+        steerInputId: result.steerInput.id,
+        reason: String(caughtError),
+      });
+      pendingSteersRef.current = rejected.pendingSteers;
+      rejectedSteersRef.current = rejected.rejectedSteers;
+      setPendingSteers(rejected.pendingSteers);
+      setRejectedSteers(rejected.rejectedSteers);
+      if (!isSteerUnsupportedError(caughtError)) {
+        setError(String(caughtError));
+      }
+      setPrompt(defaultPrompt);
+    }
+  }
+
+  function queueRejectedSteer(steerInput: SteerInput) {
+    const result = moveRejectedSteerToQueue({
+      queue: queuedPromptsRef.current,
+      rejectedSteers: rejectedSteersRef.current,
+      steerInputId: steerInput.id,
+    });
+    queuedPromptsRef.current = result.queue;
+    rejectedSteersRef.current = result.rejectedSteers;
+    setQueuedPrompts(result.queue);
+    setRejectedSteers(result.rejectedSteers);
+    setError(null);
+  }
+
+  function removeRejectedSteerInput(steerInput: SteerInput) {
+    const next = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);
+    rejectedSteersRef.current = next;
+    setRejectedSteers(next);
+  }
+
+  async function retryRejectedSteerInput(steerInput: SteerInput) {
+    const targetRunId = activeRunId;
+    if (!targetRunId || !isRunning) {
+      return;
+    }
+
+    const retry = retryRejectedSteer({
+      pendingSteers: pendingSteersRef.current,
+      rejectedSteers: rejectedSteersRef.current,
+      steerInputId: steerInput.id,
+      nextId: crypto.randomUUID(),
+      createdAtSequence: ++steerSequenceRef.current,
+    });
+    if (!retry.steerInput) {
+      return;
+    }
+
+    pendingSteersRef.current = retry.pendingSteers;
+    rejectedSteersRef.current = retry.rejectedSteers;
+    setPendingSteers(retry.pendingSteers);
+    setRejectedSteers(retry.rejectedSteers);
+    setError(null);
+
+    try {
+      await steerPromptToRun(targetRunId, retry.steerInput.text);
+      const next = acceptPendingSteer(pendingSteersRef.current, retry.steerInput.id);
+      pendingSteersRef.current = next;
+      setPendingSteers(next);
+    } catch (caughtError) {
+      const rejected = rejectPendingSteer({
+        pendingSteers: pendingSteersRef.current,
+        rejectedSteers: rejectedSteersRef.current,
+        steerInputId: retry.steerInput.id,
+        reason: String(caughtError),
+      });
+      pendingSteersRef.current = rejected.pendingSteers;
+      rejectedSteersRef.current = rejected.rejectedSteers;
+      setPendingSteers(rejected.pendingSteers);
+      setRejectedSteers(rejected.rejectedSteers);
+      if (!isSteerUnsupportedError(caughtError)) {
+        setError(String(caughtError));
+      }
+    }
+  }
+
+  async function cancelCurrentPromptAndSendRejectedSteer(steerInput: SteerInput) {
+    const originalPrompt = directPrompt?.trim();
+    const targetRunId = activeRunId;
+    if (!targetRunId || !originalPrompt) {
+      return;
+    }
+
+    const nextGoal = buildSteerPrompt(originalPrompt, steerInput.text);
+    const nextRejected = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);
+    rejectedSteersRef.current = nextRejected;
+    setRejectedSteers(nextRejected);
+    setError(null);
+    setIsAwaitingPromptResponse(true);
+    setDirectPrompt(nextGoal);
+    setItems((currentItems) =>
+      addUserMessage(currentItems, targetRunId, steerInput.text),
+    );
+
+    try {
+      await cancelCurrentPromptAndSendToRun(targetRunId, nextGoal);
+      recordPromptHistory(steerInput.text);
+    } catch (caughtError) {
+      rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
+      setRejectedSteers(rejectedSteersRef.current);
+      setDirectPrompt(originalPrompt);
+      setItems((currentItems) =>
+        removeUserMessage(currentItems, targetRunId, steerInput.text),
       );
-    };
+      setError(String(caughtError));
+      setIsAwaitingPromptResponse(false);
+    }
+  }
+
+  async function fullRestartWithRejectedSteer(steerInput: SteerInput) {
+    const originalPrompt = directPrompt?.trim();
+    const runIdToCancel = activeRunId;
+    const queuedPromptsToKeep = queuedPromptsRef.current;
+    if (!runIdToCancel || !originalPrompt) {
+      return;
+    }
+
+    const nextGoal = buildSteerPrompt(originalPrompt, steerInput.text);
+    const nextRejected = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);
+    rejectedSteersRef.current = nextRejected;
+    setRejectedSteers(nextRejected);
+    setError(null);
+    setIsAwaitingPromptResponse(true);
 
     try {
       await cancelAgentRun(runIdToCancel);
       const started = await startRun(nextGoal, {
-        queuedPrompts: result.queue,
-        displayPrompt: result.queuedPrompt.text,
+        queuedPrompts: queuedPromptsToKeep,
+        displayPrompt: steerInput.text,
       });
       if (!started) {
-        restoreQueue();
-        setPrompt(defaultPrompt);
+        rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
+        setRejectedSteers(rejectedSteersRef.current);
+        setQueuedPrompts(queuedPromptsToKeep);
       }
     } catch (caughtError) {
-      restoreQueue();
+      rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
+      setRejectedSteers(rejectedSteersRef.current);
+      setQueuedPrompts(queuedPromptsToKeep);
       setError(String(caughtError));
-      setPrompt(defaultPrompt);
-      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
+      setIsAwaitingPromptResponse(false);
     }
   }
 
@@ -1736,6 +1956,24 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                   items={visibleItems}
                   scrollParentRef={timelineScrollRef}
                 />
+                {inputMode === "prompt" && pendingSteers.length > 0 && (
+                  <PendingSteerTimeline pendingSteers={pendingSteers} />
+                )}
+                {inputMode === "prompt" && rejectedSteers.length > 0 && (
+                  <RejectedSteerTimeline
+                    rejectedSteers={rejectedSteers}
+                    isRunning={isRunning}
+                    onQueueSteer={queueRejectedSteer}
+                    onRetrySteer={(steerInput) => void retryRejectedSteerInput(steerInput)}
+                    onCancelAndSendSteer={(steerInput) =>
+                      void cancelCurrentPromptAndSendRejectedSteer(steerInput)
+                    }
+                    onFullRestartSteer={(steerInput) =>
+                      void fullRestartWithRejectedSteer(steerInput)
+                    }
+                    onRemoveSteer={removeRejectedSteerInput}
+                  />
+                )}
                 {inputMode === "prompt" && queuedPrompts.length > 0 && (
                   <QueuedPromptTimeline
                     queuedPrompts={queuedPrompts}
@@ -2806,6 +3044,111 @@ function RunEventItem({ item }: { item: TimelineItem }) {
   );
 }
 
+function PendingSteerTimeline({ pendingSteers }: { pendingSteers: SteerInput[] }) {
+  return (
+    <div className="mt-3 flex flex-col gap-2" aria-label="Pending steer inputs">
+      {pendingSteers.map((steerInput, index) => (
+        <Message key={steerInput.id} className="justify-end">
+          <div className="min-w-0 max-w-[80%] rounded-lg border border-primary/30 bg-primary/10 p-2 text-foreground">
+            <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2Icon className="size-3 animate-spin text-primary" />
+              <span>Steer pending #{index + 1}</span>
+            </div>
+            <div className="whitespace-pre-wrap break-words text-sm">{steerInput.text}</div>
+          </div>
+        </Message>
+      ))}
+    </div>
+  );
+}
+
+function RejectedSteerTimeline({
+  rejectedSteers,
+  isRunning,
+  onQueueSteer,
+  onRetrySteer,
+  onCancelAndSendSteer,
+  onFullRestartSteer,
+  onRemoveSteer,
+}: {
+  rejectedSteers: SteerInput[];
+  isRunning: boolean;
+  onQueueSteer: (steerInput: SteerInput) => void;
+  onRetrySteer: (steerInput: SteerInput) => void;
+  onCancelAndSendSteer: (steerInput: SteerInput) => void;
+  onFullRestartSteer: (steerInput: SteerInput) => void;
+  onRemoveSteer: (steerInput: SteerInput) => void;
+}) {
+  return (
+    <div className="mt-3 flex flex-col gap-2" aria-label="Rejected steer inputs">
+      {rejectedSteers.map((steerInput, index) => (
+        <Message key={steerInput.id} className="justify-end">
+          <div className="min-w-0 max-w-[80%] rounded-lg border border-destructive/30 bg-destructive/10 p-2 text-foreground">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2 text-xs text-destructive">
+                <XCircleIcon className="size-3 shrink-0" />
+                <span>Steer rejected #{index + 1}</span>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  onClick={() => onQueueSteer(steerInput)}
+                >
+                  Queue
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={!isRunning}
+                  onClick={() => onRetrySteer(steerInput)}
+                >
+                  Retry
+                </Button>
+                <Button
+                  type="button"
+                  variant="default"
+                  size="xs"
+                  disabled={!isRunning}
+                  onClick={() => onCancelAndSendSteer(steerInput)}
+                >
+                  Cancel & send
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="xs"
+                  disabled={!isRunning}
+                  onClick={() => onFullRestartSteer(steerInput)}
+                >
+                  Full restart
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={`${index + 1}번 rejected steer 제거`}
+                  onClick={() => onRemoveSteer(steerInput)}
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              </div>
+            </div>
+            <div className="whitespace-pre-wrap break-words text-sm">{steerInput.text}</div>
+            {steerInput.errorMessage && (
+              <div className="mt-1.5 text-xs text-muted-foreground">
+                {steerInput.errorMessage}
+              </div>
+            )}
+          </div>
+        </Message>
+      ))}
+    </div>
+  );
+}
+
 function QueuedPromptTimeline({
   queuedPrompts,
   activeRunId,
@@ -3181,6 +3524,9 @@ function lifecycleStatusLabel(status: string) {
   if (status === "sessionCreated") return "Session created";
   if (status === "promptSent") return "Prompt sent";
   if (status === "promptCompleted") return "Prompt completed";
+  if (status === "steerPending") return "Steer pending";
+  if (status === "steerAccepted") return "Steer accepted";
+  if (status === "steerRejected") return "Steer rejected";
   if (status === "completed") return "Completed";
   if (status === "cancelled") return "Cancelled";
   return status || "Lifecycle";
@@ -3190,14 +3536,29 @@ function lifecycleStatusClassName(status: string) {
   if (status === "completed" || status === "promptCompleted") {
     return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
   }
+  if (status === "steerAccepted") {
+    return "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
+  }
   if (status === "cancelled") {
     return "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
+  }
+  if (status === "steerRejected") {
+    return "bg-destructive/10 text-destructive";
   }
   return "bg-primary/10 text-primary";
 }
 
 function isLifecycleTerminal(status: string) {
   return status === "completed" || status === "promptCompleted" || status === "cancelled";
+}
+
+function isSteerUnsupportedError(error: unknown) {
+  const message = String(error).toLowerCase();
+  return (
+    message.includes("steer unsupported") ||
+    message.includes("steer is not supported") ||
+    message.includes("does not support active-turn steer")
+  );
 }
 
 function toolStatusLabel(status: string) {

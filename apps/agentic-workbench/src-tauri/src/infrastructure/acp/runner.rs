@@ -1,9 +1,12 @@
-use agent_client_protocol::schema::{
-    ProtocolVersion,
-    v1::{
-        ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
-        InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
-        StopReason, TextContent,
+use agent_client_protocol::{
+    JsonRpcMessage,
+    schema::{
+        ProtocolVersion,
+        v1::{
+            ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
+            InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
+            StopReason, TextContent,
+        },
     },
 };
 use anyhow::{Context, Result, anyhow, bail};
@@ -22,8 +25,9 @@ use std::{
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{Child, Command},
-    sync::Mutex,
+    sync::{Mutex, MutexGuard},
     task::JoinHandle,
+    time::timeout,
 };
 
 use crate::{
@@ -57,6 +61,7 @@ use crate::{
 
 const DEFAULT_WORKDIR: &str = "~/tmp/acp-tauri-agent-workspace";
 const DEFAULT_STDIO_BUFFER_LIMIT_MB: usize = 50;
+const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct AcpAgentRunner<C, P>
 where
@@ -278,6 +283,7 @@ where
             session_store: self.session_store.clone(),
             mcp_servers: session_mcp_servers,
             in_flight: Mutex::new(()),
+            active_prompt_request: Mutex::new(None),
         });
 
         Ok(AcpSessionSetup {
@@ -632,24 +638,23 @@ pub struct AcpSession {
     session_store: Arc<dyn AcpSessionStore>,
     mcp_servers: Vec<AgentMcpServerConfig>,
     in_flight: Mutex<()>,
+    active_prompt_request: Mutex<Option<u64>>,
 }
 
 impl AcpSession {
     pub async fn session_id(&self) -> String {
         self.session_id.lock().await.clone()
     }
-}
 
-impl SessionHandle for AcpSession {
-    async fn send_prompt<S>(&self, sink: S, text: String) -> Result<String>
+    async fn send_prompt_with_guard<S>(
+        &self,
+        _guard: MutexGuard<'_, ()>,
+        sink: S,
+        text: String,
+    ) -> Result<String>
     where
         S: RunEventSink,
     {
-        let _guard = self
-            .in_flight
-            .try_lock()
-            .map_err(|_| anyhow!("agent is still responding to the previous prompt"))?;
-
         sink.emit(
             &self.run_id,
             lifecycle(LifecycleStatus::PromptSent, "prompt submitted"),
@@ -658,13 +663,28 @@ impl SessionHandle for AcpSession {
         let mut reissued = false;
         let stop_reason = loop {
             let current_id = self.session_id().await;
-            let outcome = self
+            let request = PromptRequest::new(
+                current_id.clone(),
+                vec![ContentBlock::Text(TextContent::new(text.clone()))],
+            );
+            let method = request.method().to_string();
+            let params = serde_json::to_value(&request)?;
+            let pending = self
                 .peer
-                .request_typed(PromptRequest::new(
-                    current_id.clone(),
-                    vec![ContentBlock::Text(TextContent::new(text.clone()))],
-                ))
-                .await;
+                .start_request(&method, params)
+                .await
+                .map_err(rpc_to_anyhow)?;
+            let request_id = pending.id();
+            *self.active_prompt_request.lock().await = Some(request_id);
+
+            let outcome = pending.receive_typed::<PromptRequest>().await;
+            {
+                let mut active_prompt_request = self.active_prompt_request.lock().await;
+                if *active_prompt_request == Some(request_id) {
+                    *active_prompt_request = None;
+                }
+            }
+
             match outcome {
                 Ok(response) => break stop_reason_label(response.stop_reason),
                 Err(err) if !reissued && is_session_not_found(&err) => {
@@ -717,6 +737,38 @@ impl SessionHandle for AcpSession {
         Ok(stop_reason)
     }
 
+    async fn cancel_active_prompt_request<S>(&self, sink: S) -> Result<()>
+    where
+        S: RunEventSink,
+    {
+        let request_id = *self.active_prompt_request.lock().await;
+        let Some(request_id) = request_id else {
+            bail!("no active prompt request to cancel");
+        };
+
+        sink.emit(
+            &self.run_id,
+            RunEvent::Diagnostic {
+                message: format!("requesting cancellation for active prompt request {request_id}"),
+            },
+        );
+        self.peer.cancel_request(request_id).await?;
+        Ok(())
+    }
+}
+
+impl SessionHandle for AcpSession {
+    async fn send_prompt<S>(&self, sink: S, text: String) -> Result<String>
+    where
+        S: RunEventSink,
+    {
+        let guard = self
+            .in_flight
+            .try_lock()
+            .map_err(|_| anyhow!("agent is still responding to the previous prompt"))?;
+        self.send_prompt_with_guard(guard, sink, text).await
+    }
+
     async fn set_permission_mode<S>(&self, sink: S, mode: PermissionMode) -> Result<()>
     where
         S: RunEventSink,
@@ -741,6 +793,39 @@ impl SessionHandle for AcpSession {
         *self.permission_mode.lock().await = mode;
         Ok(())
     }
+
+    async fn steer_prompt<S>(&self, _sink: S, _text: String) -> Result<()>
+    where
+        S: RunEventSink,
+    {
+        anyhow::bail!("{}", active_turn_steer_unsupported_message())
+    }
+
+    async fn cancel_current_prompt_and_send<S>(&self, sink: S, text: String) -> Result<String>
+    where
+        S: RunEventSink,
+    {
+        self.cancel_active_prompt_request(sink.clone()).await?;
+        let guard = timeout(PROMPT_CANCEL_TIMEOUT, self.in_flight.lock())
+            .await
+            .map_err(|_| {
+                anyhow!(
+                    "cancel request did not stop the active prompt within {} seconds",
+                    PROMPT_CANCEL_TIMEOUT.as_secs()
+                )
+            })?;
+        sink.emit(
+            &self.run_id,
+            RunEvent::Diagnostic {
+                message: "active prompt cancelled; sending replacement prompt".into(),
+            },
+        );
+        self.send_prompt_with_guard(guard, sink, text).await
+    }
+}
+
+fn active_turn_steer_unsupported_message() -> &'static str {
+    "active-turn steer is not supported by this ACP agent; choose Cancel & send or Queue"
 }
 
 fn normalize_workspace(path: &str) -> Result<PathBuf> {
@@ -1228,9 +1313,9 @@ fn is_session_not_found(err: &RpcError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        context_size_candidates, new_session_params, resume_session_id, run_prompt_sequence,
-        session_config_option_value, should_reissue_missing_session, spawn_agent_error_context,
-        spawn_env_vars,
+        active_turn_steer_unsupported_message, context_size_candidates, new_session_params,
+        resume_session_id, run_prompt_sequence, session_config_option_value,
+        should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
     };
     use crate::{
         domain::{
@@ -1380,6 +1465,11 @@ mod tests {
         assert!(!should_reissue_missing_session(
             ResumePolicy::ResumeRequired
         ));
+    }
+
+    #[test]
+    fn acp_adapter_reports_active_turn_steer_as_unsupported() {
+        assert!(active_turn_steer_unsupported_message().contains("not supported"));
     }
 
     #[test]

@@ -46,6 +46,14 @@ export async function sendPromptToRun(runId: string, prompt: string) {
   return invoke<void>("send_prompt_to_run", { runId, prompt });
 }
 
+export async function steerPromptToRun(runId: string, prompt: string) {
+  return invoke<void>("steer_prompt_to_run", { runId, prompt });
+}
+
+export async function cancelCurrentPromptAndSendToRun(runId: string, prompt: string) {
+  return invoke<void>("cancel_current_prompt_and_send_to_run", { runId, prompt });
+}
+
 export async function setRunPermissionMode(runId: string, permissionMode: PermissionMode) {
   return invoke<void>("set_run_permission_mode", { runId, permissionMode });
 }
