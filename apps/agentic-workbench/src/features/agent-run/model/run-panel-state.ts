@@ -21,7 +21,38 @@ export type QueuedPromptSource =
   | "first-run"
   | "manual-queue"
   | "saved-prompt"
-  | "external-request";
+  | "external-request"
+  | "steer-fallback";
+
+export type SteerInputStatus =
+  | "pending"
+  | "accepted"
+  | "rejected"
+  | "queuedFallback"
+  | "cancelAndSendFallback"
+  | "failed";
+
+export type SteerInputSource = "manual-input" | "queued-prompt";
+
+export type SteerInput = {
+  id: string;
+  targetRunId: string;
+  text: string;
+  status: SteerInputStatus;
+  source: SteerInputSource;
+  createdAtSequence: number;
+  errorMessage?: string;
+  originalQueueIndex?: number;
+};
+
+export type PromptDispatchPhase =
+  | "idle"
+  | "starting"
+  | "awaitingPrompt"
+  | "responding"
+  | "steering"
+  | "cancelling"
+  | "cancelAndSending";
 
 export type UsageContext = {
   used: number;
@@ -35,6 +66,11 @@ export type RunEventState = {
   isRunning: boolean;
   activeRunId: string | null;
   queuedPrompts: QueuedPrompt[];
+  pendingSteers: SteerInput[];
+  rejectedSteers: SteerInput[];
+  promptDispatchPhase?: PromptDispatchPhase;
+  transitionToken?: string | null;
+  suppressQueueAutosend?: boolean;
 };
 
 export type PromptHistoryEntry = {
@@ -306,6 +342,33 @@ export function applyRunEvent(
   if (envelope.event.status === "promptCompleted") {
     return { ...nextState, isAwaitingPromptResponse: false };
   }
+  if (envelope.event.status === "steerAccepted") {
+    const [accepted] = nextState.pendingSteers;
+    return {
+      ...nextState,
+      pendingSteers: accepted
+        ? acceptPendingSteer(nextState.pendingSteers, accepted.id)
+        : nextState.pendingSteers,
+      isAwaitingPromptResponse: false,
+    };
+  }
+  if (envelope.event.status === "steerRejected") {
+    const [rejected] = nextState.pendingSteers;
+    if (!rejected) {
+      return { ...nextState, isAwaitingPromptResponse: false };
+    }
+
+    return {
+      ...nextState,
+      ...rejectPendingSteer({
+        pendingSteers: nextState.pendingSteers,
+        rejectedSteers: nextState.rejectedSteers,
+        steerInputId: rejected.id,
+        reason: envelope.event.message,
+      }),
+      isAwaitingPromptResponse: false,
+    };
+  }
   if (["completed", "cancelled"].includes(envelope.event.status)) {
     return finishRun(nextState);
   }
@@ -410,6 +473,22 @@ export function shouldAutoDispatchQueuedPrompt(queue: QueuedPrompt[]) {
   return queue.length > 0 && !queue[0].dispatchAfterRunStart;
 }
 
+export function shouldAutoDispatchQueuedPromptWithSteers({
+  queue,
+  pendingSteers,
+  suppressQueueAutosend = false,
+}: {
+  queue: QueuedPrompt[];
+  pendingSteers: SteerInput[];
+  suppressQueueAutosend?: boolean;
+}) {
+  return (
+    shouldAutoDispatchQueuedPrompt(queue) &&
+    pendingSteers.length === 0 &&
+    !suppressQueueAutosend
+  );
+}
+
 export function dequeueRunStartQueuedPrompt(queue: QueuedPrompt[]) {
   const [firstPrompt, ...remainingQueue] = queue;
   if (!firstPrompt?.dispatchAfterRunStart) {
@@ -507,6 +586,173 @@ export function insertQueuedPrompt(
   return nextQueue;
 }
 
+export function createSteerInput({
+  id,
+  targetRunId,
+  text,
+  source = "manual-input",
+  createdAtSequence,
+  originalQueueIndex,
+}: {
+  id: string;
+  targetRunId: string;
+  text: string;
+  source?: SteerInputSource;
+  createdAtSequence: number;
+  originalQueueIndex?: number;
+}): SteerInput | null {
+  const normalizedText = text.trim();
+  if (!targetRunId || !normalizedText) {
+    return null;
+  }
+
+  return {
+    id,
+    targetRunId,
+    text: normalizedText,
+    source,
+    status: "pending",
+    createdAtSequence,
+    ...(originalQueueIndex === undefined ? {} : { originalQueueIndex }),
+  };
+}
+
+export function appendPendingSteer(
+  pendingSteers: SteerInput[],
+  steerInput: SteerInput | null,
+) {
+  if (!steerInput || pendingSteers.some((item) => item.id === steerInput.id)) {
+    return pendingSteers;
+  }
+  return [...pendingSteers, steerInput];
+}
+
+export function acceptPendingSteer(pendingSteers: SteerInput[], steerInputId: string) {
+  return pendingSteers.filter((item) => item.id !== steerInputId);
+}
+
+export function rejectPendingSteer({
+  pendingSteers,
+  rejectedSteers,
+  steerInputId,
+  reason,
+}: {
+  pendingSteers: SteerInput[];
+  rejectedSteers: SteerInput[];
+  steerInputId: string;
+  reason: string;
+}) {
+  const target = pendingSteers.find((item) => item.id === steerInputId);
+  if (!target) {
+    return { pendingSteers, rejectedSteers };
+  }
+
+  return {
+    pendingSteers: pendingSteers.filter((item) => item.id !== steerInputId),
+    rejectedSteers: [
+      ...rejectedSteers.filter((item) => item.id !== steerInputId),
+      { ...target, status: "rejected" as const, errorMessage: reason },
+    ],
+  };
+}
+
+export function removeRejectedSteer(rejectedSteers: SteerInput[], steerInputId: string) {
+  return rejectedSteers.filter((item) => item.id !== steerInputId);
+}
+
+export function moveRejectedSteerToQueue({
+  queue,
+  rejectedSteers,
+  steerInputId,
+}: {
+  queue: QueuedPrompt[];
+  rejectedSteers: SteerInput[];
+  steerInputId: string;
+}) {
+  const target = rejectedSteers.find((item) => item.id === steerInputId);
+  if (!target) {
+    return { queue, rejectedSteers, queuedPrompt: null };
+  }
+
+  const queuedPrompt: QueuedPrompt = {
+    id: `${target.id}:queued-fallback`,
+    text: target.text,
+    source: "steer-fallback",
+  };
+
+  return {
+    queue: appendQueuedPrompt(queue, queuedPrompt),
+    rejectedSteers: removeRejectedSteer(rejectedSteers, steerInputId),
+    queuedPrompt,
+  };
+}
+
+export function retryRejectedSteer({
+  pendingSteers,
+  rejectedSteers,
+  steerInputId,
+  nextId,
+  createdAtSequence,
+}: {
+  pendingSteers: SteerInput[];
+  rejectedSteers: SteerInput[];
+  steerInputId: string;
+  nextId: string;
+  createdAtSequence: number;
+}) {
+  const target = rejectedSteers.find((item) => item.id === steerInputId);
+  if (!target) {
+    return { pendingSteers, rejectedSteers, steerInput: null };
+  }
+
+  const steerInput: SteerInput = {
+    ...target,
+    id: nextId,
+    status: "pending",
+    errorMessage: undefined,
+    createdAtSequence,
+  };
+
+  return {
+    pendingSteers: appendPendingSteer(pendingSteers, steerInput),
+    rejectedSteers: removeRejectedSteer(rejectedSteers, steerInputId),
+    steerInput,
+  };
+}
+
+export function prepareQueuedPromptSteer({
+  queue,
+  queuedPromptId,
+  targetRunId,
+  steerInputId,
+  createdAtSequence,
+}: {
+  queue: QueuedPrompt[];
+  queuedPromptId: string;
+  targetRunId: string;
+  steerInputId: string;
+  createdAtSequence: number;
+}) {
+  const result = removeQueuedPrompt(queue, queuedPromptId);
+  if (!result.queuedPrompt) {
+    return { queue, steerInput: null, removedPrompt: null, removedIndex: -1 };
+  }
+
+  return {
+    queue: result.queue,
+    steerInput: createSteerInput({
+      id: steerInputId,
+      targetRunId,
+      text: result.queuedPrompt.text,
+      source: "queued-prompt",
+      createdAtSequence,
+      originalQueueIndex: result.index,
+    }),
+    removedPrompt: result.queuedPrompt,
+    removedIndex: result.index,
+  };
+}
+
 export function buildSteerPrompt(originalPrompt: string, steerPrompt: string) {
   const normalizedOriginalPrompt = unwrapSteerPrompt(originalPrompt);
 
@@ -578,7 +824,11 @@ function finishRun(state: RunEventState): RunEventState {
     ...state,
     isAwaitingPromptResponse: false,
     queuedPrompts: [],
+    pendingSteers: [],
+    rejectedSteers: [],
     isRunning: false,
     activeRunId: null,
+    promptDispatchPhase: "idle",
+    suppressQueueAutosend: false,
   };
 }

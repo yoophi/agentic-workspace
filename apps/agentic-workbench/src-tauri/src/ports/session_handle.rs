@@ -17,6 +17,29 @@ pub trait SessionHandle: Send + Sync + 'static {
     where
         S: RunEventSink;
 
+    /// Attempt to inject a steer prompt into the currently active turn.
+    /// Adapters that cannot provide cancel-free steering should return an
+    /// error instead of cancelling or restarting the run.
+    fn steer_prompt<S>(&self, _sink: S, _text: String) -> impl Future<Output = Result<()>> + Send
+    where
+        S: RunEventSink,
+    {
+        async { anyhow::bail!("active-turn steer is not supported by this session") }
+    }
+
+    /// Ask the currently active prompt request to cancel, then send a
+    /// replacement prompt on the same session after the adapter is ready.
+    fn cancel_current_prompt_and_send<S>(
+        &self,
+        _sink: S,
+        _text: String,
+    ) -> impl Future<Output = Result<String>> + Send
+    where
+        S: RunEventSink,
+    {
+        async { anyhow::bail!("current prompt cancellation is not supported by this session") }
+    }
+
     /// Apply a new permission mode to the already-running session so the
     /// agent's next tool/command approval policy reflects the change
     /// without restarting the run. Progress is reported through `sink`.

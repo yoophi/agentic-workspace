@@ -411,6 +411,49 @@ export const AgentRun: Story = {
   ),
 };
 
+export const AgentRunPromptDispatchStates: Story = {
+  render: () => (
+    <div className="mx-auto flex h-[720px] max-w-5xl flex-col gap-3 bg-background p-4">
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent run prompt dispatch states</CardTitle>
+          <CardDescription>
+            Pending steer, rejected steer, queued prompt, and long prompt content states.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <div className="self-end rounded-lg border border-primary/30 bg-primary/10 p-3">
+            <div className="mb-1 text-xs text-muted-foreground">Steer pending #1</div>
+            <div className="max-w-[520px] whitespace-pre-wrap break-words text-sm">
+              현재 작업을 종료하지 말고 테스트 경계를 먼저 정리해 주세요.
+            </div>
+          </div>
+          <div className="self-end rounded-lg border border-destructive/30 bg-destructive/10 p-3">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="text-xs text-destructive">Steer rejected #1</div>
+              <div className="flex gap-1">
+                <Button type="button" size="xs" variant="outline">Queue</Button>
+                <Button type="button" size="xs" variant="outline">Retry</Button>
+                <Button type="button" size="xs" variant="default">Cancel & send</Button>
+                <Button type="button" size="xs" variant="outline">Full restart</Button>
+              </div>
+            </div>
+            <div className="max-w-[520px] whitespace-pre-wrap break-words text-sm">
+              provider가 active-turn steer를 지원하지 않는 상태입니다.
+            </div>
+          </div>
+          <div className="self-end rounded-lg border border-border bg-muted-foreground p-3 text-background">
+            <div className="mb-1 text-xs text-background/75">Queued prompt #1</div>
+            <div className="max-w-[520px] whitespace-pre-wrap break-words text-sm">
+              현재 작업이 끝나면 이 후속 작업을 실행해 주세요. {"긴 입력 ".repeat(40)}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  ),
+};
+
 export const WorktreeAgentRunAreaMainOnly: Story = {
   render: () => (
     <div className="mx-auto h-[720px] max-w-5xl overflow-hidden border">

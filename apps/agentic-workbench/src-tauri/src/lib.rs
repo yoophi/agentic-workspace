@@ -5,17 +5,17 @@ mod infrastructure;
 mod ports;
 
 use inbound::tauri_commands::{
-    WorktreeWatcherState, cancel_agent_run, clear_goal, create_git_worktree, create_goal,
-    create_project, create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt,
-    get_agent_run_settings, get_goal, get_worktree_changes, get_worktree_commit_detail,
-    get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
-    list_agent_tool_command_candidates, list_agents, list_git_branches, list_git_remotes,
-    list_git_worktrees, list_projects, list_provider_sessions, list_saved_prompts,
-    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
-    open_settings_window, open_worktree_window, read_worktree_text_file, record_goal_progress,
-    respond_agent_permission, save_agent_run_settings, send_prompt_to_run, set_run_permission_mode,
-    start_agent_run, start_worktree_watcher, stop_worktree_watcher, update_goal, update_project,
-    update_saved_prompt,
+    WorktreeWatcherState, cancel_agent_run, cancel_current_prompt_and_send_to_run, clear_goal,
+    create_git_worktree, create_goal, create_project, create_saved_prompt, delete_git_worktree,
+    delete_project, delete_saved_prompt, get_agent_run_settings, get_goal, get_worktree_changes,
+    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
+    get_worktree_git_graph, list_agent_tool_command_candidates, list_agents, list_git_branches,
+    list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
+    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
+    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
+    record_goal_progress, respond_agent_permission, save_agent_run_settings, send_prompt_to_run,
+    set_run_permission_mode, start_agent_run, start_worktree_watcher, steer_prompt_to_run,
+    stop_worktree_watcher, update_goal, update_project, update_saved_prompt,
 };
 use infrastructure::{agent_session_registry::AppState, mcp::McpServerState};
 use tauri::{
@@ -132,6 +132,8 @@ pub fn run() {
             start_agent_run,
             cancel_agent_run,
             send_prompt_to_run,
+            steer_prompt_to_run,
+            cancel_current_prompt_and_send_to_run,
             set_run_permission_mode,
             respond_agent_permission
         ])

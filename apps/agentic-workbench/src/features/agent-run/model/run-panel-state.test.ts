@@ -5,8 +5,10 @@ import {
   addUserMessage,
   applyRunEvent,
   appendQueuedPrompt,
+  appendPendingSteer,
   appendPromptHistory,
   buildSteerPrompt,
+  createSteerInput,
   createQueuedPrompt,
   createRunStartQueuedPrompt,
   dequeueRunStartQueuedPrompt,
@@ -15,12 +17,17 @@ import {
   insertQueuedPrompt,
   isOverrideCommandFailure,
   isPromptHistoryNavigationBoundary,
+  moveRejectedSteerToQueue,
   moveQueuedPrompt,
   navigatePromptHistory,
+  prepareQueuedPromptSteer,
+  rejectPendingSteer,
   removeQueuedPrompt,
+  retryRejectedSteer,
   removeUserMessage,
   resolveRequestAgentLaunch,
   resolveSelectedProfileId,
+  shouldAutoDispatchQueuedPromptWithSteers,
   shouldAutoDispatchQueuedPrompt,
   updateQueuedPrompt,
 } from "./run-panel-state";
@@ -34,6 +41,8 @@ function runningState(overrides: Partial<RunEventState> = {}): RunEventState {
     isRunning: true,
     activeRunId: "run-active",
     queuedPrompts: [],
+    pendingSteers: [],
+    rejectedSteers: [],
     ...overrides,
   };
 }
@@ -306,6 +315,173 @@ describe("run panel state", () => {
     expect(shouldAutoDispatchQueuedPrompt([])).toBe(false);
     expect(shouldAutoDispatchQueuedPrompt([firstPrompt!])).toBe(false);
     expect(shouldAutoDispatchQueuedPrompt([manualPrompt!])).toBe(true);
+  });
+
+  it("suppresses queued prompt auto-dispatch while pending steers exist", () => {
+    const queuedPrompt = createQueuedPrompt({
+      id: "queued-a",
+      text: "next prompt",
+    });
+    const steerInput = createSteerInput({
+      id: "steer-a",
+      targetRunId: "run-active",
+      text: "change course",
+      createdAtSequence: 1,
+    });
+
+    expect(
+      shouldAutoDispatchQueuedPromptWithSteers({
+        queue: [queuedPrompt!],
+        pendingSteers: [steerInput!],
+      }),
+    ).toBe(false);
+    expect(
+      shouldAutoDispatchQueuedPromptWithSteers({
+        queue: [queuedPrompt!],
+        pendingSteers: [],
+      }),
+    ).toBe(true);
+  });
+
+  it("moves accepted pending steer out without clearing the active run", () => {
+    const steerInput = createSteerInput({
+      id: "steer-a",
+      targetRunId: "run-active",
+      text: "focus on tests",
+      createdAtSequence: 1,
+    });
+    const state = runningState({
+      pendingSteers: appendPendingSteer([], steerInput),
+      isAwaitingPromptResponse: true,
+    });
+
+    const nextState = applyRunEvent(state, {
+      runId: "run-active",
+      event: {
+        type: "lifecycle",
+        status: "steerAccepted",
+        message: "accepted",
+      },
+    });
+
+    expect(nextState.activeRunId).toBe("run-active");
+    expect(nextState.isRunning).toBe(true);
+    expect(nextState.pendingSteers).toEqual([]);
+    expect(nextState.isAwaitingPromptResponse).toBe(false);
+  });
+
+  it("ignores inactive run events without mutating active steer state", () => {
+    const steerInput = createSteerInput({
+      id: "steer-a",
+      targetRunId: "run-active",
+      text: "keep going",
+      createdAtSequence: 1,
+    });
+    const state = runningState({
+      pendingSteers: [steerInput!],
+      queuedPrompts: [{ id: "queued-a", text: "next" }],
+    });
+
+    const nextState = applyRunEvent(state, {
+      runId: "run-old",
+      event: { type: "lifecycle", status: "cancelled", message: "old done" },
+    });
+
+    expect(nextState).toBe(state);
+    expect(nextState.pendingSteers).toEqual([steerInput]);
+    expect(nextState.queuedPrompts).toEqual([{ id: "queued-a", text: "next" }]);
+  });
+
+  it("keeps pending, rejected, and queued prompts in separate ownership lists", () => {
+    const steerInput = createSteerInput({
+      id: "steer-a",
+      targetRunId: "run-active",
+      text: "do this now",
+      createdAtSequence: 1,
+    })!;
+
+    const rejected = rejectPendingSteer({
+      pendingSteers: [steerInput],
+      rejectedSteers: [],
+      steerInputId: steerInput.id,
+      reason: "unsupported",
+    });
+
+    expect(rejected.pendingSteers).toEqual([]);
+    expect(rejected.rejectedSteers).toEqual([
+      { ...steerInput, status: "rejected", errorMessage: "unsupported" },
+    ]);
+
+    const queued = moveRejectedSteerToQueue({
+      queue: [],
+      rejectedSteers: rejected.rejectedSteers,
+      steerInputId: steerInput.id,
+    });
+
+    expect(queued.rejectedSteers).toEqual([]);
+    expect(queued.queue).toEqual([
+      {
+        id: "steer-a:queued-fallback",
+        text: "do this now",
+        source: "steer-fallback",
+      },
+    ]);
+  });
+
+  it("preserves queued prompt order when converting one queued prompt to steer", () => {
+    const queue = [
+      { id: "a", text: "first" },
+      { id: "b", text: "second" },
+      { id: "c", text: "third" },
+    ];
+
+    const result = prepareQueuedPromptSteer({
+      queue,
+      queuedPromptId: "b",
+      targetRunId: "run-active",
+      steerInputId: "steer-b",
+      createdAtSequence: 2,
+    });
+
+    expect(result.queue.map((item) => item.id)).toEqual(["a", "c"]);
+    expect(result.steerInput).toMatchObject({
+      id: "steer-b",
+      text: "second",
+      source: "queued-prompt",
+      originalQueueIndex: 1,
+    });
+    expect(queue.map((item) => item.id)).toEqual(["a", "b", "c"]);
+  });
+
+  it("retries rejected steers without losing the original text", () => {
+    const rejected = {
+      id: "steer-a",
+      targetRunId: "run-active",
+      text: "retry this",
+      status: "rejected" as const,
+      source: "manual-input" as const,
+      createdAtSequence: 1,
+      errorMessage: "unsupported",
+    };
+
+    const result = retryRejectedSteer({
+      pendingSteers: [],
+      rejectedSteers: [rejected],
+      steerInputId: rejected.id,
+      nextId: "steer-b",
+      createdAtSequence: 2,
+    });
+
+    expect(result.rejectedSteers).toEqual([]);
+    expect(result.pendingSteers).toEqual([
+      {
+        ...rejected,
+        id: "steer-b",
+        status: "pending",
+        errorMessage: undefined,
+        createdAtSequence: 2,
+      },
+    ]);
   });
 
   it("dequeues only prompts that are waiting for run startup", () => {

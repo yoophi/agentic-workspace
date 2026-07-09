@@ -9,12 +9,13 @@ use tauri::{AppHandle, Emitter, State};
 use crate::{
     application::{
         agent_run_settings_service, agent_tool_candidate_service::AgentToolCandidateService,
-        cancel_agent_run::CancelAgentRunUseCase, git_branch_service, git_remote_service,
+        cancel_agent_run::CancelAgentRunUseCase,
+        cancel_prompt_and_send::CancelPromptAndSendUseCase, git_branch_service, git_remote_service,
         git_worktree_changes_service, git_worktree_service, goal_service,
         list_provider_sessions::ListProviderSessionsUseCase, project_service, saved_prompt_service,
         send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
-        start_agent_run::StartAgentRunUseCase, worktree_changes_service, worktree_file_service,
-        worktree_git_service,
+        start_agent_run::StartAgentRunUseCase, steer_prompt::SteerPromptUseCase,
+        worktree_changes_service, worktree_file_service, worktree_git_service,
     },
     domain::{
         agent::AgentDescriptor,
@@ -714,6 +715,40 @@ pub async fn send_prompt_to_run(
         TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
     let registry = state.inner().clone();
     SendPromptUseCase::new(registry)
+        .execute(sink, run_id, prompt)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn steer_prompt_to_run(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    run_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    let sink =
+        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
+    let registry = state.inner().clone();
+    SteerPromptUseCase::new(registry)
+        .execute(sink, run_id, prompt)
+        .await
+        .map_err(String::from)
+}
+
+#[tauri::command]
+pub async fn cancel_current_prompt_and_send_to_run(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    run_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    let sink =
+        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
+    let registry = state.inner().clone();
+    CancelPromptAndSendUseCase::new(registry)
         .execute(sink, run_id, prompt)
         .await
         .map_err(String::from)
