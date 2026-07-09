@@ -37,6 +37,25 @@ pub fn map_session_update(params: &Value) -> MappedSessionUpdate {
         .unwrap_or("session/update");
 
     match kind {
+        "user_message_chunk" => update
+            .pointer("/content/text")
+            .and_then(Value::as_str)
+            .map(|text| {
+                if is_workbench_injected_mcp_prompt(text) {
+                    MappedSessionUpdate::Ignored
+                } else {
+                    MappedSessionUpdate::Event(RunEvent::Raw {
+                        method: "user_message_chunk".into(),
+                        payload: update.clone(),
+                    })
+                }
+            })
+            .unwrap_or_else(|| {
+                MappedSessionUpdate::Event(RunEvent::Raw {
+                    method: "user_message_chunk".into(),
+                    payload: update.clone(),
+                })
+            }),
         "agent_message_chunk" => update
             .pointer("/content/text")
             .and_then(Value::as_str)
@@ -104,6 +123,13 @@ pub fn map_session_update(params: &Value) -> MappedSessionUpdate {
     }
 }
 
+fn is_workbench_injected_mcp_prompt(text: &str) -> bool {
+    text.starts_with("## Agentic Workbench MCP tools")
+        && text.contains("You are running inside an Agentic Workbench Worktree Session.")
+        && text.contains("Available tool:")
+        && text.contains("---\n\nUser request:")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -125,6 +151,76 @@ mod tests {
             RunEvent::Raw { method, payload } => {
                 assert_eq!(method, "session/update");
                 assert_eq!(payload, params);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_message_chunk_with_injected_workbench_mcp_prompt_is_ignored() {
+        let text = [
+            "## Agentic Workbench MCP tools",
+            "",
+            "You are running inside an Agentic Workbench Worktree Session.",
+            "Available tool:",
+            "- `set_window_title`: change only the current Worktree Session window title.",
+            "---",
+            "",
+            "User request:",
+            "최근 작업 요약",
+        ]
+        .join("\n");
+        let params = json!({
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "messageId": "item-1",
+                "content": {
+                    "type": "text",
+                    "text": text
+                }
+            }
+        });
+
+        assert!(matches!(
+            map_session_update(&params),
+            MappedSessionUpdate::Ignored
+        ));
+    }
+
+    #[test]
+    fn ordinary_user_message_chunk_preserves_existing_raw_fallback() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "ordinary prompt"}
+            }
+        });
+
+        match expect_event(map_session_update(&params)) {
+            RunEvent::Raw { method, payload } => {
+                assert_eq!(method, "user_message_chunk");
+                assert_eq!(
+                    payload.pointer("/content/text").and_then(Value::as_str),
+                    Some("ordinary prompt")
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn user_message_chunk_without_text_preserves_existing_raw_fallback() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": {}
+            }
+        });
+
+        match expect_event(map_session_update(&params)) {
+            RunEvent::Raw { method, payload } => {
+                assert_eq!(method, "user_message_chunk");
+                assert_eq!(payload.get("content"), Some(&json!({})));
             }
             other => panic!("unexpected event: {other:?}"),
         }
