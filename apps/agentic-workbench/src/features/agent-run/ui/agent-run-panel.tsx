@@ -59,9 +59,12 @@ import {
   eventGroups,
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
+  formatSessionFreshnessLabel,
   isAvailableCommandsSessionUpdate,
   isSessionInfoUpdateEvent,
+  normalizeSessionUpdatedAt,
   readAgentThreadStatus,
+  readSessionInfoUpdateMetadata,
   replacePromptAutocompleteTrigger,
   toTimelineItem,
 } from "@/entities/agent-run/model";
@@ -135,6 +138,7 @@ import { StreamingMarkdown } from "@/features/agent-run/ui/agent-run-markdown";
 import { PermissionRequestDialog } from "@/features/agent-run/ui/permission-request-dialog";
 import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
+import { dispatchMcpWindowTitle } from "@/shared/lib/workspace-window-title";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CodeBlock, CodeBlockCode } from "@/components/ui/code-block";
@@ -349,6 +353,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
     type: "unknown",
   });
+  const [sessionUpdatedAt, setSessionUpdatedAt] = useState<string | null>(null);
   const [directPrompt, setDirectPrompt] = useState<string | null>(null);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [pendingSteers, setPendingSteers] = useState<SteerInput[]>([]);
@@ -636,6 +641,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   useEffect(() => {
     activeRunIdRef.current = activeRunId;
     setAvailableCommandCandidates([]);
+    if (!activeRunId) {
+      setSessionUpdatedAt(null);
+    }
   }, [activeRunId]);
 
   useEffect(() => {
@@ -687,8 +695,15 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
       const timelineEvent: TimelineRunEvent = envelope.event;
       if (isSessionInfoUpdateEvent(timelineEvent)) {
+        const metadata = readSessionInfoUpdateMetadata(timelineEvent);
         const nextThreadStatus = readAgentThreadStatus(timelineEvent);
-        // title/updatedAt metadata has no stable run-header target yet; keep it out of the timeline.
+        if (metadata?.title) {
+          dispatchMcpWindowTitle(metadata.title);
+        }
+        const nextSessionUpdatedAt = normalizeSessionUpdatedAt(metadata?.updatedAt);
+        if (nextSessionUpdatedAt) {
+          setSessionUpdatedAt(nextSessionUpdatedAt);
+        }
         if (nextThreadStatus) {
           setAgentThreadStatus(nextThreadStatus);
         }
@@ -1030,6 +1045,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     usageContext && usageContext.size > 0
       ? Math.min(100, Math.round((usageContext.used / usageContext.size) * 100))
       : null;
+  const sessionFreshnessLabel = formatSessionFreshnessLabel(sessionUpdatedAt);
   const pendingPermission = useMemo(() => findPendingPermission(items), [items]);
   const canStartRun = Boolean(
     selectedAgentId &&
@@ -1141,6 +1157,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setError(null);
     setItems([]);
     setAgentThreadStatus({ type: "unknown" });
+    setSessionUpdatedAt(null);
     queuedPromptsRef.current = nextQueuedPrompts;
     setQueuedPrompts(nextQueuedPrompts);
     pendingSteersRef.current = [];
@@ -1970,7 +1987,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                     ))}
                   </div>
                   {(activeRunId || isRunning || agentThreadStatus.type !== "unknown") && (
-                    <AgentThreadStatusBadge status={agentThreadStatus} />
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      {sessionFreshnessLabel && (
+                        <span aria-label="Session updated at">
+                          {sessionFreshnessLabel}
+                        </span>
+                      )}
+                      <AgentThreadStatusBadge status={agentThreadStatus} />
+                    </div>
                   )}
                 </div>
                 <VirtualizedRunTimeline

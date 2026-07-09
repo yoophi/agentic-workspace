@@ -14,15 +14,21 @@ export function isSessionInfoUpdateEvent(event: TimelineRunEvent) {
 }
 
 export function readAgentThreadStatus(event: TimelineRunEvent): AgentThreadStatus | null {
-  if (event.type === "sessionInfo") {
-    return normalizeAgentThreadStatus(event.threadStatus);
-  }
   return readSessionInfoUpdateMetadata(event)?.threadStatus ?? null;
 }
 
 export function readSessionInfoUpdateMetadata(
   event: TimelineRunEvent,
 ): SessionInfoUpdateMetadata | null {
+  if (event.type === "sessionInfo") {
+    return {
+      sessionUpdate: "session_info_update",
+      threadStatus: normalizeAgentThreadStatus(event.threadStatus),
+      title: readString(event.title),
+      updatedAt: readString(event.updatedAt),
+    };
+  }
+
   if (event.type !== "raw" || event.method !== "session/update") {
     return null;
   }
@@ -38,6 +44,34 @@ export function readSessionInfoUpdateMetadata(
     title: readString(update.title),
     updatedAt: readString(update.updatedAt),
   };
+}
+
+export function normalizeSessionUpdatedAt(updatedAt: string | null | undefined) {
+  if (!updatedAt) {
+    return null;
+  }
+
+  const parsed = new Date(updatedAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed.toISOString();
+}
+
+export function formatSessionFreshnessLabel(updatedAt: string | null | undefined) {
+  const normalized = normalizeSessionUpdatedAt(updatedAt);
+  if (!normalized) {
+    return null;
+  }
+
+  const date = new Date(normalized);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
+  const hours = String(date.getUTCHours()).padStart(2, "0");
+  const minutes = String(date.getUTCMinutes()).padStart(2, "0");
+  return `Updated ${year}-${month}-${day} ${hours}:${minutes} UTC`;
 }
 
 export function toTimelineItem(runId: string, event: TimelineRunEvent): TimelineItem {

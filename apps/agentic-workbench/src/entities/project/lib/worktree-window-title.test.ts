@@ -38,6 +38,13 @@ describe("worktree window title helpers", () => {
     expect(normalizeAgentWindowTitle("a".repeat(AGENT_WINDOW_TITLE_MAX_LENGTH + 1))).toBeNull();
   });
 
+  it("normalizes session_info_update titles before native window display", () => {
+    expect(normalizeAgentWindowTitle("\nReview PR feedback\t")).toBe(
+      "Review PR feedback",
+    );
+    expect(normalizeAgentWindowTitle("session\u0000title")).toBeNull();
+  });
+
   it("uses valid agent override over the default title", () => {
     expect(resolveWorktreeWindowTitle("Project / worktree", "Fix state")).toBe("Fix state");
     expect(resolveWorktreeWindowTitle("Project / worktree", null)).toBe("Project / worktree");

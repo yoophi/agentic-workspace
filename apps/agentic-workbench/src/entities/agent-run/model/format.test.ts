@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import {
   appendOneTimelineItem,
+  formatSessionFreshnessLabel,
   isSessionInfoUpdateEvent,
+  normalizeSessionUpdatedAt,
   readAgentThreadStatus,
+  readSessionInfoUpdateMetadata,
   toTimelineItem,
 } from "@/entities/agent-run/model/format";
 
@@ -98,6 +101,60 @@ describe("run event formatting", () => {
         threadStatus: { type: "idle" },
       }),
     ).toEqual({ type: "idle" });
+  });
+
+  it("reads title and updatedAt metadata from typed and raw session info updates", () => {
+    expect(
+      readSessionInfoUpdateMetadata({
+        type: "sessionInfo",
+        title: "  Fix session metadata  ",
+        updatedAt: "2026-07-09T03:20:00.000Z",
+        threadStatus: { type: "active", activeFlags: ["thinking"] },
+      }),
+    ).toEqual({
+      sessionUpdate: "session_info_update",
+      threadStatus: { type: "active", activeFlags: ["thinking"] },
+      title: "  Fix session metadata  ",
+      updatedAt: "2026-07-09T03:20:00.000Z",
+    });
+
+    expect(
+      readSessionInfoUpdateMetadata({
+        type: "raw",
+        method: "session/update",
+        payload: {
+          params: {
+            update: {
+              sessionUpdate: "session_info_update",
+              title: "Fallback parsed title",
+              updatedAt: "2026-07-09T03:30:00.000Z",
+              _meta: { codex: { threadStatus: { type: "idle" } } },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      sessionUpdate: "session_info_update",
+      threadStatus: { type: "idle" },
+      title: "Fallback parsed title",
+      updatedAt: "2026-07-09T03:30:00.000Z",
+    });
+  });
+
+  it("normalizes and formats session freshness labels from valid updatedAt values", () => {
+    expect(normalizeSessionUpdatedAt("2026-07-09T03:20:00.000Z")).toBe(
+      "2026-07-09T03:20:00.000Z",
+    );
+    expect(formatSessionFreshnessLabel("2026-07-09T03:20:00.000Z")).toBe(
+      "Updated 2026-07-09 03:20 UTC",
+    );
+  });
+
+  it("omits session freshness labels for missing or malformed updatedAt values", () => {
+    expect(normalizeSessionUpdatedAt(null)).toBeNull();
+    expect(normalizeSessionUpdatedAt("not-a-date")).toBeNull();
+    expect(formatSessionFreshnessLabel(undefined)).toBeNull();
+    expect(formatSessionFreshnessLabel("not-a-date")).toBeNull();
   });
 
   it("shows Ralph loop iteration number and status", () => {

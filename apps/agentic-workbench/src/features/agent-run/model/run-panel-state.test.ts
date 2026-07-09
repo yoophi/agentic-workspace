@@ -38,6 +38,7 @@ function runningState(overrides: Partial<RunEventState> = {}): RunEventState {
     items: [],
     usageContext: null,
     agentThreadStatus: { type: "unknown" },
+    sessionUpdatedAt: null,
     isAwaitingPromptResponse: true,
     isRunning: true,
     activeRunId: "run-active",
@@ -263,6 +264,7 @@ describe("run panel state", () => {
 
     expect(nextState.items).toHaveLength(0);
     expect(nextState.agentThreadStatus).toEqual({ type: "active" });
+    expect(nextState.sessionUpdatedAt).toBe("2026-07-02T11:11:12.255Z");
   });
 
   it("preserves agent thread status on metadata-only session info updates", () => {
@@ -284,6 +286,45 @@ describe("run panel state", () => {
 
     expect(nextState.agentThreadStatus).toEqual({ type: "active" });
     expect(nextState.items).toHaveLength(0);
+  });
+
+  it("preserves latest valid session updatedAt on malformed metadata updates", () => {
+    const validState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "sessionInfo",
+        updatedAt: "2026-07-09T03:20:00.000Z",
+      },
+    });
+    const malformedState = applyRunEvent(validState, {
+      runId: "run-active",
+      event: {
+        type: "sessionInfo",
+        updatedAt: "not-a-date",
+      },
+    });
+
+    expect(validState.sessionUpdatedAt).toBe("2026-07-09T03:20:00.000Z");
+    expect(malformedState.sessionUpdatedAt).toBe("2026-07-09T03:20:00.000Z");
+  });
+
+  it("keeps status and timeline stable on title-only typed session info updates", () => {
+    const nextState = applyRunEvent(
+      runningState({
+        items: addUserMessage([], "run-active", "before"),
+        agentThreadStatus: { type: "idle" },
+      }),
+      {
+        runId: "run-active",
+        event: {
+          type: "sessionInfo",
+          title: "Fix session metadata",
+        },
+      },
+    );
+
+    expect(nextState.items).toHaveLength(1);
+    expect(nextState.agentThreadStatus).toEqual({ type: "idle" });
   });
 
   it("clears queue and active run state on terminal lifecycle events", () => {
