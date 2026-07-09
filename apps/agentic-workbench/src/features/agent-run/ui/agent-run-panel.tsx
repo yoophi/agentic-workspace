@@ -1089,7 +1089,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const pendingPermission = useMemo(() => findPendingPermission(items), [items]);
   const canStartRun = Boolean(
     selectedAgentId &&
-      prompt.trim() &&
       !isRunning &&
       (sessionMode === "new" || selectedSessionId),
   );
@@ -1164,9 +1163,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
   async function run() {
     const goal = prompt.trim();
-    if (!goal) {
-      return;
-    }
     setPrompt(defaultPrompt);
     await startRun(goal);
   }
@@ -1180,7 +1176,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       queuedPromptSource?: QueuedPromptSource;
     } = {},
   ) {
-    if (!selectedAgentId || !goal) {
+    if (!selectedAgentId) {
       return false;
     }
 

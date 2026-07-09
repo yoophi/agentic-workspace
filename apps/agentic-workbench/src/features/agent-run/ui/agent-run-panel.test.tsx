@@ -76,6 +76,18 @@ describe("agent thread status indicator", () => {
   });
 });
 
+describe("agent run start controls", () => {
+  it("allows starting a run without prompt text when agent and session selection are ready", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("const canStartRun = Boolean(");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("selectedAgentId &&\n      !isRunning");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain(
+      "selectedAgentId &&\n      prompt.trim() &&\n      !isRunning",
+    );
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("if (!selectedAgentId) {");
+    expect(AGENT_RUN_PANEL_SOURCE).not.toContain("if (!selectedAgentId || !goal) {");
+  });
+});
+
 describe("prompt command autocomplete keyboard navigation", () => {
   it("routes autocomplete keyboard handling before prompt history navigation", () => {
     const autocompleteIndex = AGENT_RUN_PANEL_SOURCE.indexOf(
