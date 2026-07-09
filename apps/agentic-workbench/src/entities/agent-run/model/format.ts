@@ -1,6 +1,44 @@
-import type { EventGroup, RunEvent, TimelineItem, ToolFileChange } from "./types";
+import type {
+  AgentThreadStatus,
+  EventGroup,
+  RunEvent,
+  SessionInfoUpdateMetadata,
+  TimelineItem,
+  ToolFileChange,
+} from "./types";
 
 export type TimelineRunEvent = Exclude<RunEvent, { type: "usage" }>;
+
+export function isSessionInfoUpdateEvent(event: TimelineRunEvent) {
+  return event.type === "sessionInfo" || (event.type === "raw" && readSessionInfoUpdateMetadata(event) !== null);
+}
+
+export function readAgentThreadStatus(event: TimelineRunEvent): AgentThreadStatus | null {
+  if (event.type === "sessionInfo") {
+    return normalizeAgentThreadStatus(event.threadStatus);
+  }
+  return readSessionInfoUpdateMetadata(event)?.threadStatus ?? null;
+}
+
+export function readSessionInfoUpdateMetadata(
+  event: TimelineRunEvent,
+): SessionInfoUpdateMetadata | null {
+  if (event.type !== "raw" || event.method !== "session/update") {
+    return null;
+  }
+
+  const update = findSessionUpdateObject(event.payload);
+  if (!update || readString(update.sessionUpdate) !== "session_info_update") {
+    return null;
+  }
+
+  return {
+    sessionUpdate: "session_info_update",
+    threadStatus: readThreadStatus(update),
+    title: readString(update.title),
+    updatedAt: readString(update.updatedAt),
+  };
+}
 
 export function toTimelineItem(runId: string, event: TimelineRunEvent): TimelineItem {
   const normalizedEvent = normalizeRunEvent(event);
@@ -32,6 +70,66 @@ function normalizeRunEvent(event: TimelineRunEvent): TimelineRunEvent {
     ...event,
     toolCallId,
   };
+}
+
+function findSessionUpdateObject(payload: unknown): Record<string, unknown> | null {
+  const root = asRecord(payload);
+  if (!root) {
+    return null;
+  }
+
+  const candidates = [
+    root,
+    asRecord(root.update),
+    asRecord(asRecord(root.params)?.update),
+    asRecord(asRecord(asRecord(root.message)?.params)?.update),
+  ];
+
+  return (
+    candidates.find(
+      (candidate): candidate is Record<string, unknown> =>
+        Boolean(candidate && readString(candidate.sessionUpdate) === "session_info_update"),
+    ) ?? null
+  );
+}
+
+function readThreadStatus(update: Record<string, unknown>): AgentThreadStatus | null {
+  const meta = asRecord(update._meta);
+  const codex = asRecord(meta?.codex);
+  const threadStatus = asRecord(codex?.threadStatus);
+  if (!threadStatus) {
+    return null;
+  }
+
+  const type = readString(threadStatus.type);
+  const activeFlags = Array.isArray(threadStatus.activeFlags)
+    ? threadStatus.activeFlags.filter((value): value is string => typeof value === "string")
+    : undefined;
+  if (type === "active" || type === "idle") {
+    return {
+      type,
+      ...(activeFlags ? { activeFlags } : {}),
+    };
+  }
+  return { type: "unknown" };
+}
+
+function normalizeAgentThreadStatus(status: AgentThreadStatus | null | undefined): AgentThreadStatus | null {
+  if (!status) {
+    return null;
+  }
+  if (status.type === "active" || status.type === "idle") {
+    return status;
+  }
+  return { type: "unknown" };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" ? value : null;
 }
 
 function buildItem(
@@ -141,6 +239,13 @@ function buildItem(
         group: "raw",
         title: event.method,
         body: JSON.stringify(event.payload, null, 2),
+      };
+    case "sessionInfo":
+      return {
+        ...base,
+        group: "lifecycle",
+        title: "session info",
+        body: "",
       };
     case "error":
       return { ...base, group: "error", title: "error", body: event.message, tone: "danger" };

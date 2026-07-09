@@ -215,6 +215,18 @@ export type AgentRun = {
   agentId: string;
 };
 
+export type AgentThreadStatus = {
+  type: "active" | "idle" | "unknown";
+  activeFlags?: string[];
+};
+
+export type SessionInfoUpdateMetadata = {
+  sessionUpdate: "session_info_update";
+  threadStatus: AgentThreadStatus | null;
+  title: string | null;
+  updatedAt: string | null;
+};
+
 export type ToolFileChangeKind =
   | "added"
   | "modified"
@@ -260,6 +272,12 @@ export type RunEvent =
       fileChanges?: ToolFileChange[];
     }
   | { type: "usage"; used: number; size: number }
+  | {
+      type: "sessionInfo";
+      threadStatus?: AgentThreadStatus | null;
+      title?: string | null;
+      updatedAt?: string | null;
+    }
   | {
       type: "permission";
       permissionId?: string;

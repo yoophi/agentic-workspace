@@ -60,6 +60,8 @@ import {
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
   isAvailableCommandsSessionUpdate,
+  isSessionInfoUpdateEvent,
+  readAgentThreadStatus,
   replacePromptAutocompleteTrigger,
   toTimelineItem,
 } from "@/entities/agent-run/model";
@@ -67,6 +69,7 @@ import type { TimelineRunEvent } from "@/entities/agent-run/model";
 import type {
   ContextSizePreset,
   EventGroup,
+  AgentThreadStatus,
   AgentRunSessionMode,
   AgentRunSettings,
   AgentToolCommandCandidate,
@@ -343,6 +346,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isAwaitingPromptResponse, setIsAwaitingPromptResponse] = useState(false);
+  const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
+    type: "unknown",
+  });
   const [directPrompt, setDirectPrompt] = useState<string | null>(null);
   const [queuedPrompts, setQueuedPrompts] = useState<QueuedPrompt[]>([]);
   const [pendingSteers, setPendingSteers] = useState<SteerInput[]>([]);
@@ -680,6 +686,18 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       }
 
       const timelineEvent: TimelineRunEvent = envelope.event;
+      if (isSessionInfoUpdateEvent(timelineEvent)) {
+        const nextThreadStatus = readAgentThreadStatus(timelineEvent);
+        // title/updatedAt metadata has no stable run-header target yet; keep it out of the timeline.
+        if (nextThreadStatus) {
+          setAgentThreadStatus(nextThreadStatus);
+        }
+        if (nextThreadStatus?.type === "idle") {
+          setIsAwaitingPromptResponse(false);
+        }
+        return;
+      }
+
       if (timelineEvent.type === "raw") {
         const nextCandidates = availableCommandCandidatesFromSessionUpdate(
           timelineEvent.payload,
@@ -774,9 +792,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           onRunSettled?.();
           void recordRunGoalProgress();
         }
-      }
-      if (isIdleThreadStatusEvent(timelineEvent)) {
-        setIsAwaitingPromptResponse(false);
       }
     });
 
@@ -1125,6 +1140,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       : (options.queuedPrompts ?? []);
     setError(null);
     setItems([]);
+    setAgentThreadStatus({ type: "unknown" });
     queuedPromptsRef.current = nextQueuedPrompts;
     setQueuedPrompts(nextQueuedPrompts);
     pendingSteersRef.current = [];
@@ -1939,18 +1955,23 @@ export const AgentRunPanel = memo(function AgentRunPanel({
               )}
 
               <div className="flex flex-col">
-                <div className="flex flex-wrap gap-1.5 border-b pb-3" role="tablist" aria-label="ACP event filter">
-                  {eventGroups.map((group) => (
-                    <Button
-                      key={group.id}
-                      type="button"
-                      size="sm"
-                      variant={filter === group.id ? "default" : "outline"}
-                      onClick={() => setFilter(group.id)}
-                    >
-                      {group.label}
-                    </Button>
-                  ))}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
+                  <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="ACP event filter">
+                    {eventGroups.map((group) => (
+                      <Button
+                        key={group.id}
+                        type="button"
+                        size="sm"
+                        variant={filter === group.id ? "default" : "outline"}
+                        onClick={() => setFilter(group.id)}
+                      >
+                        {group.label}
+                      </Button>
+                    ))}
+                  </div>
+                  {(activeRunId || isRunning || agentThreadStatus.type !== "unknown") && (
+                    <AgentThreadStatusBadge status={agentThreadStatus} />
+                  )}
                 </div>
                 <VirtualizedRunTimeline
                   items={visibleItems}
@@ -3244,42 +3265,48 @@ function addRunEventItem(items: TimelineItem[], runId: string, event: TimelineRu
   return appendOneTimelineItem(items, toTimelineItem(runId, event));
 }
 
-function isIdleThreadStatusEvent(event: TimelineRunEvent) {
-  if (event.type !== "raw" || event.method !== "session/update") {
-    return false;
+function AgentThreadStatusBadge({ status }: { status: AgentThreadStatus }) {
+  const label = agentThreadStatusLabel(status);
+  if (status.type === "active") {
+    return (
+      <Badge
+        variant="secondary"
+        className="shrink-0 gap-1 border-primary/30 bg-primary/10 text-primary"
+        aria-label={label}
+      >
+        <Loader2Icon className="size-3 animate-spin" aria-hidden="true" />
+        {label}
+      </Badge>
+    );
   }
-
-  const payload = event.payload;
-  if (!payload || typeof payload !== "object") {
-    return false;
+  if (status.type === "idle") {
+    return (
+      <Badge
+        variant="secondary"
+        className="shrink-0 gap-1 border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+        aria-label={label}
+      >
+        <CheckCircleIcon className="size-3" aria-hidden="true" />
+        {label}
+      </Badge>
+    );
   }
+  return (
+    <Badge variant="outline" className="shrink-0 gap-1 text-muted-foreground" aria-label={label}>
+      <InfoIcon className="size-3" aria-hidden="true" />
+      {label}
+    </Badge>
+  );
+}
 
-  const update = "update" in payload ? (payload as { update?: unknown }).update : payload;
-  if (!update || typeof update !== "object") {
-    return false;
+function agentThreadStatusLabel(status: AgentThreadStatus) {
+  if (status.type === "active") {
+    return "Agent active";
   }
-
-  const sessionUpdate = (update as { sessionUpdate?: unknown }).sessionUpdate;
-  if (sessionUpdate !== "session_info_update") {
-    return false;
+  if (status.type === "idle") {
+    return "Agent idle";
   }
-
-  const meta = (update as { _meta?: unknown })._meta;
-  if (!meta || typeof meta !== "object") {
-    return false;
-  }
-
-  const codex = (meta as { codex?: unknown }).codex;
-  if (!codex || typeof codex !== "object") {
-    return false;
-  }
-
-  const threadStatus = (codex as { threadStatus?: unknown }).threadStatus;
-  if (!threadStatus || typeof threadStatus !== "object") {
-    return false;
-  }
-
-  return (threadStatus as { type?: unknown }).type === "idle";
+  return "Agent status unknown";
 }
 
 function LifecycleStep({ item }: { item: TimelineItem }) {

@@ -40,6 +40,11 @@ pub enum RunEvent {
         used: i64,
         size: i64,
     },
+    SessionInfo {
+        thread_status: Option<String>,
+        title: Option<String>,
+        updated_at: Option<String>,
+    },
     Permission {
         permission_id: Option<String>,
         title: String,

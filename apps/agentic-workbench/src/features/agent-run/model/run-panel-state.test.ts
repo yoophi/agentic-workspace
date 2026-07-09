@@ -37,6 +37,7 @@ function runningState(overrides: Partial<RunEventState> = {}): RunEventState {
   return {
     items: [],
     usageContext: null,
+    agentThreadStatus: { type: "unknown" },
     isAwaitingPromptResponse: true,
     isRunning: true,
     activeRunId: "run-active",
@@ -146,6 +147,142 @@ describe("run panel state", () => {
     });
 
     expect(nextState.usageContext).toEqual({ used: 25, size: 100 });
+    expect(nextState.items).toHaveLength(0);
+  });
+
+  it("keeps session info updates out of the timeline for the active run", () => {
+    const state = runningState({
+      items: addUserMessage([], "run-active", "before"),
+    });
+
+    const activeState = applyRunEvent(state, {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          sessionUpdate: "session_info_update",
+          _meta: { codex: { threadStatus: { type: "active" } } },
+        },
+      },
+    });
+    const idleState = applyRunEvent(activeState, {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          update: {
+            sessionUpdate: "session_info_update",
+            _meta: { codex: { threadStatus: { type: "idle" } } },
+          },
+        },
+      },
+    });
+    const metadataOnlyState = applyRunEvent(idleState, {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          sessionUpdate: "session_info_update",
+          title: "test",
+          updatedAt: "2026-07-02T11:11:12.255Z",
+        },
+      },
+    });
+
+    expect(activeState.items).toHaveLength(1);
+    expect(idleState.items).toHaveLength(1);
+    expect(metadataOnlyState.items).toHaveLength(1);
+    expect(metadataOnlyState.items[0].event).toMatchObject({
+      type: "userMessage",
+      text: "before",
+    });
+  });
+
+  it("keeps non-session raw events in the timeline for the active run", () => {
+    const nextState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: { sessionUpdate: "available_commands_update" },
+      },
+    });
+
+    expect(nextState.items).toHaveLength(1);
+    expect(nextState.items[0]).toMatchObject({
+      group: "raw",
+      title: "session/update",
+    });
+  });
+
+  it("updates agent thread status from active and idle session info updates", () => {
+    const activeState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "raw",
+        method: "session/update",
+        payload: {
+          sessionUpdate: "session_info_update",
+          _meta: { codex: { threadStatus: { type: "active", activeFlags: [] } } },
+        },
+      },
+    });
+    const idleState = applyRunEvent(
+      runningState({ agentThreadStatus: { type: "active" }, isAwaitingPromptResponse: true }),
+      {
+        runId: "run-active",
+        event: {
+          type: "raw",
+          method: "session/update",
+          payload: {
+            sessionUpdate: "session_info_update",
+            _meta: { codex: { threadStatus: { type: "idle" } } },
+          },
+        },
+      },
+    );
+
+    expect(activeState.agentThreadStatus).toEqual({ type: "active", activeFlags: [] });
+    expect(idleState.agentThreadStatus).toEqual({ type: "idle" });
+    expect(idleState.isAwaitingPromptResponse).toBe(false);
+  });
+
+  it("keeps typed sessionInfo events out of the timeline", () => {
+    const nextState = applyRunEvent(runningState(), {
+      runId: "run-active",
+      event: {
+        type: "sessionInfo",
+        threadStatus: { type: "active" },
+        title: "test",
+        updatedAt: "2026-07-02T11:11:12.255Z",
+      },
+    });
+
+    expect(nextState.items).toHaveLength(0);
+    expect(nextState.agentThreadStatus).toEqual({ type: "active" });
+  });
+
+  it("preserves agent thread status on metadata-only session info updates", () => {
+    const nextState = applyRunEvent(
+      runningState({ agentThreadStatus: { type: "active" } }),
+      {
+        runId: "run-active",
+        event: {
+          type: "raw",
+          method: "session/update",
+          payload: {
+            sessionUpdate: "session_info_update",
+            title: "test",
+            updatedAt: "2026-07-02T11:11:12.255Z",
+          },
+        },
+      },
+    );
+
+    expect(nextState.agentThreadStatus).toEqual({ type: "active" });
     expect(nextState.items).toHaveLength(0);
   });
 
