@@ -52,7 +52,7 @@ export function SpeckitFilesPanel({
     () => new Set(initialExpandedFeatureIds),
   );
   const [sortMode, setSortMode] = useState<"path" | "task">("path");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const sortedFeatures = [...features].sort((left, right) => {
     let result: number;
     if (sortMode === "task") {
@@ -247,9 +247,6 @@ function SpeckitFeatureSection({
           <ToggleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
             <h3 className="truncate text-sm font-medium">{feature.name}</h3>
-            <p className="truncate font-mono text-xs text-muted-foreground">
-              {feature.relativePath}
-            </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <RequiredDocumentStatus feature={feature} />
               <TaskProgressBadge progress={feature.taskProgress} />

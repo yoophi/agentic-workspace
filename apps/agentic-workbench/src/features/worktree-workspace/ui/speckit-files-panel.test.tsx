@@ -58,7 +58,7 @@ describe("SpeckitFilesPanel", () => {
     expect(html).toContain("001-alpha");
     expect(html).toContain("Path");
     expect(html).toContain("Task");
-    expect(html).toContain("Speckit 정렬을 역순으로 변경");
+    expect(html).toContain("Speckit 정렬을 정순으로 변경");
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain("모든 Speckit feature 펼치기");
     expect(html).toContain("Spec");
@@ -68,6 +68,27 @@ describe("SpeckitFilesPanel", () => {
     expect(html).not.toContain(">no<");
     expect(html).not.toContain("specs/001-alpha/spec.md");
     expect(html).toContain("1/2 done");
+  });
+
+  it("sorts features by path descending by default", () => {
+    const html = renderToStaticMarkup(
+      <SpeckitFilesPanel
+        features={[
+          sampleFeatures[0],
+          {
+            ...sampleFeatures[0],
+            id: "specs/002-beta",
+            name: "002-beta",
+            relativePath: "specs/002-beta",
+          },
+        ]}
+        selectedDocumentPath={null}
+        onRefresh={() => undefined}
+        onSelectDocument={() => undefined}
+      />,
+    );
+
+    expect(html.indexOf("002-beta")).toBeLessThan(html.indexOf("001-alpha"));
   });
 
   it("renders grouped document rows when a feature is expanded", () => {
