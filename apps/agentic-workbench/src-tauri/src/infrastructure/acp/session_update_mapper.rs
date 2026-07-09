@@ -83,6 +83,20 @@ pub fn map_session_update(params: &Value) -> MappedSessionUpdate {
                 .unwrap_or_default();
             MappedSessionUpdate::Event(RunEvent::Usage { used, size })
         }
+        "session_info_update" => MappedSessionUpdate::Event(RunEvent::SessionInfo {
+            thread_status: update
+                .pointer("/_meta/codex/threadStatus/type")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            title: update
+                .get("title")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            updated_at: update
+                .get("updatedAt")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+        }),
         other => MappedSessionUpdate::Event(RunEvent::Raw {
             method: other.to_string(),
             payload: update.clone(),
@@ -215,6 +229,30 @@ mod tests {
             RunEvent::Usage { used, size } => {
                 assert_eq!(used, 0);
                 assert_eq!(size, 0);
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_info_update_maps_to_session_info_event_instead_of_raw() {
+        let params = json!({
+            "update": {
+                "sessionUpdate": "session_info_update",
+                "_meta": {"codex": {"threadStatus": {"type": "active"}}},
+                "title": "test",
+                "updatedAt": "2026-07-02T11:11:12.255Z"
+            }
+        });
+        match expect_event(map_session_update(&params)) {
+            RunEvent::SessionInfo {
+                thread_status,
+                title,
+                updated_at,
+            } => {
+                assert_eq!(thread_status.as_deref(), Some("active"));
+                assert_eq!(title.as_deref(), Some("test"));
+                assert_eq!(updated_at.as_deref(), Some("2026-07-02T11:11:12.255Z"));
             }
             other => panic!("unexpected event: {other:?}"),
         }

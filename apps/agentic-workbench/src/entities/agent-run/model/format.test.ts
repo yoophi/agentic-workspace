@@ -1,8 +1,105 @@
 import { describe, expect, it } from "vitest";
 
-import { appendOneTimelineItem, toTimelineItem } from "@/entities/agent-run/model/format";
+import {
+  appendOneTimelineItem,
+  isSessionInfoUpdateEvent,
+  readAgentThreadStatus,
+  toTimelineItem,
+} from "@/entities/agent-run/model/format";
 
 describe("run event formatting", () => {
+  it("detects session_info_update raw events in direct, update, params, and wrapped payload shapes", () => {
+    const update = {
+      sessionUpdate: "session_info_update",
+      _meta: { codex: { threadStatus: { type: "idle" } } },
+    };
+
+    expect(isSessionInfoUpdateEvent({ type: "raw", method: "session/update", payload: update })).toBe(true);
+    expect(isSessionInfoUpdateEvent({ type: "raw", method: "session/update", payload: { update } })).toBe(true);
+    expect(isSessionInfoUpdateEvent({ type: "raw", method: "session/update", payload: { params: { update } } })).toBe(true);
+    expect(
+      isSessionInfoUpdateEvent({
+        type: "raw",
+        method: "session/update",
+        payload: { message: { params: { update } } },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not treat unrelated raw events as session_info_update", () => {
+    expect(
+      isSessionInfoUpdateEvent({
+        type: "raw",
+        method: "session/update",
+        payload: { sessionUpdate: "available_commands_update" },
+      }),
+    ).toBe(false);
+    expect(
+      isSessionInfoUpdateEvent({
+        type: "raw",
+        method: "other/update",
+        payload: { sessionUpdate: "session_info_update" },
+      }),
+    ).toBe(false);
+  });
+
+  it("reads active, idle, unknown, and missing agent thread status from session info updates", () => {
+    const baseUpdate = {
+      sessionUpdate: "session_info_update",
+      _meta: { codex: { threadStatus: { type: "active", activeFlags: ["busy", 1] } } },
+    };
+
+    expect(
+      readAgentThreadStatus({
+        type: "raw",
+        method: "session/update",
+        payload: baseUpdate,
+      }),
+    ).toEqual({ type: "active", activeFlags: ["busy"] });
+    expect(
+      readAgentThreadStatus({
+        type: "raw",
+        method: "session/update",
+        payload: {
+          ...baseUpdate,
+          _meta: { codex: { threadStatus: { type: "idle" } } },
+        },
+      }),
+    ).toEqual({ type: "idle" });
+    expect(
+      readAgentThreadStatus({
+        type: "raw",
+        method: "session/update",
+        payload: {
+          ...baseUpdate,
+          _meta: { codex: { threadStatus: { type: "blocked" } } },
+        },
+      }),
+    ).toEqual({ type: "unknown" });
+    expect(
+      readAgentThreadStatus({
+        type: "raw",
+        method: "session/update",
+        payload: { sessionUpdate: "session_info_update", title: "test" },
+      }),
+    ).toBeNull();
+  });
+
+  it("detects typed sessionInfo events and reads their thread status", () => {
+    expect(
+      isSessionInfoUpdateEvent({
+        type: "sessionInfo",
+        threadStatus: { type: "active" },
+      }),
+    ).toBe(true);
+    expect(
+      readAgentThreadStatus({
+        type: "sessionInfo",
+        threadStatus: { type: "idle" },
+      }),
+    ).toEqual({ type: "idle" });
+  });
+
   it("shows Ralph loop iteration number and status", () => {
     const item = toTimelineItem("run-1", {
       type: "ralphLoop",
