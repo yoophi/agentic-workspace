@@ -68,6 +68,9 @@ describe("prompt autocomplete helpers", () => {
     expect(clampHighlightedIndex(-1, 2)).toBe(1);
     expect(clampHighlightedIndex(2, 2)).toBe(0);
     expect(clampHighlightedIndex(0, 0)).toBe(-1);
+    expect(clampHighlightedIndex(5, 1)).toBe(0);
+    expect(clampHighlightedIndex(-10, 1)).toBe(0);
+    expect(clampHighlightedIndex(1, 3)).toBe(1);
   });
 
   it("replaces only the active trigger token and restores cursor position", () => {
