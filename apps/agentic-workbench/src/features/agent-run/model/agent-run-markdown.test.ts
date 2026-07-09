@@ -17,6 +17,17 @@ describe("agent run markdown", () => {
     );
   });
 
+  it("strips html comments from rendered agent prose", () => {
+    expect(normalizeStreamingMarkdown("before <!-- --> after")).toBe("before  after");
+    expect(normalizeStreamingMarkdown("before <!-- hidden --> after")).toBe("before  after");
+  });
+
+  it("preserves html comments inside fenced code blocks", () => {
+    expect(normalizeStreamingMarkdown("```html\n<!-- keep me -->\n```")).toBe(
+      "```html\n<!-- keep me -->\n```",
+    );
+  });
+
   it("extracts code languages from react-markdown class names", () => {
     expect(extractCodeLanguage("language-ts")).toBe("ts");
     expect(extractCodeLanguage("foo language-mermaid bar")).toBe("mermaid");

@@ -2,13 +2,33 @@ import { detectMermaidBlock } from "@yoophi/markdown-annotation-core";
 
 export type AgentRunCodeBlockRenderKind = "ordinary-code" | "mermaid-diagram";
 
+function stripHtmlCommentsOutsideFences(content: string) {
+  const lines = content.split(/(\n)/);
+  let inFence = false;
+
+  return lines
+    .map((line) => {
+      if (line === "\n") return line;
+
+      const trimmedStart = line.trimStart();
+      if (trimmedStart.startsWith("```")) {
+        inFence = !inFence;
+        return line;
+      }
+
+      return inFence ? line : line.replace(/<!--[\s\S]*?-->/g, "");
+    })
+    .join("");
+}
+
 export function normalizeStreamingMarkdown(content: string) {
-  const fenceMatches = content.match(/```/g);
+  const withoutComments = stripHtmlCommentsOutsideFences(content);
+  const fenceMatches = withoutComments.match(/```/g);
   if (fenceMatches && fenceMatches.length % 2 === 1) {
-    const suffix = content.endsWith("\n") ? "```" : "\n```";
-    return `${content}${suffix}`;
+    const suffix = withoutComments.endsWith("\n") ? "```" : "\n```";
+    return `${withoutComments}${suffix}`;
   }
-  return content;
+  return withoutComments;
 }
 
 export function extractCodeLanguage(className?: string) {
