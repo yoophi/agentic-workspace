@@ -255,15 +255,32 @@ function SpeckitFeatureSection({
         </button>
       </header>
       {expanded ? (
-        <div className="grid p-1">
-          {feature.documents.map((document) => (
-            <SpeckitDocumentButton
-              document={document}
-              key={document.id}
-              onSelectDocument={onSelectDocument}
-              selected={document.relativePath === selectedDocumentPath}
-            />
-          ))}
+        <div className="grid py-1">
+          {getSpeckitDocumentGroups(feature.documents).map((group) =>
+            group.kind === "planArtifacts" ? (
+              <div
+                className="ml-6 grid border-l border-border pl-1"
+                key="plan-artifacts"
+              >
+                {group.documents.map((document) => (
+                  <SpeckitDocumentButton
+                    document={document}
+                    key={document.id}
+                    nestedUnderPlan
+                    onSelectDocument={onSelectDocument}
+                    selected={document.relativePath === selectedDocumentPath}
+                  />
+                ))}
+              </div>
+            ) : (
+              <SpeckitDocumentButton
+                document={group.document}
+                key={group.document.id}
+                onSelectDocument={onSelectDocument}
+                selected={group.document.relativePath === selectedDocumentPath}
+              />
+            ),
+          )}
         </div>
       ) : null}
     </section>
@@ -302,25 +319,31 @@ function RequiredDocumentStatus({ feature }: { feature: SpeckitFeature }) {
 
 function SpeckitDocumentButton({
   document,
+  nestedUnderPlan = false,
   selected,
   onSelectDocument,
 }: {
   document: SpeckitDocument;
+  nestedUnderPlan?: boolean;
   selected: boolean;
   onSelectDocument: (path: string) => void;
 }) {
   return (
     <button
       type="button"
-      className="grid min-h-10 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-muted data-[selected=true]:bg-muted"
+      className={cn(
+        "grid min-h-8 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted data-[selected=true]:bg-muted",
+        nestedUnderPlan && "pl-3",
+      )}
       data-document-path={document.relativePath}
+      data-plan-artifact={nestedUnderPlan}
       data-selected={selected}
       onClick={() => onSelectDocument(document.relativePath)}
     >
       <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
-          <Badge variant={document.group === "core" ? "secondary" : "outline"}>
+          <Badge variant={document.group === "core" || nestedUnderPlan ? "secondary" : "outline"}>
             {document.label}
           </Badge>
           <span className="truncate font-mono text-xs text-muted-foreground">
@@ -333,6 +356,75 @@ function SpeckitDocumentButton({
       ) : null}
     </button>
   );
+}
+
+type SpeckitDocumentRenderGroup =
+  | {
+      kind: "document";
+      document: SpeckitDocument;
+    }
+  | {
+      kind: "planArtifacts";
+      documents: SpeckitDocument[];
+    };
+
+function getSpeckitDocumentGroups(documents: SpeckitDocument[]): SpeckitDocumentRenderGroup[] {
+  const specDocuments = documents.filter((document) => document.type === "spec");
+  const planDocuments = documents.filter((document) => document.type === "plan");
+  const planArtifactDocuments = documents
+    .filter(isPlanArtifactDocument)
+    .sort((left, right) => {
+      const rankOrder = planArtifactRank(left) - planArtifactRank(right);
+      if (rankOrder !== 0) {
+        return rankOrder;
+      }
+      return left.relativePath.localeCompare(right.relativePath);
+    });
+  const taskDocuments = documents.filter((document) => document.type === "tasks");
+  const remainingDocuments = documents.filter(
+    (document) =>
+      document.type !== "spec" &&
+      document.type !== "plan" &&
+      document.type !== "tasks" &&
+      !isPlanArtifactDocument(document),
+  );
+
+  const groups: SpeckitDocumentRenderGroup[] = [
+    ...specDocuments.map((document) => ({ kind: "document" as const, document })),
+    ...planDocuments.map((document) => ({ kind: "document" as const, document })),
+  ];
+  if (planArtifactDocuments.length > 0) {
+    groups.push({ kind: "planArtifacts", documents: planArtifactDocuments });
+  }
+  groups.push(
+    ...taskDocuments.map((document) => ({ kind: "document" as const, document })),
+    ...remainingDocuments.map((document) => ({ kind: "document" as const, document })),
+  );
+  return groups;
+}
+
+function isPlanArtifactDocument(document: SpeckitDocument) {
+  return (
+    document.type === "research" ||
+    document.type === "dataModel" ||
+    document.type === "contract" ||
+    document.type === "quickstart"
+  );
+}
+
+function planArtifactRank(document: SpeckitDocument) {
+  switch (document.type) {
+    case "research":
+      return 0;
+    case "dataModel":
+      return 1;
+    case "contract":
+      return 2;
+    case "quickstart":
+      return 3;
+    default:
+      return 4;
+  }
 }
 
 function TaskProgressBadge({ progress }: { progress: TaskProgressSummary | null }) {
