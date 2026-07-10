@@ -125,3 +125,78 @@ describe("prompt command autocomplete keyboard navigation", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("}, [autocompleteCandidates.length])");
   });
 });
+
+describe("agent run history minimap integration", () => {
+  it("projects the full conversation independently from the active event filter", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain(
+      "const minimapEntries = useMemo(() => projectTimelineToMinimapEntries(items), [items]);",
+    );
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("items={visibleItems}");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("entries={minimapEntries}");
+  });
+
+  it("shares the virtual timeline layout and uses clamped scroller requests", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("onLayoutChange={handleTimelineLayoutChange}");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("scrollTopForTimelineRatio(");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("scrollElement.scrollHeight - scrollElement.clientHeight");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("timelineOffsetInScroller");
+  });
+
+  it("switches filtered history to All before applying a pending seek", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('if (filter !== "all")');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("createPendingSeek(");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('setFilter("all")');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("applyPendingSeek(");
+  });
+
+  it("keeps one observer and one bottom-stick owner in the virtual timeline", () => {
+    expect(AGENT_RUN_PANEL_SOURCE.match(/new ResizeObserver\(updateViewport\)/g)).toHaveLength(1);
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("stickToBottomRef.current = distanceFromBottom < 48");
+  });
+
+  it("publishes direct-scroll and measured-height revisions back to the minimap", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('scrollElement.addEventListener("scroll", updateViewport');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setScrollTop(visibleTop)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain(
+      "setViewportHeight(Math.max(visibleHeight, timelineViewportCapacity))",
+    );
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("revisionRef.current += 1");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("measured: Object.prototype.hasOwnProperty.call");
+  });
+
+  it("keeps past positions stable and follows streaming only near the bottom", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("if (!scrollElement || !stickToBottomRef.current)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("scrollElement.scrollTop = scrollElement.scrollHeight");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("}, [items.length, scrollParentRef, totalHeight]);");
+  });
+
+  it("owns visible state per mounted panel and exposes an accessible icon toggle", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain(
+      "const [isMinimapVisible, setIsMinimapVisible] = useState(initialMinimapVisible);",
+    );
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('aria-pressed={isMinimapVisible}');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('isMinimapVisible ? "대화 미니맵 숨기기"');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("<PanelRightCloseIcon />");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("<PanelRightOpenIcon />");
+  });
+
+  it("removes only the rail and keeps the same history scroller mounted", () => {
+    const scrollerIndex = AGENT_RUN_PANEL_SOURCE.indexOf("ref={timelineScrollRef}");
+    const conditionalIndex = AGENT_RUN_PANEL_SOURCE.indexOf("{isMinimapVisible && (");
+    expect(scrollerIndex).toBeGreaterThan(-1);
+    expect(conditionalIndex).toBeGreaterThan(scrollerIndex);
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('className="h-full min-w-0 flex-1 overflow-auto"');
+  });
+
+  it("restores the logical history position after toggle-driven remeasurement", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("hiddenMinimapRatioRef");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("pendingMinimapResizeSeekRef");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("createViewportIndicator(timelineLayout).startRatio");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain(
+      "timelineLayout.revision <= pending.requestedRevision",
+    );
+    expect(AGENT_RUN_PANEL_SOURCE).toContain(
+      "performMinimapSeek(pending.targetRatio, timelineLayout)",
+    );
+  });
+});

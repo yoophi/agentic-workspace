@@ -37,6 +37,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import {
   sampleAgentRunToolFileChanges,
+  sampleAgentRunTimelineEmpty,
+  sampleAgentRunTimelineLarge,
+  sampleAgentRunTimelineLong,
+  sampleAgentRunTimelineShort,
+  sampleAgentRunTimelineStreamingSeed,
+  createSampleAgentRunTimeline,
   sampleKoreanGitCommitDetail,
   sampleKoreanGitFileDiff,
   sampleProjects,
@@ -454,6 +460,157 @@ export const PermissionRequestDialogNarrowWindow: Story = {
 export const AgentRun: Story = {
   render: () => (
     <AgentRunPanel workingDirectory="/Users/yoophi/project/agentic-workbench" />
+  ),
+};
+
+export const AgentRunMinimapLongHistory: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story: "Long prompt/response history with a draggable and keyboard-accessible minimap.",
+      },
+    },
+  },
+  render: () => (
+    <div className="mx-auto h-[720px] max-w-5xl overflow-hidden border">
+      <AgentRunPanel
+        workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-long"
+        initialTimelineItems={sampleAgentRunTimelineLong}
+      />
+    </div>
+  ),
+};
+
+export const AgentRunMinimapLargeHistory: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story: "A 500-entry conversation verifies compact projection and virtualized history performance.",
+      },
+    },
+  },
+  render: () => (
+    <div className="mx-auto h-[720px] max-w-5xl overflow-hidden border">
+      <AgentRunPanel
+        workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-large"
+        initialTimelineItems={sampleAgentRunTimelineLarge}
+      />
+    </div>
+  ),
+};
+
+export const AgentRunMinimapEmptyAndShort: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story: "Empty and one-viewport histories verify disabled slider semantics and compact content bounds.",
+      },
+    },
+  },
+  render: () => (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="h-[620px] overflow-hidden border">
+        <AgentRunPanel
+          workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-empty"
+          initialTimelineItems={sampleAgentRunTimelineEmpty}
+        />
+      </div>
+      <div className="h-[620px] overflow-hidden border">
+        <AgentRunPanel
+          workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-short"
+          initialTimelineItems={sampleAgentRunTimelineShort}
+        />
+      </div>
+    </div>
+  ),
+};
+
+export const AgentRunMinimapStreaming: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story: "Add output while viewing the end or a past position to verify the existing bottom-follow policy.",
+      },
+    },
+  },
+  render: function AgentRunMinimapStreamingStory() {
+    const [timelineItems, setTimelineItems] = useState(sampleAgentRunTimelineStreamingSeed);
+    return (
+      <div className="mx-auto flex h-[720px] max-w-5xl flex-col gap-2">
+        <div className="flex shrink-0 items-center justify-end">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() =>
+              setTimelineItems((current) => [
+                ...current,
+                ...createSampleAgentRunTimeline(2, current.length),
+              ])
+            }
+          >
+            출력 추가
+          </Button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden border">
+          <AgentRunPanel
+            workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-streaming"
+            timelineItems={timelineItems}
+          />
+        </div>
+      </div>
+    );
+  },
+};
+
+export const AgentRunMinimapVisibilityAndPanelIsolation: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story: "Two mounted panels keep independent visible/hidden minimap state and history position.",
+      },
+    },
+  },
+  render: () => (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="h-[660px] overflow-hidden border">
+        <AgentRunPanel
+          panelId="storybook-minimap-main"
+          workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-main"
+          initialTimelineItems={sampleAgentRunTimelineLong}
+          initialMinimapVisible
+        />
+      </div>
+      <div className="h-[660px] overflow-hidden border">
+        <AgentRunPanel
+          panelId="storybook-minimap-extra"
+          variant="extra"
+          workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-extra"
+          initialTimelineItems={sampleAgentRunTimelineLong}
+          initialMinimapVisible={false}
+        />
+      </div>
+    </div>
+  ),
+};
+
+export const AgentRunMinimapNarrow: Story = {
+  parameters: {
+    viewport: {
+      defaultViewport: "mobile1",
+    },
+    docs: {
+      description: {
+        story: "A 360px agent panel verifies that history, minimap, and controls remain bounded without overlap.",
+      },
+    },
+  },
+  render: () => (
+    <div className="mx-auto h-[720px] w-[360px] max-w-full overflow-hidden border">
+      <AgentRunPanel
+        workingDirectory="/Users/yoophi/project/agentic-workbench/minimap-narrow"
+        initialTimelineItems={sampleAgentRunTimelineLong}
+      />
+    </div>
   ),
 };
 
