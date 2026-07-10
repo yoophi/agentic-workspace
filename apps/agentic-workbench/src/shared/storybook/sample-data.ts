@@ -1,6 +1,7 @@
 import type {
   AgentDescriptor,
   ThreadGoal,
+  TimelineItem,
   ToolFileChange,
   WorktreeChange,
 } from "@/entities/agent-run/model/types";
@@ -27,6 +28,53 @@ import type {
   GitFileDiff,
 } from "@/entities/worktree-git/model/types";
 import type { SpeckitFeature } from "@/features/worktree-workspace/model/speckit-files";
+
+function createSampleTimelineItem({
+  index,
+  role,
+  text,
+}: {
+  index: number;
+  role: "user" | "assistant";
+  text: string;
+}): TimelineItem {
+  const isUser = role === "user";
+  return {
+    id: `storybook-minimap-${index}`,
+    runId: "storybook-minimap-run",
+    group: isUser ? "user/message" : "assistant/message",
+    title: isUser ? "user/message" : "assistant/message",
+    body: text,
+    createdAt: Date.UTC(2026, 6, 10, 9, 0, index),
+    event: isUser ? { type: "userMessage", text } : { type: "agentMessage", text },
+  };
+}
+
+export function createSampleAgentRunTimeline(
+  count: number,
+  startIndex = 0,
+): TimelineItem[] {
+  return Array.from({ length: count }, (_, offset) => {
+    const index = startIndex + offset;
+    const role = index % 2 === 0 ? "user" : "assistant";
+    const turn = Math.floor(index / 2) + 1;
+    const text =
+      role === "user"
+        ? `프롬프트 ${turn}: worktree 변경사항과 테스트 결과를 검토해 주세요.`
+        : `응답 ${turn}: 관련 파일과 검증 결과를 확인했습니다. ${
+            index % 6 === 1
+              ? "긴 출력의 상대 높이를 검증하기 위한 세부 내용입니다. ".repeat(8)
+              : "다음 작업을 진행합니다."
+          }`;
+    return createSampleTimelineItem({ index, role, text });
+  });
+}
+
+export const sampleAgentRunTimelineEmpty: TimelineItem[] = [];
+export const sampleAgentRunTimelineShort = createSampleAgentRunTimeline(4);
+export const sampleAgentRunTimelineLong = createSampleAgentRunTimeline(40);
+export const sampleAgentRunTimelineLarge = createSampleAgentRunTimeline(500);
+export const sampleAgentRunTimelineStreamingSeed = createSampleAgentRunTimeline(20);
 
 export const sampleProjects: Project[] = [
   {

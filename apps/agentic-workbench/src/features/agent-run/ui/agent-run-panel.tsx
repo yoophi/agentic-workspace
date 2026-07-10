@@ -15,6 +15,8 @@ import {
   ClockIcon,
   InfoIcon,
   Loader2Icon,
+  PanelRightCloseIcon,
+  PanelRightOpenIcon,
   PencilIcon,
   PlayIcon,
   SettingsIcon,
@@ -71,6 +73,7 @@ import {
   readAgentThreadStatus,
   readSessionInfoUpdateMetadata,
   replacePromptAutocompleteTrigger,
+  projectTimelineToMinimapEntries,
   toTimelineItem,
 } from "@/entities/agent-run/model";
 import type { TimelineRunEvent } from "@/entities/agent-run/model";
@@ -90,6 +93,16 @@ import type {
   TimelineItem,
   ToolFileChange,
 } from "@/entities/agent-run/model";
+import {
+  applyPendingSeek,
+  createPendingSeek,
+  createViewportIndicator,
+  EMPTY_TIMELINE_LAYOUT_SNAPSHOT,
+  scrollTopForTimelineRatio,
+  type MinimapSeekInput,
+  type PendingSeek,
+  type TimelineLayoutSnapshot,
+} from "@/features/agent-run/model/agent-run-minimap";
 import {
   buildGoalContinuationPrompt,
   shouldStartGoalContinuation,
@@ -141,6 +154,7 @@ import {
 } from "@/features/agent-command-override/model/command-overrides";
 import { formatSessionLabel } from "@/features/agent-run/model/session-label";
 import { StreamingMarkdown } from "@/features/agent-run/ui/agent-run-markdown";
+import { AgentRunMinimap } from "@/features/agent-run/ui/agent-run-minimap";
 import { PermissionRequestDialog } from "@/features/agent-run/ui/permission-request-dialog";
 import { PromptCommandAutocomplete } from "@/features/agent-run/ui/prompt-command-autocomplete";
 import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-toolbar";
@@ -184,6 +198,12 @@ import {
 import { Steps, StepsContent, StepsItem, StepsTrigger } from "@/components/ui/steps";
 import { SystemMessage } from "@/components/ui/system-message";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
 
@@ -197,6 +217,9 @@ type AgentRunPanelProps = {
   externalPromptRequest?: AgentPromptRequest | null;
   variant?: AgentRunPanelKind;
   onOpenSettings?: () => void;
+  initialTimelineItems?: TimelineItem[];
+  timelineItems?: TimelineItem[];
+  initialMinimapVisible?: boolean;
 };
 
 type AgentInputMode = "prompt" | "ralphLoop";
@@ -322,6 +345,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   externalPromptRequest = null,
   variant = "main",
   onOpenSettings,
+  initialTimelineItems = [],
+  timelineItems,
+  initialMinimapVisible = true,
 }: AgentRunPanelProps) {
   const enableGoalContinuation = variant === "main";
   const persistSettings = variant === "main";
@@ -367,7 +393,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [pendingSteers, setPendingSteers] = useState<SteerInput[]>([]);
   const [rejectedSteers, setRejectedSteers] = useState<SteerInput[]>([]);
   const [filter, setFilter] = useState<EventGroup | "all">("all");
-  const [items, setItems] = useState<TimelineItem[]>([]);
+  const [items, setItems] = useState<TimelineItem[]>(initialTimelineItems);
+  const [isMinimapVisible, setIsMinimapVisible] = useState(initialMinimapVisible);
+  const [timelineLayout, setTimelineLayout] = useState<TimelineLayoutSnapshot>(
+    EMPTY_TIMELINE_LAYOUT_SNAPSHOT,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isRunSettingsDialogOpen, setIsRunSettingsDialogOpen] = useState(false);
   const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
@@ -394,6 +424,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const promptTextareaElementRef = useRef<HTMLTextAreaElement | null>(null);
   const handledExternalPromptRequestIdRef = useRef<string | null>(null);
+  const pendingMinimapSeekRef = useRef<PendingSeek | null>(null);
+  const pendingMinimapResizeSeekRef = useRef<{
+    targetRatio: number;
+    requestedRevision: number;
+  } | null>(null);
+  const hiddenMinimapRatioRef = useRef<number | null>(null);
 
   // 세션 재진입 시 불필요한 refetch를 막는 신선도 정책(specs/007 research R7)은
   // entities/agent-run/api/query-options에서 key 단위로 정의된다.
@@ -416,6 +452,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     queryFn: () => getAgentRunSettings(APP_COMMAND_OVERRIDE_SETTINGS_KEY),
     ...agentRunSettingsQueryOptions,
   });
+
+  useEffect(() => {
+    if (timelineItems) {
+      setItems(timelineItems);
+    }
+  }, [timelineItems]);
   // 세션 시작 선택지 = enabled 프로필(specs/008 FR-011). selectedAgentId에는
   // profile id를 저장하고, provider 흐름(세션 조회 등)에는 agentType을 쓴다.
   const enabledProfiles = useMemo(
@@ -1078,6 +1120,78 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     () => (filter === "all" ? items : items.filter((item) => item.group === filter)),
     [filter, items],
   );
+  const minimapEntries = useMemo(() => projectTimelineToMinimapEntries(items), [items]);
+  const handleTimelineLayoutChange = useCallback((snapshot: TimelineLayoutSnapshot) => {
+    setTimelineLayout(snapshot);
+  }, []);
+  const performMinimapSeek = useCallback(
+    (targetRatio: number, snapshot: TimelineLayoutSnapshot) => {
+      const scrollElement = timelineScrollRef.current;
+      if (!scrollElement) {
+        return;
+      }
+      const maxScrollTop = Math.max(
+        0,
+        scrollElement.scrollHeight - scrollElement.clientHeight,
+      );
+      scrollElement.scrollTop = scrollTopForTimelineRatio(
+        snapshot,
+        targetRatio,
+        maxScrollTop,
+      );
+      scrollElement.dispatchEvent(new Event("scroll"));
+    },
+    [],
+  );
+  const handleMinimapSeek = useCallback(
+    (targetRatio: number, _input: MinimapSeekInput) => {
+      if (filter !== "all") {
+        pendingMinimapSeekRef.current = createPendingSeek(
+          targetRatio,
+          timelineLayout.revision,
+        );
+        setFilter("all");
+        return;
+      }
+      performMinimapSeek(targetRatio, timelineLayout);
+    },
+    [filter, performMinimapSeek, timelineLayout],
+  );
+  const handleMinimapVisibilityToggle = useCallback(() => {
+    const visibleRatio = createViewportIndicator(timelineLayout).startRatio;
+    const currentRatio = isMinimapVisible
+      ? visibleRatio
+      : (hiddenMinimapRatioRef.current ?? visibleRatio);
+    if (isMinimapVisible) {
+      hiddenMinimapRatioRef.current = currentRatio;
+    }
+    pendingMinimapResizeSeekRef.current = {
+      targetRatio: currentRatio,
+      requestedRevision: timelineLayout.revision,
+    };
+    setIsMinimapVisible((visible) => !visible);
+  }, [isMinimapVisible, timelineLayout]);
+
+  useEffect(() => {
+    const pending = pendingMinimapResizeSeekRef.current;
+    if (!pending || timelineLayout.revision <= pending.requestedRevision) {
+      return;
+    }
+    pendingMinimapResizeSeekRef.current = null;
+    performMinimapSeek(pending.targetRatio, timelineLayout);
+  }, [performMinimapSeek, timelineLayout]);
+
+  useEffect(() => {
+    const result = applyPendingSeek(
+      pendingMinimapSeekRef.current,
+      filter,
+      timelineLayout,
+    );
+    pendingMinimapSeekRef.current = result.pending;
+    if (result.targetRatio !== null) {
+      performMinimapSeek(result.targetRatio, timelineLayout);
+    }
+  }, [filter, performMinimapSeek, timelineLayout]);
   const usagePercent =
     usageContext && usageContext.size > 0
       ? Math.min(100, Math.round((usageContext.used / usageContext.size) * 100))
@@ -1871,7 +1985,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         className="flex h-full min-h-0 w-full flex-col"
       >
         <ResizablePanel id={`${panelId}-timeline`} minSize="220px">
-          <div ref={timelineScrollRef} className="h-full min-h-0 overflow-auto">
+          <div className="flex h-full min-h-0 w-full">
+          <div ref={timelineScrollRef} className="h-full min-w-0 flex-1 overflow-auto">
             <div className="flex flex-col">
           {scrollHeader}
 
@@ -2031,8 +2146,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                       </Button>
                     ))}
                   </div>
-                  {(activeRunId || isRunning || agentThreadStatus.type !== "unknown") && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                    {(activeRunId || isRunning || agentThreadStatus.type !== "unknown") && (
+                      <>
                       {sessionFreshnessLabel && (
                         <span aria-label="Session updated at">
                           {sessionFreshnessLabel}
@@ -2045,12 +2161,33 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                         />
                       )}
                       <AgentThreadStatusBadge status={agentThreadStatus} />
-                    </div>
-                  )}
+                      </>
+                    )}
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="outline"
+                            aria-label={isMinimapVisible ? "대화 미니맵 숨기기" : "대화 미니맵 표시"}
+                            aria-pressed={isMinimapVisible}
+                            onClick={handleMinimapVisibilityToggle}
+                          >
+                            {isMinimapVisible ? <PanelRightCloseIcon /> : <PanelRightOpenIcon />}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side="left">
+                          {isMinimapVisible ? "대화 미니맵 숨기기" : "대화 미니맵 표시"}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                 </div>
                 <VirtualizedRunTimeline
                   items={visibleItems}
                   scrollParentRef={timelineScrollRef}
+                  onLayoutChange={handleTimelineLayoutChange}
                 />
                 {inputMode === "prompt" && pendingSteers.length > 0 && (
                   <PendingSteerTimeline pendingSteers={pendingSteers} />
@@ -2090,6 +2227,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </div>
             </div>
           </div>
+          </div>
+          {isMinimapVisible && (
+            <AgentRunMinimap
+              entries={minimapEntries}
+              layoutSnapshot={timelineLayout}
+              onSeek={handleMinimapSeek}
+            />
+          )}
           </div>
         </ResizablePanel>
 
@@ -2875,14 +3020,18 @@ function goalStatusLabel(status: GoalStatus) {
 function VirtualizedRunTimeline({
   items,
   scrollParentRef,
+  onLayoutChange,
 }: {
   items: TimelineItem[];
   scrollParentRef: RefObject<HTMLDivElement | null>;
+  onLayoutChange: (snapshot: TimelineLayoutSnapshot) => void;
 }) {
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const stickToBottomRef = useRef(true);
+  const revisionRef = useRef(0);
   const [viewportHeight, setViewportHeight] = useState(0);
   const [scrollTop, setScrollTop] = useState(0);
+  const [timelineOffsetInScroller, setTimelineOffsetInScroller] = useState(0);
   const [measuredHeights, setMeasuredHeights] = useState<Record<string, number>>({});
   const renderItems = useMemo(() => groupTimelineRenderItems(items), [items]);
 
@@ -2902,12 +3051,19 @@ function VirtualizedRunTimeline({
         0,
         visibleBottom - Math.max(scrollRect.top, timelineRect.top),
       );
+      const timelineViewportCapacity = Math.min(
+        scrollElement.clientHeight,
+        timelineRect.height,
+      );
+      const nextTimelineOffset =
+        timelineRect.top - scrollRect.top + scrollElement.scrollTop;
       const distanceFromBottom =
         scrollElement.scrollHeight - scrollElement.scrollTop - scrollElement.clientHeight;
 
       stickToBottomRef.current = distanceFromBottom < 48;
       setScrollTop(visibleTop);
-      setViewportHeight(visibleHeight);
+      setViewportHeight(Math.max(visibleHeight, timelineViewportCapacity));
+      setTimelineOffsetInScroller(Math.max(0, nextTimelineOffset));
     };
 
     const resizeObserver = new ResizeObserver(updateViewport);
@@ -2935,6 +3091,33 @@ function VirtualizedRunTimeline({
   const totalHeight = itemLayouts.length
     ? itemLayouts[itemLayouts.length - 1].end
     : 0;
+
+  useEffect(() => {
+    revisionRef.current += 1;
+    onLayoutChange({
+      timelineOffsetInScroller,
+      totalHeight,
+      visibleStart: Math.min(totalHeight, Math.max(0, scrollTop)),
+      visibleEnd: Math.min(totalHeight, Math.max(0, scrollTop + viewportHeight)),
+      viewportHeight,
+      itemLayouts: itemLayouts.map(({ item, start, end, height }) => ({
+        id: item.id,
+        start,
+        end,
+        height,
+        measured: Object.prototype.hasOwnProperty.call(measuredHeights, item.id),
+      })),
+      revision: revisionRef.current,
+    });
+  }, [
+    itemLayouts,
+    measuredHeights,
+    onLayoutChange,
+    scrollTop,
+    timelineOffsetInScroller,
+    totalHeight,
+    viewportHeight,
+  ]);
 
   const virtualItems = useMemo(() => {
     if (!itemLayouts.length) {
