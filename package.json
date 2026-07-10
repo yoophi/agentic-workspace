@@ -20,6 +20,8 @@
     "storybook:git": "turbo run storybook --filter=@yoophi/git-explorer",
     "build-storybook:annotator": "turbo run build-storybook --filter=@yoophi/markdown-annotator",
     "build-storybook:git": "turbo run build-storybook --filter=@yoophi/git-explorer",
+    "openwiki:init": "openwiki code --init \"모든 OpenWiki 문서는 한국어로 작성하세요. 제목, 설명, 요약, 주의사항, 탐색 문구는 한국어로 작성하고, 파일명, 경로, 클래스명, 함수명, 패키지명, 명령어, 환경변수, 코드 식별자는 원문 그대로 유지하세요.\"",
+    "openwiki:update": "openwiki code --update \"새로 작성하거나 수정하는 OpenWiki 문서는 한국어로 작성하세요. 기존 영어 문서를 수정하는 경우 해당 수정 섹션을 한국어로 바꾸되, 기술 식별자와 링크는 원문 그대로 유지하세요.\"",
     "tauri": "turbo run tauri --filter=@yoophi/agentic-workbench --",
     "tauri:workbench": "turbo run tauri --filter=@yoophi/agentic-workbench --",
     "tauri:annotator": "turbo run tauri --filter=@yoophi/markdown-annotator --",
@@ -30,6 +32,7 @@
     "tauri:dev:git": "turbo run tauri:dev --filter=@yoophi/git-explorer --"
   },
   "devDependencies": {
+    "openwiki": "0.1.0",
     "turbo": "^2.5.8"
   }
 }
