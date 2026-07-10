@@ -95,6 +95,29 @@ sequenceDiagram
 - `tool_call` → 툴 호출 표시
 - `usage_update` → 토큰 사용량 업데이트
 
+## Steer (실행 중 프롬프트 개입)
+
+에이전트가 실행(active turn) 중일 때 사용자가 새 프롬프트를 주입하거나, 현재 프롬프트를 취소하고 새 프롬프트를 보낼 수 있습니다. 두 유스케이스 모두 `application/` 계층에 추가되었습니다.
+
+| 유스케이스 | 파일 | Tauri 명령 | 동작 |
+|-----------|------|-----------|------|
+| `SteerPromptUseCase` | `application/steer_prompt.rs` | `steer_prompt_to_run` | 활성 세션에 steer 프롬프트 전달. `RunEvent::Lifecycle { SteerPending }` emit 후 세션에 위임 |
+| `CancelPromptAndSendUseCase` | `application/cancel_prompt_and_send.rs` | `cancel_current_prompt_and_send_to_run` | 현재 프롬프트 취소 + 새 프롬프트 전송을 세션에 위임 |
+
+`SessionHandle` 포트 (`ports/session_handle.rs`)에 `steer_prompt`와 `cancel_current_prompt_and_send` 메서드가 추가되어, `AcpSession`이 ACP `session/prompt`의 interrupt/steer 기능으로 구현합니다. 세션이 활성 상태가 아니면 각각 `SteerError::RunNotActive` / `SendPromptError::RunNotActive`를 반환합니다.
+
+### Steer 라이프사이클 상태
+
+steer 요청은 다음 `LifecycleStatus` 변형을 emit합니다 (`domain/events.rs`):
+
+| 상태 | 의미 |
+|------|------|
+| `SteerPending` | steer 프롬프트가 제출됨 |
+| `SteerAccepted` | 에이전트가 steer를 수락 |
+| `SteerRejected` | 에이전트가 steer를 거부 (예: 비활성 턴) |
+
+→ 프론트엔드에서 `run-panel-state.ts`가 이 상태들을 처리하여 UI에 steer 결과를 반영합니다.
+
 ## 권한 처리
 
 ### 권한 모드 (`domain/run.rs`의 `PermissionMode`)
@@ -161,6 +184,21 @@ sequenceDiagram
 
 각 worktree 세션은 별도 창(`session-{uuid}`)에서 열립니다. run 이벤트는 소유 창 label로 `emit_to(label, "agent-run-event", ...)` 전송되어 창 간 이벤트 섞임을 방지합니다.
 
+## 세션 라이프사이클 상태 메시지
+
+`domain/events.rs`의 `LifecycleStatus`는 세션 전체 라이프사이클을 추적합니다:
+
+```text
+Started → Initialized → SessionCreated → SessionIdle
+  → PromptSent → PromptCompleted → Completed
+  (steer: SteerPending → SteerAccepted | SteerRejected)
+  (취소: Cancelled)
+```
+
+`sessionCreated` / `sessionIdle` 상태는 `SessionLifecycleStatusMessage` (`entities/agent-run/model/types.ts`)로 변환되어 UI에 정보성 상태 메시지로 표시됩니다. `run-panel-state.ts`가 이 메시지를 중복 제거(dedupeKey 기반)하여 표시합니다.
+
+`SessionInfoUpdateMetadata`는 ACP `session_info_update`에서 스레드 상태(`AgentThreadStatus`), 세션 제목, 갱신 시각을 전달하며, 에이전트 상태 아이콘과 창 제목에 반영됩니다.
+
 ## 프롬프트 자동완성
 
 `application/agent_tool_candidate_service.rs` + `entities/agent-run/model/prompt-autocomplete.ts`가 세션/앱/확장 소스에서 삽입 가능한 툴 후보를 해결합니다. 프론트엔드의 `PromptCommandAutocomplete` 컴포넌트가 `/` 명령어 자동완성을 제공합니다.
@@ -170,6 +208,8 @@ sequenceDiagram
 | 영역 | 경로 |
 |------|------|
 | 실행 유스케이스 | `src-tauri/src/application/start_agent_run.rs` |
+| Steer 유스케이스 | `src-tauri/src/application/steer_prompt.rs` |
+| Cancel-and-send 유스케이스 | `src-tauri/src/application/cancel_prompt_and_send.rs` |
 | ACP 러너 | `src-tauri/src/infrastructure/acp/runner.rs` |
 | 권한 흐름 | `src-tauri/src/infrastructure/acp/permission_flow.rs` |
 | 권한 브로커 | `src-tauri/src/infrastructure/permission_broker.rs` |
