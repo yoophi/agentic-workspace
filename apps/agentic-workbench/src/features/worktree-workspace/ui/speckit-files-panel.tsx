@@ -259,7 +259,7 @@ function SpeckitFeatureSection({
           {getSpeckitDocumentGroups(feature.documents).map((group) =>
             group.kind === "planArtifacts" ? (
               <div
-                className="ml-6 grid border-l border-border pl-1"
+                className="ml-[34px] grid border-l border-border pl-1"
                 key="plan-artifacts"
               >
                 {group.documents.map((document) => (
@@ -332,15 +332,19 @@ function SpeckitDocumentButton({
     <button
       type="button"
       className={cn(
-        "grid min-h-8 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted data-[selected=true]:bg-muted",
-        nestedUnderPlan && "pl-3",
+        "grid min-h-8 min-w-0 items-center gap-2 rounded-sm px-2 py-1 text-left text-sm hover:bg-muted data-[selected=true]:bg-muted",
+        nestedUnderPlan
+          ? "grid-cols-[minmax(0,1fr)_auto] pl-3"
+          : "grid-cols-[auto_minmax(0,1fr)_auto]",
       )}
       data-document-path={document.relativePath}
       data-plan-artifact={nestedUnderPlan}
       data-selected={selected}
       onClick={() => onSelectDocument(document.relativePath)}
     >
-      <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+      {nestedUnderPlan ? null : (
+        <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
+      )}
       <span className="min-w-0">
         <span className="flex min-w-0 items-center gap-1.5">
           <Badge variant={document.group === "core" || nestedUnderPlan ? "secondary" : "outline"}>

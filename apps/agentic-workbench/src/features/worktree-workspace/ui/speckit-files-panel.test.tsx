@@ -163,6 +163,11 @@ describe("SpeckitFilesPanel", () => {
     expect(html).toContain("Contract");
     expect(html).toContain("specs/001-alpha/spec.md");
     expect(html).toContain('data-plan-artifact="true"');
+    const planArtifactButton = html.match(
+      /<button[^>]*data-document-path="specs\/001-alpha\/research\.md"[\s\S]*?<\/button>/,
+    )?.[0];
+    expect(planArtifactButton).toBeDefined();
+    expect(planArtifactButton).not.toContain("<svg");
     expect(html.indexOf("specs/001-alpha/plan.md")).toBeLessThan(
       html.indexOf("specs/001-alpha/research.md"),
     );
