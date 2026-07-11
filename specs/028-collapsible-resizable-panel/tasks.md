@@ -107,7 +107,20 @@
 - [X] T024 Audit the original public API, non-scope boundaries, and manual scenarios against `specs/028-collapsible-resizable-panel/contracts/ui-component.md` and `specs/028-collapsible-resizable-panel/quickstart.md`
 - [X] T025 [P] Re-run the UI package tests and type check after the full-rail interaction change using the scripts in `packages/ui/package.json`
 - [X] T026 [P] Re-run Git Explorer type checking and Storybook static build after the full-rail interaction change using the scripts in `apps/git-explorer/package.json`
-- [X] T027 Validate the updated full-rail activation and right-edge title alignment scenarios against `specs/028-collapsible-resizable-panel/contracts/ui-component.md` and `specs/028-collapsible-resizable-panel/quickstart.md`
+- [X] T027 Validate the updated full-rail activation and rotated-title positioning scenarios against `specs/028-collapsible-resizable-panel/contracts/ui-component.md` and `specs/028-collapsible-resizable-panel/quickstart.md`
+
+---
+
+## Phase 7: Post-Implementation Feedback
+
+**Purpose**: 브라우저 피드백으로 확정된 선택적 title, 중첩 조합, 회전 제목 표시 요구를 반영한다.
+
+- [X] T028 Add optional `collapsible`, `showTitle`, and `contentClassName` panel configuration and update the public contract in `packages/ui/src/components/collapsible-resizable-panels.tsx` and `specs/028-collapsible-resizable-panel/contracts/ui-component.md`
+- [X] T029 [P] Add a three-column resizable primitive example in `apps/git-explorer/src/stories/molecules.stories.tsx`
+- [X] T030 Add an outer A/B CRP with titleless B containing an inner B1/B2 CRP and interaction assertions in `apps/git-explorer/src/stories/molecules.stories.tsx`
+- [X] T031 Remove nested B padding and duplicate inner borders from the nested CRP example in `apps/git-explorer/src/stories/molecules.stories.tsx`
+- [X] T032 Replace vertical writing mode with a true minus-90-degree transform and center the rotated Korean title horizontally in `packages/ui/src/components/collapsible-resizable-panels.tsx` and `apps/git-explorer/src/stories/molecules.stories.tsx`
+- [X] T033 Re-run shared UI tests, UI and Git Explorer type checks, browser rendering checks, and diff validation using `packages/ui/package.json` and `apps/git-explorer/package.json`
 
 ---
 
@@ -121,6 +134,7 @@
 - **User Story 2 (Phase 4)**: 같은 공용 상태와 컴포넌트를 확장하므로 US1 완료 후 시작한다.
 - **User Story 3 (Phase 5)**: 회전 제목과 disabled 상태를 함께 검증해야 하므로 US2 완료 후 시작한다.
 - **Polish (Phase 6)**: 목표로 하는 모든 사용자 스토리 완료 후 시작한다.
+- **Post-Implementation Feedback (Phase 7)**: Phase 6 완료 후 사용자 브라우저 피드백 순서대로 실행한다.
 
 ### User Story Dependency Graph
 
