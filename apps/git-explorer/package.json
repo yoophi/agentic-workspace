@@ -26,6 +26,7 @@
     "lucide-react": "^1.17.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-grab": "^0.1.47",
     "react-resizable-panels": "^4.11.2",
     "react-router": "^7.17.0",
     "tailwindcss": "^4.3.0"
