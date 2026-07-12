@@ -1,8 +1,9 @@
-import type { ElementType, MouseEvent, ReactNode } from "react";
+import { Fragment, type ElementType, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { MessageSquare, Pencil, StickyNote, Trash2, X } from "lucide-react";
+import { Circle, CircleCheck, MessageSquare, Pencil, StickyNote, Trash2, X } from "lucide-react";
 import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
+import { transformWikilinks } from "@yoophi/markdown-annotation-core";
 import { cn } from "./cn";
 import { MermaidExpandedView } from "./MermaidExpandedView";
 import { segmentTextByAnnotations } from "./segment-text";
@@ -23,6 +24,7 @@ export type MarkdownViewerProps = {
   onEditInlineAnnotation?: (annotationId: string) => void;
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
+  onLinkActivate?: (href: string) => void;
 };
 
 const deleteAnnotationClassName =
@@ -143,12 +145,14 @@ function InlineMarkdown({
   components,
   onCancelInlineAnnotation,
   onEditInlineAnnotation,
+  onLinkActivate,
 }: {
   annotations?: MarkdownViewerInlineAnnotation[];
   children: string;
   components: MarkdownViewerComponents;
   onCancelInlineAnnotation?: (annotationId: string) => void;
   onEditInlineAnnotation?: (annotationId: string) => void;
+  onLinkActivate?: (href: string) => void;
 }) {
   if (annotations.length > 0) {
     return (
@@ -166,11 +170,24 @@ function InlineMarkdown({
   return (
     <ReactMarkdown
       components={{
+        a: ({ children: linkChildren, href }) => (
+          <a
+            href={href}
+            onClick={(event) => {
+              if (href?.startsWith("./") && onLinkActivate) {
+                event.preventDefault();
+                onLinkActivate(href);
+              }
+            }}
+          >
+            {linkChildren}
+          </a>
+        ),
         p: ({ children: inlineChildren }) => <>{inlineChildren}</>,
       }}
       remarkPlugins={[remarkGfm]}
     >
-      {children}
+      {transformWikilinks(children)}
     </ReactMarkdown>
   );
 }
@@ -303,6 +320,7 @@ function MarkdownBlockRenderer({
   onEditInlineAnnotation,
   onRequestBlockComment,
   onRequestBlockDelete,
+  onLinkActivate,
 }: {
   block: MarkdownBlock;
   annotated: boolean;
@@ -314,6 +332,7 @@ function MarkdownBlockRenderer({
   onEditInlineAnnotation?: (annotationId: string) => void;
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
+  onLinkActivate?: (href: string) => void;
 }) {
   const shellProps = {
     annotated,
@@ -331,6 +350,7 @@ function MarkdownBlockRenderer({
       components={components}
       onCancelInlineAnnotation={onCancelInlineAnnotation}
       onEditInlineAnnotation={onEditInlineAnnotation}
+      onLinkActivate={onLinkActivate}
     >
       {block.content}
     </InlineMarkdown>
@@ -354,6 +374,43 @@ function MarkdownBlockRenderer({
       );
 
     case "list-item":
+      if (block.checked !== undefined) {
+        const TaskIcon = block.checked ? CircleCheck : Circle;
+        return (
+          <BlockShell {...shellProps}>
+            <div
+              className={cn(
+                "flex min-w-0 items-start gap-3 rounded-md border px-3 py-2",
+                block.checked
+                  ? "border-border/60 bg-muted/50"
+                  : "border-primary/30 bg-primary/5",
+              )}
+              data-task-checked={block.checked}
+              data-task-list-item
+              style={{ marginLeft: `${(block.level ?? 0) * 1.25}rem` }}
+            >
+              <TaskIcon
+                aria-hidden="true"
+                className={cn(
+                  "mt-1 size-4 shrink-0",
+                  block.checked ? "text-primary" : "text-muted-foreground",
+                )}
+              />
+              <span className="sr-only">{block.checked ? "Completed task: " : "Open task: "}</span>
+              <div
+                className={cn(
+                  "min-w-0 flex-1",
+                  block.checked && "text-muted-foreground line-through decoration-1",
+                )}
+                data-block-content
+              >
+                {inline}
+              </div>
+            </div>
+          </BlockShell>
+        );
+      }
+
       return (
         <BlockShell {...shellProps}>
           <div
@@ -403,7 +460,7 @@ function MarkdownBlockRenderer({
       return (
         <BlockShell {...shellProps}>
           <div data-block-content>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{block.content}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{transformWikilinks(block.content)}</ReactMarkdown>
           </div>
         </BlockShell>
       );
@@ -425,6 +482,57 @@ function MarkdownBlockRenderer({
   }
 }
 
+function TaskSummary({ completed, open }: { completed: number; open: number }) {
+  return (
+    <aside
+      aria-label="Task summary"
+      className="my-4 flex flex-wrap items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm"
+      data-task-summary
+    >
+      <span className="flex items-center gap-1.5 text-muted-foreground" data-task-summary-completed>
+        <CircleCheck aria-hidden="true" className="size-4 text-primary" />
+        <span>Completed</span>
+        <strong className="font-semibold text-foreground">{completed}</strong>
+      </span>
+      <span aria-hidden="true" className="text-border">
+        /
+      </span>
+      <span className="flex items-center gap-1.5 text-muted-foreground" data-task-summary-open>
+        <Circle aria-hidden="true" className="size-4" />
+        <span>Open</span>
+        <strong className="font-semibold text-foreground">{open}</strong>
+      </span>
+    </aside>
+  );
+}
+
+type TaskCounts = { completed: number; open: number };
+
+function countTasksByH1Chapter(blocks: MarkdownBlock[]) {
+  const countsByHeadingIndex = new Map<number, TaskCounts>();
+  let chapterHeadingIndex = -1;
+
+  blocks.forEach((block, index) => {
+    if (block.type === "heading" && (block.level ?? 1) === 1) {
+      chapterHeadingIndex = index;
+      return;
+    }
+    if (block.checked === undefined) {
+      return;
+    }
+
+    const counts = countsByHeadingIndex.get(chapterHeadingIndex) ?? { completed: 0, open: 0 };
+    if (block.checked) {
+      counts.completed += 1;
+    } else {
+      counts.open += 1;
+    }
+    countsByHeadingIndex.set(chapterHeadingIndex, counts);
+  });
+
+  return countsByHeadingIndex;
+}
+
 export function MarkdownViewer({
   blocks,
   components,
@@ -436,23 +544,41 @@ export function MarkdownViewer({
   onEditInlineAnnotation,
   onRequestBlockComment,
   onRequestBlockDelete,
+  onLinkActivate,
 }: MarkdownViewerProps) {
+  const taskCountsByH1Chapter = countTasksByH1Chapter(blocks);
+  const preambleTaskCounts = taskCountsByH1Chapter.get(-1);
+
   return (
     <article className="markdown-viewer max-w-none">
-      {blocks.map((block) => (
-        <MarkdownBlockRenderer
-          annotated={annotatedBlockIds.has(block.id)}
-          block={block}
-          components={components}
-          deleted={deletedBlockIds.has(block.id)}
-          inlineAnnotations={inlineAnnotationsByBlock.get(block.id) ?? []}
-          key={block.id}
-          notes={noteAnnotationsByBlock.get(block.id) ?? []}
-          onCancelInlineAnnotation={onCancelInlineAnnotation}
-          onEditInlineAnnotation={onEditInlineAnnotation}
-          onRequestBlockComment={onRequestBlockComment}
-          onRequestBlockDelete={onRequestBlockDelete}
-        />
+      {blocks.map((block, index) => (
+        <Fragment key={block.id}>
+          {index === 0 && preambleTaskCounts ? (
+            <TaskSummary
+              completed={preambleTaskCounts.completed}
+              open={preambleTaskCounts.open}
+            />
+          ) : null}
+          <MarkdownBlockRenderer
+            annotated={annotatedBlockIds.has(block.id)}
+            block={block}
+            components={components}
+            deleted={deletedBlockIds.has(block.id)}
+            inlineAnnotations={inlineAnnotationsByBlock.get(block.id) ?? []}
+            notes={noteAnnotationsByBlock.get(block.id) ?? []}
+            onCancelInlineAnnotation={onCancelInlineAnnotation}
+            onEditInlineAnnotation={onEditInlineAnnotation}
+            onRequestBlockComment={onRequestBlockComment}
+            onRequestBlockDelete={onRequestBlockDelete}
+            onLinkActivate={onLinkActivate}
+          />
+          {taskCountsByH1Chapter.has(index) ? (
+            <TaskSummary
+              completed={taskCountsByH1Chapter.get(index)?.completed ?? 0}
+              open={taskCountsByH1Chapter.get(index)?.open ?? 0}
+            />
+          ) : null}
+        </Fragment>
       ))}
     </article>
   );

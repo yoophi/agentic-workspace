@@ -82,6 +82,46 @@ describe("extractTocEntries", () => {
     expect(entries[0].startLine).toBeGreaterThan(3);
   });
 
+  it("adds completed and open task counts to each h1 chapter entry", () => {
+    const markdown = [
+      "# First",
+      "",
+      "- [x] done",
+      "- [ ] open",
+      "## Nested section",
+      "- [X] also done",
+      "",
+      "# Second",
+      "",
+      "- [ ] another open",
+    ].join("\n");
+    const entries = extractTocEntries(parseMarkdownToBlocks(markdown));
+
+    expect(entries.find((entry) => entry.text === "First")?.taskSummary).toEqual({
+      completed: 2,
+      open: 1,
+    });
+    expect(entries.find((entry) => entry.text === "Nested section")?.taskSummary).toBeUndefined();
+    expect(entries.find((entry) => entry.text === "Second")?.taskSummary).toEqual({
+      completed: 0,
+      open: 1,
+    });
+  });
+
+  it("omits task summaries for taskless chapters and tasks before the first h1", () => {
+    const markdown = [
+      "- [x] preamble task",
+      "",
+      "## Section before h1",
+      "- [ ] unscoped task",
+      "",
+      "# Taskless chapter",
+    ].join("\n");
+    const entries = extractTocEntries(parseMarkdownToBlocks(markdown));
+
+    expect(entries.every((entry) => entry.taskSummary === undefined)).toBe(true);
+  });
+
   it("returns an empty array for empty input", () => {
     expect(extractTocEntries([])).toEqual([]);
   });

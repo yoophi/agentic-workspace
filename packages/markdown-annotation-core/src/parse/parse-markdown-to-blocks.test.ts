@@ -162,4 +162,15 @@ const graph = new Map();
       },
     ]);
   });
+
+  it("parses a 2,000-block document within the Preview performance budget", () => {
+    const markdown = Array.from({ length: 1_000 }, (_, index) =>
+      `## Section ${index + 1}\n\nParagraph ${index + 1}`,
+    ).join("\n\n");
+    const startedAt = performance.now();
+    const blocks = parseMarkdownToBlocks(markdown);
+
+    expect(blocks).toHaveLength(2_000);
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+  });
 });

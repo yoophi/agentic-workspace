@@ -9,6 +9,7 @@
     "dev:workbench": "turbo run dev --filter=@yoophi/agentic-workbench",
     "dev:annotator": "turbo run dev --filter=@yoophi/markdown-annotator",
     "dev:git": "turbo run dev --filter=@yoophi/git-explorer",
+    "build:annotator": "turbo run build --filter=@yoophi/markdown-annotator",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
@@ -29,7 +30,8 @@
     "tauri:dev": "turbo run tauri:dev --filter=@yoophi/agentic-workbench --",
     "tauri:dev:workbench": "turbo run tauri:dev --filter=@yoophi/agentic-workbench --",
     "tauri:dev:annotator": "turbo run tauri:dev --filter=@yoophi/markdown-annotator --",
-    "tauri:dev:git": "turbo run tauri:dev --filter=@yoophi/git-explorer --"
+    "tauri:dev:git": "turbo run tauri:dev --filter=@yoophi/git-explorer --",
+    "tauri:build:annotator": "turbo run tauri:build --filter=@yoophi/markdown-annotator"
   },
   "devDependencies": {
     "openwiki": "0.1.0",

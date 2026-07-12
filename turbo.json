@@ -29,6 +29,10 @@
     "tauri": {
       "cache": false
     },
+    "tauri:build": {
+      "cache": false,
+      "dependsOn": ["^build"]
+    },
     "tauri:dev": {
       "cache": false,
       "persistent": true

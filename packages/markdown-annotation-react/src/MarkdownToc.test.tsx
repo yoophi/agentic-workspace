@@ -49,6 +49,24 @@ describe("MarkdownToc", () => {
 
     expect(buttonTagFor(html, "block-9")).toContain("padding-left:2rem");
   });
+
+  it("renders task progress for h1 chapters that contain tasks", () => {
+    const taskEntries: TocEntry[] = [
+      {
+        blockId: "chapter-with-tasks",
+        level: 1,
+        text: "Tasks",
+        startLine: 1,
+        taskSummary: { completed: 3, open: 2 },
+      },
+      { blockId: "taskless-chapter", level: 1, text: "Notes", startLine: 10 },
+    ];
+    const html = renderToStaticMarkup(<MarkdownToc entries={taskEntries} />);
+
+    expect(html).toContain('data-toc-task-summary="chapter-with-tasks"');
+    expect(html).toContain('aria-label="3 completed tasks, 2 open tasks"');
+    expect(html).not.toContain('data-toc-task-summary="taskless-chapter"');
+  });
 });
 
 function buttonTagFor(html: string, blockId: string): string {

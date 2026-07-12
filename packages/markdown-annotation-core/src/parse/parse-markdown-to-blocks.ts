@@ -1,5 +1,6 @@
 import type { MarkdownBlock } from "../types";
 import { detectMermaidBlock } from "../mermaid/detect-mermaid-block";
+import { stripHtmlComments } from "./inline-markdown";
 
 type FrontmatterResult = {
   content: string;
@@ -34,7 +35,7 @@ function isTableStart(lines: string[], index: number) {
 }
 
 export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
-  const { content, contentStartLine } = extractFrontmatter(markdown);
+  const { content, contentStartLine } = extractFrontmatter(stripHtmlComments(markdown));
   const lines = content.split("\n");
   const blocks: MarkdownBlock[] = [];
   let nextId = 0;

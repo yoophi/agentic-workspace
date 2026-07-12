@@ -72,6 +72,14 @@ pnpm run tauri:dev:annotator
 pnpm run tauri:dev:git
 ```
 
+Markdown Annotator 독립 앱 번들 생성:
+
+```sh
+pnpm run tauri:build:annotator
+```
+
+산출물은 `target/release/bundle/` 아래의 운영체제별 디렉터리에 생성됩니다.
+
 프론트엔드만 실행:
 
 ```sh

@@ -33,6 +33,55 @@ export const Basic: Story = {
   },
 };
 
+export const TaskListStates: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`# Task List Preview
+
+- [ ] 미완료 작업
+- [x] 완료된 작업
+- [X] 대문자 X로 완료된 작업
+  - [ ] 중첩된 미완료 작업과 [관련 문서](./related.md)
+  - [x] 중첩된 완료 작업과 \`inline code\`
+- 일반 목록은 기존 bullet로 표시됩니다.
+- [ ] 공백 없이 매우 긴 작업 설명도 아이콘과 본문 정렬을 유지하며 미리보기 영역을 밀어내지 않고 자연스럽게 여러 줄로 표시되어야 합니다.
+
+# Second Chapter Without Tasks
+
+이 chapter에는 task가 없으므로 요약을 표시하지 않습니다.
+
+# Third Chapter
+
+- [ ] 세 번째 chapter의 미완료 작업
+- [x] 세 번째 chapter의 완료 작업
+
+\`\`\`md
+- [ ] 코드 블록 안의 문구는 task로 표시하지 않습니다.
+\`\`\`
+`),
+  },
+};
+
+export const HtmlCommentBoundaries: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`# HTML5 Comment Boundaries
+
+표시되는 본문입니다. <!-- Preview에서 숨겨지는 한 줄 주석 --> 이어지는 본문입니다.
+
+<!--
+여러 줄 주석도 Preview에 표시되지 않습니다.
+-->
+
+\`<!-- inline code는 보존 -->\`
+
+\`\`\`html
+<!-- fenced code의 내용도 보존 -->
+\`\`\`
+
+<!-- 닫히지 않은 주석은 이후 문서를 숨기지 않습니다.
+`),
+  },
+};
+
 export const MermaidDiagram: Story = {
   args: {
     blocks: parseMarkdownToBlocks(`# Mermaid Diagram
