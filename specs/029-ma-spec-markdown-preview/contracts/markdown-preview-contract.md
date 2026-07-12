@@ -78,3 +78,23 @@ type TocEntry = {
 - MA navigation/lifecycle: page/feature tests
 - reusable UI states: `Molecules/MarkdownViewer`, `Molecules/MarkdownToc` Storybook
 - consumers: core, React, MA, AW의 `check-types`와 `test`; MA Vite/Storybook build
+
+## AW Speckit Preview Integration Contract
+
+- Speckit Preview는 현재 문서 blocks를 `MarkdownViewer`에 전달하면서 annotation maps와 block/inline action callbacks를 함께 연결한다.
+- 본문 selection은 현재 Preview container 안에서만 anchor로 변환하고 selection delete/note toolbar를 제공한다.
+- annotation 생성·편집·삭제는 선택 Speckit 문서 경로의 배열만 변경한다.
+- annotation 목록과 agent prompt는 현재 선택 문서의 annotation만 사용한다.
+- agent prompt 전송 callback이 없으면 Send action을 비활성화한다.
+- 문서 전환 시 열린 dialog, editing id, selection anchors와 highlight를 초기화한다.
+- `extractTocEntries(blocks)` 결과를 `MarkdownPreviewToc`에 전달하고 선택한 `blockId`를 Speckit Preview container 안에서 scroll한다.
+- task가 포함된 H1 TOC entry는 공용 `taskSummary`의 completed/open 개수를 그대로 표시한다.
+- 일반 Markdown panel과 Speckit panel은 같은 AW app-local annotation workspace 계약을 사용하며 공용 package에 worktree 또는 agent callback 의존성을 추가하지 않는다.
+
+### AW integration verification
+
+- 동일 문서에서 block/selection annotation 생성·편집·삭제
+- 두 Speckit 문서 사이 annotation 격리와 복귀 시 보존
+- 문서 전환 시 selection/dialog 초기화
+- annotation prompt 내용과 Send callback
+- H1~H3, 중복 제목, H1 task count와 TOC scroll target

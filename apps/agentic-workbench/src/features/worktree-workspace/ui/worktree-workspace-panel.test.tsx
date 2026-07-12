@@ -128,14 +128,15 @@ describe("worktree workspace file tree", () => {
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
       'type WorkspaceTabId = "git" | "files" | "markdown" | "speckit"',
     );
-    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("<SpeckitWorkspaceTab worktree={worktree} />");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      "<SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} />",
+    );
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onSelectDocument={setSelectedDocumentPath}");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
       'readWorktreeTextFile(worktree.path, selectedDocumentPath ?? "")',
     );
-    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
-      "<MarkdownViewer blocks={blocks} components={markdownViewerComponents} />",
-    );
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("<MarkdownAnnotationWorkspace");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("tocEntries={tocEntries}");
   });
 
   it("keeps stale Speckit document selection separate from successful preview content", () => {

@@ -36,3 +36,20 @@ flowchart LR
 ## 검증
 
 자동 검증과 browser/Tauri 수동 시나리오는 `specs/029-ma-spec-markdown-preview/quickstart.md`를 따른다. 공용 Markdown package를 수정하면 MA와 Agentic Workbench(AW)를 함께 검증한다.
+
+## AW Speckit Preview
+
+AW의 Speckit panel에서도 일반 Markdown workspace와 같은 block·선택 영역 annotation을 사용할 수 있다. Annotation은 Speckit 문서 상대 경로별로 분리되며 문서를 전환해도 기존 작업을 보존한다. 현재 문서의 annotation만 목록과 agent prompt에 포함된다.
+
+```mermaid
+flowchart LR
+  A[Speckit 문서 선택] --> B[Markdown block parse]
+  B --> C[Annotation Preview]
+  B --> D[H1~H3 Contents]
+  C --> E[Block 또는 선택 영역 annotation]
+  E --> F[문서별 annotation 목록]
+  F --> G[Agent prompt 전송]
+  D --> H[Heading 위치 이동]
+```
+
+Contents에는 H1~H3 제목이 표시되며 task가 있는 H1은 완료·미완료 개수를 함께 보여준다. 문서를 바꾸면 열린 annotation dialog, selection과 highlight는 초기화되지만 경로별 annotation은 유지된다.

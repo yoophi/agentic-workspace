@@ -114,3 +114,31 @@ stateDiagram-v2
   Stale --> LocalLoaded: 복구 후 reload
   Stale --> ExampleLoaded: 예제 선택
 ```
+
+## AwMarkdownAnnotationWorkspace
+
+AW 일반 Markdown 및 Speckit Preview panel이 재사용하는 app-local interaction 상태다.
+
+| Field | Type | Rules |
+|---|---|---|
+| `selectedDocumentPath` | `string \| null` | 현재 panel에서 선택한 worktree 상대 경로 |
+| `annotationsByFile` | `Record<string, AnnotationDraft[]>` | 문서 경로별로 분리하며 다른 문서와 공유하지 않음 |
+| `draftTarget` | `selection \| block \| null` | 현재 문서에 속한 annotation 입력 대상 |
+| `selectionAnchors` | `AnnotationAnchor[]` | 현재 parse 결과의 block id/offset만 참조 |
+| `selectionHighlightRects` | `SelectionRect[]` | 문서 전환 시 초기화되는 일시 UI 상태 |
+| `editingAnnotationId` | `string \| null` | 현재 문서 annotation만 편집 가능 |
+
+`tocEntries`는 현재 blocks에서, `annotationPrompt`는 현재 문서 경로·annotations·blocks에서 파생한다. 선택 문서가 바뀌면 draft/selection/editing 상태는 초기화하지만 `annotationsByFile`의 다른 경로 항목은 보존한다.
+
+### AW Speckit Preview State Transitions
+
+```mermaid
+stateDiagram-v2
+  [*] --> NoDocument
+  NoDocument --> DocumentSelected: Speckit 문서 선택
+  DocumentSelected --> Drafting: block 또는 selection annotation 요청
+  Drafting --> DocumentSelected: 저장 또는 취소
+  DocumentSelected --> DocumentSelected: annotation 편집 또는 삭제
+  DocumentSelected --> OtherDocument: 다른 Speckit 문서 선택
+  OtherDocument --> DocumentSelected: 기존 문서로 복귀
+```

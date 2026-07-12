@@ -120,6 +120,8 @@ import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
+import { useMarkdownAnnotationWorkspace } from "@/features/worktree-workspace/model/use-markdown-annotation-workspace";
+import { MarkdownAnnotationWorkspace } from "@/features/worktree-workspace/ui/markdown-annotation-workspace";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
@@ -320,7 +322,7 @@ export function WorktreeWorkspacePanel({
             onSendAnnotationPrompt={onSendAnnotationPrompt}
           />
         ) : (
-          <SpeckitWorkspaceTab worktree={worktree} />
+          <SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} />
         )}
       </div>
     </section>
@@ -998,7 +1000,15 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
   );
 }
 
-function SpeckitWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
+function SpeckitWorkspaceTab({
+  worktree,
+  onSendAnnotationPrompt,
+}: {
+  worktree: GitWorktree;
+  onSendAnnotationPrompt?: (prompt: string) => void;
+}) {
+  const previewPaneRef = useRef<HTMLDivElement | null>(null);
+  const previewContentRef = useRef<HTMLDivElement | null>(null);
   const [selectedDocumentPath, setSelectedDocumentPath] = useState<string | null>(null);
   const queryClient = useQueryClient();
   const filesQuery = useQuery({
@@ -1044,6 +1054,13 @@ function SpeckitWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
     () => parseMarkdownToBlocks(previewQuery.data?.content ?? ""),
     [previewQuery.data?.content],
   );
+  const tocEntries = useMemo(() => extractTocEntries(blocks), [blocks]);
+  const annotationWorkspace = useMarkdownAnnotationWorkspace({
+    blocks,
+    contentRef: previewContentRef,
+    documentPath: selectedDocumentPath,
+    previewRef: previewPaneRef,
+  });
   const selectedDocument = features
     .flatMap((feature) => feature.documents)
     .find((document) => document.relativePath === selectedDocumentPath);
@@ -1106,7 +1123,11 @@ function SpeckitWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
               </div>
             </div>
           </header>
-          <div className="min-h-0 flex-1 overflow-auto p-4">
+          <div
+            ref={previewPaneRef}
+            className="min-h-0 flex-1 overflow-auto p-4"
+            onMouseUp={() => window.setTimeout(annotationWorkspace.captureSelection, 10)}
+          >
             {selectedDocumentPath === null ? (
               <EmptyPanel
                 title="Speckit 문서를 선택하세요"
@@ -1127,9 +1148,14 @@ function SpeckitWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
                 variant="destructive"
               />
             ) : previewQuery.data ? (
-              <div className="min-w-0">
-                <MarkdownViewer blocks={blocks} components={markdownViewerComponents} />
-              </div>
+              <MarkdownAnnotationWorkspace
+                blocks={blocks}
+                contentRef={previewContentRef}
+                model={annotationWorkspace}
+                onSendAnnotationPrompt={onSendAnnotationPrompt}
+                previewRef={previewPaneRef}
+                tocEntries={tocEntries}
+              />
             ) : null}
           </div>
         </div>
