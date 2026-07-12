@@ -21,6 +21,7 @@ pnpm --filter @yoophi/markdown-annotator check-types
 pnpm --filter @yoophi/markdown-annotator test
 pnpm --filter @yoophi/agentic-workbench check-types
 pnpm --filter @yoophi/agentic-workbench test
+pnpm --filter @yoophi/agentic-workbench build
 pnpm --filter @yoophi/markdown-annotator build
 pnpm --filter @yoophi/markdown-annotator build-storybook
 ```
@@ -64,6 +65,19 @@ pnpm run tauri:dev:annotator
 4. 존재하지 않는 target과 directory traversal target에서 현재 문서가 유지되고 오류가 표시되는지 확인한다.
 5. 열린 로컬 파일을 외부에서 수정하고 최신 Preview와 watcher 대상이 갱신되는지 확인한다.
 
+## AW Speckit Preview 검증
+
+```sh
+pnpm run tauri:dev:workbench
+```
+
+1. worktree session에서 Speckit tab을 열고 spec 문서를 선택한다.
+2. 본문 block comment/delete와 선택 영역 note/delete를 생성하고 annotation 목록에서 편집·삭제한다.
+3. agent prompt가 현재 spec 경로와 annotation만 포함하며 Send action이 active agent panel로 전달되는지 확인한다.
+4. 다른 Speckit 문서를 선택해 annotation이 섞이지 않고, 이전 문서로 돌아가면 기존 annotation이 보존되는지 확인한다.
+5. Contents를 펼쳐 H1~H3 항목을 선택하고 해당 heading으로 이동하는지 확인한다.
+6. task가 포함된 H1의 완료·미완료 개수가 본문 chapter summary 및 Contents와 일치하는지 확인한다.
+
 ## 완료 기준
 
 - [ ] 자동 검증 command가 모두 통과한다.
@@ -73,7 +87,9 @@ pnpm run tauri:dev:annotator
 - [ ] local wikilink의 성공·누락·차단 경로가 계약대로 동작한다.
 - [ ] Mermaid 오류가 나머지 문서를 숨기지 않는다.
 - [ ] HTML5 주석은 숨고 code 내부 주석 문자열과 주석 밖 본문은 보존된다.
+- [ ] AW Speckit Preview에서 annotation 생성·편집·삭제·prompt 전송과 문서별 격리가 동작한다.
+- [ ] AW Speckit Preview의 TOC 이동과 H1 task count가 본문과 일치한다.
 
 ## 자동 검증 기록
 
-2026-07-12 구현 검증에서 core 44개, shared React 41개, MA 17개, AW 258개 테스트와 각 TypeScript type check가 통과했다. MA Vite build, Storybook build와 Tauri `cargo check`도 통과했다. 수동 browser/Tauri 시나리오는 release 전 완료 기준 목록으로 유지한다.
+2026-07-12 구현 검증에서 core 44개, shared React 41개, MA 17개, AW 262개 테스트와 각 TypeScript type check가 통과했다. MA와 AW Vite build, Storybook build 및 Tauri `cargo check`도 통과했다. AW Speckit Preview의 문서별 annotation model, block/selection action wiring, prompt callback과 TOC integration contract를 자동 검증했으며 수동 browser/Tauri 조작은 release 전 완료 기준 목록으로 유지한다.

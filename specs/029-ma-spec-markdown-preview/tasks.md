@@ -174,6 +174,43 @@
 
 ---
 
+## Phase 9: User Story 6 - AW에서도 동일한 Markdown Preview 사용 (Priority: P2)
+
+**Goal**: AW Speckit Preview panel에서 일반 Markdown workspace와 동일한 annotation 생성·편집·삭제·agent prompt 및 H1~H3 TOC 탐색을 제공한다.
+
+**Independent Test**: Speckit 문서 두 개를 번갈아 선택하며 block/selection annotation을 생성·편집·삭제하고 prompt를 전송한 뒤, 문서별 상태 격리와 TOC heading 이동 및 H1 task count가 정확한지 확인한다.
+
+### Tests for User Story 6
+
+- [X] T056 [P] [US6] Add failing reducer/hook tests for per-document annotations, selection reset, editing reset, and return-to-document preservation in `apps/agentic-workbench/src/features/worktree-workspace/model/use-markdown-annotation-workspace.test.ts`
+- [X] T057 [P] [US6] Add failing UI contract tests for annotation list, selection toolbar, dialog, prompt Send state, and callback wiring in `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-annotation-workspace.test.tsx`
+- [X] T058 [P] [US6] Add failing Speckit integration tests for `extractTocEntries`, duplicate heading scroll, H1 task counts, document switching, and annotation isolation in `apps/agentic-workbench/src/features/worktree-workspace/ui/speckit-preview-annotation.test.tsx`
+
+### Implementation for User Story 6
+
+- [X] T059 [US6] Extract document-keyed annotation, draft, selection, editing, viewer-map, and prompt state from the general Markdown tab into `apps/agentic-workbench/src/features/worktree-workspace/model/use-markdown-annotation-workspace.ts`
+- [X] T060 [US6] Build a reusable annotation-enabled Preview surface with block actions, selection toolbar, annotation list, agent prompt, dialog, and TOC slots in `apps/agentic-workbench/src/features/worktree-workspace/ui/markdown-annotation-workspace.tsx`
+- [X] T061 [US6] Refactor the general Markdown workspace to consume the extracted model and reusable Preview surface without behavior changes in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T062 [US6] Connect Speckit document path, parsed blocks, annotation maps, block callbacks, selection capture, and per-file lifecycle to the reusable workspace in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T063 [US6] Connect Speckit annotation editing, deletion, agent prompt generation, and `onSendAnnotationPrompt` propagation from the session workspace in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T064 [US6] Render `MarkdownPreviewToc` beside the Speckit Preview and scroll selected entries within the Speckit preview container in `apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx`
+- [X] T065 [US6] Reset transient selection, highlights, dialog, and editing state on Speckit document changes while preserving path-keyed annotations in `apps/agentic-workbench/src/features/worktree-workspace/model/use-markdown-annotation-workspace.ts`
+- [X] T066 [US6] Register Speckit annotation empty, annotated, multi-document, task-TOC, and long-content states in `apps/agentic-workbench/src/stories/organisms.stories.tsx`
+
+**Checkpoint**: US6는 Speckit panel 안에서 annotation과 TOC를 독립적으로 완료하고 일반 Markdown workspace의 기존 동작을 유지한다.
+
+---
+
+## Phase 10: AW Speckit Preview Polish & Verification
+
+**Purpose**: 새 AW 통합의 문서, 접근성, 회귀와 실행 검증을 완료한다.
+
+- [X] T067 [P] Document AW Speckit annotation and TOC usage with a Mermaid interaction flow in `docs/markdown-annotator-preview.md`
+- [X] T068 Run AW `check-types`, tests, and production build plus shared core/React and MA consumer regression commands in `specs/029-ma-spec-markdown-preview/quickstart.md`
+- [X] T069 Run the AW Tauri Speckit annotation/TOC scenarios and record validation evidence in `specs/029-ma-spec-markdown-preview/quickstart.md`
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -185,7 +222,9 @@
 - **US3 (Phase 5)**: Foundational inline/link 계약에 의존하며 US2와 병렬 진행 가능하다.
 - **US4 (Phase 6)**: Foundational document lifecycle에 의존하며 다른 story와 병렬 진행 가능하다.
 - **US5 (Phase 7)**: Foundational example model에 의존한다. 완전한 시연은 US1~US3 완료 후 가능하지만 catalog 자체는 독립 구현 가능하다.
-- **Polish (Phase 8)**: 목표로 삼은 모든 사용자 스토리 완료 후 진행한다.
+- **Polish (Phase 8)**: 기존 US1~US5 구현 완료 후 진행한다.
+- **US6 (Phase 9)**: 완료된 공용 Preview와 AW 일반 Markdown annotation workspace에 의존하며 T056~T058 테스트 후 T059~T066 순서로 진행한다.
+- **AW Polish (Phase 10)**: US6 완료 후 문서와 전체 소비 앱 회귀를 검증한다.
 
 ### User Story Dependency Graph
 
@@ -197,12 +236,15 @@ flowchart TD
   Foundation --> US3[US3 Wikilink]
   Foundation --> US4[US4 Stable Review]
   Foundation --> US5[US5 Examples]
+  Foundation --> US6[US6 AW Speckit Annotation and TOC]
   US1 --> Demo[Integrated SpecKit Demo]
   US2 --> Demo
   US3 --> Demo
   US5 --> Demo
   Demo --> Polish[Phase 8 Polish]
   US4 --> Polish
+  US6 --> AwPolish[Phase 10 AW Polish]
+  Polish --> AwPolish
 ```
 
 ### Within Each User Story
@@ -220,6 +262,8 @@ flowchart TD
 - 각 story의 `[P]` test는 구현 전에 병렬 작성할 수 있다.
 - T042~T046 SpecKit fixture 5종은 완전히 병렬 생성 가능하다.
 - T052와 T053은 machine resource가 허용하면 package와 consumer 검증을 병렬 실행할 수 있다.
+- T056~T058은 서로 다른 model/UI/integration test 파일에서 병렬 작성할 수 있다.
+- T067 문서 갱신은 US6 구현 파일과 독립적으로 진행할 수 있다.
 
 ## Parallel Examples
 
@@ -266,6 +310,14 @@ T045: tasks fixture
 T046: checklist fixture
 ```
 
+### User Story 6
+
+```text
+T056: document-keyed annotation model tests
+T057: reusable annotation workspace UI tests
+T058: Speckit Preview integration and TOC tests
+```
+
 ## Implementation Strategy
 
 ### MVP First (User Story 1 Only)
@@ -284,11 +336,12 @@ T046: checklist fixture
 4. US3 → 연결 문서 이동
 5. US4 → 변경 감지와 오류 복구
 6. US5 → SpecKit 예제 catalog와 통합 시연
-7. Polish → 접근성, 성능, 문서와 교차 앱 회귀 완료
+7. US6 → AW Speckit annotation과 TOC
+8. Polish → 접근성, 성능, 문서와 교차 앱 회귀 완료
 
 ### Parallel Team Strategy
 
-Foundation 완료 후 서로 다른 담당자가 US2 TOC, US3 navigation, US4 reload/Mermaid, US5 fixtures를 병렬 진행할 수 있다. 공유 package 파일을 수정하는 US1/US2/US3 담당자는 merge 순서를 core → React → MA로 조정한다.
+Foundation 완료 후 서로 다른 담당자가 US2 TOC, US3 navigation, US4 reload/Mermaid, US5 fixtures를 병렬 진행할 수 있다. 기존 phase 완료 후 US6의 model, reusable UI와 Speckit integration test를 병렬 준비하고 구현은 model → UI → panel integration 순서로 진행한다. 공유 package 파일을 수정하는 담당자는 merge 순서를 core → React → 소비 앱으로 조정한다.
 
 ## Notes
 

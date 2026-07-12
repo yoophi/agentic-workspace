@@ -55,3 +55,19 @@
 **Rationale**: Preview에서 주석을 숨기면서 기존 source line과 annotation anchor를 유지하고, code 예시 및 손상된 문서의 후속 본문을 보존한다.
 
 **Alternatives considered**: React 렌더 단계에서만 숨기면 빈 annotation block과 TOC 입력이 남을 수 있다. 전체 문자열 정규식 제거는 fenced/inline code와 닫히지 않은 주석을 잘못 제거한다.
+
+## AW Speckit Preview annotation과 TOC 재사용
+
+**Decision**: AW 일반 Markdown workspace의 문서별 annotation map, selection capture, block action, annotation dialog, agent prompt와 TOC 조합을 `features/worktree-workspace` 내부 재사용 단위로 추출하여 Speckit Preview panel에도 연결한다.
+
+**Rationale**: 일반 Markdown panel에 이미 검증된 interaction이 있으므로 Speckit 전용으로 복제하면 편집·삭제·group annotation과 selection offset 동작이 분기된다. 반면 이 상태는 AW의 worktree와 agent prompt callback에 의존하므로 공용 React package가 아니라 AW feature 내부에 남아야 한다.
+
+**Alternatives considered**: Speckit panel에서 별도 annotation 구현은 중복과 회귀 위험이 크다. 전체 workspace 상태를 `markdown-annotation-react`로 이동하는 방법은 공유 UI의 app-shell 독립 원칙을 위반한다. Speckit panel을 일반 Markdown tab으로 강제 이동시키는 방법은 Speckit 목록과 Preview를 함께 보는 작업 흐름을 깨뜨린다.
+
+## Speckit 문서별 상태 범위
+
+**Decision**: annotation은 Speckit 상대 경로를 key로 분리하고, 문서 전환 시 selection, dialog editing target과 highlight는 초기화한다. TOC와 agent prompt는 현재 선택 문서의 blocks/annotations에서 매번 파생한다.
+
+**Rationale**: 문서 간 annotation 혼합을 방지하면서 같은 문서로 돌아왔을 때 작업을 보존한다. 파생 데이터는 별도 저장하지 않아 stale TOC/prompt를 방지한다.
+
+**Alternatives considered**: 문서 전환 시 모든 annotation을 삭제하면 검토 작업이 유실된다. 단일 전역 annotation 배열은 동일 block id가 여러 문서에 반복될 때 충돌한다.

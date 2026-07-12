@@ -150,7 +150,11 @@ export const WorktreeWorkspace: Story = {
 export const WorktreeWorkspaceSpeckit: Story = {
   render: () => (
     <div className="h-[720px] overflow-hidden border">
-      <WorktreeWorkspacePanel initialTab="speckit" worktree={sampleWorktrees[1]} />
+      <WorktreeWorkspacePanel
+        initialTab="speckit"
+        worktree={sampleWorktrees[1]}
+        onSendAnnotationPrompt={(prompt) => console.log("send Speckit annotation prompt", prompt)}
+      />
     </div>
   ),
 };

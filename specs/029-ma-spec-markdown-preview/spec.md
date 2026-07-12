@@ -116,6 +116,8 @@
 2. **Given** task가 있는 H1 chapter가 AW에 표시될 때, **When** 사용자가 본문과 Table of Contents를 확인하면, **Then** 완료·미완료 개수가 MA와 동일한 범위와 상태별 아이콘으로 표시된다.
 3. **Given** 문서에 wikilink가 있을 때, **When** AW Preview가 표시되면, **Then** MA와 동일한 표시 문구와 상대 Markdown 대상이 제공되며 AW의 문서 탐색 경계 안에서 활성화된다.
 4. **Given** 공용 Markdown Preview 동작이 변경되었을 때, **When** 기능 검증을 수행하면, **Then** MA와 AW 소비 화면의 회귀 검증이 모두 통과해야 한다.
+5. **Given** 사용자가 AW의 Speckit Preview panel에서 문서를 열었을 때, **When** 본문 블록 또는 선택 영역에 annotation을 추가하면, **Then** 일반 Markdown Preview와 동일하게 annotation을 확인하고 편집하거나 삭제할 수 있다.
+6. **Given** AW의 Speckit Preview panel에 제목이 있는 문서가 열렸을 때, **When** Table of Contents 항목을 선택하면, **Then** 해당 제목 위치로 이동하고 task가 있는 H1 항목에는 완료·미완료 개수가 표시된다.
 
 ### Edge Cases
 
@@ -135,7 +137,8 @@
 - 한 줄 또는 여러 줄의 `<!-- ... -->` HTML5 주석은 Preview에서 숨기되, fenced code block이나 inline code 안의 동일한 문자열은 코드 내용으로 보존한다.
 - 닫히지 않은 HTML5 주석은 이후 문서 전체를 임의로 숨기지 않도록 안전한 일반 텍스트 또는 명확한 대체 상태로 처리한다.
 - MA와 AW가 서로 다른 앱 상태나 문서 열기 방식을 사용하더라도 공유 Markdown 문법의 표시, task 집계와 TOC 결과는 일치해야 한다.
-- MA 전용 예제 선택, annotation 작성과 Tauri window 동작은 AW에 복제하지 않고 공용 Preview 표현만 동일하게 유지한다.
+- MA 전용 예제 선택과 Tauri window 동작은 AW에 복제하지 않지만, AW Speckit Preview panel의 annotation은 AW 일반 Markdown Preview가 사용하는 기존 annotation 동작과 상태 모델을 재사용해야 한다.
+- AW Speckit Preview panel에서 문서를 전환할 때 annotation과 TOC 선택 대상은 현재 Speckit 문서 기준으로 교체되어 다른 문서의 상태와 섞이지 않아야 한다.
 
 ## Requirements *(mandatory)*
 
@@ -184,6 +187,9 @@
 - **FR-041**: MA에 반영된 공용 Markdown Preview의 parsing, wikilink 표시, task 상태, H1 chapter 요약, Table of Contents task 정보와 HTML5 주석 처리 변경사항은 AW의 Markdown Preview에도 적용되어야 한다.
 - **FR-042**: MA와 AW는 공용 Markdown 입력에 대해 동일한 block 순서, 표시 콘텐츠와 task 집계 결과를 사용해야 하며 앱별 문서 탐색 및 shell 동작만 각 앱 경계에서 조합해야 한다.
 - **FR-043**: 공용 Markdown Preview package를 변경하면 MA와 AW의 관련 type check와 test를 모두 수행해야 하며 어느 한 소비 앱의 회귀가 남은 상태를 완료로 처리하지 않아야 한다.
+- **FR-044**: AW의 Speckit Preview panel은 본문 블록 및 선택 영역 annotation 추가, annotation 유형과 comment 편집, 삭제와 agent prompt 전달을 AW 일반 Markdown Preview와 동일한 동작으로 지원해야 한다.
+- **FR-045**: AW의 Speckit Preview panel은 H1~H3 Table of Contents를 표시하고 항목 선택 시 대응하는 본문 위치로 이동해야 하며, task가 포함된 H1에는 완료·미완료 개수를 표시해야 한다.
+- **FR-046**: AW Speckit Preview의 annotation은 Speckit 문서 경로별로 분리하고, 문서 선택이 변경되면 Preview, annotation 목록, 선택 상태, Table of Contents와 agent prompt를 선택 문서 기준으로 갱신해야 한다.
 
 ### Key Entities
 
@@ -226,6 +232,8 @@
 - **SC-017**: 한 줄·여러 줄 HTML5 주석과 code 내부의 주석 유사 문자열을 포함한 기준 사례 100%에서 실제 주석은 화면에 표시되지 않고 code 내용과 주석 밖의 본문은 손실 없이 표시된다.
 - **SC-018**: 동일한 기준 Markdown fixture를 MA와 AW에 적용한 교차 앱 검증 사례 100%에서 본문 요소, wikilink 출력, task 상태, H1 chapter 및 TOC 집계, HTML5 주석 처리 결과가 일치한다.
 - **SC-019**: 공용 Markdown Preview 변경에 대한 release 검증에서 MA와 AW의 관련 type check 및 test 명령이 모두 성공한다.
+- **SC-020**: AW Speckit Preview 기준 annotation 검증 사례 100%에서 block 및 선택 영역 annotation의 생성·편집·삭제와 agent prompt 반영이 일반 Markdown Preview와 동일하게 동작하고 다른 Speckit 문서의 annotation과 섞이지 않는다.
+- **SC-021**: H1~H3, 중복 제목과 task가 포함된 AW Speckit 문서 기준 사례 100%에서 Table of Contents의 순서, 이동 대상과 H1 task 개수가 본문과 일치한다.
 
 ## Assumptions
 
@@ -237,4 +245,4 @@
 - wikilink 별칭은 화면 표시와 접근 가능한 링크 이름에 사용하고 대상 파일 해석에는 영향을 주지 않는다.
 - 원격 URL의 Markdown 가져오기, 여러 spec 비교, 원문 편집과 SpecKit 명령 실행은 이번 범위에 포함하지 않는다.
 - SpecKit 예제는 기능 학습과 표시 검증을 위한 읽기 전용 샘플이며 실제 프로젝트 산출물을 생성하거나 수정하지 않는다.
-- AW는 MA의 예제 catalog나 annotation workflow를 복제할 필요가 없으며 `markdown-annotation-core`와 `markdown-annotation-react`가 제공하는 공용 Preview 동작만 동일하게 소비한다.
+- AW는 MA의 예제 catalog나 Tauri window workflow를 복제할 필요가 없다. Speckit Preview annotation은 AW 일반 Markdown Preview의 기존 annotation 상태와 상호작용을 재사용하고, Markdown 표시와 TOC는 `markdown-annotation-core`와 `markdown-annotation-react`의 공용 동작을 소비한다.
