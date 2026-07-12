@@ -5,4 +5,8 @@ export type TocEntry = {
   level: TocLevel;
   text: string;
   startLine: number;
+  taskSummary?: {
+    completed: number;
+    open: number;
+  };
 };

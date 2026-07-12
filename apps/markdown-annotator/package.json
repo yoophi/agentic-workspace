@@ -12,7 +12,8 @@
     "storybook": "storybook dev -p 6007",
     "build-storybook": "storybook build",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev"
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

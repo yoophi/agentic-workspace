@@ -71,6 +71,7 @@ import {
   getDocumentPathFromWindowQuery,
   openMarkdownDocumentTab,
 } from "@/features/open-document/openMarkdownDocument";
+import { resolveWikilinkTarget } from "@/features/open-document/resolveWikilinkTarget";
 import { shouldSwapDocument } from "./model/document-reload";
 import {
   AnnotationInputDialog,
@@ -266,6 +267,32 @@ export function AnnotatorPage() {
     setNoteDialogOpen(false);
     setComment("");
     setStatus(`${example.fileName} 예제를 불러왔습니다.`);
+  }
+
+  async function handleWikilinkActivate(href: string) {
+    try {
+      const target = resolveWikilinkTarget(document.absolutePath, href);
+      const example = exampleMarkdownDocuments.find(
+        (candidate) => candidate.fileName === target.fileName,
+      );
+
+      if (document.absolutePath.startsWith("examples/markdown-annotator/")) {
+        if (!example) {
+          throw new Error(`예제 wikilink 대상을 찾을 수 없습니다: ${target.fileName}`);
+        }
+        loadExample(example.id);
+        return;
+      }
+
+      if (!isTauriRuntime()) {
+        throw new Error("브라우저에서 연 로컬 문서의 연결 파일은 데스크톱 앱에서 열 수 있습니다.");
+      }
+
+      const opened = await readMarkdownDocument(target.path);
+      loadDocumentIntoWindow(opened, `${opened.fileName} wikilink 문서를 열었습니다.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "wikilink 문서를 열 수 없습니다.");
+    }
   }
 
   async function handleOpenFileAsTab() {
@@ -837,6 +864,7 @@ export function AnnotatorPage() {
                     deletedBlockIds={deletedBlockIds}
                     inlineAnnotationsByBlock={inlineAnnotationsByBlock}
                     noteAnnotationsByBlock={noteAnnotationsByBlock}
+                    onLinkActivate={(href) => void handleWikilinkActivate(href)}
                     onCancelInlineAnnotation={deleteAnnotation}
                     onEditInlineAnnotation={editInlineAnnotation}
                     onRequestBlockComment={requestBlockComment}

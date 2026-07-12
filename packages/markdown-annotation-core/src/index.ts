@@ -14,6 +14,7 @@ export {
   type MermaidStartToken,
 } from "./mermaid/detect-mermaid-block";
 export { parseMarkdownToBlocks } from "./parse/parse-markdown-to-blocks";
+export { stripHtmlComments, transformWikilinks } from "./parse/inline-markdown";
 export { extractTocEntries } from "./toc/extract-toc-entries";
 export { stripInlineMarkdown } from "./toc/strip-inline-markdown";
 export type {

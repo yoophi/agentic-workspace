@@ -162,6 +162,28 @@ Tauri 개발 앱:
 pnpm tauri:dev:annotator
 ```
 
+MA만 독립적으로 실행하려면 앱 디렉터리에서도 같은 명령을 실행할 수 있습니다.
+
+```bash
+cd apps/markdown-annotator
+pnpm tauri:dev
+```
+
+설치하거나 더블클릭해 실행할 수 있는 독립 데스크톱 앱 번들은 저장소 루트에서 다음과 같이 생성합니다.
+
+```bash
+pnpm tauri:build:annotator
+```
+
+앱 디렉터리에서는 다음 명령이 동일하게 동작합니다.
+
+```bash
+cd apps/markdown-annotator
+pnpm tauri:build
+```
+
+macOS에서는 빌드된 앱이 기본적으로 `target/release/bundle/macos/Markdown Annotator.app`에 생성됩니다. 다른 운영체제의 설치 산출물은 같은 `target/release/bundle/` 아래 플랫폼별 디렉터리에 생성됩니다.
+
 Storybook:
 
 ```bash

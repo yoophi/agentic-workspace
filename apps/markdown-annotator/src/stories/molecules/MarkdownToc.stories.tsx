@@ -60,6 +60,30 @@ export const LongList: Story = {
   },
 };
 
+export const TaskProgress: Story = {
+  args: {
+    entries: entriesFromMarkdown(`# 구현
+
+- [x] parser 작성
+- [X] preview 연결
+- [ ] 키보드 탐색
+
+## 세부 작업
+
+- [ ] 접근성 확인
+
+# 문서
+
+task가 없는 chapter에는 요약을 표시하지 않습니다.
+
+# 배포
+
+- [ ] 릴리스 확인
+`),
+    className: "w-64",
+  },
+};
+
 export const StartsAtH3: Story = {
   args: {
     entries: entriesFromMarkdown(`### h1 없이 시작하는 문서
