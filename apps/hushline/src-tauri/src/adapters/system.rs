@@ -114,13 +114,52 @@ impl SystemToolchain {
 
     fn whisper_python(whisper: &Path) -> Option<PathBuf> {
         let script = fs::read_to_string(whisper).ok()?;
-        let first = script.lines().next()?.strip_prefix("#!")?.trim();
-        let executable = first.split_whitespace().next()?;
-        if executable.ends_with("env") {
-            Self::find(&["python3", "python"])
-        } else {
-            Some(PathBuf::from(executable))
+        // 1) shebang이 실제 python이면 그대로 사용한다.
+        if let Some(shebang) = script.lines().next().and_then(|line| line.strip_prefix("#!")) {
+            let executable = shebang.trim().split_whitespace().next().unwrap_or("");
+            let name = Path::new(executable)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            if name.starts_with("python") {
+                return Some(PathBuf::from(executable));
+            }
         }
+        // 2) pipx/uv가 만든 sh 래퍼(#!/bin/sh 뒤에서 실제 python을 exec)에서 그 python을 추출한다.
+        //    이 python 환경에만 whisper 모듈이 설치돼 있으므로, PATH의 임의 python으로 대체하면 안 된다.
+        if let Some(python) = Self::extract_wrapped_python(&script) {
+            return Some(python);
+        }
+        // 3) 마지막 폴백: PATH의 python3/python.
+        Self::find(&["python3", "python"])
+    }
+
+    /// 래퍼 스크립트에서 따옴표로 감싸인 조각 중 basename이 `python`으로 시작하는 경로 후보.
+    /// pipx/uv 폴리글롯 래퍼는 exec할 python 절대경로를 따옴표로 담는다(경로에 공백 포함 가능).
+    fn wrapped_python_candidates(script: &str) -> Vec<PathBuf> {
+        script
+            .split(|c| c == '\'' || c == '"')
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .map(PathBuf::from)
+            .filter(|path| {
+                path.is_absolute()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.starts_with("python"))
+                        .unwrap_or(false)
+            })
+            .collect()
+    }
+
+    fn extract_wrapped_python(script: &str) -> Option<PathBuf> {
+        let candidates = Self::wrapped_python_candidates(script);
+        candidates
+            .iter()
+            .find(|path| path.is_file())
+            .cloned()
+            .or_else(|| candidates.into_iter().next())
     }
 
     fn run_streaming<F>(command: &mut Command, mut on_line: F) -> Result<(bool, String), String>
@@ -472,5 +511,28 @@ impl ToolchainPort for SystemToolchain {
                 .map_err(|e| format!("{model} 모델을 삭제하지 못했습니다: {e}"))?;
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SystemToolchain;
+
+    // pipx/uv 폴리글롯 래퍼(#!/bin/sh + '''exec' '<python>' ...)에서 실제 python 경로를 추출한다.
+    #[test]
+    fn extracts_pipx_wrapped_python_with_spaces() {
+        let script = "#!/bin/sh\n'''exec' '/Users/x/Library/Application Support/pipx/venvs/openai-whisper/bin/python' \"$0\" \"$@\"\n' '''\nimport sys\n";
+        let candidates = SystemToolchain::wrapped_python_candidates(script);
+        assert_eq!(
+            candidates.first().and_then(|p| p.to_str()),
+            Some("/Users/x/Library/Application Support/pipx/venvs/openai-whisper/bin/python")
+        );
+    }
+
+    // 셸 래퍼가 아니라 python 경로가 없는 스크립트에서는 후보가 비어야 한다.
+    #[test]
+    fn no_candidates_when_no_python_path() {
+        let script = "#!/bin/sh\necho hello\n";
+        assert!(SystemToolchain::wrapped_python_candidates(script).is_empty());
     }
 }
