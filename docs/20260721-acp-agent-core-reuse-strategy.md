@@ -357,6 +357,23 @@ flowchart TD
 에이전트→앱 기능 실행용. transcribe 같은 장기 작업은 MCP로 job id만 받고 폴링하며,
 진행률은 기존 hushline 이벤트로 UI에 별도 표시한다.
 
+## 구현 결과 (spec 030, 2026-07 착수)
+
+이 전략을 `specs/030-hushline-monorepo-integration`에서 실제 구현했다.
+
+- **편입**: hushline을 `apps/hushline`로 스냅샷 복사(방식 C) 후 pnpm/Cargo workspace에 등록.
+  모노레포 hoist된 `@types/react@19`가 lucide-react를 통해 새던 문제는 hushline tsconfig의
+  `paths`로 로컬 18 고정하여 해결.
+- **공유 코어 추출**: `crates/acp-agent-core`(domain/ports/application/infrastructure 하위집합)로
+  workbench에서 무동작 리팩터 이동. workbench는 `mod.rs` re-export로 소비, registry의 workbench
+  전용 트레이트 2개는 orphan rule로 workbench에 잔류. env는 `ACP_MAX_RUNS`(+ 레거시 폴백)로 중립화.
+  `packages/agent-client`(계약 타입 + invoke/listen 래퍼)로 TS 계약 공유, workbench는 타입 re-export.
+- **hushline agent 기능**: `HushlineAgentSink` + run-control command(start/send/cancel/permission)
+  + `save_organized_document`/`save_chat_session`. cwd 안전 경계·소유 검증·창종료 정리 포함.
+  프론트는 `features/organize-transcript`(정리·저장)와 `features/chat-with-document`(세션 내 다회 대화).
+- **검증**: `cargo test`(acp-agent-core 84, agentic-workbench 113, hushline 6), `cargo check --workspace`,
+  `pnpm check-types` 11/11, `pnpm test` 전체 green. 실제 agent 스트리밍 런타임 확인은 agent CLI 설치 필요.
+
 ## 결정 요약
 
 - 공유 단위 3개: `crates/acp-agent-core`(Rust, 에이전트→MCP 소비 배선 포함) +

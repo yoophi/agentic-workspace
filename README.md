@@ -11,6 +11,9 @@ local coding projects, Git worktrees, and ACP agent sessions.
 | `apps/agentic-workbench` | Main desktop workbench for managing projects, Git worktrees, and ACP agent runs. |
 | `apps/markdown-annotator` | Markdown annotation tool that exports structured prompts for coding agents. |
 | `apps/git-explorer` | Git repository exploration UI. |
+| `apps/hushline` | Local YouTube-to-Whisper transcription app; organizes transcripts and chats over them via ACP agent runs. |
+| `crates/acp-agent-core` | Shared Rust core for ACP agent runs (run domain, ports, use cases, ACP adapter, session registry). |
+| `packages/agent-client` | Shared TS client for agent runs (run-communication contract types + invoke/listen wrappers). |
 | `packages/ui` | Shared React UI primitives used across apps. |
 
 ## What Agentic Workbench Does
