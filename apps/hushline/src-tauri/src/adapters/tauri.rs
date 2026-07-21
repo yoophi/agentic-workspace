@@ -198,10 +198,23 @@ async fn process_video(
 }
 
 pub fn run() {
+    use tauri::{Manager, WindowEvent};
+    use acp_agent_core::infrastructure::agent_session_registry::AppState;
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(acp_agent_core::infrastructure::agent_session_registry::AppState::default())
+        .manage(AppState::default())
+        .on_window_event(|window, event| {
+            // 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소해 자원 누수를 막는다(계약 CT-4).
+            if let WindowEvent::Destroyed = event {
+                let label = window.label().to_string();
+                let state = window.state::<AppState>().inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    state.cancel_runs_owned_by(&label).await;
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             check_dependencies,
             get_model_status,
@@ -213,7 +226,8 @@ pub fn run() {
             crate::adapters::agent::set_run_permission_mode,
             crate::adapters::agent::cancel_agent_run,
             crate::adapters::agent::respond_agent_permission,
-            crate::adapters::agent::save_organized_document
+            crate::adapters::agent::save_organized_document,
+            crate::adapters::agent::save_chat_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hushline");

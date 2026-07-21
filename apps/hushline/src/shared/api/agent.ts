@@ -17,6 +17,16 @@ export type OrganizedDocumentInput = {
   createdAt: string;
 };
 
+export type ChatMessageInput = { role: string; text: string; createdAt: string };
+
+export type ChatSessionInput = {
+  documentPath?: string | null;
+  sourceTranscriptPath?: string | null;
+  title: string;
+  messages: ChatMessageInput[];
+  createdAt: string;
+};
+
 export const agent = {
   startAgentRun,
   sendPromptToRun,
@@ -24,4 +34,6 @@ export const agent = {
   listenRunEvents,
   saveOrganizedDocument: (dir: string, baseName: string, document: OrganizedDocumentInput) =>
     invoke<string>("save_organized_document", { dir, baseName, document }),
+  saveChatSession: (dir: string, baseName: string, session: ChatSessionInput) =>
+    invoke<string>("save_chat_session", { dir, baseName, session }),
 };

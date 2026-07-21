@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Check, Copy, Database, ExternalLink, Languages, RotateCcw, Sparkles } from "lucide-react";
+import { Check, Copy, Database, ExternalLink, Languages, MessageSquare, RotateCcw, Sparkles } from "lucide-react";
 import type { TranscriptionResult } from "../../../entities/transcription";
 import { OrganizePanel } from "../../../features/organize-transcript";
+import { ChatPanel } from "../../../features/chat-with-document";
 import { backend } from "../../../shared/api";
 import { Button, Select } from "../../../shared/ui";
 
@@ -16,11 +17,13 @@ function ResultCard({result, highlighted, onRerun}: {result: TranscriptionResult
   const [language, setLanguage] = useState(result.language);
   const [copied, setCopied] = useState(false);
   const [organizing, setOrganizing] = useState(false);
+  const [chatting, setChatting] = useState(false);
   async function copy() { await navigator.clipboard.writeText(result.transcript); setCopied(true); setTimeout(() => setCopied(false), 1200); }
   return <article className={`panel flex min-h-[300px] flex-col overflow-hidden transition-all duration-500 ${highlighted ? "border-[#d8ff65]/60 shadow-[0_0_0_3px_rgba(216,255,101,.08),0_20px_60px_rgba(216,255,101,.08)]" : ""}`}>
     <div className="border-b border-white/[.07] p-4"><div className="mb-2 flex items-center justify-between gap-3"><span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 font-mono text-[9px] uppercase tracking-wider ${result.cached ? "bg-sky-300/10 text-sky-200" : "bg-[#d8ff65]/10 text-[#d8ff65]"}`}>{result.cached ? <Database size={10}/> : <Check size={10}/>} {result.cached ? "Cached result" : "Converted"}</span><span className="font-mono text-[9px] text-[#555d52]">{result.model}</span></div><h3 className="line-clamp-2 text-sm font-semibold leading-5 text-[#d9ddd3]">{result.title}</h3><p className="mt-1 truncate text-[10px] text-[#555d52]">{result.url}</p></div>
     <div className="transcript-scroll min-h-0 flex-1 overflow-y-auto p-4"><p className="line-clamp-6 whitespace-pre-wrap text-xs leading-5 text-[#969e91]">{result.transcript}</p></div>
-    <div className="border-t border-white/[.07] p-3"><div className="mb-2 flex gap-2"><div className="relative flex-1"><Languages size={12} className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 text-[#6c7468]"/><Select className="h-9 pl-8 text-xs" value={language} onChange={(event) => setLanguage(event.target.value)}>{languages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div><Button variant="secondary" size="sm" onClick={() => onRerun(result, language)} disabled={language === result.language}><RotateCcw size={13}/>재실행</Button></div><div className="grid grid-cols-2 gap-2"><Button variant="ghost" size="sm" onClick={copy}>{copied ? <Check size={13}/> : <Copy size={13}/>} {copied ? "복사됨" : "텍스트 복사"}</Button><Button variant="ghost" size="sm" onClick={() => backend.openArtifact(result.json_path)}><ExternalLink size={13}/>JSON 열기</Button></div><Button variant={organizing ? "secondary" : "ghost"} size="sm" className="mt-2 w-full" onClick={() => setOrganizing((v) => !v)}><Sparkles size={13}/>{organizing ? "정리 닫기" : "Agent로 정리"}</Button></div>
+    <div className="border-t border-white/[.07] p-3"><div className="mb-2 flex gap-2"><div className="relative flex-1"><Languages size={12} className="absolute left-2.5 top-1/2 z-10 -translate-y-1/2 text-[#6c7468]"/><Select className="h-9 pl-8 text-xs" value={language} onChange={(event) => setLanguage(event.target.value)}>{languages.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></div><Button variant="secondary" size="sm" onClick={() => onRerun(result, language)} disabled={language === result.language}><RotateCcw size={13}/>재실행</Button></div><div className="grid grid-cols-2 gap-2"><Button variant="ghost" size="sm" onClick={copy}>{copied ? <Check size={13}/> : <Copy size={13}/>} {copied ? "복사됨" : "텍스트 복사"}</Button><Button variant="ghost" size="sm" onClick={() => backend.openArtifact(result.json_path)}><ExternalLink size={13}/>JSON 열기</Button></div><div className="mt-2 grid grid-cols-2 gap-2"><Button variant={organizing ? "secondary" : "ghost"} size="sm" onClick={() => setOrganizing((v) => !v)}><Sparkles size={13}/>{organizing ? "정리 닫기" : "정리"}</Button><Button variant={chatting ? "secondary" : "ghost"} size="sm" onClick={() => setChatting((v) => !v)}><MessageSquare size={13}/>{chatting ? "대화 닫기" : "대화"}</Button></div></div>
     {organizing && <OrganizePanel result={result}/>}
+    {chatting && <ChatPanel result={result}/>}
   </article>;
 }

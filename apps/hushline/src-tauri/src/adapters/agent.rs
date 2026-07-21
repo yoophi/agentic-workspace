@@ -110,14 +110,24 @@ pub async fn start_agent_run(
         .map_err(String::from)
 }
 
-/// 진행 중 run에 후속 프롬프트를 보낸다(지식 대화용).
+/// run 소유자 라벨이 요청 창 라벨과 일치하는지. 순수 함수라 테스트 가능(계약 CT-3).
+fn owner_matches(owner: Option<&str>, label: &str) -> bool {
+    matches!(owner, Some(existing) if existing == label)
+}
+
+/// 진행 중 run에 후속 프롬프트를 보낸다(지식 대화용). 소유 창만 보낼 수 있다.
 #[tauri::command]
 pub async fn send_prompt_to_run(
     app: AppHandle,
+    window: Window,
     state: State<'_, AppState>,
     run_id: String,
     prompt: String,
 ) -> Result<(), String> {
+    let owner = state.owner_of(&run_id).await;
+    if !owner_matches(owner.as_deref(), window.label()) {
+        return Err(format!("소유하지 않았거나 종료된 run에 프롬프트를 보냈습니다: {run_id}"));
+    }
     let sink = HushlineAgentSink::new(app);
     SendPromptUseCase::new(state.inner().clone())
         .execute(sink, run_id, prompt)
@@ -140,13 +150,19 @@ pub async fn set_run_permission_mode(
         .map_err(String::from)
 }
 
-/// run을 취소한다.
+/// run을 취소한다. 소유하지 않은 활성 run은 취소할 수 없다(이미 종료된 run은 no-op).
 #[tauri::command]
 pub async fn cancel_agent_run(
     app: AppHandle,
+    window: Window,
     state: State<'_, AppState>,
     run_id: String,
 ) -> Result<(), String> {
+    if let Some(owner) = state.owner_of(&run_id).await {
+        if owner != window.label() {
+            return Err("소유하지 않은 창에서 run을 취소하려 했습니다".to_string());
+        }
+    }
     let sink = HushlineAgentSink::new(app);
     CancelAgentRunUseCase::new(state.inner().clone())
         .execute(sink, run_id)
@@ -218,9 +234,61 @@ pub fn save_organized_document(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// 문서 기반 지식 대화 한 건(메시지 로그). 세션 재개는 하지 않고 로그만 영속한다.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessage {
+    pub role: String,
+    pub text: String,
+    pub created_at: String,
+}
+
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSession {
+    pub document_path: Option<String>,
+    pub source_transcript_path: Option<String>,
+    pub title: String,
+    pub messages: Vec<ChatMessage>,
+    pub created_at: String,
+}
+
+/// 대화 세션 로그를 관리 디렉터리 하위에 JSON으로 저장한다.
+#[tauri::command]
+pub fn save_chat_session(
+    dir: String,
+    base_name: String,
+    session: ChatSession,
+) -> Result<String, String> {
+    let root = managed_root()?;
+    let target_dir = ensure_cwd_within(&root, &dir)?;
+    let safe_base: String = base_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    let safe_base = if safe_base.trim_matches('_').is_empty() {
+        "chat".to_string()
+    } else {
+        safe_base
+    };
+    let path = target_dir.join(format!("{safe_base}.chat.json"));
+    let json = serde_json::to_string_pretty(&session)
+        .map_err(|e| format!("대화 로그 JSON 생성 실패: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("대화 로그 저장 실패: {e}"))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // 계약 CT-3: run 소유 라벨이 일치할 때만 프롬프트/취소를 허용한다.
+    #[test]
+    fn owner_matches_only_same_label() {
+        assert!(owner_matches(Some("main"), "main"));
+        assert!(!owner_matches(Some("other"), "main"));
+        assert!(!owner_matches(None, "main"));
+    }
 
     // 계약 CT-2: cwd가 관리 경계 밖이면 거부한다.
     #[test]
