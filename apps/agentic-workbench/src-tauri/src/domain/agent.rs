@@ -13,6 +13,8 @@ pub struct AgentDescriptor {
     pub id: String,
     pub label: String,
     pub command: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_version: Option<String>,
     #[serde(default)]
     pub models: Vec<AgentOptionDescriptor>,
     #[serde(default)]

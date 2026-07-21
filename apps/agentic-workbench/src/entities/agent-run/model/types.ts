@@ -2,6 +2,7 @@ export type AgentDescriptor = {
   id: string;
   label: string;
   command: string;
+  runtimeVersion?: string;
   models?: AgentOptionDescriptor[];
   contextSizes?: AgentOptionDescriptor[];
 };

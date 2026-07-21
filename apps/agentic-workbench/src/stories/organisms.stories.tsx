@@ -214,12 +214,14 @@ export const AgentCommandOverrideSettings: Story = {
       {
         id: "codex",
         label: "Codex",
-        command: "npx -y @agentclientprotocol/codex-acp",
+        command: "npx -y @agentclientprotocol/codex-acp@1.1.5",
+        runtimeVersion: "1.1.5",
       },
       {
         id: "claude-code",
         label: "Claude Code",
-        command: "npx -y @agentclientprotocol/claude-agent-acp",
+        command: "npx -y @agentclientprotocol/claude-agent-acp@0.60.0",
+        runtimeVersion: "0.60.0",
       },
     ];
     const [draft, setDraft] = useState<CommandOverrideDraft>(() =>
@@ -267,11 +269,17 @@ export const AgentCommandOverrideSettings: Story = {
 export const AgentProfileEditorLastActiveGuard: Story = {
   render: function AgentProfileEditorLastActiveGuardStory() {
     const agents = [
-      { id: "codex", label: "Codex", command: "npx -y @agentclientprotocol/codex-acp" },
+      {
+        id: "codex",
+        label: "Codex",
+        command: "npx -y @agentclientprotocol/codex-acp@1.1.5",
+        runtimeVersion: "1.1.5",
+      },
       {
         id: "claude-code",
         label: "Claude Code",
-        command: "npx -y @agentclientprotocol/claude-agent-acp",
+        command: "npx -y @agentclientprotocol/claude-agent-acp@0.60.0",
+        runtimeVersion: "0.60.0",
       },
     ];
     const [draft, setDraft] = useState<CommandOverrideDraft>(() => {

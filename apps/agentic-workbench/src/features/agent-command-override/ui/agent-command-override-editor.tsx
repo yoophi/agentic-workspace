@@ -87,7 +87,7 @@ export function AgentCommandOverrideEditor({
         </div>
         <Input
           value={draft.globalCommand}
-          placeholder="예: npx -y @agentclientprotocol/codex-acp"
+          placeholder="예: npx -y @agentclientprotocol/codex-acp@1.1.5"
           className="font-mono"
           onChange={(event) =>
             onDraftChange({ ...draft, globalCommand: event.target.value })
@@ -152,6 +152,7 @@ export function AgentCommandOverrideEditor({
               key={profile.id}
               profile={profile}
               agents={agents}
+              globalCommand={draft.globalCommand}
               disableVerdict={canDisableProfile(invariantProfiles, profile.id)}
               onChange={(patch) => onDraftChange(updateProfileDraft(draft, profile.id, patch))}
               onRemove={() => onDraftChange(removeCustomProfileDraft(draft, profile.id))}
@@ -185,6 +186,7 @@ export function AgentCommandOverrideEditor({
 function ProfileCard({
   profile,
   agents,
+  globalCommand,
   disableVerdict,
   onChange,
   onRemove,
@@ -194,6 +196,7 @@ function ProfileCard({
 }: {
   profile: ProfileDraft;
   agents: AgentDescriptor[];
+  globalCommand: string;
   disableVerdict: { allowed: boolean; reason?: string };
   onChange: (
     patch: Partial<Pick<ProfileDraft, "name" | "command" | "enabled">>,
@@ -203,7 +206,13 @@ function ProfileCard({
   onUpdateEnvRow: (rowId: string, key: string, value: string) => void;
   onRemoveEnvRow: (rowId: string) => void;
 }) {
-  const defaultCommand = agents.find((agent) => agent.id === profile.agentType)?.command;
+  const agent = agents.find((candidate) => candidate.id === profile.agentType);
+  const defaultCommand = agent?.command;
+  const acpRuntimeVersion = agentRuntimeVersionLabel({
+    agent,
+    profileCommand: profile.command,
+    globalCommand,
+  });
   const disableBlocked = profile.enabled && !disableVerdict.allowed;
 
   return (
@@ -222,6 +231,11 @@ function ProfileCard({
           <Badge variant={profile.builtIn ? "secondary" : "default"} className="shrink-0">
             {profile.builtIn ? "기본" : "커스텀"}
           </Badge>
+          {acpRuntimeVersion && (
+            <Badge variant="outline" className="shrink-0 font-mono">
+              {acpRuntimeVersion}
+            </Badge>
+          )}
           {!profile.enabled && (
             <Badge variant="outline" className="shrink-0 text-muted-foreground">
               비활성
@@ -279,4 +293,50 @@ function ProfileCard({
       </div>
     </div>
   );
+}
+
+export function agentRuntimeVersionLabel({
+  agent,
+  profileCommand,
+  globalCommand,
+}: {
+  agent?: AgentDescriptor;
+  profileCommand: string;
+  globalCommand: string;
+}) {
+  const runtime =
+    agent?.id === "codex"
+      ? {
+          packageName: "@agentclientprotocol/codex-acp",
+          displayName: "Codex ACP",
+        }
+      : agent?.id === "claude-code"
+        ? {
+            packageName: "@agentclientprotocol/claude-agent-acp",
+            displayName: "Claude ACP",
+          }
+        : null;
+  if (!agent || !runtime) {
+    return null;
+  }
+
+  const effectiveCommand =
+    profileCommand.trim() || globalCommand.trim() || agent.command.trim();
+  const versionMatch =
+    agent.id === "codex"
+      ? effectiveCommand.match(/@agentclientprotocol\/codex-acp@([^\s"']+)/)
+      : effectiveCommand.match(/@agentclientprotocol\/claude-agent-acp@([^\s"']+)/);
+  if (versionMatch?.[1]) {
+    return `${runtime.displayName} v${versionMatch[1]}`;
+  }
+
+  if (effectiveCommand === agent.command.trim() && agent.runtimeVersion) {
+    return `${runtime.displayName} v${agent.runtimeVersion}`;
+  }
+
+  if (effectiveCommand.includes(runtime.packageName)) {
+    return `${runtime.displayName} 버전 미고정`;
+  }
+
+  return `${runtime.displayName} 버전 확인 불가`;
 }

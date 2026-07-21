@@ -10,6 +10,8 @@ const OPENCODE_MODELS_CACHE_PATH_ENV: &str = "ACP_OPENCODE_MODELS_CACHE_PATH";
 const OPENCODE_MODELS_REFRESH_ENV: &str = "ACP_OPENCODE_MODELS_REFRESH";
 const MODELS_DEV_API_URL: &str = "https://models.dev/api.json";
 const MODELS_DEV_FETCH_TIMEOUT_SECONDS: &str = "2";
+pub const CODEX_AGENT_ACP_VERSION: &str = "1.1.5";
+pub const CLAUDE_AGENT_ACP_VERSION: &str = "0.60.0";
 
 #[derive(Clone, Default)]
 pub struct ConfigurableAgentCatalog {
@@ -46,7 +48,8 @@ impl AgentCatalog for StaticAgentCatalog {
             AgentDescriptor {
                 id: "codex".into(),
                 label: "Codex".into(),
-                command: "npx -y @agentclientprotocol/codex-acp".into(),
+                command: format!("npx -y @agentclientprotocol/codex-acp@{CODEX_AGENT_ACP_VERSION}"),
+                runtime_version: Some(CODEX_AGENT_ACP_VERSION.into()),
                 models: options(&[
                     ("gpt-5.6", "GPT-5.6"),
                     ("gpt-5.6-sol", "GPT-5.6 Sol"),
@@ -71,12 +74,22 @@ impl AgentCatalog for StaticAgentCatalog {
             AgentDescriptor {
                 id: "claude-code".into(),
                 label: "Claude Code".into(),
-                command: "npx -y @agentclientprotocol/claude-agent-acp".into(),
+                command: format!(
+                    "npx -y @agentclientprotocol/claude-agent-acp@{CLAUDE_AGENT_ACP_VERSION}"
+                ),
+                runtime_version: Some(CLAUDE_AGENT_ACP_VERSION.into()),
                 models: options(&[
+                    ("best", "Best available"),
+                    ("fable", "Fable alias"),
                     ("opus", "Opus alias"),
                     ("sonnet", "Sonnet alias"),
-                    ("fable", "Fable alias"),
+                    ("haiku", "Haiku alias"),
+                    ("opusplan", "Opus plan / Sonnet execution"),
+                    ("opus[1m]", "Opus 1M context"),
+                    ("sonnet[1m]", "Sonnet 1M context"),
+                    ("claude-fable-5", "Claude Fable 5"),
                     ("claude-opus-4-8", "Claude Opus 4.8"),
+                    ("claude-sonnet-5", "Claude Sonnet 5"),
                     ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
                     ("claude-haiku-4-5", "Claude Haiku 4.5"),
                 ]),
@@ -86,6 +99,7 @@ impl AgentCatalog for StaticAgentCatalog {
                 id: "pi-coding-agent".into(),
                 label: "Pi Coding Agent".into(),
                 command: "npx -y pi-acp".into(),
+                runtime_version: None,
                 models: Vec::new(),
                 context_sizes: Vec::new(),
             },
@@ -93,6 +107,7 @@ impl AgentCatalog for StaticAgentCatalog {
                 id: "opencode".into(),
                 label: "OpenCode".into(),
                 command: "npx -y opencode-ai acp".into(),
+                runtime_version: None,
                 models: opencode_models().unwrap_or_else(opencode_fallback_models),
                 context_sizes: Vec::new(),
             },
@@ -317,10 +332,57 @@ mod tests {
             .find(|agent| agent.id == "codex")
             .expect("Codex agent");
 
+        assert_eq!(
+            codex.command,
+            format!("npx -y @agentclientprotocol/codex-acp@{CODEX_AGENT_ACP_VERSION}")
+        );
+        assert_eq!(
+            codex.runtime_version.as_deref(),
+            Some(CODEX_AGENT_ACP_VERSION)
+        );
+
         for model_id in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
             assert!(
                 codex.models.iter().any(|model| model.id == model_id),
                 "missing Codex model {model_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn claude_catalog_pins_acp_and_lists_current_models() {
+        let agents = StaticAgentCatalog.list_agents();
+        let claude = agents
+            .iter()
+            .find(|agent| agent.id == "claude-code")
+            .expect("Claude Code agent");
+
+        assert_eq!(
+            claude.command,
+            format!("npx -y @agentclientprotocol/claude-agent-acp@{CLAUDE_AGENT_ACP_VERSION}")
+        );
+        assert_eq!(
+            claude.runtime_version.as_deref(),
+            Some(CLAUDE_AGENT_ACP_VERSION)
+        );
+        for model_id in [
+            "best",
+            "fable",
+            "opus",
+            "sonnet",
+            "haiku",
+            "opusplan",
+            "opus[1m]",
+            "sonnet[1m]",
+            "claude-fable-5",
+            "claude-opus-4-8",
+            "claude-sonnet-5",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5",
+        ] {
+            assert!(
+                claude.models.iter().any(|model| model.id == model_id),
+                "missing Claude model {model_id}"
             );
         }
     }
