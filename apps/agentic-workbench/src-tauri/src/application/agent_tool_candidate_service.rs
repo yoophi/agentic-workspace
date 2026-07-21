@@ -10,6 +10,12 @@ pub trait AgentToolCandidateRegistry {
     ) -> impl std::future::Future<Output = Option<String>> + Send;
 }
 
+impl AgentToolCandidateRegistry for crate::infrastructure::agent_session_registry::AppState {
+    async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
+        self.active_owner_of(run_id).await
+    }
+}
+
 pub struct AgentToolCandidateService<R>
 where
     R: AgentToolCandidateRegistry,

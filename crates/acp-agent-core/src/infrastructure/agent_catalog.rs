@@ -128,11 +128,12 @@ fn options(values: &[(&str, &str)]) -> Vec<AgentOptionDescriptor> {
 fn opencode_models() -> Option<Vec<AgentOptionDescriptor>> {
     let cache_path = opencode_models_cache_path();
     let refresh = env::var_os(OPENCODE_MODELS_REFRESH_ENV).is_some();
-    if !refresh
-        && let Some(cache_path) = &cache_path
-        && let Some(models) = read_cached_opencode_models(cache_path)
-    {
-        return Some(models);
+    if !refresh {
+        if let Some(cache_path) = &cache_path {
+            if let Some(models) = read_cached_opencode_models(cache_path) {
+                return Some(models);
+            }
+        }
     }
 
     let models = fetch_opencode_models_from_models_dev().or_else(|| {

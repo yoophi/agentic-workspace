@@ -12,9 +12,10 @@ pub const WORKSPACE_EXCLUDED_DIRS: &[&str] = &[
     "target",
 ];
 
-pub mod acp;
-pub mod agent_catalog;
-pub mod agent_session_registry;
+pub use acp_agent_core::infrastructure::{
+    acp, agent_catalog, agent_session_registry, noop_acp_session_store, permission_broker,
+};
+
 #[cfg(debug_assertions)]
 pub mod devtools;
 pub mod fs_provider_session_repository;
@@ -33,8 +34,6 @@ pub mod json_saved_prompt_repository;
 pub mod json_store;
 pub mod mcp;
 pub mod native_window_menu;
-pub mod noop_acp_session_store;
 pub mod perf_log;
-pub mod permission_broker;
 pub mod tauri_run_event_sink;
 pub mod window_manager;

@@ -7,21 +7,18 @@ use std::{
 use tokio::{sync::Mutex, task::JoinHandle};
 
 use crate::{
-    application::{
-        agent_tool_candidate_service::AgentToolCandidateRegistry,
-        mcp_title_control_service::TitleControlRegistry,
-    },
     infrastructure::{acp::runner::AcpSession, permission_broker::PermissionBroker},
     ports::session_registry::{ReserveRunError, SessionRegistry},
 };
 
-const MAX_RUNS_ENV: &str = "ACP_WORKBENCH_MAX_RUNS";
+const MAX_RUNS_ENV: &str = "ACP_MAX_RUNS";
+const LEGACY_MAX_RUNS_ENV: &str = "ACP_WORKBENCH_MAX_RUNS";
 
 fn read_max_runs_from_env() -> Option<usize> {
-    match env::var(MAX_RUNS_ENV) {
-        Ok(raw) => raw.trim().parse::<usize>().ok().filter(|n| *n > 0),
-        Err(_) => None,
-    }
+    let raw = env::var(MAX_RUNS_ENV)
+        .or_else(|_| env::var(LEGACY_MAX_RUNS_ENV))
+        .ok()?;
+    raw.trim().parse::<usize>().ok().filter(|n| *n > 0)
 }
 
 #[derive(Clone)]
@@ -99,18 +96,6 @@ impl AppState {
         }
 
         owned_run_ids
-    }
-}
-
-impl TitleControlRegistry for AppState {
-    async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
-        self.active_owner_of(run_id).await
-    }
-}
-
-impl AgentToolCandidateRegistry for AppState {
-    async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
-        self.active_owner_of(run_id).await
     }
 }
 
