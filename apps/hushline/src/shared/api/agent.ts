@@ -8,6 +8,9 @@ import {
   startAgentRun,
 } from "@yoophi/agent-client";
 
+// 정리·대화에 사용할 기본 agent. 실제 실행 명령은 백엔드 카탈로그(env)가 해석한다.
+export const DEFAULT_AGENT_ID = "claude-code";
+
 export type OrganizedDocumentInput = {
   sourceUrl?: string | null;
   sourceTranscriptPath?: string | null;

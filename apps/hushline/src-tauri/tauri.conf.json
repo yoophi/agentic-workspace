@@ -5,7 +5,7 @@
   "identifier": "com.hushline.stt",
   "build": {
     "beforeDevCommand": "pnpm run dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1425",
     "beforeBuildCommand": "pnpm run build",
     "frontendDist": "../dist"
   },

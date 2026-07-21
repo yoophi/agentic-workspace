@@ -1,29 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 
 import type { TranscriptionResult } from "../../../entities/transcription";
-import { agent } from "../../../shared/api";
-
-const DEFAULT_AGENT_ID = "claude-code";
+import { agent, DEFAULT_AGENT_ID } from "../../../shared/api";
+import { baseNoExt, dirOf, fileOf } from "../../../shared/lib/path";
+import { useRunEventStream } from "../../../shared/lib/use-run-event-stream";
 
 export type ChatRole = "user" | "assistant";
 export type ChatMessage = { role: ChatRole; text: string };
 export type ChatStatus = "idle" | "starting" | "ready" | "thinking" | "error" | "ended";
-
-function dirOf(path: string): string {
-  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return idx > 0 ? path.slice(0, idx) : path;
-}
-
-function fileOf(path: string): string {
-  const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return idx >= 0 ? path.slice(idx + 1) : path;
-}
-
-function baseNoExt(path: string): string {
-  const file = fileOf(path);
-  const dot = file.lastIndexOf(".");
-  return dot > 0 ? file.slice(0, dot) : file;
-}
 
 /**
  * 저장된 자막/문서를 대상으로 한 세션 내 다회 대화. 하나의 장수(long-lived) run을 유지하고
@@ -34,15 +18,6 @@ export function useChatWithDocument(result: TranscriptionResult) {
   const [status, setStatus] = useState<ChatStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [savedPath, setSavedPath] = useState<string | null>(null);
-  const runIdRef = useRef<string | null>(null);
-  const unlistenRef = useRef<(() => void) | null>(null);
-
-  const teardown = useCallback(() => {
-    unlistenRef.current?.();
-    unlistenRef.current = null;
-  }, []);
-
-  useEffect(() => teardown, [teardown]);
 
   const appendToAssistant = useCallback((text: string) => {
     setMessages((prev) => {
@@ -57,31 +32,20 @@ export function useChatWithDocument(result: TranscriptionResult) {
     });
   }, []);
 
-  const subscribe = useCallback(() => {
-    teardown();
-    unlistenRef.current = agent.listenRunEvents((envelope) => {
-      if (runIdRef.current && envelope.runId !== runIdRef.current) return;
-      const event = envelope.event;
-      switch (event.type) {
-        case "agentMessage":
-          appendToAssistant(event.text);
-          break;
-        case "error":
-          setError(event.message);
-          setStatus("error");
-          break;
-        case "lifecycle":
-          if (event.status === "promptCompleted" || event.status === "completed") {
-            setStatus((prev) => (prev === "ended" || prev === "error" ? prev : "ready"));
-          } else if (event.status === "cancelled") {
-            setStatus("ended");
-          }
-          break;
-        default:
-          break;
+  const { runIdRef, begin, setRunId, teardown } = useRunEventStream({
+    onMessage: appendToAssistant,
+    onError: (message) => {
+      setError(message);
+      setStatus("error");
+    },
+    onLifecycle: (lifecycle) => {
+      if (lifecycle === "promptCompleted" || lifecycle === "completed") {
+        setStatus((prev) => (prev === "ended" || prev === "error" ? prev : "ready"));
+      } else if (lifecycle === "cancelled") {
+        setStatus("ended");
       }
-    });
-  }, [appendToAssistant, teardown]);
+    },
+  });
 
   const startSession = useCallback(async () => {
     if (status !== "idle" && status !== "error" && status !== "ended") return;
@@ -89,7 +53,7 @@ export function useChatWithDocument(result: TranscriptionResult) {
     setError(null);
     setSavedPath(null);
     setStatus("starting");
-    subscribe();
+    begin();
 
     const dir = dirOf(result.transcript_path);
     const file = fileOf(result.transcript_path);
@@ -101,13 +65,13 @@ export function useChatWithDocument(result: TranscriptionResult) {
         cwd: dir,
         permissionMode: "readOnly",
       });
-      runIdRef.current = run.id;
+      setRunId(run.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setStatus("error");
       teardown();
     }
-  }, [result, status, subscribe, teardown]);
+  }, [result, status, begin, setRunId, teardown]);
 
   const ask = useCallback(
     async (question: string) => {
@@ -122,23 +86,23 @@ export function useChatWithDocument(result: TranscriptionResult) {
         setStatus("error");
       }
     },
-    [status],
+    [status, runIdRef],
   );
 
   const end = useCallback(async () => {
     if (runIdRef.current) await agent.cancelAgentRun(runIdRef.current);
     setStatus("ended");
-  }, []);
+  }, [runIdRef]);
 
   const save = useCallback(async () => {
-    const meaningful = messages.filter((m) => m.text.trim());
+    const meaningful = messages.filter((message) => message.text.trim());
     if (!meaningful.length) throw new Error("저장할 대화가 없습니다");
     const dir = dirOf(result.transcript_path);
     const now = new Date().toISOString();
     const path = await agent.saveChatSession(dir, `${baseNoExt(result.transcript_path)}-chat`, {
       sourceTranscriptPath: result.transcript_path,
       title: `${result.title} · 대화`,
-      messages: meaningful.map((m) => ({ role: m.role, text: m.text, createdAt: now })),
+      messages: meaningful.map((message) => ({ role: message.role, text: message.text, createdAt: now })),
       createdAt: now,
     });
     setSavedPath(path);

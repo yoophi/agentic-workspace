@@ -82,6 +82,19 @@ fn ensure_cwd_within(base: &Path, cwd: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+/// 파일명 base를 안전한 문자(영숫자/`-`/`_`)로 정규화한다. 비면 fallback을 쓴다.
+fn sanitize_base(base_name: &str, fallback: &str) -> String {
+    let safe: String = base_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .collect();
+    if safe.trim_matches('_').is_empty() {
+        fallback.to_string()
+    } else {
+        safe
+    }
+}
+
 /// 새 agent run을 시작한다. goal/cwd를 검증하고 공유 use case에 위임한다.
 #[tauri::command]
 pub async fn start_agent_run(
@@ -218,15 +231,7 @@ pub fn save_organized_document(
     if document.content.trim().is_empty() {
         return Err("정리 내용이 비어 있어 저장할 수 없습니다".to_string());
     }
-    let safe_base: String = base_name
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect();
-    let safe_base = if safe_base.trim_matches('_').is_empty() {
-        "organized".to_string()
-    } else {
-        safe_base
-    };
+    let safe_base = sanitize_base(&base_name, "organized");
     let path = target_dir.join(format!("{safe_base}.organized.json"));
     let json = serde_json::to_string_pretty(&document)
         .map_err(|e| format!("정리 문서 JSON 생성 실패: {e}"))?;
@@ -262,15 +267,7 @@ pub fn save_chat_session(
 ) -> Result<String, String> {
     let root = managed_root()?;
     let target_dir = ensure_cwd_within(&root, &dir)?;
-    let safe_base: String = base_name
-        .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-        .collect();
-    let safe_base = if safe_base.trim_matches('_').is_empty() {
-        "chat".to_string()
-    } else {
-        safe_base
-    };
+    let safe_base = sanitize_base(&base_name, "chat");
     let path = target_dir.join(format!("{safe_base}.chat.json"));
     let json = serde_json::to_string_pretty(&session)
         .map_err(|e| format!("대화 로그 JSON 생성 실패: {e}"))?;

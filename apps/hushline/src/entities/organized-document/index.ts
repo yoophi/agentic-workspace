@@ -1,1 +1,1 @@
-export type { OrganizedDocument, OrganizeStatus } from "./model/types";
+export type { OrganizeStatus } from "./model/types";

@@ -1,11 +1,2 @@
-// 자막을 사용자가 지정한 방식으로 재구성한 정리 문서(백엔드 camelCase와 일치).
-export type OrganizedDocument = {
-  sourceUrl?: string | null;
-  sourceTranscriptPath?: string | null;
-  style: string;
-  title: string;
-  content: string;
-  createdAt: string;
-};
-
+// 정리 실행 상태. 정리 문서의 저장 형태(payload)는 공유 API의 OrganizedDocumentInput이 단일 소스다.
 export type OrganizeStatus = "idle" | "running" | "done" | "error" | "cancelled";
