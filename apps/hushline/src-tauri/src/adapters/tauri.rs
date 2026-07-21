@@ -201,12 +201,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .manage(acp_agent_core::infrastructure::agent_session_registry::AppState::default())
         .invoke_handler(tauri::generate_handler![
             check_dependencies,
             get_model_status,
             download_model,
             delete_model,
-            process_video
+            process_video,
+            crate::adapters::agent::start_agent_run,
+            crate::adapters::agent::send_prompt_to_run,
+            crate::adapters::agent::set_run_permission_mode,
+            crate::adapters::agent::cancel_agent_run,
+            crate::adapters::agent::respond_agent_permission,
+            crate::adapters::agent::save_organized_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running Hushline");
