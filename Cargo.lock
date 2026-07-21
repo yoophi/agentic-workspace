@@ -3,6 +3,23 @@
 version = 4
 
 [[package]]
+name = "acp-agent-core"
+version = "0.1.0"
+dependencies = [
+ "agent-client-protocol",
+ "anyhow",
+ "chrono",
+ "libc",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "shell-words",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -60,6 +77,7 @@ dependencies = [
 name = "agentic-workbench"
 version = "0.1.0"
 dependencies = [
+ "acp-agent-core",
  "agent-client-protocol",
  "anyhow",
  "axum",
@@ -1702,6 +1720,21 @@ name = "httpdate"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
+name = "hushline"
+version = "0.1.0"
+dependencies = [
+ "acp-agent-core",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tokio",
+ "url",
+]
 
 [[package]]
 name = "hyper"

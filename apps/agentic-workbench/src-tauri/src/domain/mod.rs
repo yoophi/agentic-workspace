@@ -1,9 +1,7 @@
-pub mod acp_session;
-pub mod agent;
+pub use acp_agent_core::domain::{acp_session, agent, agent_tool_candidate, events, run};
+
 pub mod agent_run_settings;
 pub mod agent_run_settings_repository;
-pub mod agent_tool_candidate;
-pub mod events;
 pub mod git_branch;
 pub mod git_branch_provider;
 pub mod git_remote;
@@ -17,7 +15,6 @@ pub mod mcp_title_control;
 pub mod project;
 pub mod project_repository;
 pub mod provider_session;
-pub mod run;
 pub mod saved_prompt;
 pub mod saved_prompt_repository;
 pub mod window_menu;

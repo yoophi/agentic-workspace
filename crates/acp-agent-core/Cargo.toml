@@ -1,0 +1,22 @@
+[package]
+name = "acp-agent-core"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "acp_agent_core"
+
+[dependencies]
+agent-client-protocol = "0.15.0"
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+libc = "0.2"
+percent-encoding = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+shell-words = "1.1"
+tokio = { version = "1.48", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+uuid = { version = "1.18", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"

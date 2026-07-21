@@ -1,8 +1,6 @@
-pub mod acp_session_store;
-pub mod agent_catalog;
-pub mod event_sink;
-pub mod permission;
+pub use acp_agent_core::ports::{
+    acp_session_store, agent_catalog, event_sink, permission, session_handle, session_launcher,
+    session_registry,
+};
+
 pub mod provider_session_repository;
-pub mod session_handle;
-pub mod session_launcher;
-pub mod session_registry;

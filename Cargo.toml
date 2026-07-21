@@ -7,4 +7,5 @@ members = [
     "apps/agentic-workbench/src-tauri",
     "apps/git-explorer/src-tauri",
     "apps/markdown-annotator/src-tauri",
+    "apps/hushline/src-tauri",
 ]
