@@ -256,6 +256,9 @@ importers:
       '@tauri-apps/plugin-opener':
         specifier: ^2.5.0
         version: 2.5.4
+      '@yoophi/agent-client':
+        specifier: workspace:*
+        version: link:../../packages/agent-client
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1

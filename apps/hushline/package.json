@@ -16,6 +16,7 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@yoophi/agent-client": "workspace:*",
     "@tauri-apps/api": "^2.8.0",
     "@tauri-apps/plugin-dialog": "^2.4.0",
     "@tauri-apps/plugin-opener": "^2.5.0",
