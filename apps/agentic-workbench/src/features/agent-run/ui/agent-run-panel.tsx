@@ -318,7 +318,11 @@ const fallbackContextSizeLabels: Record<ContextSizePreset, string> = {
 };
 
 const fallbackModelDescriptions: Record<string, string> = {
-  "gpt-5.5": "Use OpenAI's current flagship model for coding and reasoning.",
+  "gpt-5.6": "Use OpenAI's current flagship model for coding and reasoning.",
+  "gpt-5.6-sol": "Use GPT-5.6 Sol for the highest capability.",
+  "gpt-5.6-terra": "Use GPT-5.6 Terra to balance capability and cost.",
+  "gpt-5.6-luna": "Use GPT-5.6 Luna for efficient, high-volume workloads.",
+  "gpt-5.5": "Use OpenAI's previous flagship model for coding and reasoning.",
   "gpt-5.4": "Use OpenAI's more affordable current-generation model.",
   "gpt-5.4-mini": "Use OpenAI's lower-latency mini model.",
   "gpt-5.4-nano": "Use OpenAI's lowest-latency nano model.",

@@ -48,6 +48,10 @@ impl AgentCatalog for StaticAgentCatalog {
                 label: "Codex".into(),
                 command: "npx -y @agentclientprotocol/codex-acp".into(),
                 models: options(&[
+                    ("gpt-5.6", "GPT-5.6"),
+                    ("gpt-5.6-sol", "GPT-5.6 Sol"),
+                    ("gpt-5.6-terra", "GPT-5.6 Terra"),
+                    ("gpt-5.6-luna", "GPT-5.6 Luna"),
                     ("gpt-5.5", "GPT-5.5"),
                     ("gpt-5.4", "GPT-5.4"),
                     ("gpt-5.4-mini", "GPT-5.4 mini"),
@@ -209,6 +213,7 @@ fn opencode_fallback_models() -> Vec<AgentOptionDescriptor> {
         ("opencode/claude-opus-4-8", "OpenCode Claude Opus 4.8"),
         ("opencode/claude-sonnet-4-6", "OpenCode Claude Sonnet 4.6"),
         ("opencode/claude-haiku-4-5", "OpenCode Claude Haiku 4.5"),
+        ("opencode/gpt-5.6", "OpenCode GPT-5.6"),
         ("opencode/gpt-5.5", "OpenCode GPT-5.5"),
         ("opencode/gpt-5.4", "OpenCode GPT-5.4"),
         ("opencode/gpt-5.4-mini", "OpenCode GPT-5.4 mini"),
@@ -301,7 +306,23 @@ mod tests {
                 .iter()
                 .any(|model| model.id == "opencode/claude-opus-4-8")
         );
-        assert!(models.iter().any(|model| model.id == "opencode/gpt-5.5"));
+        assert!(models.iter().any(|model| model.id == "opencode/gpt-5.6"));
+    }
+
+    #[test]
+    fn codex_catalog_contains_gpt_5_6_family() {
+        let agents = StaticAgentCatalog.list_agents();
+        let codex = agents
+            .iter()
+            .find(|agent| agent.id == "codex")
+            .expect("Codex agent");
+
+        for model_id in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
+            assert!(
+                codex.models.iter().any(|model| model.id == model_id),
+                "missing Codex model {model_id}"
+            );
+        }
     }
 
     #[test]
