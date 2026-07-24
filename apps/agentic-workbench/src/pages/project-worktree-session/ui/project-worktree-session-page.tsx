@@ -54,6 +54,9 @@ export function ProjectWorktreeSessionPage({
             onSendAnnotationPrompt={(text) =>
               setWorkspacePromptRequest({ id: crypto.randomUUID(), text })
             }
+            onSendSddPrompt={(request) =>
+              setWorkspacePromptRequest({ id: crypto.randomUUID(), text: request.text, delivery: request.delivery })
+            }
           />
         </ResizablePanel>
       </ResizablePanelGroup>

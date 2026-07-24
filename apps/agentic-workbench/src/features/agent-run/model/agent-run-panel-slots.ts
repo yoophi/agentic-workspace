@@ -6,6 +6,7 @@ export type AgentRunPanelCloseState = "open" | "confirmingClose" | "closing";
 export type AgentPromptRequest = {
   id: string;
   text: string;
+  delivery?: "send" | "queue" | "draft";
 };
 
 export type AgentRunPanelSlot = {

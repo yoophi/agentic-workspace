@@ -27,6 +27,7 @@ import { SavedPromptToolbar } from "@/features/saved-prompt/ui/saved-prompt-tool
 import { WorktreeChangesPanel as WorktreeChangeReviewPanel } from "@/features/worktree-change-review/ui/worktree-changes-panel";
 import { WorktreeChangesPanel as AgentRunWorktreeChangesPanel } from "@/features/worktree-changes/ui/worktree-changes-panel";
 import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
+import { SddWorkflowControls } from "@/features/worktree-workspace/ui/sdd-workflow-controls";
 import { WorktreeWorkspacePanel } from "@/features/worktree-workspace/ui/worktree-workspace-panel";
 import {
   computeGitGraphRows,
@@ -192,6 +193,10 @@ export const SpeckitFilesPanelStates: Story = {
       </div>
     </div>
   ),
+};
+
+export const SddWorkflowControlsStates: Story = {
+  render: () => <div className="max-w-xl border"><SddWorkflowControls pointer={{ status: "active", featurePath: "specs/021-speckit-files-panel" }} stages={["specify", "plan", "tasks", "implement"].map((stage, index) => ({ stage: stage as "specify", status: index < 3 ? "complete" as const : "current" as const, canStart: true, requiresConfirmation: index > 0 }))} onRequest={(request) => console.log(request)} /></div>,
 };
 
 export const CommitDetailKoreanPaths: Story = {

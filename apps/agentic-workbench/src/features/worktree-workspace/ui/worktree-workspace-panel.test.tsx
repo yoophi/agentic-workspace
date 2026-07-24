@@ -129,9 +129,11 @@ describe("worktree workspace file tree", () => {
       'type WorkspaceTabId = "git" | "files" | "markdown" | "speckit"',
     );
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
-      "<SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} />",
+      "<SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} onSendSddPrompt={onSendSddPrompt} />",
     );
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onSelectDocument={setSelectedDocumentPath}");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('".specify/feature.json"');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("activeFeaturePath={activePointer.featurePath}");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
       'readWorktreeTextFile(worktree.path, selectedDocumentPath ?? "")',
     );

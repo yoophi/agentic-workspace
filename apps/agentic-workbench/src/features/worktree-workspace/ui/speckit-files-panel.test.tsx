@@ -100,6 +100,11 @@ const sampleFeatures: SpeckitFeature[] = [
 ];
 
 describe("SpeckitFilesPanel", () => {
+  it("highlights the active feature with an accessible label", () => {
+    const html = renderToStaticMarkup(<SpeckitFilesPanel features={sampleFeatures} selectedDocumentPath={null} activeFeaturePath="specs/001-alpha" onRefresh={() => undefined} onSelectDocument={() => undefined} />);
+    expect(html).toContain("현재 작업 중");
+    expect(html).toContain('aria-label="현재 작업 중"');
+  });
   it("renders feature rows collapsed by default", () => {
     const html = renderToStaticMarkup(
       <SpeckitFilesPanel

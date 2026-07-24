@@ -1258,6 +1258,24 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       return;
     }
 
+    if (externalPromptRequest.delivery === "draft") {
+      handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
+      setInputMode("prompt");
+      setRalphLoopEnabled(false);
+      setIsRalphSettingsDialogOpen(false);
+      setPrompt(nextPrompt);
+      return;
+    }
+
+    if (externalPromptRequest.delivery === "queue") {
+      handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
+      setInputMode("prompt");
+      setRalphLoopEnabled(false);
+      setIsRalphSettingsDialogOpen(false);
+      enqueuePrompt(nextPrompt, "external-request");
+      return;
+    }
+
     if (activeRunIdRef.current && isRunning) {
       handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
       enqueuePrompt(nextPrompt, "external-request");
