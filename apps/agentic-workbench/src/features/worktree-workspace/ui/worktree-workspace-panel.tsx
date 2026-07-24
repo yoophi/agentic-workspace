@@ -122,11 +122,13 @@ import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-pr
 import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
 import { useMarkdownAnnotationWorkspace } from "@/features/worktree-workspace/model/use-markdown-annotation-workspace";
 import { MarkdownAnnotationWorkspace } from "@/features/worktree-workspace/ui/markdown-annotation-workspace";
+import type { WorkspacePanelId } from "@/features/worktree-workspace/model/workspace-layout";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
   initialTab?: WorkspaceTabId;
+  selectedPanel?: WorkspacePanelId;
 };
 
 type WorkspaceTabId = "git" | "files" | "markdown" | "speckit";
@@ -201,8 +203,9 @@ export function WorktreeWorkspacePanel({
   worktree,
   onSendAnnotationPrompt,
   initialTab = "git",
+  selectedPanel,
 }: WorktreeWorkspacePanelProps) {
-  const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>(initialTab);
+  const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>(selectedPanel ?? initialTab);
   const [gitHistoryView, setGitHistoryView] = useState<GitHistoryView>("graph");
   const queryClient = useQueryClient();
   // watcher 구독을 유지한 채 최신 탭을 참조하기 위한 ref. effect 의존성에 탭을
@@ -212,6 +215,7 @@ export function WorktreeWorkspacePanel({
   useEffect(() => {
     selectedTabRef.current = selectedTab;
   }, [selectedTab]);
+  useEffect(() => { if (selectedPanel) setSelectedTab(selectedPanel); }, [selectedPanel]);
 
   useEffect(() => {
     let disposed = false;
@@ -283,27 +287,6 @@ export function WorktreeWorkspacePanel({
             <span className="truncate text-sm font-medium">Workspace</span>
             <WorktreeStatusBadge status={worktree.status} />
           </div>
-        </div>
-        <div className="flex shrink-0 rounded-md border p-0.5" role="tablist" aria-label="Worktree workspace">
-          {workspaceTabs.map((tab) => {
-            const Icon = tab.icon;
-            const isSelected = selectedTab === tab.id;
-
-            return (
-              <Button
-                key={tab.id}
-                type="button"
-                size="sm"
-                variant={isSelected ? "secondary" : "ghost"}
-                role="tab"
-                aria-selected={isSelected}
-                onClick={() => setSelectedTab(tab.id)}
-              >
-                <Icon data-icon="inline-start" />
-                {tab.label}
-              </Button>
-            );
-          })}
         </div>
       </header>
 

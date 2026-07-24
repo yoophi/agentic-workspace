@@ -18,3 +18,4 @@ pub mod window_menu_service;
 pub mod worktree_changes_service;
 pub mod worktree_file_service;
 pub mod worktree_git_service;
+pub mod worktree_workspace_layout_service;

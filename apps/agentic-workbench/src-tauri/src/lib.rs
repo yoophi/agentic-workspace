@@ -7,13 +7,13 @@ mod ports;
 use inbound::tauri_commands::{
     WorktreeWatcherState, cancel_agent_run, cancel_current_prompt_and_send_to_run, clear_goal,
     create_git_worktree, create_goal, create_project, create_saved_prompt, delete_git_worktree,
-    delete_project, delete_saved_prompt, get_agent_run_settings, get_goal, get_worktree_changes,
+    delete_project, delete_saved_prompt, get_agent_run_settings, get_goal, get_worktree_changes, get_worktree_workspace_layout,
     get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
     get_worktree_git_graph, list_agent_tool_command_candidates, list_agents, list_git_branches,
     list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
     list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
     open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
-    record_goal_progress, respond_agent_permission, save_agent_run_settings, send_prompt_to_run,
+    record_goal_progress, respond_agent_permission, save_agent_run_settings, save_worktree_workspace_layout, send_prompt_to_run,
     set_run_permission_mode, start_agent_run, start_worktree_watcher, steer_prompt_to_run,
     stop_worktree_watcher, update_goal, update_project, update_saved_prompt,
 };
@@ -76,6 +76,9 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
+            if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::CloseRequested { .. }) {
+                infrastructure::window_manager::save_session_window_bounds(window);
+            }
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
@@ -107,6 +110,8 @@ pub fn run() {
             record_goal_progress,
             get_agent_run_settings,
             save_agent_run_settings,
+            get_worktree_workspace_layout,
+            save_worktree_workspace_layout,
             list_git_remotes,
             list_git_branches,
             list_git_worktrees,

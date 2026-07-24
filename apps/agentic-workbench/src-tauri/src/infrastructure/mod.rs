@@ -32,6 +32,7 @@ pub mod json_goal_repository;
 pub mod json_project_repository;
 pub mod json_saved_prompt_repository;
 pub mod json_store;
+pub mod json_worktree_workspace_layout_repository;
 pub mod mcp;
 pub mod native_window_menu;
 pub mod perf_log;

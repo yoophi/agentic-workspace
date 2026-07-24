@@ -24,3 +24,5 @@ pub mod worktree_file;
 pub mod worktree_file_provider;
 pub mod worktree_git;
 pub mod worktree_git_provider;
+pub mod worktree_workspace_layout;
+pub mod worktree_workspace_layout_repository;
