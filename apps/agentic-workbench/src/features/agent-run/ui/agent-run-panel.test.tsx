@@ -11,6 +11,12 @@ const WORKTREE_AGENT_RUN_AREA_SOURCE = readFileSync(
 );
 
 describe("agent run settings entrypoints", () => {
+  it("keeps draft prompt injection separate from send and queue behavior", () => {
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('externalPromptRequest.delivery === "draft"');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain("setPrompt(nextPrompt)");
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('externalPromptRequest.delivery === "queue"');
+    expect(AGENT_RUN_PANEL_SOURCE).toContain('enqueuePrompt(nextPrompt, "external-request")');
+  });
   it("keeps the override failure action delegated to onOpenSettings", () => {
     expect(AGENT_RUN_PANEL_SOURCE).toContain("onClick={onOpenSettings}");
     expect(AGENT_RUN_PANEL_SOURCE).toContain("isOverrideCommandFailure(error)");

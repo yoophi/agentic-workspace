@@ -32,6 +32,7 @@ export type SpeckitFilesPanelProps = {
   refreshing?: boolean;
   errorMessage?: string;
   staleDocumentPath?: string | null;
+  activeFeaturePath?: string | null;
   initialExpandedFeatureIds?: string[];
   onSelectDocument: (path: string) => void;
   onRefresh: () => void;
@@ -44,6 +45,7 @@ export function SpeckitFilesPanel({
   refreshing = false,
   errorMessage,
   staleDocumentPath,
+  activeFeaturePath = null,
   initialExpandedFeatureIds = [],
   onSelectDocument,
   onRefresh,
@@ -185,6 +187,7 @@ export function SpeckitFilesPanel({
               <SpeckitFeatureSection
                 expanded={expandedFeatureIds.has(feature.id)}
                 feature={feature}
+                active={feature.relativePath === activeFeaturePath}
                 key={feature.id}
                 onSelectDocument={onSelectDocument}
                 onToggleFeature={toggleFeature}
@@ -214,12 +217,14 @@ function taskStateRank(feature: SpeckitFeature) {
 }
 
 function SpeckitFeatureSection({
+  active,
   expanded,
   feature,
   selectedDocumentPath,
   onSelectDocument,
   onToggleFeature,
 }: {
+  active: boolean;
   expanded: boolean;
   feature: SpeckitFeature;
   selectedDocumentPath: string | null;
@@ -233,6 +238,7 @@ function SpeckitFeatureSection({
     <section
       className={cn(
         "rounded-md border bg-background",
+        active && "border-primary bg-primary/5 ring-1 ring-primary/30",
         isComplete && "border-green-500/40 bg-green-50/70",
       )}
       data-complete={isComplete}
@@ -246,7 +252,7 @@ function SpeckitFeatureSection({
         >
           <ToggleIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
-            <h3 className="truncate text-sm font-medium">{feature.name}</h3>
+            <div className="flex items-center gap-2"><h3 className="truncate text-sm font-medium">{feature.name}</h3>{active ? <Badge aria-label="현재 작업 중">현재 작업 중</Badge> : null}</div>
             <div className="mt-2 flex flex-wrap items-center gap-2">
               <RequiredDocumentStatus feature={feature} />
               <TaskProgressBadge progress={feature.taskProgress} />

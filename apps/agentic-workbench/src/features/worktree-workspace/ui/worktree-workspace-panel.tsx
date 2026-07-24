@@ -120,12 +120,16 @@ import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
+import { SddWorkflowControls } from "@/features/worktree-workspace/ui/sdd-workflow-controls";
+import { getSddStageStates, readActiveFeaturePointer, type SddActionRequest } from "@/features/worktree-workspace/model/sdd-workflow";
 import { useMarkdownAnnotationWorkspace } from "@/features/worktree-workspace/model/use-markdown-annotation-workspace";
 import { MarkdownAnnotationWorkspace } from "@/features/worktree-workspace/ui/markdown-annotation-workspace";
+import { TasksKanbanPanel } from "@/features/worktree-workspace/ui/tasks-kanban-panel";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
+  onSendSddPrompt?: (request: SddActionRequest) => void;
   initialTab?: WorkspaceTabId;
 };
 
@@ -200,6 +204,7 @@ function createAnnotationFromAnchor({
 export function WorktreeWorkspacePanel({
   worktree,
   onSendAnnotationPrompt,
+  onSendSddPrompt,
   initialTab = "git",
 }: WorktreeWorkspacePanelProps) {
   const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>(initialTab);
@@ -322,7 +327,7 @@ export function WorktreeWorkspacePanel({
             onSendAnnotationPrompt={onSendAnnotationPrompt}
           />
         ) : (
-          <SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} />
+          <SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} onSendSddPrompt={onSendSddPrompt} />
         )}
       </div>
     </section>
@@ -1003,13 +1008,16 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
 function SpeckitWorkspaceTab({
   worktree,
   onSendAnnotationPrompt,
+  onSendSddPrompt,
 }: {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
+  onSendSddPrompt?: (request: SddActionRequest) => void;
 }) {
   const previewPaneRef = useRef<HTMLDivElement | null>(null);
   const previewContentRef = useRef<HTMLDivElement | null>(null);
   const [selectedDocumentPath, setSelectedDocumentPath] = useState<string | null>(null);
+  const [tasksViewMode, setTasksViewMode] = useState<"markdown" | "tasks">("markdown");
   const queryClient = useQueryClient();
   const filesQuery = useQuery({
     queryKey: worktreeFileQueryKeys.speckit(worktree.path),
@@ -1042,6 +1050,14 @@ function SpeckitWorkspaceTab({
     () => buildSpeckitFeatures(filesQuery.data ?? [], taskContentsByPath),
     [filesQuery.data, taskContentsByPath],
   );
+  const featurePointerQuery = useQuery({
+    queryKey: worktreeFileQueryKeys.textFile(worktree.path, ".specify/feature.json"),
+    queryFn: () => readWorktreeTextFile(worktree.path, ".specify/feature.json"),
+    ...autoRefreshQueryOptions,
+  });
+  const activePointer = useMemo(() => readActiveFeaturePointer(featurePointerQuery.data?.content, features, featurePointerQuery.isLoading), [featurePointerQuery.data?.content, featurePointerQuery.isLoading, features]);
+  const activeFeature = features.find((feature) => feature.relativePath === activePointer.featurePath);
+  const sddStages = useMemo(() => getSddStageStates(activeFeature, activePointer), [activeFeature, activePointer]);
   const previewQuery = useQuery({
     enabled: selectedDocumentPath !== null,
     queryKey: selectedDocumentPath
@@ -1081,6 +1097,7 @@ function SpeckitWorkspaceTab({
     for (const taskQuery of taskQueries) {
       void taskQuery.refetch();
     }
+    void featurePointerQuery.refetch();
     if (selectedDocumentPath) {
       void queryClient.invalidateQueries({
         queryKey: worktreeFileQueryKeys.textFile(worktree.path, selectedDocumentPath),
@@ -1091,6 +1108,7 @@ function SpeckitWorkspaceTab({
   return (
     <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
       <ResizablePanel id="speckit-workspace-list" defaultSize="38%" minSize="280px">
+        <SddWorkflowControls pointer={activePointer} stages={sddStages} onRequest={(request) => onSendSddPrompt?.(request)} />
         <SpeckitFilesPanel
           errorMessage={filesQuery.isError ? String(filesQuery.error) : undefined}
           features={features}
@@ -1098,6 +1116,7 @@ function SpeckitWorkspaceTab({
           refreshing={filesQuery.isFetching || taskQueries.some((query) => query.isFetching)}
           selectedDocumentPath={selectedDocumentPath}
           staleDocumentPath={staleDocumentSelection?.id ?? null}
+          activeFeaturePath={activePointer.featurePath}
           onRefresh={refreshSpeckit}
           onSelectDocument={setSelectedDocumentPath}
         />
@@ -1121,6 +1140,12 @@ function SpeckitWorkspaceTab({
                   {selectedDocument?.relativePath ?? selectedDocumentPath ?? "No Speckit document selected"}
                 </p>
               </div>
+              {selectedDocument?.type === "tasks" ? (
+                <div className="ml-auto flex shrink-0 rounded-md border p-0.5">
+                  <Button type="button" size="sm" variant={tasksViewMode === "markdown" ? "secondary" : "ghost"} onClick={() => setTasksViewMode("markdown")}>Markdown</Button>
+                  <Button type="button" size="sm" variant={tasksViewMode === "tasks" ? "secondary" : "ghost"} onClick={() => setTasksViewMode("tasks")}>작업 보기</Button>
+                </div>
+              ) : null}
             </div>
           </header>
           <div
@@ -1147,6 +1172,8 @@ function SpeckitWorkspaceTab({
                 description={String(previewQuery.error)}
                 variant="destructive"
               />
+            ) : previewQuery.data && selectedDocument?.type === "tasks" && tasksViewMode === "tasks" ? (
+              <TasksKanbanPanel blocks={blocks} content={previewQuery.data.content} />
             ) : previewQuery.data ? (
               <MarkdownAnnotationWorkspace
                 blocks={blocks}

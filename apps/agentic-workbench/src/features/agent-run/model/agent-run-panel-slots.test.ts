@@ -111,6 +111,13 @@ describe("agent run panel slots", () => {
     });
   });
 
+  it("preserves draft delivery for a routed external request", () => {
+    const state = createInitialAgentRunAreaState();
+    const request = { id: "draft-1", text: "prepare SDD", delivery: "draft" as const };
+    expect({ ...state, slots: [{ ...state.slots[0], externalPromptRequest: request }] }.slots[0]?.externalPromptRequest)
+      .toEqual(request);
+  });
+
   it("rejects empty prompts and prompts routed to closing panels", () => {
     const state = addExtraPanel(createInitialAgentRunAreaState());
     expect(routePromptToActivePanel(state, "   ", "ignored")).toEqual({
