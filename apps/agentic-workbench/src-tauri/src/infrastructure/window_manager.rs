@@ -1,6 +1,7 @@
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::{sync::mpsc, time::Duration};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
+use crate::{application::worktree_workspace_layout_service, domain::worktree_workspace_layout::WorkspaceLayoutSettings, infrastructure::json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository};
 use uuid::Uuid;
 
 #[cfg(debug_assertions)]
@@ -108,10 +109,16 @@ fn build_window(
     title: &str,
 ) -> Result<WebviewWindow, String> {
     #[allow(unused_mut)]
+    let saved_layout = JsonWorkspaceLayoutRepository::from_app(app)
+        .ok()
+        .and_then(|repository| worktree_workspace_layout_service::get_layout(&repository, worktree_path.to_string()).ok().flatten());
     let mut builder = WebviewWindowBuilder::new(app, label, session_url(project_id, worktree_path))
         .title(title)
-        .inner_size(1100.0, 820.0)
+        .inner_size(saved_layout.as_ref().and_then(|layout| layout.window_width).unwrap_or(1100) as f64, saved_layout.as_ref().and_then(|layout| layout.window_height).unwrap_or(820) as f64)
         .min_inner_size(980.0, 680.0);
+    if let (Some(x), Some(y)) = (saved_layout.as_ref().and_then(|layout| layout.window_x), saved_layout.as_ref().and_then(|layout| layout.window_y)) {
+        builder = builder.position(x as f64, y as f64);
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -126,6 +133,18 @@ fn build_window(
     }
 
     Ok(window)
+}
+
+pub fn save_session_window_bounds(window: &Window) {
+    if !window.label().starts_with("session-") { return; }
+    let Some(webview_window) = window.app_handle().get_webview_window(window.label()) else { return; };
+    let Ok(url) = webview_window.url() else { return; };
+    let Some((_, path)) = url.query_pairs().find(|(key, _)| key == "worktreePath") else { return; };
+    let worktree_path = path.into_owned();
+    let (Ok(position), Ok(size), Ok(repository)) = (window.outer_position(), window.inner_size(), JsonWorkspaceLayoutRepository::from_app(window.app_handle())) else { return; };
+    let existing = worktree_workspace_layout_service::get_layout(&repository, worktree_path.clone()).ok().flatten().unwrap_or_else(|| WorkspaceLayoutSettings { working_directory: worktree_path, ..Default::default() });
+    let layout = WorkspaceLayoutSettings { window_x: Some(position.x), window_y: Some(position.y), window_width: Some(size.width), window_height: Some(size.height), ..existing };
+    let _ = worktree_workspace_layout_service::save_layout(&repository, layout);
 }
 
 #[cfg(target_os = "macos")]
