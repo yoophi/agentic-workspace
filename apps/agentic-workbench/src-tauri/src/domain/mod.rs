@@ -1,5 +1,6 @@
 pub use acp_agent_core::domain::{acp_session, agent, agent_tool_candidate, events, run};
 
+pub mod agent_exchange;
 pub mod agent_run_settings;
 pub mod agent_run_settings_repository;
 pub mod git_branch;

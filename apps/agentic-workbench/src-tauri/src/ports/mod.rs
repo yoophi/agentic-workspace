@@ -3,4 +3,5 @@ pub use acp_agent_core::ports::{
     session_registry,
 };
 
+pub mod agent_workspace_registry;
 pub mod provider_session_repository;

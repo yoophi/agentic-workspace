@@ -275,6 +275,24 @@ export const WorktreeSessionWithSpeckitFixtures: Story = {
   ),
 };
 
+export const WorktreeSessionAgentTileWorkspace: Story = {
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Agent run 영역에서 extra panel을 추가한 뒤 탭/타일 전환과 인접 타일 명령을 검증하는 전체 페이지 상태입니다.",
+      },
+    },
+  },
+  render: () => (
+    <ProjectWorktreeSessionPage
+      project={sampleProjects[0]}
+      worktree={sampleWorktrees[1]}
+      onBack={() => undefined}
+    />
+  ),
+};
+
 export const WorktreeSessionClean: Story = {
   render: () => (
     <ProjectWorktreeSessionPage
