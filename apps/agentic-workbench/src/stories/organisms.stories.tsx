@@ -16,8 +16,15 @@ import {
   type CommandOverrideDraft,
 } from "@/features/agent-command-override/model/command-override-form";
 import { AgentRunPanel } from "@/features/agent-run/ui/agent-run-panel";
+import { AgentRunTileLayout } from "@/features/agent-run/ui/agent-run-tile-layout";
 import { PermissionRequestDialog } from "@/features/agent-run/ui/permission-request-dialog";
 import { WorktreeAgentRunArea } from "@/features/agent-run/ui/worktree-agent-run-area";
+import {
+  createInitialAgentRunWorkspaceState,
+  openAdjacentPanel,
+  resizeAgentRunSplit,
+  selectPanel,
+} from "@/entities/agent-run/model/agent-run-workspace";
 import { DeleteProjectDialog } from "@/features/project-delete/ui/delete-project-dialog";
 import { ProjectFormDialog } from "@/features/project-form/ui/project-form-dialog";
 import { ProjectTable } from "@/features/project-list/ui/project-table";
@@ -680,6 +687,53 @@ export const WorktreeAgentRunAreaMainOnly: Story = {
       <WorktreeAgentRunArea worktree={sampleWorktrees[1]} />
     </div>
   ),
+};
+
+export const AgentRunTileWorkspace: Story = {
+  render: function AgentRunTileWorkspaceStory() {
+    const [workspace, setWorkspace] = useState(() => {
+      const initial = createInitialAgentRunWorkspaceState();
+      const right = openAdjacentPanel(initial, initial.focusedPanelId, "right");
+      return openAdjacentPanel(
+        right.state,
+        right.opened ? right.panelId : initial.focusedPanelId,
+        "below",
+      ).state;
+    });
+
+    return (
+      <div className="h-[620px] overflow-hidden rounded-md border bg-background">
+        <AgentRunTileLayout
+          layout={workspace.layout}
+          panels={workspace.slots.map((slot) => ({
+            panelId: slot.id,
+            slot: {
+              ...slot,
+              isRunning: slot.id === "extra-agent-run-1",
+              pendingExchangeCount: slot.id === "extra-agent-run-2" ? 2 : 0,
+            },
+            content: (
+              <div className="flex h-full items-center justify-center bg-muted/10 p-6 text-sm text-muted-foreground">
+                {slot.title} agent run content
+              </div>
+            ),
+          }))}
+          focusedPanelId={workspace.focusedPanelId}
+          onFocusPanel={(panelId) =>
+            setWorkspace((current) => selectPanel(current, panelId))
+          }
+          onOpenAdjacent={() => undefined}
+          onClosePanel={() => undefined}
+          onMessagePeer={() => undefined}
+          onResizeSplit={(splitId, ratio) =>
+            setWorkspace((current) =>
+              resizeAgentRunSplit(current, splitId, ratio),
+            )
+          }
+        />
+      </div>
+    );
+  },
 };
 
 export const WorktreeAgentRunAreaWithAnnotationPrompt: Story = {

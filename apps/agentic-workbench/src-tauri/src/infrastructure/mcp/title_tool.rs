@@ -11,29 +11,27 @@ use crate::domain::mcp_title_control::{
 pub const SET_WINDOW_TITLE_TOOL: &str = "set_window_title";
 
 pub fn tools_list_result() -> Value {
-    json!({
-        "tools": [
-            {
-                "name": SET_WINDOW_TITLE_TOOL,
-                "description": "Change the current Worktree Session window title for the active agent run.",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {
-                        "runId": {
-                            "type": "string",
-                            "description": "The active agent run id provided by AW_MCP_RUN_ID."
-                        },
-                        "title": {
-                            "type": "string",
-                            "description": "Readable window title to apply to the owning Worktree Session window."
-                        }
-                    },
-                    "required": ["runId", "title"],
-                    "additionalProperties": false
+    let mut tools = vec![json!({
+        "name": SET_WINDOW_TITLE_TOOL,
+        "description": "Change the current Worktree Session window title for the active agent run.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "runId": {
+                    "type": "string",
+                    "description": "The active agent run id provided by AW_MCP_RUN_ID."
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Readable window title to apply to the owning Worktree Session window."
                 }
-            }
-        ]
-    })
+            },
+            "required": ["runId", "title"],
+            "additionalProperties": false
+        }
+    })];
+    tools.extend(crate::infrastructure::mcp::agent_exchange_tool::tool_definitions());
+    json!({ "tools": tools })
 }
 
 pub fn tool_command_candidates(
@@ -133,10 +131,10 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn tools_list_exposes_only_set_window_title() {
+    fn tools_list_exposes_title_and_agent_exchange_tools() {
         let result = tools_list_result();
         let tools = result["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 1);
+        assert_eq!(tools.len(), 4);
         assert_eq!(tools[0]["name"], SET_WINDOW_TITLE_TOOL);
     }
 

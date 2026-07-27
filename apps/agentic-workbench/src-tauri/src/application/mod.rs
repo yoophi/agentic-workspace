@@ -3,6 +3,7 @@ pub use acp_agent_core::application::{
     start_agent_run, steer_prompt,
 };
 
+pub mod agent_exchange_service;
 pub mod agent_run_settings_service;
 pub mod agent_tool_candidate_service;
 pub mod git_branch_service;

@@ -5,19 +5,25 @@ mod infrastructure;
 mod ports;
 
 use inbound::tauri_commands::{
-    WorktreeWatcherState, cancel_agent_run, cancel_current_prompt_and_send_to_run, clear_goal,
-    create_git_worktree, create_goal, create_project, create_saved_prompt, delete_git_worktree,
-    delete_project, delete_saved_prompt, get_agent_run_settings, get_goal, get_worktree_changes,
-    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
-    get_worktree_git_graph, list_agent_tool_command_candidates, list_agents, list_git_branches,
+    WorktreeWatcherState, acknowledge_agent_exchange, cancel_agent_run,
+    cancel_current_prompt_and_send_to_run, clear_goal, create_git_worktree, create_goal,
+    create_project, create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt,
+    get_agent_run_settings, get_goal, get_worktree_changes, get_worktree_commit_detail,
+    get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
+    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
     list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
     list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
     open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
-    record_goal_progress, respond_agent_permission, save_agent_run_settings, send_prompt_to_run,
-    set_run_permission_mode, start_agent_run, start_worktree_watcher, steer_prompt_to_run,
-    stop_worktree_watcher, update_goal, update_project, update_saved_prompt,
+    record_goal_progress, respond_agent_permission, save_agent_run_settings, send_agent_exchange,
+    send_prompt_to_run, set_run_permission_mode, start_agent_run, start_worktree_watcher,
+    steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace, update_goal, update_project,
+    update_saved_prompt,
 };
-use infrastructure::{agent_session_registry::AppState, mcp::McpServerState};
+use infrastructure::{
+    agent_session_registry::AppState,
+    in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry, mcp::McpServerState,
+};
+use ports::agent_workspace_registry::AgentWorkspaceRegistry;
 use tauri::{
     Manager, WindowEvent,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
@@ -35,6 +41,7 @@ const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
     let app_state = AppState::default();
+    let agent_workspace_registry = InMemoryAgentWorkspaceRegistry::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(build_native_menu)
@@ -58,6 +65,9 @@ pub fn run() {
             let mcp_state = McpServerState::start(
                 _app.handle().clone(),
                 _app.state::<AppState>().inner().clone(),
+                _app.state::<InMemoryAgentWorkspaceRegistry>()
+                    .inner()
+                    .clone(),
             )?;
             _app.manage(mcp_state);
 
@@ -80,16 +90,22 @@ pub fn run() {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
                     let state = window.state::<AppState>().inner().clone();
+                    let workspace_registry = window
+                        .state::<InMemoryAgentWorkspaceRegistry>()
+                        .inner()
+                        .clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
                     tauri::async_runtime::spawn(async move {
                         state.cancel_runs_owned_by(&label).await;
+                        workspace_registry.remove_window(&label).await;
                     });
                 }
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }
         })
         .manage(app_state)
+        .manage(agent_workspace_registry)
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             list_projects,
@@ -135,7 +151,11 @@ pub fn run() {
             steer_prompt_to_run,
             cancel_current_prompt_and_send_to_run,
             set_run_permission_mode,
-            respond_agent_permission
+            respond_agent_permission,
+            sync_agent_workspace,
+            send_agent_exchange,
+            acknowledge_agent_exchange,
+            list_agent_exchanges
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

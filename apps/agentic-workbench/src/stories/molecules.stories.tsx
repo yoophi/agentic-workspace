@@ -1,11 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { CopyIcon, FolderIcon, InfoIcon, SendIcon } from "lucide-react";
+import { useState } from "react";
 import { StickToBottom } from "use-stick-to-bottom";
 import { extractTocEntries, parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
 import { MarkdownViewer, MermaidExpandedView } from "@yoophi/markdown-annotation-react";
 
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
+import { AgentPeerMessageDialog } from "@/features/agent-run/ui/agent-peer-message-dialog";
+import { AgentRunWorkspaceToolbar } from "@/features/agent-run/ui/agent-run-workspace-toolbar";
+import type { AgentRunViewMode } from "@/entities/agent-run/model/agent-run-workspace";
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -393,4 +397,49 @@ export const WorktreeMarkdownPreviewMermaidExpanded: Story = {
       />
     </div>
   ),
+};
+
+export const AgentRunWorkspaceControls: Story = {
+  render: function AgentRunWorkspaceControlsStory() {
+    const [viewMode, setViewMode] = useState<AgentRunViewMode>("tiles");
+    const [dialogOpen, setDialogOpen] = useState(false);
+
+    return (
+      <div className="grid max-w-2xl gap-6">
+        <div className="overflow-hidden rounded-md border">
+          <AgentRunWorkspaceToolbar
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+            onAddPanel={() => undefined}
+          />
+          <div className="p-4 text-sm text-muted-foreground">
+            현재 보기: {viewMode === "tiles" ? "타일" : "탭"}
+          </div>
+        </div>
+        <Button className="w-fit" onClick={() => setDialogOpen(true)}>
+          피어 메시지 열기
+        </Button>
+        <AgentPeerMessageDialog
+          open={dialogOpen}
+          sourcePanelId="main-agent-run"
+          peers={[
+            {
+              panelId: "extra-agent-run-1",
+              title: "Review",
+              runId: "run-review",
+              status: "running",
+            },
+            {
+              panelId: "extra-agent-run-2",
+              title: "Tests",
+              runId: null,
+              status: "idle",
+            },
+          ]}
+          onOpenChange={setDialogOpen}
+          onSubmit={async () => undefined}
+        />
+      </div>
+    );
+  },
 };

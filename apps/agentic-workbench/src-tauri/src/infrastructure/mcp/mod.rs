@@ -15,14 +15,21 @@ use tokio::net::TcpListener;
 use uuid::Uuid;
 
 use crate::{
-    application::mcp_title_control_service::McpTitleControlService,
+    application::{
+        agent_exchange_service::AgentExchangeService,
+        mcp_title_control_service::McpTitleControlService,
+    },
     domain::{
         mcp_title_control::{TitleChangeFailureCode, TitleChangeResult},
         run::{AgentMcpHttpHeader, AgentMcpServerConfig},
     },
     infrastructure::{
         agent_session_registry::AppState,
+        in_memory_agent_workspace_registry::{
+            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
+        },
         mcp::{
+            agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
             protocol::{JsonRpcResponse, initialize_result, parse_request},
             title_tool::{
                 SET_WINDOW_TITLE_TOOL, is_authorized, origin_allowed, parse_title_change_request,
@@ -32,6 +39,7 @@ use crate::{
     },
 };
 
+pub mod agent_exchange_tool;
 pub mod protocol;
 pub mod title_tool;
 
@@ -52,6 +60,7 @@ pub struct McpServerState {
 struct McpRouterState {
     app: AppHandle,
     registry: AppState,
+    workspace_registry: InMemoryAgentWorkspaceRegistry,
     token: String,
 }
 
@@ -87,14 +96,19 @@ impl McpLaunchEnv {
 You are running inside an Agentic Workbench Worktree Session.
 The local MCP server named `{AW_MCP_SERVER_NAME}` is available for controlling this session UI.
 
-Available tool:
+Available tools:
 - `set_window_title`: change only the current Worktree Session window title.
+- `list_peer_agents`: list other agent-run panels in this same session window.
+- `send_message_to_agent`: send a scoped `send`, `queue`, or `draft` message to a listed peer.
+- `get_agent_exchange_status`: inspect the final delivery status of a sent message.
 
 When the user asks to change, label, rename, or summarize the current session/window title, call `set_window_title` with:
 - `runId`: `{run_id}`
 - `title`: a readable title, 80 characters or fewer, without control characters.
 
-Do not use this MCP server for file edits, Git operations, permission approval, or reading source files. If the title tool fails, report the failure instead of claiming the title changed.
+For agent-to-agent messages, first call `list_peer_agents`, use the returned stable panel/run ids, generate a unique request id, and report the returned delivery status accurately.
+
+Do not use this MCP server for file edits, Git operations, permission approval, or reading source files. If the title tool fails, report the failure instead of claiming the title changed. Apply the same rule to the agent exchange tools.
 "#,
             run_id = self.run_id
         )
@@ -102,7 +116,11 @@ Do not use this MCP server for file edits, Git operations, permission approval, 
 }
 
 impl McpServerState {
-    pub fn start(app: AppHandle, registry: AppState) -> Result<Self> {
+    pub fn start(
+        app: AppHandle,
+        registry: AppState,
+        workspace_registry: InMemoryAgentWorkspaceRegistry,
+    ) -> Result<Self> {
         let token = Uuid::new_v4().to_string();
         let std_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .context("failed to bind MCP server to localhost")?;
@@ -115,6 +133,7 @@ impl McpServerState {
         let router_state = McpRouterState {
             app,
             registry,
+            workspace_registry,
             token: token.clone(),
         };
         let router = Router::new()
@@ -210,6 +229,15 @@ async fn handle_tool_call(state: &McpRouterState, params: Option<Value>) -> Valu
         .and_then(|value| value.get("name"))
         .and_then(Value::as_str)
         .unwrap_or_default();
+    if is_exchange_tool(name) {
+        let service = AgentExchangeService::new(
+            state.workspace_registry.clone(),
+            state.registry.clone(),
+            TauriAgentExchangeEventSink::new(state.app.clone()),
+        );
+        let arguments = params.as_ref().and_then(|value| value.get("arguments"));
+        return handle_exchange_tool(&service, name, arguments).await;
+    }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);
     }
@@ -311,6 +339,8 @@ mod tests {
 
         assert!(instructions.contains(AW_MCP_SERVER_NAME));
         assert!(instructions.contains("set_window_title"));
+        assert!(instructions.contains("list_peer_agents"));
+        assert!(instructions.contains("send_message_to_agent"));
         assert!(instructions.contains("runId`: `run-1`"));
         assert!(instructions.contains("If the title tool fails"));
     }

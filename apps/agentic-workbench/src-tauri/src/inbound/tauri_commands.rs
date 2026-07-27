@@ -8,7 +8,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     application::{
-        agent_run_settings_service, agent_tool_candidate_service::AgentToolCandidateService,
+        agent_exchange_service::AgentExchangeService, agent_run_settings_service,
+        agent_tool_candidate_service::AgentToolCandidateService,
         cancel_agent_run::CancelAgentRunUseCase,
         cancel_prompt_and_send::CancelPromptAndSendUseCase, git_branch_service, git_remote_service,
         git_worktree_changes_service, git_worktree_service, goal_service,
@@ -19,6 +20,10 @@ use crate::{
     },
     domain::{
         agent::AgentDescriptor,
+        agent_exchange::{
+            AgentExchange, AgentExchangeAckRequest, AgentWorkspaceSyncRequest,
+            AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
+        },
         agent_run_settings::{
             APP_COMMAND_OVERRIDE_SETTINGS_KEY, AgentCommandSource, AgentRunSettings,
         },
@@ -50,6 +55,9 @@ use crate::{
         git_cli_worktree_change_provider::GitCliWorktreeChangeProvider,
         git_cli_worktree_git_provider::GitCliWorktreeGitProvider,
         git_cli_worktree_provider::GitCliWorktreeProvider,
+        in_memory_agent_workspace_registry::{
+            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
+        },
         json_acp_session_store::JsonAcpSessionStore,
         json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
         json_goal_repository::JsonGoalRepository,
@@ -68,6 +76,86 @@ const WORKTREE_CHANGED_EVENT: &str = "workspace://worktree-changed";
 
 pub struct WorktreeWatcherState {
     handles: Mutex<HashMap<String, WorktreeWatchHandle>>,
+}
+
+fn exchange_error(error: crate::domain::agent_exchange::AgentExchangeError) -> String {
+    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+}
+
+#[tauri::command]
+pub async fn sync_agent_workspace(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
+    mut request: AgentWorkspaceSyncRequest,
+) -> Result<AgentWorkspaceSyncResponse, String> {
+    let canonical = std::fs::canonicalize(&request.worktree_path)
+        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
+    if !canonical.is_dir() {
+        return Err("Workspace path must be a directory.".into());
+    }
+    request.worktree_path = canonical.to_string_lossy().into_owned();
+    AgentExchangeService::new(
+        workspace_registry.inner().clone(),
+        state.inner().clone(),
+        TauriAgentExchangeEventSink::new(app),
+    )
+    .sync_workspace(window.label().to_string(), request)
+    .await
+    .map_err(exchange_error)
+}
+
+#[tauri::command]
+pub async fn send_agent_exchange(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
+    request: SendAgentExchangeRequest,
+) -> Result<AgentExchange, String> {
+    AgentExchangeService::new(
+        workspace_registry.inner().clone(),
+        state.inner().clone(),
+        TauriAgentExchangeEventSink::new(app),
+    )
+    .send_user_exchange(window.label(), request)
+    .await
+    .map_err(exchange_error)
+}
+
+#[tauri::command]
+pub async fn acknowledge_agent_exchange(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
+    request: AgentExchangeAckRequest,
+) -> Result<AgentExchange, String> {
+    AgentExchangeService::new(
+        workspace_registry.inner().clone(),
+        state.inner().clone(),
+        TauriAgentExchangeEventSink::new(app),
+    )
+    .acknowledge(window.label(), request)
+    .await
+    .map_err(exchange_error)
+}
+
+#[tauri::command]
+pub async fn list_agent_exchanges(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
+) -> Result<Vec<AgentExchange>, String> {
+    Ok(AgentExchangeService::new(
+        workspace_registry.inner().clone(),
+        state.inner().clone(),
+        TauriAgentExchangeEventSink::new(app),
+    )
+    .list_exchanges(window.label())
+    .await)
 }
 
 impl WorktreeWatcherState {
