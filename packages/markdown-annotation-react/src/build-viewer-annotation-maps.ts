@@ -20,22 +20,24 @@ export function buildViewerAnnotationMaps(
   annotations: AnnotationDraft[],
   blocks: MarkdownBlock[],
 ): ViewerAnnotationMaps {
-  const annotatedBlockIds = new Set(annotations.map((annotation) => annotation.anchor.blockId));
+  const blocksById = new Map(blocks.map((block) => [block.id, block]));
+  const activeAnnotations = annotations.filter((annotation) => blocksById.has(annotation.anchor.blockId));
+  const annotatedBlockIds = new Set(activeAnnotations.map((annotation) => annotation.anchor.blockId));
 
   const deletedBlockIds = new Set(
-    annotations
+    activeAnnotations
       .filter((annotation) => {
         if (annotation.type !== "delete") {
           return false;
         }
-        const block = blocks.find((candidate) => candidate.id === annotation.anchor.blockId);
+        const block = blocksById.get(annotation.anchor.blockId);
         return block !== undefined && isFullBlockAnnotation(annotation, block);
       })
       .map((annotation) => annotation.anchor.blockId),
   );
 
   const noteAnnotationsByBlock = new Map<string, MarkdownViewerBlockNote[]>();
-  annotations
+  activeAnnotations
     .filter((annotation) => annotation.type === "note")
     .forEach((annotation) => {
       const blockNotes = noteAnnotationsByBlock.get(annotation.anchor.blockId) ?? [];
@@ -44,10 +46,10 @@ export function buildViewerAnnotationMaps(
     });
 
   const inlineAnnotationsByBlock = new Map<string, MarkdownViewerInlineAnnotation[]>();
-  annotations
+  activeAnnotations
     .filter((annotation) => annotation.type === "delete" || annotation.type === "note")
     .forEach((annotation) => {
-      const block = blocks.find((candidate) => candidate.id === annotation.anchor.blockId);
+      const block = blocksById.get(annotation.anchor.blockId);
       if (
         !block ||
         annotation.anchor.startOffset === undefined ||

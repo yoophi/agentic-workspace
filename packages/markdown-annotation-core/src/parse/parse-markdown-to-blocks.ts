@@ -1,220 +1,133 @@
-import type { MarkdownBlock } from "../types";
+import { toString } from "mdast-util-to-string";
+import remarkGfm from "remark-gfm";
+import remarkParse from "remark-parse";
+import { unified } from "unified";
+import type { MarkdownBlock, MarkdownBlockType } from "../types";
 import { detectMermaidBlock } from "../mermaid/detect-mermaid-block";
 import { stripHtmlComments } from "./inline-markdown";
 
-type FrontmatterResult = {
-  content: string;
-  contentStartLine: number;
+type Position = {
+  start: { line: number; column: number; offset?: number };
+  end: { line: number; column: number; offset?: number };
 };
+
+type AstNode = {
+  type: string;
+  children?: AstNode[];
+  position?: Position;
+  depth?: number;
+  lang?: string | null;
+  ordered?: boolean;
+  start?: number | null;
+  checked?: boolean | null;
+};
+
+type FrontmatterResult = { content: string; contentStartLine: number };
 
 function extractFrontmatter(markdown: string): FrontmatterResult {
   const trimmed = markdown.trimStart();
-  if (!trimmed.startsWith("---")) {
-    return { content: markdown, contentStartLine: 1 };
-  }
-
+  if (!trimmed.startsWith("---")) return { content: markdown, contentStartLine: 1 };
   const endIndex = trimmed.indexOf("\n---", 3);
-  if (endIndex === -1) {
-    return { content: markdown, contentStartLine: 1 };
-  }
-
+  if (endIndex === -1) return { content: markdown, contentStartLine: 1 };
   const rawAfterFrontmatter = trimmed.slice(endIndex + 4);
   const afterFrontmatter = rawAfterFrontmatter.trimStart();
   const leadingChars = markdown.length - trimmed.length;
-  const consumedInTrimmed = endIndex + 4 + (rawAfterFrontmatter.length - afterFrontmatter.length);
-  const consumedTotal = leadingChars + consumedInTrimmed;
-  const contentStartLine = (markdown.slice(0, consumedTotal).match(/\n/g) ?? []).length + 1;
-
-  return { content: afterFrontmatter, contentStartLine };
+  const consumed = leadingChars + endIndex + 4 + (rawAfterFrontmatter.length - afterFrontmatter.length);
+  return { content: afterFrontmatter, contentStartLine: (markdown.slice(0, consumed).match(/\n/g) ?? []).length + 1 };
 }
 
-function isTableStart(lines: string[], index: number) {
-  const current = lines[index]?.trim() ?? "";
-  const next = lines[index + 1]?.trim() ?? "";
-  return current.includes("|") && /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(next);
+function blockType(node: AstNode): MarkdownBlockType | undefined {
+  switch (node.type) {
+    case "heading": return "heading";
+    case "paragraph": return "paragraph";
+    case "blockquote": return "blockquote";
+    case "listItem": return "list-item";
+    case "code": return "code";
+    case "table": return "table";
+    case "thematicBreak": return "hr";
+    default: return undefined;
+  }
 }
 
+function sourceOf(node: AstNode, markdown: string) {
+  if (!node.position) return "";
+  return markdown.slice(node.position.start.offset ?? 0, node.position.end.offset ?? markdown.length);
+}
+
+function inlineMarkdownSource(node: AstNode, type: MarkdownBlockType, markdown: string) {
+  const raw = sourceOf(node, markdown);
+  if (type === "paragraph" || type === "table" || type === "code" || type === "hr") return raw;
+  if (type === "heading") return raw.replace(/^ {0,3}#{1,6}[ \t]+/, "").replace(/[ \t]+#+[ \t]*$/, "");
+  if (type === "blockquote") return raw.replace(/^ {0,3}>[ \t]?/gm, "");
+  if (type === "list-item") {
+    return (node.children ?? [])
+      .filter((child) => child.type !== "list")
+      .map((child) => sourceOf(child, markdown))
+      .join("\n\n");
+  }
+  return raw;
+}
+
+/**
+ * CommonMark/GFM AST에서 annotation·TOC가 소비할 의미 블록을 만든다.
+ * 목록은 parser 문맥을 보존한 채 item을 추출하고 parentId로 중첩 관계를 남긴다.
+ */
 export function parseMarkdownToBlocks(markdown: string): MarkdownBlock[] {
   const { content, contentStartLine } = extractFrontmatter(stripHtmlComments(markdown));
-  const lines = content.split("\n");
+  const root = unified().use(remarkParse).use(remarkGfm).parse(content) as unknown as AstNode;
   const blocks: MarkdownBlock[] = [];
   let nextId = 0;
-  let paragraphBuffer: string[] = [];
-  let paragraphStartLine = contentStartLine;
 
-  const pushBlock = (block: Omit<MarkdownBlock, "id" | "order">) => {
-    const order = blocks.length;
+  const push = (node: AstNode, parentId?: string, list?: AstNode, level = 0) => {
+    const type = blockType(node);
+    if (!type || !node.position) return undefined;
+    const position = node.position;
+    const id = `block-${nextId++}`;
+    const rawContent = content.slice(position.start.offset ?? 0, position.end.offset ?? content.length);
+    const text = type === "hr"
+      ? ""
+      : type === "code"
+        ? toString(node as never)
+        : inlineMarkdownSource(node, type, content);
+    const language = type === "code" ? node.lang ?? undefined : undefined;
     blocks.push({
-      ...block,
-      id: `block-${nextId++}`,
-      order,
+      id,
+      type,
+      content: text,
+      rawContent,
+      order: blocks.length,
+      startLine: contentStartLine + position.start.line - 1,
+      endLine: contentStartLine + position.end.line - 1,
+      sourceRange: {
+        startOffset: position.start.offset ?? 0,
+        endOffset: position.end.offset ?? content.length,
+        startColumn: position.start.column,
+        endColumn: position.end.column,
+      },
+      parentId,
+      level: type === "heading" ? node.depth : type === "list-item" ? level : undefined,
+      language,
+      mermaid: type === "code" ? detectMermaidBlock({ content: text, language }) : undefined,
+      ordered: type === "list-item" ? list?.ordered : undefined,
+      orderedStart: type === "list-item" && list?.ordered ? list.start ?? 1 : undefined,
+      checked: type === "list-item" && node.checked !== null ? node.checked ?? undefined : undefined,
     });
+    return id;
   };
 
-  const flushParagraph = (endLine?: number) => {
-    if (paragraphBuffer.length === 0) {
+  const visit = (node: AstNode, parentId?: string, level = 0) => {
+    if (node.type === "list") {
+      node.children?.forEach((item) => {
+        const itemId = push(item, parentId, node, level);
+        item.children?.forEach((child) => {
+          if (child.type === "list") visit(child, itemId, level + 1);
+        });
+      });
       return;
     }
-
-    pushBlock({
-      type: "paragraph",
-      content: paragraphBuffer.join("\n"),
-      rawContent: paragraphBuffer.join("\n"),
-      startLine: paragraphStartLine,
-      endLine: endLine ?? paragraphStartLine + paragraphBuffer.length - 1,
-    });
-    paragraphBuffer = [];
+    push(node, parentId, undefined, level);
   };
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    const trimmed = line.trim();
-    const lineNumber = contentStartLine + index;
-
-    if (!trimmed) {
-      flushParagraph(lineNumber - 1);
-      continue;
-    }
-
-    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
-    if (headingMatch) {
-      flushParagraph(lineNumber - 1);
-      pushBlock({
-        type: "heading",
-        level: headingMatch[1].length,
-        content: headingMatch[2],
-        rawContent: line,
-        startLine: lineNumber,
-        endLine: lineNumber,
-      });
-      continue;
-    }
-
-    if (/^(```|~~~)/.test(trimmed)) {
-      flushParagraph(lineNumber - 1);
-      const fence = trimmed.slice(0, 3);
-      const language = trimmed.slice(3).trim() || undefined;
-      const codeLines: string[] = [];
-      const rawCodeLines: string[] = [line];
-      let endLine = lineNumber;
-
-      for (index += 1; index < lines.length; index += 1) {
-        const codeLine = lines[index];
-        endLine = contentStartLine + index;
-        rawCodeLines.push(codeLine);
-        if (codeLine.trim().startsWith(fence)) {
-          break;
-        }
-        codeLines.push(codeLine);
-      }
-
-      pushBlock({
-        type: "code",
-        content: codeLines.join("\n"),
-        rawContent: rawCodeLines.join("\n"),
-        language,
-        mermaid: detectMermaidBlock({ content: codeLines.join("\n"), language }),
-        startLine: lineNumber,
-        endLine,
-      });
-      continue;
-    }
-
-    if (isTableStart(lines, index)) {
-      flushParagraph(lineNumber - 1);
-      const tableLines: string[] = [];
-      const startLine = lineNumber;
-      let endLine = lineNumber;
-
-      while (index < lines.length && lines[index].includes("|") && lines[index].trim()) {
-        tableLines.push(lines[index]);
-        endLine = contentStartLine + index;
-        index += 1;
-      }
-      index -= 1;
-
-      pushBlock({
-        type: "table",
-        content: tableLines.join("\n"),
-        rawContent: tableLines.join("\n"),
-        startLine,
-        endLine,
-      });
-      continue;
-    }
-
-    if (/^(---|\*\*\*)$/.test(trimmed)) {
-      flushParagraph(lineNumber - 1);
-      pushBlock({
-        type: "hr",
-        content: "",
-        rawContent: line,
-        startLine: lineNumber,
-        endLine: lineNumber,
-      });
-      continue;
-    }
-
-    const listMatch = trimmed.match(/^(\*|-|(\d+)\.)\s+(.+)$/);
-    if (listMatch) {
-      flushParagraph(lineNumber - 1);
-      const leadingWhitespace = line.match(/^(\s*)/)?.[1] ?? "";
-      const level = Math.floor(leadingWhitespace.replace(/\t/g, "  ").length / 2);
-      const ordered = listMatch[2] !== undefined;
-      let itemContent = listMatch[3];
-      let checked: boolean | undefined;
-      const checkboxMatch = itemContent.match(/^\[([ xX])]\s+/);
-
-      if (checkboxMatch) {
-        checked = checkboxMatch[1].toLowerCase() === "x";
-        itemContent = itemContent.replace(/^\[([ xX])]\s+/, "");
-      }
-
-      pushBlock({
-        type: "list-item",
-        content: itemContent,
-        rawContent: line,
-        level,
-        ordered,
-        orderedStart: ordered ? Number.parseInt(listMatch[2], 10) : undefined,
-        checked,
-        startLine: lineNumber,
-        endLine: lineNumber,
-      });
-      continue;
-    }
-
-    if (trimmed.startsWith(">")) {
-      flushParagraph(lineNumber - 1);
-      const quoteLines: string[] = [];
-      const rawQuoteLines: string[] = [];
-      const startLine = lineNumber;
-      let endLine = lineNumber;
-
-      while (index < lines.length && lines[index].trim().startsWith(">")) {
-        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
-        rawQuoteLines.push(lines[index]);
-        endLine = contentStartLine + index;
-        index += 1;
-      }
-      index -= 1;
-
-      pushBlock({
-        type: "blockquote",
-        content: quoteLines.join("\n"),
-        rawContent: rawQuoteLines.join("\n"),
-        startLine,
-        endLine,
-      });
-      continue;
-    }
-
-    if (paragraphBuffer.length === 0) {
-      paragraphStartLine = lineNumber;
-    }
-    paragraphBuffer.push(line);
-  }
-
-  flushParagraph(contentStartLine + lines.length - 1);
+  root.children?.forEach((node) => visit(node));
   return blocks;
 }

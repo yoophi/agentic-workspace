@@ -146,4 +146,11 @@ describe("worktree workspace file tree", () => {
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("선택한 Speckit 문서가 현재 목록에 없습니다");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("Speckit preview를 표시할 수 없습니다.");
   });
+
+  it("allows both Markdown preview paths to hide and restore the annotation area", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("const [annotationsVisible, setAnnotationsVisible] = useState(true);");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('aria-label={annotationsVisible ? "주석 영역 숨기기" : "주석 영역 보이기"}');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("annotationsVisible={annotationsVisible}");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onAnnotationsVisibleChange={setAnnotationsVisible}");
+  });
 });

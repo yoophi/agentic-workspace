@@ -61,6 +61,21 @@ export const TaskListStates: Story = {
   },
 };
 
+export const ComplexListQuality: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`1. 첫 번째 항목
+   이어지는 문단은 같은 항목에 속합니다.
+
+   두 번째 문단입니다.
+   - 중첩된 항목
+   - [x] 완료된 중첩 작업
+
+2. 두 번째 항목
+
+\`- inline code는 목록이 아닙니다.\``),
+  },
+};
+
 export const HtmlCommentBoundaries: Story = {
   args: {
     blocks: parseMarkdownToBlocks(`# HTML5 Comment Boundaries

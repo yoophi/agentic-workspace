@@ -163,6 +163,29 @@ const graph = new Map();
     ]);
   });
 
+  it("keeps stable source ranges and parent relationships for nested list items", () => {
+    const markdown = `- Parent with [link](./child.md)
+  continuation paragraph
+  - [x] Child`;
+    const blocks = parseMarkdownToBlocks(markdown);
+
+    expect(blocks).toMatchObject([
+      {
+        id: "block-0",
+        type: "list-item",
+        content: "Parent with [link](./child.md)\n  continuation paragraph",
+        sourceRange: { startOffset: 0, startColumn: 1 },
+      },
+      {
+        id: "block-1",
+        type: "list-item",
+        parentId: "block-0",
+        checked: true,
+      },
+    ]);
+    expect(blocks[0]?.sourceRange?.endOffset).toBeGreaterThanOrEqual(blocks[1]?.sourceRange?.endOffset ?? 0);
+  });
+
   it("parses a 2,000-block document within the Preview performance budget", () => {
     const markdown = Array.from({ length: 1_000 }, (_, index) =>
       `## Section ${index + 1}\n\nParagraph ${index + 1}`,

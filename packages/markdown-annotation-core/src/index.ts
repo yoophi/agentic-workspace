@@ -14,6 +14,12 @@ export {
   type MermaidStartToken,
 } from "./mermaid/detect-mermaid-block";
 export { parseMarkdownToBlocks } from "./parse/parse-markdown-to-blocks";
+export type {
+  MarkdownRenderingFixture,
+  MarkdownRenderingFixtureCategory,
+} from "./quality/types";
+export { assertRenderingFixture } from "./quality/assert-rendering-fixture";
+export { markdownRenderingFixtures } from "./quality/fixtures";
 export { stripHtmlComments, transformWikilinks } from "./parse/inline-markdown";
 export { extractTocEntries } from "./toc/extract-toc-entries";
 export { stripInlineMarkdown } from "./toc/strip-inline-markdown";
