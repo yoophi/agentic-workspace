@@ -7,17 +7,20 @@ Agentic Workspace는 에이전트 기반 소프트웨어 개발을 지원하는 
 ```text
 apps/
   agentic-workbench/      메인 Tauri 데스크톱 앱 (프로젝트 · worktree · ACP 에이전트 실행)
+  hushline/               YouTube → Whisper 자막 변환 + 에이전트 정리 Tauri 앱
   markdown-annotator/     Markdown 주석 도구 → 구조화된 프롬프트 내보내기
   git-explorer/           Git 저장소 탐색 UI
 packages/
   ui/                     공유 React UI 프리미티브 (shadcn/ui 스타일)
   git-graph/              Git 커밋 그래프 타입 + 레이아웃 알고리즘 (TypeScript)
   git-ui/                 공유 Git UI 컴포넌트 (히스토리 그래프, diff 뷰어 등)
+  agent-client/           ACP agent-run TS 계약 + invoke/listen 래퍼 (@yoophi/agent-client)
   markdown-annotation-core/   Markdown 파싱 · 주석 · TOC · 에이전트 프롬프트 포맷 (TypeScript)
   markdown-annotation-react/  Markdown 뷰어 · 주석 오버레이 · Mermaid 렌더 (React)
   workspace-auto-refresh/     파일시스템 감시 기반 자동 새로고침 훅
 crates/
   git-core/               공유 Rust crate — Git 도메인 타입 · 포트 · CLI 구현
+  acp-agent-core/         공유 Rust crate — ACP 에이전트 실행 domain · ports · application · 인프라
 docs/                     아키텍처 및 기능 설계 문서 (한국어)
 specs/                    SpecKit 기반 스펙 주도 개발 산출물
 ```
@@ -27,6 +30,7 @@ specs/                    SpecKit 기반 스펙 주도 개발 산출물
 | 약어 | 앱 |
 |------|-----|
 | AW | `apps/agentic-workbench` |
+| HL | `apps/hushline` |
 | MA | `apps/markdown-annotator` |
 | GE | `apps/git-explorer` |
 
@@ -70,6 +74,12 @@ pnpm run tauri:dev          # 또는 pnpm run tauri:dev:workbench
 pnpm run tauri:dev:workbench
 pnpm run tauri:dev:annotator
 pnpm run tauri:dev:git
+```
+
+Hushline은 앱 디렉토리에서 직접 실행:
+
+```sh
+pnpm run tauri:dev    # apps/hushline/ 에서
 ```
 
 Markdown Annotator 독립 앱 번들 생성:

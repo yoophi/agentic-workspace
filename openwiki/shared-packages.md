@@ -17,6 +17,27 @@ Rust 공유 크레이트. Git 히스토리/그래프/상세/diff의 도메인 �
 
 **소비자**: `apps/agentic-workbench` (worktree git 히스토리/그래프), `apps/git-explorer` (저장소 히스토리/그래프/상세/diff/워킹트리 상태)
 
+## crates/acp-agent-core
+
+ACP 기반 agent 실행(domain · ports · application · 인프라)을 담당하는 공유 Rust crate. hushline 편입 시 `agentic-workbench`에서 Tauri 결합이 없는 계층을 그대로 추출했다 (전략: `docs/20260721-acp-agent-core-reuse-strategy.md`).
+
+소스 경로: `crates/acp-agent-core/src/`
+
+| 모듈 | 역할 |
+|------|------|
+| `domain/` | `run.rs` (`AgentRunRequest`, `PermissionMode`, `RalphLoopRequest` 등), `events.rs` (`RunEvent`, `RunEventEnvelope`, `LifecycleStatus`), `agent.rs` (`AgentDescriptor`), `acp_session.rs`, `agent_tool_candidate.rs` |
+| `ports/` | `SessionLauncher`, `SessionHandle`, `SessionRegistry`, `RunEventSink`, `AcpSessionStore`, `AgentCatalog`, `PermissionDecisionPort` 트레이트 |
+| `application/` | 통신 유스케이스: `start_agent_run`, `send_prompt`, `steer_prompt`, `cancel_prompt_and_send`, `cancel_agent_run`, `set_permission_mode`, `agent_run_errors` |
+| `infrastructure/` | `acp/*` (runner, client, transport, permission_flow, session_update_mapper, terminal), `agent_session_registry` (`AppState`), `permission_broker`, `agent_catalog` (`ConfigurableAgentCatalog`), `noop_acp_session_store` |
+| `lib.rs` | `domain`, `ports`, `application`, `infrastructure` 모듈 재내보내기 |
+
+**앱이 주입하는 것** (Tauri 탈착 지점):
+- `RunEventSink` — 이벤트를 창으로 emit하는 sink (각 앱에서 구현)
+- `AcpSessionStore` — 세션 영속화 (AW: JSON 파일, hushline: `NoopAcpSessionStore`)
+- `#[tauri::command]` 조립 지점 — 각 앱의 inbound/adapter에서 담당
+
+**소비자**: `apps/agentic-workbench` (ACP 세션 실행), `apps/hushline` (문서 정리 에이전트 실행)
+
 ## packages/git-graph
 
 `git-core`의 Rust 도메인 타입을 미러링하는 TypeScript 타입 + 커밋 DAG → 레인/세그먼트 그래프 레이아웃 알고리즘.
@@ -67,11 +88,12 @@ Rust 공유 크레이트. Git 히스토리/그래프/상세/diff의 도메인 �
 |------|-------------|
 | `types/annotation.ts` | `AnnotationType` (delete/question/change-request/note/approve), `AnnotationAnchor`, `AnnotationDraft` |
 | `types/markdown-block.ts` | `MarkdownBlockType` (heading/paragraph/blockquote/list-item/code/table/hr), `MarkdownBlock` (`mermaid?` 메타데이터 포함) |
-| `types/toc.ts` | `TocLevel` (1\|2\|3), `TocEntry` |
-| `parse/parse-markdown-to-blocks.ts` | `parseMarkdownToBlocks(markdown)` — 줄 기반 파서: frontmatter, 제목, 펜스드 코드, 테이블, 인용구, 리스트, HR 처리. 안정적인 `block-N` ID와 줄 범위 할당 |
+| `types/toc.ts` | `TocLevel` (1\|2\|3), `TocEntry` (`taskSummary?` — 하위 체크리스트 완료/미완료 카운트) |
+| `parse/parse-markdown-to-blocks.ts` | `parseMarkdownToBlocks(markdown)` — 줄 기반 파서: frontmatter, 제목, 펜스드 코드, 테이블, 인용구, 리스트, HR 처리. 안정적인 `block-N` ID와 줄 범위 할당. 파싱 전 `stripHtmlComments`로 HTML 주석 제거 |
+| `parse/inline-markdown.ts` | `transformWikilinks(markdown)` — `[[target\|label]]` 형태의 wikilink를 표준 Markdown 링크로 변환 (인라인 코드 영역 보존). `stripHtmlComments(markdown)` — 펜스드/인라인 코드 영역을 제외한 HTML 주석 제거 (줄 앵커 안정성 유지) |
 | `mermaid/detect-mermaid-block.ts` | `detectMermaidBlock()` — 언어가 `mermaid`이거나 30+ 선언 토큰(`graph`, `flowchart`, `sequenceDiagram` 등)으로 감지 |
 | `format/format-annotations-for-agent.ts` | `formatAnnotationsForAgent()` — 주석을 타입별 지시문으로 포맷 (delete/change-request/question/note/approve), 원본 Markdown 컨텍스트와 줄 범위 포함. `AgentPromptGoal` (edit-document/review-reference/custom) |
-| `toc/extract-toc-entries.ts` | `extractTocEntries(blocks)` — 제목 블록 필터링 (레벨 1-3) |
+| `toc/extract-toc-entries.ts` | `extractTocEntries(blocks)` — 제목 블록 필터링 (레벨 1-3). 각 H1 항목 아래의 체크리스트(`[ ]`/`[x]`)를 집계하여 `taskSummary`에 완료/미완료 카운트 추가 |
 | `toc/strip-inline-markdown.ts` | `stripInlineMarkdown(text)` — `**bold**`, `[link](url)`, `` `code` ``, `~~strike~~`, 이미지 등 제거 |
 
 ## packages/markdown-annotation-react
@@ -83,11 +105,12 @@ React 컴포넌트 라이브러리. Markdown 뷰잉 + 주석 오버레이 + Merm
 | 컴포넌트 | 역할 |
 |---------|------|
 | `MarkdownViewer` | 블록을 `react-markdown` + `remark-gfm`으로 렌더링. 인라인 `<mark>` 주석, 블록 레벨 노트 아이콘, Mermaid 확대 표시. 주입형 `components` prop |
-| `MarkdownToc` | 목차 네비게이션 (들여쓰기 제목 버튼) |
+| `MarkdownToc` | 목차 네비게이션 (들여쓰기 제목 버튼). `taskSummary`가 있는 H1 항목은 완료/미완료 체크리스트 카운트 표시 |
 | `AnnotationInputDialog` | 주석 생성/편집 모달 (타입 선택 + 코멘트). 주입형 `DialogShell` + `TypeSelect` |
 | `MermaidDiagram` | 동적 `import("mermaid")`로 Mermaid 렌더. 렌더 상태 관리 (loading/rendered/failed), 오류 분류 |
 | `MermaidExpandedView` | Mermaid 확대 모달 뷰 |
 | `scroll-to-block.ts` | 블록 ID → 스크롤 이동 헬퍼 |
+| `test-fixtures.ts` | 테스트용 Markdown 파싱 픽스처 (wikilink, HTML 주석, 체크리스트 포함) |
 
 ## packages/ui
 
@@ -101,11 +124,28 @@ React 컴포넌트 라이브러리. Markdown 뷰잉 + 주석 오버레이 + Merm
 | `button.tsx` | `Button` (cva 변형: default/outline/secondary/ghost; 크기: default/sm/lg/icon/icon-sm) + `buttonVariants` |
 | `input.tsx` | `Input` |
 | `resizable.tsx` | `ResizablePanelGroup`, `ResizablePanel`, `ResizableHandle` (`react-resizable-panels` 래핑) |
+| `collapsible-resizable-panels.tsx` | `CollapsibleResizablePanels` — 좌우 패널 접기/펼치기 + 크기 조절 통합 컴포넌트. `CollapsibleResizablePanelsState` 상태를 `onStateChange`로 노출 |
+| `collapsible-resizable-panels-state.ts` | `createPanelPairState`, `collapsePanel`, `expandPanel`, `updatePanelLayout`, `clampPanelSize` — 순수 상태 관리 함수. `PanelPairState` / `PanelPairPublicState` 타입 |
 | `table.tsx` | `Table`, `TableHeader`, `TableBody`, `TableRow`, `TableCell`, `TableHead` |
 
 ## packages/workspace-auto-refresh
 
 파일시스템 감시 기반 자동 새로고침 React 훅.
+
+## packages/agent-client
+
+ACP agent-run 실행/이벤트의 TypeScript 계약 + invoke/listen 래퍼 (`@yoophi/agent-client`). Rust crate `acp-agent-core`의 domain 타입(camelCase 직렬화)과 1:1 매핑하며, 어느 Tauri 앱이든 agent run을 구동할 수 있다.
+
+소스 경로: `packages/agent-client/src/`
+
+| 파일 | 역할 |
+|------|------|
+| `types.ts` | `AgentDescriptor`, `AgentRunRequest`, `PermissionMode`, `RalphLoopRequest`, `RunEvent`, `RunEventEnvelope`, `LifecycleStatus`, `ToolFileChange` 등 — ACP agent-run 통신 계약 전체. 앱 전용 타입(Goal/Worktree/Settings)은 두지 않는다 |
+| `repository.ts` | `startAgentRun`, `sendPromptToRun`, `steerPromptToRun`, `cancelCurrentPromptAndSendToRun`, `setRunPermissionMode`, `cancelAgentRun`, `respondAgentPermission` — Tauri command 래퍼. `listenRunEvents(callback)`는 `agent-run-event` 채널과 fallback window 이벤트를 모두 구독 |
+| `index.ts` | 타입 + 래퍼 함수 배럴 재내보내기 |
+| `contract.test.ts` | 계약 일관성 검증 테스트 |
+
+**소비자**: `apps/hushline` (`@yoophi/agent-client` 직접 소비), `apps/agentic-workbench` (`entities/agent-run/model/types.ts`에서 re-export하여 기존 소비 경로 유지)
 
 ## 다른 앱
 
@@ -121,6 +161,14 @@ Git 저장소 탐색 데스크톱 앱. 저장소 등록, 커밋 히스토리 시
 
 Markdown 주석 에디터 데스크톱 앱. Markdown 문서를 열어 블록 단위로 파싱하고, 인라인/블록 주석(delete, change-request, question, note, approve)을 생성하여 AI 에이전트 프롬프트로 내보냅니다.
 
-**프론트엔드** (`src/`): 단일 `AnnotatorPage` (~42KB). 문서 로딩, 블록 파싱, 주석 CRUD, 선택 영역 → 앵커 매핑, 에이전트 프롬프트 내보내기, CLI 설치, TOC, Mermaid 확대, 문서 변경 감지. `@yoophi/markdown-annotation-core`와 `-react` 사용.
+**프론트엔드** (`src/`): 단일 `AnnotatorPage` (~42KB). 문서 로딩, 블록 파싱, 주석 CRUD, 선택 영역 → 앵커 매핑, 에이전트 프롬프트 내보내기, CLI 설치, TOC, Mermaid 확대, 문서 변경 감지, wikilink(`[[target|label]]`) 클릭 시 같은 디렉터리 내 `.md` 파일로 이동. `@yoophi/markdown-annotation-core`와 `-react` 사용.
 
 **UI 어댑터 패턴**: 앱별 shadcn/ui(base-ui 기반) 컴포넌트를 `MarkdownViewerComponents`/`AnnotationDialogComponents` 컨트랙트로 변환하는 어댑터를 `shared/ui/`에 둡니다. 이로 인해 같은 `-react` 패키지가 서로 다른 UI 킷을 사용하는 앱에서 재사용됩니다.
+
+### apps/hushline
+
+로컬 YouTube → Whisper 자막 변환 데스크톱 앱. yt-dlp + ffmpeg + whisper.cpp 파이프라인으로 자막을 생성하고, ACP 에이전트로 자막을 정리/요약한다. 외부 저장소(`youtube-whisper-stt`)에서 편입되어 모노레포의 `acp-agent-core`와 `@yoophi/agent-client`를 소비한다.
+
+**프론트엔드** (`src/`): 단일 `TranscriptionPage` 라우트. FSD 계층 구조. `use-transcription-workspace` 훅이 URL 큐, 진행률, 실시간 자막, 모델 다운로드를 관리. `use-run-event-stream` 훅이 `@yoophi/agent-client`의 `listenRunEvents`로 에이전트 실행 이벤트를 구독. Storybook 포함 (Tauri API 모킹).
+
+**백엔드** (`src-tauri/src/`): `adapters/` 계층 — `system.rs` (`SystemToolchain`: yt-dlp/ffmpeg/whisper CLI 호출), `agent.rs` (`acp-agent-core` 유스케이스 래핑 + `HushlineAgentSink`로 run 이벤트 emit), `tauri.rs` (Tauri command 조립 + 이벤트 emit). `NoopAcpSessionStore` 사용 (세션 재개 미지원). `ensure_cwd_within`로 에이전트 작업 디렉토리를 홈 디렉터리 하위로 제한.

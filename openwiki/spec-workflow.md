@@ -45,7 +45,7 @@
 
 ## 구현된 주요 스펙
 
-`specs/` 디렉토리에는 19개 기능 디렉토리가 있습니다. 주요 스펙:
+`specs/` 디렉토리에는 34개 기능 디렉토리가 있습니다. 주요 스펙:
 
 | 스펙 | 기능 |
 |------|------|
@@ -59,10 +59,14 @@
 | `014-acp-tool-autocomplete` | ACP 툴 프롬프트 자동완성 |
 | `016-mermaid-modal-preview` | Mermaid 모달 확대 미리보기 |
 | `019-improve-permission-dialog` | 권한 다이얼로그 레이아웃 개선 |
+| `027-agent-run-minimap` | 에이전트 실행 미니맵 |
+| `028-collapsible-resizable-panel` | 접기/펼치기 가능한 크기 조절 패널 (`packages/ui`) |
+| `029-ma-spec-markdown-preview` | SpecKit Markdown 프리뷰 + 주석 (wikilink 해석, TOC task 카운트) |
+| `030-hushline-monorepo-integration` | hushline 모노레포 편입 + agent run 기능 (`acp-agent-core`, `@yoophi/agent-client` 추출) |
 
 ## 기존 문서 (docs/)
 
-`docs/` 디렉토리에 28개의 아키텍처 및 기능 설계 문서가 있습니다 (한국어, 영어 파일명). 주요 문서:
+`docs/` 디렉토리에 33개의 아키텍처 및 기능 설계 문서가 있습니다 (한국어, 영어 파일명). 주요 문서:
 
 - `portable-architecture-plan.md` — AW의 ACP 워크벤치를 재사용 가능한 코어 + 호스트 어댑터로 추출하는 계획
 - `git-worktree-changes-architecture.md` — GE와 AW 간 worktree 상태/diff 공유 아키텍처
@@ -71,5 +75,7 @@
 - `acp-agent-command-override.md` — 에이전트 프로필 (명령어/env 오버라이드)
 - `app-wide-acp-session-context-summary.md` — 앱 주입 MCP 서버로 worktree/목표/세션 요약 제공
 - `dual-pane-agent-session-exchange-design.md` — 동일 worktree 내 듀얼 에이전트 세션 설계
+- `markdown-annotator-preview.md` — SpecKit Markdown 프리뷰 + 주석 워크플로 설계
+- `20260721-acp-agent-core-reuse-strategy.md` — ACP agent 실행 계층을 공유 crate로 추출하는 전략 및 결정
 
 기존 `docs/` 문서는 여전히 유용하므로, 이 위키는 그것을 요약하고 링크하는 역할을 합니다. 스펙 세부사항은 항상 해당 `specs/` 디렉토리와 `docs/` 문서를 직접 참조하세요.

@@ -9,8 +9,8 @@
 `pnpm-workspace.yaml`이 `apps/*`와 `packages/*`를 워크스페이스 패키지로 등록합니다. Turbo가 작업 의존성 그래프를 관리합니다.
 
 ```text
-apps/*           → Tauri 데스크톱 앱 3개 (프론트엔드 + Rust 백엔드)
-packages/*       → 크로스앱 공유 TypeScript 라이브러리 6개
+apps/*           → Tauri 데스크톱 앱 4개 (프론트엔드 + Rust 백엔드)
+packages/*       → 크로스앱 공유 TypeScript 라이브러리 7개
 ```
 
 Turbo 작업 (`turbo.json`): `build`, `check-types`, `test`, `dev`, `preview`, `storybook`, `build-storybook`, `tauri`, `tauri:dev`. `build`/`check-types`/`test`는 `^` 의존성을 먼저 실행합니다.
@@ -21,8 +21,9 @@ Turbo 작업 (`turbo.json`): `build`, `check-types`, `test`, `dev`, `preview`, `
 
 ```toml
 members = [
-    "crates/*",                                  # git-core
+    "crates/*",                                  # git-core, acp-agent-core
     "apps/agentic-workbench/src-tauri",
+    "apps/hushline/src-tauri",
     "apps/git-explorer/src-tauri",
     "apps/markdown-annotator/src-tauri",
 ]
@@ -82,6 +83,7 @@ src-tauri/src/
 | 앱 | 패키지명 | 프론트엔드 | 백엔드 |
 |----|---------|-----------|--------|
 | Agentic Workbench | `@yoophi/agentic-workbench` | React + FSD | Rust 헥사고날, ACP 엔진 |
+| Hushline | `@yoophi/hushline` | React + FSD | Rust 헥사고날, Whisper + `acp-agent-core` |
 | Markdown Annotator | `@yoophi/markdown-annotator` | React + FSD | Rust 헥사고날 |
 | Git Explorer | `@yoophi/git-explorer` | React + FSD | Rust 헥각고날 + `git-core` |
 
@@ -98,6 +100,13 @@ Git 스택:
     ↕
   apps/git-explorer, apps/agentic-workbench
 
+ACP agent-run 스택:
+  crates/acp-agent-core (Rust domain + ports + application + ACP 인프라)
+    ↕
+  packages/agent-client (TS 계약 + invoke/listen 래퍼)
+    ↕
+  apps/agentic-workbench, apps/hushline
+
 Markdown 주석 스택:
   packages/markdown-annotation-core (프레임워크 무관 TS)
   packages/markdown-annotation-react (React 컴포넌트)
@@ -105,7 +114,7 @@ Markdown 주석 스택:
   apps/markdown-annotator, apps/agentic-workbench
 ```
 
-공유 승격은 "최소 2개 소비자" 원칙을 따릅니다. 단일 소비자 코드는 앱 내부에 유지하다가 두 번째 소비자가 생기면 `packages/` 또는 `crates/`로 추출합니다.
+공유 승격은 "최소 2개 소비자" 원칙을 따릅니다. 단일 소비자 코드는 앱 내부에 유지하다가 두 번째 소비자가 생기면 `packages/` 또는 `crates/`로 추출합니다. `acp-agent-core`는 hushline 편입 시 AW의 ACP 실행 계층(domain · ports · application · `infrastructure/acp/*`)을 그대로 추출한 사례입니다 (결정 문서: `docs/20260721-acp-agent-core-reuse-strategy.md`).
 
 ## 데이터 저장
 

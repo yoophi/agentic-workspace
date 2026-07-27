@@ -32,7 +32,7 @@ HashRouter 기반. `app/App.tsx`에서 라우트를 정의합니다.
 | 기능 | 핵심 컴포넌트 | 설명 |
 |------|--------------|------|
 | `agent-run` | `AgentRunPanel`, `AgentRunPanelTabs`, `WorktreeAgentRunArea`, `PermissionRequestDialog`, `AgentRunMarkdown`, `PromptCommandAutocomplete`, `AgentRunMinimap` | 에이전트 채팅/이벤트 UI, 다중 실행 탭, 권한 다이얼로그, Markdown 렌더링, 프롬프트 자동완성, 실행 미니맵(스크롤 네비게이션) |
-| `worktree-workspace` | `WorktreeWorkspacePanel`, `MarkdownPreviewToc`, `MarkdownViewerComponents`, `SpeckitFilesPanel` | 파일 트리, Markdown 미리보기, TOC, Mermaid, SpecKit 스펙 파일 탐색 패널 |
+| `worktree-workspace` | `WorktreeWorkspacePanel`, `MarkdownPreviewToc`, `MarkdownViewerComponents`, `SpeckitFilesPanel`, `MarkdownAnnotationWorkspace`, `useMarkdownAnnotationWorkspace` | 파일 트리, Markdown 미리보기, TOC, Mermaid, SpecKit 스펙 파일 탐색 패널, Speckit 프리뷰에 인라인/블록 주석 기능 통합 (주석 → 에이전트 프롬프트 전송) |
 | `agent-command-override` | `AgentCommandOverrideEditor`, `EnvVarEditor` | 에이전트 프로필/환경변수 설정 UI |
 | `project-form` | `ProjectFormDialog` | 프로젝트 생성/편집 다이얼로그 |
 | `project-worktree` | `ProjectWorktreeCard` | worktree 카드 — 열기 모드 (현재 창 / 새 창 / 탭) |
@@ -61,6 +61,8 @@ HashRouter 기반. `app/App.tsx`에서 라우트를 정의합니다.
 소스 경로: `apps/agentic-workbench/src-tauri/src/`
 
 헥사고날 아키텍처의 5계층으로 구성됩니다. 자세한 아키텍처 원칙은 [아키텍처](architecture.md)를 참조.
+
+> **ACP 코어 추출**: agent 실행 관련 domain · ports · application · `infrastructure/acp/*` 계층은 공유 crate `crates/acp-agent-core`로 추출되었습니다. AW의 각 `mod.rs`는 `acp_agent_core` 모듈을 re-export하므로, 기존 경로(`domain::run`, `application::start_agent_run`, `infrastructure::acp::runner` 등)는 그대로 동작합니다. AW 고유의 계층(프로젝트, 목표, worktree, 설정, MCP 등)은 로컬에 유지됩니다.
 
 ### 도메인 계층 (domain/)
 
@@ -138,14 +140,14 @@ ACP 엔진과 MCP 서버가 이 계층의 핵심입니다. 상세한 실행 흐�
 
 ## 내장 에이전트 카탈로그
 
-`infrastructure/agent_catalog.rs`의 `StaticAgentCatalog`가 4개 에이전트를 기본 제공합니다:
+`ConfigurableAgentCatalog` (공유 crate `acp-agent-core`에 위치)가 4개 에이전트를 기본 제공합니다. codex와 claude-code는 ACP 버전을 고정(`runtimeVersion` 포함)하여 재현성을 보장합니다:
 
-| 에이전트 ID | 명령어 |
-|------------|--------|
-| codex | `npx -y @agentclientprotocol/codex-acp` |
-| claude-code | `npx -y @agentclientprotocol/claude-agent-acp` |
-| pi-coding-agent | `npx -y pi-acp` |
-| opencode | `npx -y opencode-ai acp` |
+| 에이전트 ID | 명령어 | 고정 버전 |
+|------------|--------|-----------|
+| codex | `npx -y @agentclientprotocol/codex-acp@1.1.5` | 1.1.5 |
+| claude-code | `npx -y @agentclientprotocol/claude-agent-acp@0.60.0` | 0.60.0 |
+| pi-coding-agent | `npx -y pi-acp` | — |
+| opencode | `npx -y opencode-ai acp` | — |
 
 환경변수 `ACP_AGENT_CATALOG_PATH`로 외부 카탈로그 파일을 지정할 수 있습니다. 모델 정보는 models.dev API에서 가져오거나 캐시에서 로드합니다.
 

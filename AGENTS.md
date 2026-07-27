@@ -51,3 +51,13 @@ When working in this repository, read the OpenWiki quickstart first, then follow
 - Keep outbound adapters such as JSON file persistence in `infrastructure`.
 - Do not let `domain` depend on Tauri, filesystem APIs, or JSON storage details.
 - Do not put persistence logic directly in Tauri commands; commands should delegate to application services through ports/adapters.
+
+<!-- OPENWIKI:START -->
+
+## OpenWiki
+
+This repository uses OpenWiki for recurring code documentation. Start with `openwiki/quickstart.md`, then follow its links to architecture, workflows, domain concepts, operations, integrations, testing guidance, and source maps.
+
+The scheduled OpenWiki GitHub Actions workflow refreshes the repository wiki. Do not hand-edit generated OpenWiki pages unless explicitly asked; prefer updating source code/docs and letting OpenWiki regenerate.
+
+<!-- OPENWIKI:END -->
