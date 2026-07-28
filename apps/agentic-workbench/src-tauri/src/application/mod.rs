@@ -15,6 +15,7 @@ pub mod list_provider_sessions;
 pub mod mcp_title_control_service;
 pub mod project_service;
 pub mod saved_prompt_service;
+pub mod session_window_state_service;
 pub mod window_menu_service;
 pub mod worktree_changes_service;
 pub mod worktree_file_service;

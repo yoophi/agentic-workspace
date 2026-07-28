@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,8 +10,6 @@ import {
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
-  FolderKanbanIcon,
-  GitBranchIcon,
   GitCommitIcon,
   GitPullRequestIcon,
   ListTreeIcon,
@@ -126,6 +124,11 @@ import { useMarkdownAnnotationWorkspace } from "@/features/worktree-workspace/mo
 import { MarkdownAnnotationWorkspace } from "@/features/worktree-workspace/ui/markdown-annotation-workspace";
 import { TasksKanbanPanel } from "@/features/worktree-workspace/ui/tasks-kanban-panel";
 import type { WorkspacePanelId } from "@/features/worktree-workspace/model/workspace-layout";
+import type { WorkspacePanelWidths } from "@/entities/worktree-workspace-layout/model/types";
+import {
+  useSplitPersistence,
+  type SplitPersistence,
+} from "@/features/worktree-workspace/model/use-split-persistence";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
@@ -133,10 +136,27 @@ type WorktreeWorkspacePanelProps = {
   onSendSddPrompt?: (request: SddActionRequest) => void;
   initialTab?: WorkspaceTabId;
   selectedPanel?: WorkspacePanelId;
+  /// Worktree에 저장된 패널 종류별 내부 B 폭.
+  panelWidthsPx?: WorkspacePanelWidths;
+  /// 저장된 레이아웃을 읽어 적용한 뒤에만 내부 B 폭 저장을 허용한다.
+  layoutHydrated?: boolean;
+  onPersistPanelWidth?: (panel: WorkspacePanelId, widthPx: number) => void;
 };
 
 type WorkspaceTabId = "git" | "files" | "markdown" | "speckit";
 type GitHistoryView = "graph" | "list";
+
+/// 각 패널 내부 분할의 A/B 최소 폭과 저장 값이 없을 때의 B 기본 크기.
+/// B는 항상 오른쪽(상세·미리보기) 영역이다. (specs/031 contracts/workspace-layout-ui.md)
+const innerSplitConstraints: Record<
+  WorkspaceTabId,
+  { minimumA: number; minimumB: number; fallbackSize: string }
+> = {
+  git: { minimumA: 280, minimumB: 320, fallbackSize: "58%" },
+  files: { minimumA: 280, minimumB: 320, fallbackSize: "58%" },
+  markdown: { minimumA: 260, minimumB: 360, fallbackSize: "62%" },
+  speckit: { minimumA: 280, minimumB: 360, fallbackSize: "62%" },
+};
 
 type AnnotationDraftTarget =
   | {
@@ -151,17 +171,6 @@ type AnnotationDraftTarget =
 
 // CommitListView 고정 row 높이(virtualization용). 두 줄 레이아웃 기준.
 const COMMIT_LIST_ROW_HEIGHT = 56;
-
-const workspaceTabs: Array<{
-  id: WorkspaceTabId;
-  label: string;
-  icon: typeof GitBranchIcon;
-}> = [
-  { id: "git", label: "Git", icon: GitBranchIcon },
-  { id: "files", label: "Files", icon: FileIcon },
-  { id: "markdown", label: "Markdown", icon: FileTextIcon },
-  { id: "speckit", label: "Speckit", icon: FolderKanbanIcon },
-];
 
 function fullBlockAnchor(block: MarkdownBlock): AnnotationAnchor {
   return {
@@ -209,10 +218,27 @@ export function WorktreeWorkspacePanel({
   onSendSddPrompt,
   initialTab = "git",
   selectedPanel,
+  panelWidthsPx,
+  layoutHydrated = false,
+  onPersistPanelWidth,
 }: WorktreeWorkspacePanelProps) {
   const [selectedTab, setSelectedTab] = useState<WorkspaceTabId>(selectedPanel ?? initialTab);
   const [gitHistoryView, setGitHistoryView] = useState<GitHistoryView>("graph");
   const queryClient = useQueryClient();
+
+  // 표시 중인 패널 하나만 렌더링되므로 내부 분할 저장도 그 패널에 대해서만 유지한다.
+  // 패널 종류를 저장 키로 쓰기 때문에 다른 종류의 폭을 덮어쓰지 않는다.
+  const persistSelectedPanelWidth = useCallback(
+    (widthPx: number) => onPersistPanelWidth?.(selectedTab, widthPx),
+    [onPersistPanelWidth, selectedTab],
+  );
+  const innerSplit = useSplitPersistence({
+    preferredWidth: panelWidthsPx?.[selectedTab],
+    hydrated: layoutHydrated,
+    onPersist: persistSelectedPanelWidth,
+    resetKey: selectedTab,
+    ...innerSplitConstraints[selectedTab],
+  });
   // watcher 구독을 유지한 채 최신 탭을 참조하기 위한 ref. effect 의존성에 탭을
   // 넣으면 탭 전환마다 watcher가 재시작되므로 ref로 분리한다.
   const selectedTabRef = useRef(selectedTab);
@@ -295,22 +321,26 @@ export function WorktreeWorkspacePanel({
         </div>
       </header>
 
-      <div className="min-h-0 flex-1" role="tabpanel">
+      {/* 탭 목록이 아니라 화면 오른쪽 토글 버튼 그룹으로 패널을 고르므로 tablist/tabpanel
+          role을 쓰지 않는다. 선택 상태는 selector 버튼의 aria-pressed가 알린다. */}
+      <div className="min-h-0 flex-1">
         {selectedTab === "git" ? (
           <GitWorkspaceTab
             worktree={worktree}
             historyView={gitHistoryView}
             onHistoryViewChange={setGitHistoryView}
+            split={innerSplit}
           />
         ) : selectedTab === "files" ? (
-          <FileWorkspaceTab worktree={worktree} />
+          <FileWorkspaceTab worktree={worktree} split={innerSplit} />
         ) : selectedTab === "markdown" ? (
           <MarkdownWorkspaceTab
             worktree={worktree}
             onSendAnnotationPrompt={onSendAnnotationPrompt}
+            split={innerSplit}
           />
         ) : (
-          <SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} onSendSddPrompt={onSendSddPrompt} />
+          <SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} onSendSddPrompt={onSendSddPrompt} split={innerSplit} />
         )}
       </div>
     </section>
@@ -321,10 +351,12 @@ function GitWorkspaceTab({
   worktree,
   historyView,
   onHistoryViewChange,
+  split,
 }: {
   worktree: GitWorktree;
   historyView: GitHistoryView;
   onHistoryViewChange: (view: GitHistoryView) => void;
+  split: SplitPersistence;
 }) {
   const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(null);
   const [selectedDiffPath, setSelectedDiffPath] = useState<string | null>(null);
@@ -473,8 +505,9 @@ function GitWorkspaceTab({
   }, [graphData, historyData, selectedCommitHash]);
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel id="git-workspace-nav" defaultSize="42%" minSize="280px">
+    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0" {...split.groupProps}>
+      {/* A(탐색·목록)는 저장 크기를 갖지 않고 남은 공간을 채운다. (FR-018) */}
+      <ResizablePanel id="git-workspace-nav" minSize="280px">
         <div className="flex h-full min-h-0 flex-col border-r">
           <section className="shrink-0 border-b p-4">
             <div className="flex items-center justify-between gap-2">
@@ -624,9 +657,11 @@ function GitWorkspaceTab({
       <ResizableHandle
         aria-label="Git workspace detail 영역 크기 조정"
         className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        {...split.separatorProps}
       />
 
-      <ResizablePanel id="git-workspace-detail" minSize="320px">
+      {/* B(상세)는 저장된 픽셀 폭으로 고정한다. (FR-018, FR-019) */}
+      <ResizablePanel id="git-workspace-detail" {...split.panelProps}>
         <div className="flex h-full min-h-0 flex-col">
           <header className="shrink-0 border-b">
             <div className="flex items-center justify-between gap-2 px-4 py-1">
@@ -789,7 +824,13 @@ function CommitListView({
   );
 }
 
-function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
+function FileWorkspaceTab({
+  worktree,
+  split,
+}: {
+  worktree: GitWorktree;
+  split: SplitPersistence;
+}) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(() => new Set());
   // 한 번이라도 펼친 디렉터리의 목록 query는 유지한다. 접었다 다시 펼칠 때
   // 캐시로 즉시 표시되고, stale 파일 판정에도 계속 쓰인다(specs/007 R10).
@@ -862,8 +903,9 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel id="file-workspace-tree" defaultSize="42%" minSize="280px">
+    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0" {...split.groupProps}>
+      {/* A(파일 트리)는 남은 공간을 채운다. (FR-018) */}
+      <ResizablePanel id="file-workspace-tree" minSize="280px">
         <div className="flex h-full min-h-0 flex-col border-r">
           <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -930,11 +972,13 @@ function FileWorkspaceTab({ worktree }: { worktree: GitWorktree }) {
       <ResizableHandle
         aria-label="File detail 영역 크기 조정"
         className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        {...split.separatorProps}
       >
         <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
       </ResizableHandle>
 
-      <ResizablePanel id="file-workspace-preview" minSize="320px">
+      {/* B(미리보기)는 저장된 픽셀 폭으로 고정한다. (FR-018, FR-019) */}
+      <ResizablePanel id="file-workspace-preview" {...split.panelProps}>
         <div className="flex h-full min-h-0 flex-col">
           <header className="shrink-0 border-b px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -992,10 +1036,12 @@ function SpeckitWorkspaceTab({
   worktree,
   onSendAnnotationPrompt,
   onSendSddPrompt,
+  split,
 }: {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
   onSendSddPrompt?: (request: SddActionRequest) => void;
+  split: SplitPersistence;
 }) {
   const previewPaneRef = useRef<HTMLDivElement | null>(null);
   const previewContentRef = useRef<HTMLDivElement | null>(null);
@@ -1090,8 +1136,9 @@ function SpeckitWorkspaceTab({
   }
 
   return (
-    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel id="speckit-workspace-list" defaultSize="38%" minSize="280px">
+    <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0" {...split.groupProps}>
+      {/* A(문서 목록)는 남은 공간을 채운다. (FR-018) */}
+      <ResizablePanel id="speckit-workspace-list" minSize="280px">
         <SddWorkflowControls pointer={activePointer} stages={sddStages} onRequest={(request) => onSendSddPrompt?.(request)} />
         <SpeckitFilesPanel
           errorMessage={filesQuery.isError ? String(filesQuery.error) : undefined}
@@ -1109,11 +1156,13 @@ function SpeckitWorkspaceTab({
       <ResizableHandle
         aria-label="Speckit preview 영역 크기 조정"
         className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        {...split.separatorProps}
       >
         <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
       </ResizableHandle>
 
-      <ResizablePanel id="speckit-workspace-preview" minSize="360px">
+      {/* B(미리보기)는 저장된 픽셀 폭으로 고정한다. (FR-018, FR-019) */}
+      <ResizablePanel id="speckit-workspace-preview" {...split.panelProps}>
         <div className="flex h-full min-h-0 flex-col">
           <header className="shrink-0 border-b px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -1180,9 +1229,11 @@ function SpeckitWorkspaceTab({
 function MarkdownWorkspaceTab({
   worktree,
   onSendAnnotationPrompt,
+  split,
 }: {
   worktree: GitWorktree;
   onSendAnnotationPrompt?: (prompt: string) => void;
+  split: SplitPersistence;
 }) {
   const previewPaneRef = useRef<HTMLDivElement | null>(null);
   const markdownColumnRef = useRef<HTMLDivElement | null>(null);
@@ -1483,8 +1534,9 @@ function MarkdownWorkspaceTab({
 
   return (
     <>
-      <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0">
-      <ResizablePanel id="markdown-workspace-tree" defaultSize="38%" minSize="260px">
+      <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0" {...split.groupProps}>
+      {/* A(Markdown 파일 목록)는 남은 공간을 채운다. (FR-018) */}
+      <ResizablePanel id="markdown-workspace-tree" minSize="260px">
         <div className="flex h-full min-h-0 flex-col border-r">
           <header className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">
@@ -1550,11 +1602,13 @@ function MarkdownWorkspaceTab({
       <ResizableHandle
         aria-label="Markdown preview 영역 크기 조정"
         className="relative flex w-2 shrink-0 cursor-ew-resize items-center justify-center bg-transparent transition-colors after:absolute after:bottom-0 after:top-0 after:w-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        {...split.separatorProps}
       >
         <div className="relative z-10 h-12 w-1 rounded-full bg-border transition-colors" />
       </ResizableHandle>
 
-      <ResizablePanel id="markdown-workspace-preview" minSize="360px">
+      {/* B(미리보기)는 저장된 픽셀 폭으로 고정한다. (FR-018, FR-019) */}
+      <ResizablePanel id="markdown-workspace-preview" {...split.panelProps}>
         <div className="flex h-full min-h-0 flex-col">
           <header className="shrink-0 border-b px-4 py-3">
             <div className="flex min-w-0 items-center gap-2">

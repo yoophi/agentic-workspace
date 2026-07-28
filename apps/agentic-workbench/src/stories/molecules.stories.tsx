@@ -10,6 +10,11 @@ import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markd
 import { AgentPeerMessageDialog } from "@/features/agent-run/ui/agent-peer-message-dialog";
 import { AgentRunWorkspaceToolbar } from "@/features/agent-run/ui/agent-run-workspace-toolbar";
 import type { AgentRunViewMode } from "@/entities/agent-run/model/agent-run-workspace";
+import { WorkspacePanelSelector } from "@/features/worktree-workspace/ui/workspace-panel-selector";
+import {
+  toggleWorkspacePanel,
+  type WorkspacePanelId,
+} from "@/features/worktree-workspace/model/workspace-layout";
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
@@ -439,6 +444,38 @@ export const AgentRunWorkspaceControls: Story = {
           onOpenChange={setDialogOpen}
           onSubmit={async () => undefined}
         />
+      </div>
+    );
+  },
+};
+
+export const WorkspacePanelSelectorStates: Story = {
+  render: function WorkspacePanelSelectorStatesStory() {
+    const [selectedPanel, setSelectedPanel] = useState<WorkspacePanelId | null>("git");
+
+    return (
+      <div className="grid max-w-2xl gap-6">
+        <div className="flex h-72 overflow-hidden rounded-md border">
+          <div className="flex min-w-0 flex-1 items-center justify-center p-4 text-sm text-muted-foreground">
+            {selectedPanel
+              ? `${selectedPanel} 패널이 여기에 표시됩니다.`
+              : "선택 없음 — 보조 패널이 화면 공간을 차지하지 않습니다."}
+          </div>
+          {selectedPanel ? (
+            <div className="flex w-64 shrink-0 items-center justify-center border-l bg-muted/30 text-xs text-muted-foreground">
+              Workspace B
+            </div>
+          ) : null}
+          <WorkspacePanelSelector
+            selectedPanel={selectedPanel}
+            onSelect={(panel) =>
+              setSelectedPanel((current) => toggleWorkspacePanel(current, panel))
+            }
+          />
+        </div>
+        <p className="text-sm text-muted-foreground">
+          선택된 버튼을 다시 누르면 선택이 해제되고 보조 패널 영역이 사라집니다.
+        </p>
       </div>
     );
   },

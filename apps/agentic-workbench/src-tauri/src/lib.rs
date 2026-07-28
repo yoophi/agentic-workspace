@@ -86,13 +86,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
-            if matches!(event, WindowEvent::Moved(_) | WindowEvent::Resized(_) | WindowEvent::CloseRequested { .. }) {
-                infrastructure::window_manager::save_session_window_bounds(window);
+            // 세션 창의 위치·크기를 Worktree별로 저장한다. 이동·리사이즈는 드래그 중 연속으로
+            // 들어오므로 간격을 두고 저장하고, 닫힐 때는 마지막 값을 반드시 기록한다.
+            match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    infrastructure::window_manager::save_session_window_bounds(window, false);
+                }
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+                    infrastructure::window_manager::save_session_window_bounds(window, true);
+                }
+                _ => {}
             }
+            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
+                    infrastructure::window_manager::forget_session_window(&label);
                     let state = window.state::<AppState>().inner().clone();
                     let workspace_registry = window
                         .state::<InMemoryAgentWorkspaceRegistry>()
