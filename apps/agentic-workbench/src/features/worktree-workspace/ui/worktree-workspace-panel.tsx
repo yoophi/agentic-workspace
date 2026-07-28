@@ -1018,6 +1018,7 @@ function SpeckitWorkspaceTab({
   const previewContentRef = useRef<HTMLDivElement | null>(null);
   const [selectedDocumentPath, setSelectedDocumentPath] = useState<string | null>(null);
   const [tasksViewMode, setTasksViewMode] = useState<"markdown" | "tasks">("markdown");
+  const [annotationsVisible, setAnnotationsVisible] = useState(true);
   const queryClient = useQueryClient();
   const filesQuery = useQuery({
     queryKey: worktreeFileQueryKeys.speckit(worktree.path),
@@ -1180,6 +1181,8 @@ function SpeckitWorkspaceTab({
                 contentRef={previewContentRef}
                 model={annotationWorkspace}
                 onSendAnnotationPrompt={onSendAnnotationPrompt}
+                annotationsVisible={annotationsVisible}
+                onAnnotationsVisibleChange={setAnnotationsVisible}
                 previewRef={previewPaneRef}
                 tocEntries={tocEntries}
               />
@@ -1213,6 +1216,7 @@ function MarkdownWorkspaceTab({
     top: number;
   } | null>(null);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
+  const [annotationsVisible, setAnnotationsVisible] = useState(true);
   // markdown 필터는 백엔드(scope)에서 수행되어 전체 파일 목록을 받지 않는다.
   // 프론트 필터는 응답 검증 겸 안전망으로 유지한다(specs/007 R10).
   const filesQuery = useQuery({
@@ -1605,8 +1609,20 @@ function MarkdownWorkspaceTab({
                 variant="destructive"
               />
             ) : previewQuery.data ? (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+              <div className={annotationsVisible ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]" : "grid gap-4"}>
                 <div ref={markdownColumnRef} className="relative min-w-0">
+                  <div className="mb-3 flex justify-end">
+                    <Button
+                      aria-expanded={annotationsVisible}
+                      aria-label={annotationsVisible ? "주석 영역 숨기기" : "주석 영역 보이기"}
+                      onClick={() => setAnnotationsVisible((visible) => !visible)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      {annotationsVisible ? "주석 숨기기" : "주석 보이기"}
+                    </Button>
+                  </div>
                   <MarkdownViewer
                     blocks={blocks}
                     components={markdownViewerComponents}
@@ -1659,7 +1675,7 @@ function MarkdownWorkspaceTab({
                     </div>
                   ) : null}
                 </div>
-                <aside className="flex flex-col gap-3">
+                {annotationsVisible ? <aside className="flex flex-col gap-3">
                   <div className="rounded-md border p-3">
                     <div className="flex items-center justify-between gap-2">
                       <h3 className="text-sm font-medium">Annotations</h3>
@@ -1737,7 +1753,7 @@ function MarkdownWorkspaceTab({
                     key={selectedFilePath}
                     onEntrySelect={(entry) => scrollToBlock(previewPaneRef.current, entry.blockId)}
                   />
-                </aside>
+                </aside> : null}
               </div>
             ) : null}
           </div>

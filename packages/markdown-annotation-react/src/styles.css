@@ -33,15 +33,11 @@
 
   .markdown-viewer ul,
   .markdown-viewer ol {
-    @apply my-4 flex flex-col gap-2 pl-6;
-  }
-
-  .markdown-viewer ul {
-    @apply list-disc;
-  }
-
-  .markdown-viewer ol {
-    @apply list-decimal;
+    @apply my-4 flex flex-col gap-2 pl-0;
+    /* viewer가 항목마다 커스텀 마커(-, N., 체크박스)를 flex 레이아웃으로 직접
+       렌더한다. 네이티브 목록 마커를 끄지 않으면 마커가 중복 표시된다(예: `• -`,
+       `1. 1.`). 항목 들여쓰기는 각 항목의 level 기반 marginLeft가 담당한다. */
+    list-style: none;
   }
 
   .markdown-viewer blockquote {

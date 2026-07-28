@@ -61,6 +61,44 @@ export const TaskListStates: Story = {
   },
 };
 
+export const ComplexListQuality: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`1. 첫 번째 항목
+   이어지는 문단은 같은 항목에 속합니다.
+
+   두 번째 문단입니다.
+   - 중첩된 항목
+   - [x] 완료된 중첩 작업
+
+2. 두 번째 항목
+
+\`- inline code는 목록이 아닙니다.\``),
+  },
+};
+
+export const SeparatedListsOrder: Story = {
+  args: {
+    blocks: parseMarkdownToBlocks(`## Setup
+
+- install 의존성
+- build 스크립트
+
+문단으로 구분된 목록도 원문 순서를 유지합니다.
+
+1. 순서 목록 A
+2. 순서 목록 B
+
+## Usage
+
+- run 명령
+  - 중첩된 하위 항목
+- deploy 명령
+
+각 목록은 자신이 속한 제목/문단 뒤에 원문 순서대로 표시되며, 서로 떨어진 목록이 하나로
+병합되지 않습니다.`),
+  },
+};
+
 export const HtmlCommentBoundaries: Story = {
   args: {
     blocks: parseMarkdownToBlocks(`# HTML5 Comment Boundaries

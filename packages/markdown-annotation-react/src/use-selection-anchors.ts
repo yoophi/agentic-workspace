@@ -4,6 +4,12 @@ function containsNode(parent: HTMLElement, node: Node) {
   return parent === node || parent.contains(node);
 }
 
+function optionalNumber(value: string | undefined) {
+  if (value === undefined || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 /**
  * 현재 브라우저 선택 영역을 블록별 AnnotationAnchor 배열로 변환한다.
  *
@@ -58,6 +64,8 @@ export function getSelectionAnchors(root: HTMLElement | null): AnnotationAnchor[
         selectedText: segmentText,
         startLine: Number(annotatedElement.dataset.startLine) || undefined,
         endLine: Number(annotatedElement.dataset.endLine) || undefined,
+        sourceStartOffset: optionalNumber(annotatedElement.dataset.sourceStart),
+        sourceEndOffset: optionalNumber(annotatedElement.dataset.sourceEnd),
       },
     ];
   });

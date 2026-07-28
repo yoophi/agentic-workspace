@@ -2,6 +2,7 @@ export type { AnnotationAnchor, AnnotationDraft, AnnotationType } from "./annota
 export type {
   MarkdownBlock,
   MarkdownBlockType,
+  MarkdownSourceRange,
   MermaidBlockMetadata,
   MermaidDetectionReason,
 } from "./markdown-block";

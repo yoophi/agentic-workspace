@@ -1,4 +1,5 @@
 import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
+export { markdownRenderingFixtures } from "@yoophi/markdown-annotation-core";
 
 export const previewBoundaryBlocks = parseMarkdownToBlocks(`# Preview Fixture
 

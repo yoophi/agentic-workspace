@@ -14,6 +14,8 @@ export function MarkdownAnnotationWorkspace({
   contentRef,
   model,
   onSendAnnotationPrompt,
+  annotationsVisible = true,
+  onAnnotationsVisibleChange,
   previewRef,
   tocEntries,
 }: {
@@ -21,13 +23,27 @@ export function MarkdownAnnotationWorkspace({
   contentRef: RefObject<HTMLDivElement | null>;
   model: MarkdownAnnotationWorkspaceModel;
   onSendAnnotationPrompt?: (prompt: string) => void;
+  annotationsVisible?: boolean;
+  onAnnotationsVisibleChange?: (visible: boolean) => void;
   previewRef: RefObject<HTMLDivElement | null>;
   tocEntries: TocEntry[];
 }) {
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className={annotationsVisible ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]" : "grid gap-4"}>
         <div ref={contentRef} className="relative min-w-0">
+          <div className="mb-3 flex justify-end">
+            <Button
+              aria-expanded={annotationsVisible}
+              aria-label={annotationsVisible ? "주석 영역 숨기기" : "주석 영역 보이기"}
+              onClick={() => onAnnotationsVisibleChange?.(!annotationsVisible)}
+              size="sm"
+              type="button"
+              variant="outline"
+            >
+              {annotationsVisible ? "주석 숨기기" : "주석 보이기"}
+            </Button>
+          </div>
           <MarkdownViewer
             blocks={blocks}
             components={markdownViewerComponents}
@@ -50,7 +66,7 @@ export function MarkdownAnnotationWorkspace({
             </div>
           ) : null}
         </div>
-        <aside className="flex flex-col gap-3">
+        {annotationsVisible ? <aside className="flex flex-col gap-3">
           <div className="rounded-md border p-3">
             <div className="flex items-center justify-between gap-2"><h3 className="text-sm font-medium">Annotations</h3><Badge variant="outline">{model.annotations.length}</Badge></div>
             {model.annotations.length === 0 ? <p className="mt-3 text-sm text-muted-foreground">No annotations.</p> : (
@@ -72,7 +88,7 @@ export function MarkdownAnnotationWorkspace({
             <div className="rounded-md border"><div className="flex items-center justify-between border-b px-3 py-2"><span className="text-sm font-medium">Agent prompt</span><Button type="button" size="sm" disabled={!onSendAnnotationPrompt} onClick={() => onSendAnnotationPrompt?.(model.annotationPrompt)}><SendIcon data-icon="inline-start" />Send</Button></div><pre className="max-h-80 overflow-auto p-3 text-xs leading-5"><code>{model.annotationPrompt}</code></pre></div>
           ) : null}
           <MarkdownPreviewToc className="sticky bottom-4 mt-auto shadow-sm" entries={tocEntries} onEntrySelect={(entry) => scrollToBlock(previewRef.current, entry.blockId)} />
-        </aside>
+        </aside> : null}
       </div>
       <AnnotationInputDialog
         open={model.draftTarget !== null}

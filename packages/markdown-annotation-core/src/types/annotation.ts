@@ -7,6 +7,8 @@ export type AnnotationAnchor = {
   selectedText?: string;
   startLine?: number;
   endLine?: number;
+  sourceStartOffset?: number;
+  sourceEndOffset?: number;
 };
 
 export type AnnotationDraft = {

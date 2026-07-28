@@ -16,6 +16,13 @@ export type MermaidBlockMetadata = {
   source: string;
 };
 
+export type MarkdownSourceRange = {
+  startOffset: number;
+  endOffset: number;
+  startColumn: number;
+  endColumn: number;
+};
+
 export type MarkdownBlock = {
   id: string;
   type: MarkdownBlockType;
@@ -24,6 +31,8 @@ export type MarkdownBlock = {
   order: number;
   startLine: number;
   endLine: number;
+  sourceRange?: MarkdownSourceRange;
+  parentId?: string;
   level?: number;
   language?: string;
   mermaid?: MermaidBlockMetadata;
