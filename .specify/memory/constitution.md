@@ -1,5 +1,40 @@
 <!--
 Sync Impact Report
+Version change: 1.0.0 → 1.0.1 (PATCH)
+Date: 2026-07-29
+Modified principles:
+- III. Hexagonal Tauri Backend Architecture — clarified port placement only.
+  Previously: "Pure domain models and ports belong in `domain`."
+  Now: ports MAY live in `domain` or in a dedicated top-level `ports` module,
+  chosen consistently per app; a `ports` module holds port definitions and their
+  signature data types only, never adapters; `domain` and `ports` both MUST stay
+  free of Tauri/filesystem/persistence/UI dependencies.
+Added sections: none
+Removed sections: none
+Rationale for PATCH: no obligation is added or removed. The technology-
+independence requirement for ports is unchanged; only the permitted file
+location is stated explicitly. This resolves a documented mismatch between the
+constitution wording and the established repository convention (top-level
+`ports` module in `apps/agentic-workbench/src-tauri/src`, in use since commit
+b5f16ac), recorded as C1 in specs/033-agent-orchestration/plan.md.
+Templates and docs requiring updates:
+- ✅ .specify/templates/plan-template.md (already allowed a separate `ports`
+  module; no change needed)
+- ✅ .specify/templates/tasks-template.md (already listed `ports` as a sibling
+  layer; no change needed)
+- ✅ .specify/templates/spec-template.md (no port-placement guidance; no change
+  needed)
+- ✅ .specify/templates/checklist-template.md (no port-placement guidance; no
+  change needed)
+- ✅ .specify/templates/commands/*.md (directory absent; no files to update)
+- ✅ AGENTS.md (updated to match the clarified rule)
+- ✅ README.md (backend layer listing updated)
+Follow-up TODOs:
+- specs/033-agent-orchestration/plan.md: C1 deviation is resolved by this
+  amendment; the Complexity Tracking entry and both Constitution Check sections
+  must be updated to reflect compliance.
+
+Previous report (1.0.0)
 Version change: template → 1.0.0
 Modified principles:
 - PRINCIPLE_1_NAME placeholder → I. Monorepo Boundary First
@@ -52,15 +87,23 @@ being coupled to a single screen unless the component is truly screen-specific.
 
 ### III. Hexagonal Tauri Backend Architecture
 Tauri backend code MUST live under `apps/*/src-tauri/src` and MUST preserve
-hexagonal boundaries. Pure domain models and ports belong in `domain`. Use cases
-and business rules belong in `application`. Tauri commands and other inbound
+hexagonal boundaries. Pure domain models belong in `domain`. Use cases and
+business rules belong in `application`. Tauri commands and other inbound
 adapters belong in `inbound`. Filesystem, Git, ACP, JSON persistence, CLI, and
 OS adapters belong in `infrastructure`.
 
-The `domain` layer MUST NOT depend on Tauri, filesystem APIs, JSON persistence,
-or UI concerns. Tauri commands MUST NOT contain persistence or business logic;
-they MUST validate command input at the boundary and delegate behavior to
-application services through ports/adapters.
+Ports MUST be pure abstractions. An app MAY place them in `domain` alongside the
+models they describe, or in a dedicated top-level `ports` module when the app has
+enough ports that a separate module aids navigation. Whichever location an app
+chooses, it MUST use that location consistently: a single app MUST NOT split
+ports across both. A `ports` module MUST contain only port definitions and the
+data types that appear in their signatures; adapter implementations MUST NOT live
+there.
+
+The `domain` layer and any `ports` module MUST NOT depend on Tauri, filesystem
+APIs, JSON persistence, or UI concerns. Tauri commands MUST NOT contain
+persistence or business logic; they MUST validate command input at the boundary
+and delegate behavior to application services through ports/adapters.
 
 ### IV. Shared Core Before Shared UI
 Git, Markdown annotation, ACP/workbench, and similar capabilities MUST share
@@ -163,4 +206,4 @@ Complexity Tracking table with a concrete justification and the simpler
 alternative that was rejected. Architecture boundary violations are not complete
 work until corrected or explicitly amended into this constitution.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-01
+**Version**: 1.0.1 | **Ratified**: 2026-07-01 | **Last Amended**: 2026-07-29

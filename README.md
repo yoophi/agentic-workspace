@@ -117,11 +117,15 @@ shared/    Reusable cross-domain utilities and UI primitives
 Tauri backend code follows hexagonal architecture:
 
 ```text
-domain/          Pure domain models and ports
+domain/          Pure domain models
+ports/           Port definitions when kept separate from domain
 application/     Use cases and business rules
 inbound/         Tauri commands and other inbound adapters
 infrastructure/  Git, ACP, persistence, filesystem, and OS adapters
 ```
+
+Ports may live in `domain` or in a dedicated `ports` module; each app picks one
+location and uses it consistently. `apps/agentic-workbench` uses `ports`.
 
 ## ACP agents
 
