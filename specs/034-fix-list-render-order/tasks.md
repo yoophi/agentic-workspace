@@ -211,3 +211,18 @@ Task: "T013 docs/markdown-rendering-quality.md 순서 규칙 추가"
 - 각 CT는 FAIL 확인 후 구현으로 통과시킨다(TDD). 태스크/논리 그룹마다 커밋 권장.
 - core 파서는 변경하지 않는다(순서 결함은 렌더러 계층). 항목 내 다중 하위 목록 병합은
   out-of-scope(spec 참조).
+
+---
+
+## Phase 6: Convergence
+
+/speckit-converge 결과 추가된 정합화 작업. 034의 명세 범위(FR-001~007, SC-001~004,
+US1/US2, CT-1~9)는 코드에서 모두 충족됨. 아래는 shipped 코드와 산출물 간 갭.
+
+- [X] T017 마커 렌더링 품질 수정(네이티브 마커 off `list-style: none`, 항목별 순서번호
+  증가, `-`/`N.` 마커 `shrink-0`, MK-1~3 테스트, docs 마커 규칙)을 spec 034의 요구사항·
+  계약으로 역기록해 shipped 렌더링 품질 작업을 추적 가능하게 한다 — spec.md/plan.md/
+  contracts (source: 034 spec/plan/tasks, unrequested)
+- [X] T018 `plan.md` Project Structure의 테스트 파일 참조(`MarkdownViewer.test.tsx`)를
+  실제 회귀 스위트 파일명(`list-render-order.test.tsx`)에 맞춰 정합화한다 — plan.md
+  (source: FR-007 / plan: Project Structure, partial)

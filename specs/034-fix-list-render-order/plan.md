@@ -99,9 +99,10 @@ specs/034-fix-list-render-order/
 
 ```text
 packages/markdown-annotation-react/src/
-├── MarkdownViewer.tsx          # 렌더 루프: 최상위 목록 런(run)을 제자리 렌더하도록 수정
+├── MarkdownViewer.tsx          # 렌더 루프: 최상위 목록 런(run) 제자리 렌더 + 마커(순서번호/‑) 렌더
 ├── markdown-components.tsx     # MarkdownList (ul/ol 경계) — 재사용, 변경 최소
-└── MarkdownViewer.test.tsx     # 순서 보존·목록 병합 방지 회귀 테스트 추가
+├── styles.css                  # 목록 네이티브 마커 off(list-style:none) — 마커 중복 방지
+└── list-render-order.test.tsx  # 순서 보존·병합 방지·마커(CT-1~9, MK-1~3) 회귀 테스트 (신규)
 
 packages/markdown-annotation-core/src/
 └── quality/fixtures.ts         # (선택) 분리된 목록 fixture 보강 — 순서 검증은 react에서
@@ -157,6 +158,14 @@ docs/
    그대로 정확하다.
 
 이로써 O(n) 단일 순회로 문서 순서가 보존되고, 비용이 큰 `findIndex` 이중 탐색도 제거된다.
+
+### 마커 렌더링 (수렴 반영, FR-008·FR-009)
+
+앱 실행 검증 중 발견된 마커 중복을 함께 고쳤다. viewer는 항목마다 커스텀 마커(비순서
+`-`, 순서 `N.`, 작업 항목 체크박스)를 flex 레이아웃으로 직접 렌더하므로, `styles.css`에서
+네이티브 목록 마커를 끈다(`list-style: none`). 끄지 않으면 `• -`, `1. 1.`처럼 중복된다.
+순서 번호는 각 항목의 목록 내 위치(`orderedStart + index`)로 증가시키고, 마커 span은
+`shrink-0 whitespace-nowrap`로 `N.`이 줄바꿈되지 않게 한다. 검증은 MK-1~3.
 
 ### 범위 밖 (알려진 한계)
 
