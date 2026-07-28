@@ -6,6 +6,8 @@ import {
   closePanel,
   createInitialAgentRunWorkspaceState,
   openAdjacentPanel,
+  promoteOrchestrationNode,
+  detachOrchestrationPanel,
   routePromptToPanel,
   selectPanel,
   setAgentRunViewMode,
@@ -100,5 +102,24 @@ describe("agent run workspace", () => {
       text: "review this",
       delivery: "queue",
     });
+  });
+
+  it("separates visible panel membership from a running orchestration node", () => {
+    const promoted = promoteOrchestrationNode(createInitialAgentRunWorkspaceState(), {
+      id: "worker-1",
+      title: "Researcher",
+      runId: "run-worker-1",
+      isRunning: true,
+    });
+    const detached = detachOrchestrationPanel(promoted, "worker-1");
+
+    expect(promoted.slots[1]).toMatchObject({
+      id: "worker-1",
+      activeRunId: "run-worker-1",
+      isRunning: true,
+    });
+    expect(detached.slots.map((slot) => slot.id)).toEqual([
+      MAIN_AGENT_RUN_PANEL_ID,
+    ]);
   });
 });

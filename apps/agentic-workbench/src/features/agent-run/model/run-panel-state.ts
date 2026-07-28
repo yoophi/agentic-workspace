@@ -10,7 +10,12 @@ import {
   readSessionInfoUpdateMetadata,
   toTimelineItem,
 } from "@/entities/agent-run/model";
-import type { RunEventEnvelope, TimelineItem } from "@/entities/agent-run/model";
+import type {
+  RunEvent,
+  RunEventEnvelope,
+  TimelineItem,
+  TimelineRunEvent,
+} from "@/entities/agent-run/model";
 import type {
   AgentThreadStatus,
   AgentCommandOverrides,
@@ -68,6 +73,52 @@ export type UsageContext = {
   used: number;
   size: number;
 };
+
+const RUN_EVENT_TYPES = new Set<RunEvent["type"]>([
+  "lifecycle",
+  "agentMessage",
+  "thought",
+  "plan",
+  "tool",
+  "usage",
+  "sessionInfo",
+  "permission",
+  "fileSystem",
+  "terminal",
+  "diagnostic",
+  "ralphLoop",
+  "raw",
+  "error",
+]);
+
+function isRunEvent(value: unknown): value is RunEvent {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const type = (value as { type?: unknown }).type;
+  return typeof type === "string" && RUN_EVENT_TYPES.has(type as RunEvent["type"]);
+}
+
+export function partitionReplayedRunEvents(events: readonly unknown[]): {
+  timelineEvents: TimelineRunEvent[];
+  usageContext: UsageContext | null;
+} {
+  const timelineEvents: TimelineRunEvent[] = [];
+  let usageContext: UsageContext | null = null;
+
+  for (const value of events) {
+    if (!isRunEvent(value)) {
+      continue;
+    }
+    if (value.type === "usage") {
+      usageContext = { used: value.used, size: value.size };
+      continue;
+    }
+    timelineEvents.push(value);
+  }
+
+  return { timelineEvents, usageContext };
+}
 
 export type RunEventState = {
   items: TimelineItem[];

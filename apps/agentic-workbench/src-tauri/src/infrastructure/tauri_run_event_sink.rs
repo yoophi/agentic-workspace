@@ -1,9 +1,16 @@
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
-    domain::events::{RunEvent, RunEventEnvelope},
-    infrastructure::agent_session_registry::AppState,
-    ports::event_sink::RunEventSink,
+    application::orchestration_service::OrchestrationService,
+    domain::events::{LifecycleStatus, RunEvent, RunEventEnvelope},
+    infrastructure::{
+        acp_agent_worker_adapter::{take_worktree_guard, verify_worktree_unchanged},
+        agent_session_registry::AppState,
+        in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
+        json_orchestration_repository::JsonOrchestrationRepository,
+        tauri_orchestration_event_sink::TauriOrchestrationEventSink,
+    },
+    ports::{event_sink::RunEventSink, runtime_event_journal::RuntimeEventJournal},
 };
 
 pub const AGENT_RUN_EVENT: &str = "agent-run-event";
@@ -28,6 +35,35 @@ impl TauriRunEventSink {
 
 impl RunEventSink for TauriRunEventSink {
     fn emit(&self, run_id: &str, event: RunEvent) {
+        let terminal = matches!(
+            &event,
+            RunEvent::Lifecycle {
+                status: LifecycleStatus::Completed | LifecycleStatus::Cancelled,
+                ..
+            }
+        );
+        if let Some(journal) = self.app.try_state::<InMemoryRuntimeEventJournal>()
+            && let Ok(value) = serde_json::to_value(&event)
+        {
+            journal.append(run_id, value, terminal);
+        }
+        if terminal
+            && let Some(guard) = take_worktree_guard(run_id)
+            && let Err(violation) = verify_worktree_unchanged(&guard.worktree_path, &guard.baseline)
+            && let Ok(repository) = JsonOrchestrationRepository::from_app(&self.app)
+        {
+            let service = OrchestrationService::new(
+                repository,
+                TauriOrchestrationEventSink::new(self.app.clone()),
+            );
+            let _ = service.fail_task_for_runtime(
+                &guard.window_label,
+                &guard.task_id,
+                &guard.node_id,
+                violation.code,
+                &violation.message,
+            );
+        }
         let envelope = RunEventEnvelope {
             run_id: run_id.to_string(),
             event,

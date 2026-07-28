@@ -10,7 +10,14 @@ pub fn load_json_vec<T>(store_path: &Path, label: &str) -> Result<Vec<T>, String
 where
     T: DeserializeOwned,
 {
-    match read_json_vec(store_path, label) {
+    load_json(store_path, label)
+}
+
+pub fn load_json<T>(store_path: &Path, label: &str) -> Result<T, String>
+where
+    T: DeserializeOwned + Default,
+{
+    match read_json(store_path, label) {
         Ok(value) => Ok(value),
         Err(primary_error) if store_path.exists() => {
             let backup_path = backup_path(store_path);
@@ -18,7 +25,7 @@ where
                 return Err(primary_error);
             }
 
-            let backup_value = read_json_vec(&backup_path, label).map_err(|backup_error| {
+            let backup_value = read_json(&backup_path, label).map_err(|backup_error| {
                 format!("{primary_error}; backup recovery failed: {backup_error}")
             })?;
             fs::copy(&backup_path, store_path).map_err(|error| {
@@ -37,17 +44,24 @@ pub fn save_json_vec<T>(store_path: &Path, label: &str, values: &[T]) -> Result<
 where
     T: Serialize,
 {
-    let contents = serde_json::to_vec_pretty(values)
+    save_json(store_path, label, values)
+}
+
+pub fn save_json<T>(store_path: &Path, label: &str, value: &T) -> Result<(), String>
+where
+    T: Serialize + ?Sized,
+{
+    let contents = serde_json::to_vec_pretty(value)
         .map_err(|error| format!("Failed to serialize {label}: {error}"))?;
     atomic_write(store_path, label, &contents)
 }
 
-fn read_json_vec<T>(store_path: &Path, label: &str) -> Result<Vec<T>, String>
+fn read_json<T>(store_path: &Path, label: &str) -> Result<T, String>
 where
-    T: DeserializeOwned,
+    T: DeserializeOwned + Default,
 {
     if !store_path.exists() {
-        return Ok(Vec::new());
+        return Ok(T::default());
     }
 
     let contents = fs::read_to_string(store_path).map_err(|error| {
@@ -157,6 +171,12 @@ mod tests {
         id: String,
     }
 
+    #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+    struct TestDocument {
+        revision: u64,
+        records: Vec<TestRecord>,
+    }
+
     #[test]
     fn saves_json_with_backup_and_loads_current_file() {
         let store_path = test_store_path("current");
@@ -187,6 +207,34 @@ mod tests {
 
         assert_eq!(recovered, vec![record("backup")]);
         assert!(restored.contains("backup"));
+    }
+
+    #[test]
+    fn saves_and_recovers_json_documents_atomically() {
+        let store_path = test_store_path("document");
+        save_json(
+            &store_path,
+            "test document",
+            &TestDocument {
+                revision: 1,
+                records: vec![record("backup")],
+            },
+        )
+        .unwrap();
+        save_json(
+            &store_path,
+            "test document",
+            &TestDocument {
+                revision: 2,
+                records: vec![record("current")],
+            },
+        )
+        .unwrap();
+        fs::write(&store_path, "{ broken").unwrap();
+
+        let recovered: TestDocument = load_json(&store_path, "test document").unwrap();
+        assert_eq!(recovered.revision, 1);
+        assert_eq!(recovered.records, vec![record("backup")]);
     }
 
     fn record(id: &str) -> TestRecord {

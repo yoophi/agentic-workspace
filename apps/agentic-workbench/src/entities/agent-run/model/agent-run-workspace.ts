@@ -205,6 +205,55 @@ export function addExtraPanel(state: AgentRunWorkspaceState): AgentRunWorkspaceS
     : state;
 }
 
+export function promoteOrchestrationNode(
+  state: AgentRunWorkspaceState,
+  node: {
+    id: string;
+    title: string;
+    runId: string | null;
+    isRunning: boolean;
+  },
+): AgentRunWorkspaceState {
+  if (state.slots.some((slot) => slot.id === node.id)) {
+    return withFocus(state, node.id);
+  }
+  if (state.slots.length >= MAX_AGENT_RUN_PANELS) {
+    return state;
+  }
+  const result = splitTileLeaf(
+    state.layout,
+    state.focusedPanelId,
+    node.id,
+    "right",
+    `agent-run-split-${state.nextSplitSequence}`,
+  );
+  if (!result.changed || getTileDepth(result.layout) > MAX_AGENT_RUN_TILE_DEPTH) {
+    return state;
+  }
+  return {
+    ...state,
+    slots: [
+      ...state.slots,
+      {
+        ...createSlot("extra", node.id, node.title),
+        activeRunId: node.runId,
+        isRunning: node.isRunning,
+      },
+    ],
+    focusedPanelId: node.id,
+    activePanelId: node.id,
+    layout: result.layout,
+    nextSplitSequence: state.nextSplitSequence + 1,
+  };
+}
+
+export function detachOrchestrationPanel(
+  state: AgentRunWorkspaceState,
+  panelId: string,
+): AgentRunWorkspaceState {
+  return closePanel(state, panelId);
+}
+
 export function resizeAgentRunSplit(
   state: AgentRunWorkspaceState,
   splitId: string,

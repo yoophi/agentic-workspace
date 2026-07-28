@@ -38,8 +38,8 @@ export async function saveAgentRunSettings(settings: AgentRunSettings) {
   return invoke<AgentRunSettings>("save_agent_run_settings", { settings });
 }
 
-export async function startAgentRun(request: AgentRunRequest) {
-  return invoke<AgentRun>("start_agent_run", { request });
+export async function startAgentRun(request: AgentRunRequest, panelId?: string) {
+  return invoke<AgentRun>("start_agent_run", { request, panelId });
 }
 
 export async function sendPromptToRun(runId: string, prompt: string) {

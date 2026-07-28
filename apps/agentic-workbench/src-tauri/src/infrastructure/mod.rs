@@ -12,10 +12,13 @@ pub const WORKSPACE_EXCLUDED_DIRS: &[&str] = &[
     "target",
 ];
 
+#[allow(unused_imports)]
 pub use acp_agent_core::infrastructure::{
     acp, agent_catalog, agent_session_registry, noop_acp_session_store, permission_broker,
 };
 
+pub mod acp_agent_launch_factory;
+pub mod acp_agent_worker_adapter;
 #[cfg(debug_assertions)]
 pub mod devtools;
 pub mod fs_provider_session_repository;
@@ -27,14 +30,17 @@ pub mod git_cli_worktree_change_provider;
 pub mod git_cli_worktree_git_provider;
 pub mod git_cli_worktree_provider;
 pub mod in_memory_agent_workspace_registry;
+pub mod in_memory_runtime_event_journal;
 pub mod json_acp_session_store;
 pub mod json_agent_run_settings_repository;
 pub mod json_goal_repository;
+pub mod json_orchestration_repository;
 pub mod json_project_repository;
 pub mod json_saved_prompt_repository;
 pub mod json_store;
 pub mod mcp;
 pub mod native_window_menu;
 pub mod perf_log;
+pub mod tauri_orchestration_event_sink;
 pub mod tauri_run_event_sink;
 pub mod window_manager;

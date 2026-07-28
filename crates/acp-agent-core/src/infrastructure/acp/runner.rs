@@ -1,24 +1,24 @@
 use agent_client_protocol::{
-    JsonRpcMessage,
     schema::{
-        ProtocolVersion,
         v1::{
             ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
             InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
             StopReason, TextContent,
         },
+        ProtocolVersion,
     },
+    JsonRpcMessage,
 };
-use anyhow::{Context, Result, anyhow, bail};
-use serde_json::{Value, json};
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
 use std::{
     fs,
     future::Future,
     path::PathBuf,
     process::Stdio,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
     time::Duration,
 };
@@ -40,11 +40,11 @@ use crate::{
         },
     },
     infrastructure::acp::{
-        client::{AcpClient, lifecycle},
-        transport::{RpcPeer, read_loop},
+        client::{lifecycle, AcpClient},
+        transport::{read_loop, RpcPeer},
         util::{
-            RpcError, display_command, enriched_path, expand_tilde, normalize_path,
-            resolve_program, rpc_to_anyhow,
+            display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
+            rpc_to_anyhow, RpcError,
         },
     },
     ports::{
@@ -769,6 +769,14 @@ impl SessionHandle for AcpSession {
         self.send_prompt_with_guard(guard, sink, text).await
     }
 
+    async fn queue_prompt<S>(&self, sink: S, text: String) -> Result<String>
+    where
+        S: RunEventSink,
+    {
+        let guard = self.in_flight.lock().await;
+        self.send_prompt_with_guard(guard, sink, text).await
+    }
+
     async fn set_permission_mode<S>(&self, sink: S, mode: PermissionMode) -> Result<()>
     where
         S: RunEventSink,
@@ -1208,16 +1216,30 @@ async fn load_agent_session(
     peer: &RpcPeer,
     session_id: &str,
     workspace: &PathBuf,
+    mcp_servers: &[AgentMcpServerConfig],
 ) -> Result<Value> {
-    let params = serde_json::to_value(LoadSessionRequest::new(
-        SessionId::new(session_id),
-        workspace.clone(),
-    ))?;
+    let params = load_session_params(session_id, workspace, mcp_servers)?;
     let response = peer
         .request("session/load", params)
         .await
         .map_err(rpc_to_anyhow)?;
     Ok(response)
+}
+
+fn load_session_params(
+    session_id: &str,
+    workspace: &PathBuf,
+    mcp_servers: &[AgentMcpServerConfig],
+) -> Result<Value> {
+    let mut params = serde_json::to_value(LoadSessionRequest::new(
+        SessionId::new(session_id),
+        workspace.clone(),
+    ))?;
+    let Value::Object(ref mut object) = params else {
+        bail!("session/load params must serialize to an object");
+    };
+    object.insert("mcpServers".to_string(), serde_json::to_value(mcp_servers)?);
+    Ok(params)
 }
 
 /// resume 요청을 처리한다. agent가 `loadSession` capability를 광고하면
@@ -1249,7 +1271,7 @@ where
         return create_agent_session(peer, workspace, mcp_servers).await;
     }
 
-    match load_agent_session(peer, session_id, workspace).await {
+    match load_agent_session(peer, session_id, workspace, mcp_servers).await {
         Ok(response) => Ok(AcpCreatedSession {
             session_id: session_id.to_string(),
             response,
@@ -1313,8 +1335,8 @@ fn is_session_not_found(err: &RpcError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_turn_steer_unsupported_message, context_size_candidates, new_session_params,
-        resume_session_id, run_prompt_sequence, session_config_option_value,
+        active_turn_steer_unsupported_message, context_size_candidates, load_session_params,
+        new_session_params, resume_session_id, run_prompt_sequence, session_config_option_value,
         should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
     };
     use crate::{
@@ -1330,8 +1352,8 @@ mod tests {
     use anyhow::anyhow;
     use serde_json::json;
     use std::sync::{
-        Arc, Mutex,
         atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
     };
 
     #[derive(Clone, Default)]
@@ -1414,6 +1436,41 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(
+            params["mcpServers"],
+            json!([
+                {
+                    "type": "http",
+                    "name": "agentic_workbench",
+                    "url": "http://127.0.0.1:1000/mcp",
+                    "headers": [
+                        {
+                            "name": "Authorization",
+                            "value": "Bearer secret"
+                        }
+                    ]
+                }
+            ])
+        );
+    }
+
+    #[test]
+    fn load_session_params_include_mcp_servers() {
+        let params = load_session_params(
+            "session-1",
+            &std::path::PathBuf::from("/work/project"),
+            &[AgentMcpServerConfig::Http {
+                name: "agentic_workbench".to_string(),
+                url: "http://127.0.0.1:1000/mcp".to_string(),
+                headers: vec![AgentMcpHttpHeader {
+                    name: "Authorization".to_string(),
+                    value: "Bearer secret".to_string(),
+                }],
+            }],
+        )
+        .unwrap();
+
+        assert_eq!(params["sessionId"], json!("session-1"));
         assert_eq!(
             params["mcpServers"],
             json!([

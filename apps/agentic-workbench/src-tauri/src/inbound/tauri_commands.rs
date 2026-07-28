@@ -1,21 +1,33 @@
 use serde::Deserialize;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     process::Command,
     sync::{Arc, Mutex},
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     application::{
-        agent_exchange_service::AgentExchangeService, agent_run_settings_service,
+        agent_exchange_service::AgentExchangeService,
+        agent_run_settings_service,
         agent_tool_candidate_service::AgentToolCandidateService,
         cancel_agent_run::CancelAgentRunUseCase,
-        cancel_prompt_and_send::CancelPromptAndSendUseCase, git_branch_service, git_remote_service,
-        git_worktree_changes_service, git_worktree_service, goal_service,
-        list_provider_sessions::ListProviderSessionsUseCase, project_service, saved_prompt_service,
-        send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
-        start_agent_run::StartAgentRunUseCase, steer_prompt::SteerPromptUseCase,
+        cancel_prompt_and_send::CancelPromptAndSendUseCase,
+        coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
+        git_branch_service, git_remote_service, git_worktree_changes_service, git_worktree_service,
+        goal_service,
+        list_provider_sessions::ListProviderSessionsUseCase,
+        orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
+        orchestration_service::{
+            BindMainRunRequest, CoordinatorHandoffRequest, DelegateGoalOutcome,
+            DelegateGoalRequest, DispatchPromptRequest, OrchestrationService,
+            SetPresentationRequest, TaskActionRequest,
+        },
+        project_service, saved_prompt_service,
+        send_prompt::SendPromptUseCase,
+        set_permission_mode::SetPermissionModeUseCase,
+        start_agent_run::StartAgentRunUseCase,
+        steer_prompt::SteerPromptUseCase,
         worktree_changes_service, worktree_file_service, worktree_git_service,
     },
     domain::{
@@ -23,6 +35,10 @@ use crate::{
         agent_exchange::{
             AgentExchange, AgentExchangeAckRequest, AgentWorkspaceSyncRequest,
             AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
+        },
+        agent_orchestration::{
+            AccessPolicy, MAIN_AGENT_NODE_ID, PromptDelivery, PromptDispatchTargetStatus,
+            TaskCommand, TaskCommandKind, TaskCommandSource, TaskReportType, WorkerRuntimeProfile,
         },
         agent_run_settings::{
             APP_COMMAND_OVERRIDE_SETTINGS_KEY, AgentCommandSource, AgentRunSettings,
@@ -35,7 +51,7 @@ use crate::{
         goal::{GoalDraft, GoalProgressUpdate, GoalStatus, GoalUpdate, ThreadGoal},
         project::{Project, ProjectDraft},
         provider_session::{ProviderSession, SessionScope},
-        run::{AgentRun, AgentRunRequest, PermissionMode, RalphLoopRequest},
+        run::{AgentRun, AgentRunRequest, PermissionMode},
         saved_prompt::{SavedPrompt, SavedPromptDraft},
         worktree_change::WorktreeChange,
         worktree_file::{WorktreeFileEntry, WorktreeFileListScope, WorktreeTextFile},
@@ -45,6 +61,8 @@ use crate::{
     },
     infrastructure::{
         acp::runner::AcpAgentRunner,
+        acp_agent_launch_factory::{inject_mcp_launch_env, normalize_run_request},
+        acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
         fs_provider_session_repository::FsProviderSessionRepository,
@@ -58,21 +76,865 @@ use crate::{
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
+        in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
         json_acp_session_store::JsonAcpSessionStore,
         json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
         json_goal_repository::JsonGoalRepository,
+        json_orchestration_repository::JsonOrchestrationRepository,
         json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
-        mcp::title_tool,
-        mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv, McpServerState},
+        mcp::{McpServerState, capability_registry::CapabilityPrincipal, title_tool},
         perf_log::run_blocking_command,
+        tauri_orchestration_event_sink::TauriOrchestrationEventSink,
         tauri_run_event_sink::TauriRunEventSink,
         window_manager,
     },
-    ports::{agent_catalog::AgentCatalog, permission::PermissionDecision},
+    ports::{
+        agent_catalog::AgentCatalog,
+        agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
+        orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
+        permission::PermissionDecision,
+        runtime_event_journal::{RuntimeEventJournal, RuntimeEventSnapshot},
+    },
 };
 
+#[cfg(test)]
+use crate::{
+    domain::run::RalphLoopRequest,
+    infrastructure::mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
+};
+#[cfg(test)]
+use std::collections::BTreeMap;
+
 const WORKTREE_CHANGED_EVENT: &str = "workspace://worktree-changed";
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootstrapOrchestrationInput {
+    worktree_path: String,
+    resume_workspace_id: Option<String>,
+}
+
+fn orchestration_error(error: crate::domain::agent_orchestration::OrchestrationError) -> String {
+    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+}
+
+#[tauri::command]
+pub fn bootstrap_orchestration_workspace(
+    app: AppHandle,
+    window: tauri::Window,
+    input: BootstrapOrchestrationInput,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let canonical = std::fs::canonicalize(&input.worktree_path)
+        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
+    if !canonical.is_dir() {
+        return Err("Workspace path must be a directory.".into());
+    }
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .bootstrap(
+            canonical.to_string_lossy().as_ref(),
+            window.label(),
+            input.resume_workspace_id.as_deref(),
+        )
+        .map_err(orchestration_error)
+}
+
+#[tauri::command]
+pub fn get_orchestration_workspace(
+    app: AppHandle,
+    window: tauri::Window,
+) -> Result<Option<crate::domain::agent_orchestration::OrchestrationSession>, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .get_for_window(window.label())
+        .map_err(orchestration_error)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListRecoverableOrchestrationInput {
+    worktree_path: String,
+}
+
+#[tauri::command]
+pub fn list_recoverable_orchestration_workspaces(
+    app: AppHandle,
+    input: ListRecoverableOrchestrationInput,
+) -> Result<Vec<crate::domain::agent_orchestration::OrchestrationSession>, String> {
+    let canonical = std::fs::canonicalize(&input.worktree_path)
+        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
+    if !canonical.is_dir() {
+        return Err("Workspace path must be a directory.".into());
+    }
+    let worktree_path = canonical.to_string_lossy().to_string();
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service =
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
+    let stale_window_labels: Vec<_> = service
+        .list_for_worktree(&worktree_path)
+        .map_err(orchestration_error)?
+        .into_iter()
+        .filter_map(|session| session.bound_window_label)
+        .filter(|label| app.get_webview_window(label).is_none())
+        .collect();
+    for label in stale_window_labels {
+        service
+            .release_window(&label)
+            .map_err(orchestration_error)?;
+    }
+    service
+        .list_recoverable(&worktree_path)
+        .map_err(orchestration_error)
+}
+
+#[tauri::command]
+pub fn bind_main_coordinator_run(
+    app: AppHandle,
+    window: tauri::Window,
+    mcp_state: State<'_, McpServerState>,
+    input: BindMainRunRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let run_id = input.run_id.clone();
+    let binding_state = input.state;
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .bind_main_run(window.label(), input)
+        .map_err(orchestration_error)?;
+    if binding_state == crate::application::orchestration_service::MainRunBindingState::Active
+        && let Some(generation_id) = session.active_coordinator_generation_id.clone()
+    {
+        mcp_state
+            .bind_run_principal(
+                crate::infrastructure::mcp::capability_registry::CapabilityPrincipal::coordinator(
+                    session.id.clone(),
+                    window.label(),
+                    run_id,
+                    generation_id,
+                ),
+            )
+            .map_err(orchestration_error)?;
+    }
+    Ok(session)
+}
+
+#[tauri::command]
+pub async fn delegate_orchestration_goal(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    input: DelegateGoalRequest,
+) -> Result<DelegateGoalOutcome, String> {
+    let goal = input.goal.clone();
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service =
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
+    let outcome = service
+        .delegate_goal(window.label(), input)
+        .map_err(orchestration_error)?;
+    let snapshot = service
+        .get_for_window(window.label())
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
+    let run_id = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.id == crate::domain::agent_orchestration::MAIN_AGENT_NODE_ID)
+        .and_then(|node| node.current_run_id.clone())
+        .ok_or_else(|| "Main Coordinator run is unavailable.".to_string())?;
+    SendPromptUseCase::new(state.inner().clone())
+        .execute(
+            TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string()),
+            run_id,
+            goal,
+        )
+        .await
+        .map_err(String::from)?;
+    Ok(outcome)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdoptManualChildInput {
+    panel_id: String,
+    title: String,
+}
+
+#[tauri::command]
+pub fn adopt_manual_orchestration_child(
+    app: AppHandle,
+    window: tauri::Window,
+    input: AdoptManualChildInput,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .adopt_manual_child(window.label(), &input.panel_id, &input.title)
+        .map_err(orchestration_error)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListOrchestrationTasksInput {
+    generation_id: String,
+}
+
+#[tauri::command]
+pub fn list_orchestration_tasks(
+    app: AppHandle,
+    window: tauri::Window,
+    input: ListOrchestrationTasksInput,
+) -> Result<Vec<crate::domain::agent_orchestration::OrchestrationTask>, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .list_child_tasks(window.label(), &input.generation_id)
+        .map_err(orchestration_error)
+}
+
+#[tauri::command]
+pub fn collect_orchestration_reports(
+    app: AppHandle,
+    window: tauri::Window,
+) -> Result<Vec<crate::domain::agent_orchestration::TaskReport>, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    Ok(
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+            .get_for_window(window.label())
+            .map_err(orchestration_error)?
+            .map(|session| session.reports)
+            .unwrap_or_default(),
+    )
+}
+
+#[tauri::command]
+pub fn set_orchestration_presentation(
+    app: AppHandle,
+    window: tauri::Window,
+    input: SetPresentationRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .set_presentation(window.label(), input)
+        .map_err(orchestration_error)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliverTaskCommandInput {
+    request_id: String,
+    task_id: String,
+    kind: TaskCommandKind,
+    message: Option<String>,
+    input_report_id: Option<String>,
+    delivery: PromptDelivery,
+    expected_task_revision: Option<u64>,
+}
+
+#[tauri::command]
+pub async fn send_orchestration_child_command(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: DeliverTaskCommandInput,
+) -> Result<TaskCommand, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app.clone(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+    ));
+    let command = OrchestrationCommandService::new(repository.clone(), adapter)
+        .deliver(
+            window.label(),
+            DeliverTaskCommandRequest {
+                request_id: input.request_id,
+                task_id: input.task_id,
+                kind: input.kind,
+                message: input.message,
+                input_report_id: input.input_report_id,
+                delivery: input.delivery,
+                source: TaskCommandSource::User,
+                expected_task_revision: input.expected_task_revision,
+            },
+        )
+        .await
+        .map_err(orchestration_error)?;
+    emit_orchestration_runtime_update(&app, &repository, window.label(), "taskCommandDelivery");
+    Ok(command)
+}
+
+#[tauri::command]
+pub async fn respond_orchestration_input(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: TaskActionRequest,
+) -> Result<TaskCommand, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let snapshot = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    )
+    .get_for_window(window.label())
+    .map_err(orchestration_error)?
+    .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
+    let input_report_id = snapshot
+        .reports
+        .iter()
+        .rev()
+        .find(|report| {
+            report.task_id == input.task_id && report.report_type == TaskReportType::InputRequest
+        })
+        .map(|report| report.id.clone());
+    let task_revision = snapshot
+        .tasks
+        .iter()
+        .find(|task| task.id == input.task_id)
+        .map(|task| task.revision);
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app,
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+    ));
+    OrchestrationCommandService::new(repository, adapter)
+        .deliver(
+            window.label(),
+            DeliverTaskCommandRequest {
+                request_id: input.request_id,
+                task_id: input.task_id,
+                kind: TaskCommandKind::InputResponse,
+                message: input.message,
+                input_report_id,
+                delivery: PromptDelivery::Queue,
+                source: TaskCommandSource::User,
+                expected_task_revision: task_revision,
+            },
+        )
+        .await
+        .map_err(orchestration_error)
+}
+
+#[tauri::command]
+pub async fn cancel_orchestration_task(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: TaskActionRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let snapshot = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    )
+    .get_for_window(window.label())
+    .map_err(orchestration_error)?
+    .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
+    let task = snapshot.tasks.iter().find(|task| task.id == input.task_id);
+    let task_revision = task.map(|task| task.revision);
+    let has_active_run = task
+        .and_then(|task| task.assigned_node_id.as_ref())
+        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
+        .and_then(|node| node.current_run_id.as_ref())
+        .is_some();
+    if !has_active_run {
+        return OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+            .cancel_task(window.label(), input)
+            .map_err(orchestration_error);
+    }
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app.clone(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+    ));
+    OrchestrationCommandService::new(repository.clone(), adapter)
+        .deliver(
+            window.label(),
+            DeliverTaskCommandRequest {
+                request_id: input.request_id,
+                task_id: input.task_id.clone(),
+                kind: TaskCommandKind::Cancel,
+                message: None,
+                input_report_id: None,
+                delivery: PromptDelivery::Queue,
+                source: TaskCommandSource::User,
+                expected_task_revision: task_revision,
+            },
+        )
+        .await
+        .map_err(orchestration_error)?;
+    let _ = mcp_state.orchestration_scheduler().release(&input.task_id);
+    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .get_for_window(window.label())
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())
+}
+
+#[tauri::command]
+pub async fn retry_orchestration_task(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: TaskActionRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service =
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
+    stop_existing_task_worker(
+        &app,
+        window.label(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+        &service,
+        &input.task_id,
+    )
+    .await?;
+    service
+        .retry_task(window.label(), input.clone())
+        .map_err(orchestration_error)?;
+    launch_orchestration_task_for_ui(
+        &app,
+        window.label(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+        &service,
+        &input.task_id,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn reassign_orchestration_task(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: TaskActionRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    );
+    stop_existing_task_worker(
+        &app,
+        window.label(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+        &service,
+        &input.task_id,
+    )
+    .await?;
+    service
+        .reassign_task(window.label(), input.clone())
+        .map_err(orchestration_error)?;
+    launch_orchestration_task_for_ui(
+        &app,
+        window.label(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+        &service,
+        &input.task_id,
+    )
+    .await
+}
+
+async fn stop_existing_task_worker(
+    app: &AppHandle,
+    window_label: &str,
+    state: AppState,
+    mcp_state: McpServerState,
+    service: &OrchestrationService<JsonOrchestrationRepository, TauriOrchestrationEventSink>,
+    task_id: &str,
+) -> Result<(), String> {
+    let Some(snapshot) = service
+        .get_for_window(window_label)
+        .map_err(orchestration_error)?
+    else {
+        return Ok(());
+    };
+    let Some(task) = snapshot.tasks.iter().find(|task| task.id == task_id) else {
+        return Ok(());
+    };
+    let Some(node) = task
+        .assigned_node_id
+        .as_ref()
+        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
+    else {
+        return Ok(());
+    };
+    let Some(run_id) = node.current_run_id.as_ref() else {
+        return Ok(());
+    };
+    let binding = WorkerBinding {
+        workspace_id: snapshot.id.clone(),
+        window_label: window_label.into(),
+        node_id: node.id.clone(),
+        task_id: task.id.clone(),
+        run_id: run_id.clone(),
+    };
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app.clone(),
+        state,
+        mcp_state.clone(),
+    ));
+    if adapter.is_active(&binding).await {
+        let _ = adapter.cancel_worker(&binding).await;
+    }
+    mcp_state
+        .revoke_run_capability(run_id)
+        .map_err(orchestration_error)
+}
+
+async fn launch_orchestration_task_for_ui(
+    app: &AppHandle,
+    window_label: &str,
+    state: AppState,
+    mcp_state: McpServerState,
+    service: &OrchestrationService<JsonOrchestrationRepository, TauriOrchestrationEventSink>,
+    task_id: &str,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    if let crate::application::orchestration_scheduler::LeaseOutcome::Queued { .. } = mcp_state
+        .orchestration_scheduler()
+        .acquire(task_id)
+        .map_err(orchestration_error)?
+    {
+        return service
+            .get_for_window(window_label)
+            .map_err(orchestration_error)?
+            .ok_or_else(|| "Orchestration workspace is unavailable.".to_string());
+    }
+    let snapshot = service
+        .get_for_window(window_label)
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
+    let task = snapshot
+        .tasks
+        .iter()
+        .find(|task| task.id == task_id)
+        .ok_or_else(|| "Task is unavailable.".to_string())?;
+    let node = task
+        .assigned_node_id
+        .as_ref()
+        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
+        .ok_or_else(|| "Assigned Child is unavailable.".to_string())?;
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app.clone(),
+        state,
+        mcp_state.clone(),
+    ));
+    let planned_run_id = uuid::Uuid::new_v4().to_string();
+    let outcome = adapter
+        .start_worker(WorkerAssignment {
+            workspace_id: snapshot.id.clone(),
+            window_label: window_label.into(),
+            worktree_path: snapshot.worktree_path.clone(),
+            node_id: node.id.clone(),
+            task_id: task.id.clone(),
+            attempt: task.attempt,
+            planned_run_id,
+            role: node.role.clone(),
+            objective: task.objective.clone(),
+            constraints: task.constraints.clone(),
+            expected_result: task.expected_result.clone(),
+            runtime_profile: WorkerRuntimeProfile {
+                agent_profile_id: std::env::var("AW_ORCHESTRATION_AGENT_PROFILE")
+                    .unwrap_or_else(|_| "codex".into()),
+                provider_id: "acp".into(),
+                model_id: None,
+                access_policy: AccessPolicy::ReadOnly,
+                supports_read_only: true,
+            },
+            mcp_capability: String::new(),
+        })
+        .await
+        .map_err(orchestration_error)?;
+    match outcome {
+        StartWorkerOutcome::Started { run_id } => service
+            .bind_child_run(window_label, &task.id, &node.id, &run_id)
+            .map_err(orchestration_error),
+        StartWorkerOutcome::Queued { .. } => service
+            .get_for_window(window_label)
+            .map_err(orchestration_error)?
+            .ok_or_else(|| "Orchestration workspace is unavailable.".to_string()),
+        StartWorkerOutcome::Failed {
+            code: _,
+            message,
+            retryable: _,
+        } => {
+            let _ = mcp_state.orchestration_scheduler().release(task_id);
+            Err(message)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn handoff_orchestration_coordinator(
+    app: AppHandle,
+    window: tauri::Window,
+    mcp_state: State<'_, McpServerState>,
+    input: CoordinatorHandoffRequest,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let previous_generation = {
+        let repository = JsonOrchestrationRepository::from_app(&app)?;
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
+            .get_for_window(window.label())
+            .map_err(orchestration_error)?
+            .and_then(|session| session.active_coordinator_generation_id)
+    };
+    let successor_run_id = input.successor_run_id.clone();
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
+        .handoff_coordinator(window.label(), input)
+        .map_err(orchestration_error)?;
+    if let Some(generation_id) = previous_generation {
+        mcp_state
+            .revoke_generation_capabilities(&session.id, &generation_id)
+            .map_err(orchestration_error)?;
+    }
+    if let Some(generation_id) = session.active_coordinator_generation_id.clone() {
+        mcp_state
+            .bind_run_principal(
+                crate::infrastructure::mcp::capability_registry::CapabilityPrincipal::coordinator(
+                    session.id.clone(),
+                    window.label(),
+                    successor_run_id,
+                    generation_id,
+                ),
+            )
+            .map_err(orchestration_error)?;
+    }
+    Ok(session)
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReplayRuntimeEventsInput {
+    run_id: String,
+    after_sequence: u64,
+}
+
+#[tauri::command]
+pub fn replay_orchestration_runtime_events(
+    journal: State<'_, InMemoryRuntimeEventJournal>,
+    input: ReplayRuntimeEventsInput,
+) -> RuntimeEventSnapshot {
+    journal.replay(&input.run_id, input.after_sequence)
+}
+
+#[tauri::command]
+pub async fn dispatch_orchestration_prompt(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+    input: DispatchPromptRequest,
+) -> Result<crate::domain::agent_orchestration::PromptDispatch, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    );
+    let mut dispatch = service
+        .record_prompt_dispatch(window.label(), input)
+        .map_err(orchestration_error)?;
+    let snapshot = service
+        .get_for_window(window.label())
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
+
+    for target in dispatch.targets.clone() {
+        let Some(node) = snapshot.nodes.iter().find(|node| {
+            node.id == target.panel_id
+                && node.kind == crate::domain::agent_orchestration::AgentNodeKind::Child
+        }) else {
+            continue;
+        };
+        let Some(task) = node
+            .assigned_task_id
+            .as_ref()
+            .and_then(|task_id| snapshot.tasks.iter().find(|task| task.id == *task_id))
+        else {
+            dispatch = service
+                .update_prompt_dispatch_target(
+                    window.label(),
+                    &dispatch.id,
+                    &target.request_id,
+                    PromptDispatchTargetStatus::Rejected,
+                    Some(("unknownTask".into(), "Child has no assigned task.".into())),
+                )
+                .map_err(orchestration_error)?;
+            continue;
+        };
+        let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+            app.clone(),
+            state.inner().clone(),
+            mcp_state.inner().clone(),
+        ));
+        let command = OrchestrationCommandService::new(repository.clone(), adapter)
+            .deliver(
+                window.label(),
+                DeliverTaskCommandRequest {
+                    request_id: target.request_id.clone(),
+                    task_id: task.id.clone(),
+                    kind: TaskCommandKind::Message,
+                    message: Some(dispatch.message.clone()),
+                    input_report_id: None,
+                    delivery: dispatch.delivery,
+                    source: TaskCommandSource::User,
+                    expected_task_revision: Some(task.revision),
+                },
+            )
+            .await;
+        dispatch = match command {
+            Ok(command)
+                if command.status
+                    == crate::domain::agent_orchestration::TaskCommandStatus::Accepted =>
+            {
+                service
+                    .update_prompt_dispatch_target(
+                        window.label(),
+                        &dispatch.id,
+                        &target.request_id,
+                        PromptDispatchTargetStatus::Delivered,
+                        None,
+                    )
+                    .map_err(orchestration_error)?
+            }
+            Ok(command) => service
+                .update_prompt_dispatch_target(
+                    window.label(),
+                    &dispatch.id,
+                    &target.request_id,
+                    PromptDispatchTargetStatus::Failed,
+                    command
+                        .failure
+                        .map(|failure| (format!("{:?}", failure.code), failure.message)),
+                )
+                .map_err(orchestration_error)?,
+            Err(error) => service
+                .update_prompt_dispatch_target(
+                    window.label(),
+                    &dispatch.id,
+                    &target.request_id,
+                    PromptDispatchTargetStatus::Failed,
+                    Some((format!("{:?}", error.code), error.message)),
+                )
+                .map_err(orchestration_error)?,
+        };
+    }
+    Ok(dispatch)
+}
+
+#[tauri::command]
+pub async fn recover_orchestration_workspace(
+    app: AppHandle,
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    mcp_state: State<'_, McpServerState>,
+) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
+    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let service = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    );
+    let snapshot = service
+        .get_for_window(window.label())
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())?;
+    let mut live_run_ids = Vec::new();
+    for run_id in snapshot
+        .nodes
+        .iter()
+        .filter_map(|node| node.current_run_id.as_ref())
+    {
+        if state.active_owner_of(run_id).await.as_deref() == Some(window.label()) {
+            live_run_ids.push(run_id.clone());
+        }
+    }
+    let reconciled = service
+        .reconcile_runtime(window.label(), &live_run_ids)
+        .map_err(orchestration_error)?;
+    let active_task_ids = reconciled
+        .tasks
+        .iter()
+        .filter(|task| {
+            task.status == crate::domain::agent_orchestration::TaskStatus::Running
+                && task
+                    .assigned_node_id
+                    .as_ref()
+                    .and_then(|node_id| reconciled.nodes.iter().find(|node| node.id == *node_id))
+                    .and_then(|node| node.current_run_id.as_ref())
+                    .is_some_and(|run_id| live_run_ids.contains(run_id))
+        })
+        .map(|task| task.id.clone())
+        .collect::<Vec<_>>();
+    let ready_task_ids = reconciled
+        .tasks
+        .iter()
+        .filter(|task| task.status == crate::domain::agent_orchestration::TaskStatus::Ready)
+        .map(|task| task.id.clone())
+        .collect::<Vec<_>>();
+    mcp_state
+        .orchestration_scheduler()
+        .reconcile(&active_task_ids, &ready_task_ids)
+        .map_err(orchestration_error)?;
+    let _ = repository.pending_outbox().map_err(orchestration_error)?;
+    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
+        app.clone(),
+        state.inner().clone(),
+        mcp_state.inner().clone(),
+    ));
+    OrchestrationCommandService::new(repository.clone(), adapter.clone())
+        .reconcile_pending(window.label())
+        .map_err(orchestration_error)?;
+    let dispatcher = CoordinatorNotificationDispatcher::new(repository.clone(), adapter);
+    dispatcher
+        .recover_interrupted(window.label())
+        .map_err(orchestration_error)?;
+    let dispatch_app = app.clone();
+    let dispatch_repository = repository.clone();
+    let dispatch_window_label = window.label().to_string();
+    tokio::spawn(async move {
+        let _ = dispatcher.dispatch_pending(&dispatch_window_label).await;
+        emit_orchestration_runtime_update(
+            &dispatch_app,
+            &dispatch_repository,
+            &dispatch_window_label,
+            "notificationRecovery",
+        );
+    });
+    service
+        .get_for_window(window.label())
+        .map_err(orchestration_error)?
+        .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())
+}
+
+fn emit_orchestration_runtime_update(
+    app: &AppHandle,
+    repository: &JsonOrchestrationRepository,
+    window_label: &str,
+    reason: &str,
+) {
+    let service = OrchestrationService::new(
+        repository.clone(),
+        TauriOrchestrationEventSink::new(app.clone()),
+    );
+    if let Ok(Some(session)) = service.get_for_window(window_label) {
+        let _ = TauriOrchestrationEventSink::new(app.clone()).emit(
+            window_label,
+            OrchestrationEvent {
+                workspace_id: session.id,
+                revision: session.revision,
+                reason: reason.into(),
+                task_id: None,
+                node_id: None,
+            },
+        );
+    }
+}
 
 pub struct WorktreeWatcherState {
     handles: Mutex<HashMap<String, WorktreeWatchHandle>>,
@@ -693,35 +1555,56 @@ fn open_url_with_system_browser(url: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to open external URL: {error}"))
 }
 
-/// 클라이언트가 보낸 run 요청을 실행 직전 형태로 정규화한다. run_id를 보장하고
-/// 아직 지원하지 않는 필드(workspace/checkout)는 비운다. ralph_loop은 안전 범위로
-/// 정규화해 그대로 전달한다.
-/// 단, resume_session_id/resume_policy는 **보존**해야 기존 세션 재사용이 동작한다.
-fn normalize_run_request(mut request: AgentRunRequest) -> AgentRunRequest {
-    if request.run_id.as_deref().is_none_or(str::is_empty) {
-        request.run_id = Some(uuid::Uuid::new_v4().to_string());
+fn resolve_agent_run_launch_principal(
+    app: &AppHandle,
+    window_label: &str,
+    panel_id: Option<&str>,
+    run_id: &str,
+) -> Result<Option<CapabilityPrincipal>, String> {
+    if panel_id != Some(MAIN_AGENT_NODE_ID) {
+        return Ok(None);
     }
-    request.workspace_id = None;
-    request.checkout_id = None;
-    request.ralph_loop = request.ralph_loop.map(RalphLoopRequest::sanitized);
-    request
+
+    let repository = JsonOrchestrationRepository::from_app(app)?;
+    let session =
+        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
+            .get_for_window(window_label)
+            .map_err(orchestration_error)?;
+    coordinator_principal_for_bound_session(panel_id, run_id, window_label, session.as_ref())
 }
 
-fn inject_mcp_launch_env(request: &mut AgentRunRequest, env: McpLaunchEnv) {
-    let agent_env = request.agent_env.get_or_insert_with(BTreeMap::new);
-    agent_env.insert(AW_MCP_URL_ENV.to_string(), env.url.clone());
-    agent_env.insert(AW_MCP_TOKEN_ENV.to_string(), env.token.clone());
-    agent_env.insert(AW_MCP_RUN_ID_ENV.to_string(), env.run_id.clone());
-    request.mcp_servers.push(env.server_config());
-    request.goal = with_mcp_agent_instructions(&request.goal, &env.agent_instructions());
-}
+fn coordinator_principal_for_bound_session(
+    panel_id: Option<&str>,
+    run_id: &str,
+    window_label: &str,
+    session: Option<&crate::domain::agent_orchestration::OrchestrationSession>,
+) -> Result<Option<CapabilityPrincipal>, String> {
+    if panel_id != Some(MAIN_AGENT_NODE_ID) {
+        return Ok(None);
+    }
+    let session =
+        session.ok_or_else(|| "Main Coordinator workspace is unavailable.".to_string())?;
+    let generation_id = session
+        .active_coordinator_generation_id
+        .clone()
+        .ok_or_else(|| "Main Coordinator generation must be bound before launch.".to_string())?;
+    let generation = session
+        .generations
+        .iter()
+        .find(|generation| generation.id == generation_id)
+        .ok_or_else(|| "Active Main Coordinator generation is unavailable.".to_string())?;
+    if generation.run_id != run_id {
+        return Err(
+            "Main Coordinator generation does not match the run being launched.".to_string(),
+        );
+    }
 
-fn with_mcp_agent_instructions(goal: &str, instructions: &str) -> String {
-    format!(
-        "{instructions}\n---\n\nUser request:\n{goal}",
-        instructions = instructions.trim(),
-        goal = goal.trim()
-    )
+    Ok(Some(CapabilityPrincipal::coordinator(
+        session.id.clone(),
+        window_label,
+        run_id,
+        generation_id,
+    )))
 }
 
 #[tauri::command]
@@ -731,13 +1614,22 @@ pub async fn start_agent_run(
     state: State<'_, AppState>,
     mcp_state: State<'_, McpServerState>,
     request: AgentRunRequest,
+    panel_id: Option<String>,
 ) -> Result<AgentRun, String> {
     let mut request = normalize_run_request(request);
     let run_id = request
         .run_id
         .clone()
         .ok_or_else(|| "agent run id is unavailable after normalization".to_string())?;
-    inject_mcp_launch_env(&mut request, mcp_state.launch_env(&run_id));
+    let launch_principal =
+        resolve_agent_run_launch_principal(&app, window.label(), panel_id.as_deref(), &run_id)?;
+    let launch_env = match launch_principal {
+        Some(principal) => mcp_state
+            .launch_env_for_principal(principal)
+            .map_err(orchestration_error)?,
+        None => mcp_state.launch_env(&run_id),
+    };
+    inject_mcp_launch_env(&mut request, launch_env);
     let catalog = ConfigurableAgentCatalog::from_env();
     if request
         .agent_command
@@ -922,6 +1814,85 @@ mod tests {
             context_size: None,
             ralph_loop: None,
         }
+    }
+
+    fn coordinator_session(
+        run_id: &str,
+    ) -> crate::domain::agent_orchestration::OrchestrationSession {
+        use crate::domain::agent_orchestration::{
+            CoordinatorGeneration, CoordinatorGenerationStatus,
+        };
+
+        let mut session = crate::domain::agent_orchestration::OrchestrationSession::new(
+            "workspace-1",
+            "/repo",
+            "window-1",
+            "2026-07-27T00:00:00Z",
+        );
+        session.active_coordinator_generation_id = Some("generation-1".into());
+        session.generations.push(CoordinatorGeneration {
+            id: "generation-1".into(),
+            ordinal: 1,
+            main_node_id: MAIN_AGENT_NODE_ID.into(),
+            run_id: run_id.into(),
+            previous_generation_id: None,
+            status: CoordinatorGenerationStatus::Active,
+            started_at: "2026-07-27T00:00:00Z".into(),
+            ended_at: None,
+            handoff_summary: None,
+            successor_generation_id: None,
+        });
+        session
+    }
+
+    #[test]
+    fn main_launch_uses_prebound_coordinator_principal() {
+        let session = coordinator_session("run-main");
+
+        let principal = coordinator_principal_for_bound_session(
+            Some(MAIN_AGENT_NODE_ID),
+            "run-main",
+            "window-1",
+            Some(&session),
+        )
+        .unwrap()
+        .expect("Main should receive a Coordinator principal");
+
+        assert_eq!(
+            principal.actor_kind,
+            crate::infrastructure::mcp::capability_registry::CapabilityActorKind::Coordinator
+        );
+        assert_eq!(principal.run_id, "run-main");
+        assert_eq!(principal.generation_id.as_deref(), Some("generation-1"));
+    }
+
+    #[test]
+    fn main_launch_rejects_an_unbound_successor_run() {
+        let session = coordinator_session("run-current");
+
+        let error = coordinator_principal_for_bound_session(
+            Some(MAIN_AGENT_NODE_ID),
+            "run-successor",
+            "window-1",
+            Some(&session),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("does not match"));
+    }
+
+    #[test]
+    fn non_main_launch_keeps_legacy_principal_path() {
+        let session = coordinator_session("run-main");
+        let principal = coordinator_principal_for_bound_session(
+            Some("extra-agent-run-1"),
+            "run-extra",
+            "window-1",
+            Some(&session),
+        )
+        .unwrap();
+
+        assert!(principal.is_none());
     }
 
     #[test]
