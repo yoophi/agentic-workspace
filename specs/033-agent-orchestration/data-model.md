@@ -281,8 +281,10 @@ Rules:
 
 `manual | onAttention | always | onFailure | onCompletion`
 
-v1 기본값은 `onAttention`이며, 실제 panel open은 사용자 확인 후 실행한다. `always` 등
-후속 정책도 focus stealing은 허용하지 않는다.
+v1에서는 시스템이 역할에 따라 값을 배정하고 사용자 편집 수단을 제공하지 않는다(FR-046).
+Main Node는 `always`, 자동 생성 Child Node는 `onAttention`으로 생성된다. 실제 panel open은
+사용자 확인 후 실행하며, `always`를 포함해 어떤 정책 값도 focus stealing을 허용하지 않는다
+(FR-014).
 
 ## `TaskReport`
 
@@ -323,7 +325,7 @@ Child가 Main에게 보내는 구조화된 보고다.
 | `message` | string? | message/inputResponse에서 필수 |
 | `source` | `user \| coordinator \| recovery` | audit |
 | `status` | `pending \| dispatching \| accepted \| failed \| cancelled` | 전달 상태 |
-| `failure` | `CommandFailure?` | typed retry 정보 |
+| `failure` | `CommandFailure?` | typed retry 정보. `{ code, message, retryable }`이며 `code`는 `TaskFailure`·dispatch `failureCode`와 같은 `OrchestrationErrorCode` 집합을 쓴다 |
 | `createdAt` | timestamp | server 생성 |
 | `updatedAt` | timestamp | 상태 변경 |
 

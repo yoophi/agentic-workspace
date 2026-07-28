@@ -40,7 +40,8 @@ MCP handler가 worker를 직접 조립하거나 상태 전이만 별도로 수�
 ### Start outcome
 
 - `started { runId }`
-- `queued { reason: concurrencyLimit }`
+- `queued { position }` — FIFO 대기 순번. 상한 초과 자체를 오류로 반환할 때의 code는
+  `capacityExceeded`다.
 - `failed { code, message, retryable }`
 
 ## 시작 transaction과 lease

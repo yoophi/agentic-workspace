@@ -1,6 +1,6 @@
 # Implementation Plan: Main Coordinator 기반 에이전트 오케스트레이션
 
-**Branch**: `main` | **Date**: 2026-07-27 | **Spec**: [spec.md](./spec.md)
+**Branch**: `033-agent-orchestration` | **Date**: 2026-07-27 | **Last Updated**: 2026-07-29 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `specs/033-agent-orchestration/spec.md`
 
@@ -44,7 +44,7 @@ Serde/serde_json, existing `acp-agent-core` run/session primitives, existing
 **Storage**: app data의 atomic JSON `orchestration-sessions.json`에 workspace aggregate,
 revision, tasks, reports, TaskCommand outbox, CoordinatorNotification inbox/outbox,
 dispatch와 idempotency 결과를 저장한다. active run timeline rehydration은 window-scoped
-bounded in-memory event journal을 사용한다.
+in-memory event journal을 사용하며 run별 최근 512 event를 보존한다(FR-043).
 
 **Testing**: Vitest/React Testing Library for pure reducers, controller and UI contracts;
 Storybook build/a11y states; Rust unit/application/infrastructure tests for state machines,
@@ -58,7 +58,7 @@ Tauri command/domain 계약은 유지하되 1차 수동 검증은 macOS AW 개�
 
 **Performance Goals**: local Composer/Activity Rail interaction 200ms 이내; task/report
 변경 후 1초 이내 UI 반영; 목표 submit 후 30초 이내 세 Child의 생성·배정 확인; 8 Node와
-4 active run 대표 시나리오에서 responsive UI 유지; bounded MCP wait 최대 30초;
+4 active run 대표 시나리오에서 각 상호작용 200ms 이내(SC-016); bounded MCP wait 최대 30초;
 panel 승격 후 journal 보존 범위의 timeline을 1초 이내 표시; Child
 input/result/blocked notification을 active Main과 UI에 1초 이내 반영
 
@@ -70,11 +70,18 @@ revision; 명시적 result만 completion; Main generation 자동 인계 금지; 
 runtime controller 하나; panel mount state는 authoritative run
 binding을 덮어쓸 수 없음; snapshot/live event는 sequence로 exact-once 적용; runtime
 delivery accepted 전 task 상태 선행 전이 금지; full-payload idempotency; attempt/run fence;
-UI와 MCP runtime command parity
+UI와 MCP runtime command parity; Node 상한 8개(FR-045)와 run별 event 보존 512개(FR-043);
+승격 정책은 역할별 시스템 배정이며 사용자 편집 없음(FR-046); artifact는 workspace 상대
+경로만 허용(FR-047); 모든 거부는 구분 가능한 사유와 `retryable`을 반환하고 상태를 바꾸지
+않음(FR-048)
 
 **Scale/Scope**: Worktree Session workspace당 Node 최대 8개, 대표 active run Main+Child
 3개, 작은 task DAG와 구조화 reports; `apps/agentic-workbench`와 `docs/specs`만 변경하며
 `packages/*`, `crates/*`, 다른 앱은 변경하지 않음
+
+**Non-scope**: spec.md의 `Out of Scope` 절을 그대로 따른다. 특히 다단계 자식 계층, 창 간
+오케스트레이션, 자동 Child의 파일 쓰기, 사용자 편집 승격 정책, 공급자 내장 하위 에이전트
+노출, crash 이후 전체 timeline 복원, 실패 시 자동 revert는 이 계획의 설계 대상이 아니다.
 
 ## Constitution Check
 
@@ -89,8 +96,10 @@ UI와 MCP runtime command parity
   `components/ui` 경계를 따른다.
 - **Hexagonal Tauri Backend Architecture**: PASS. 관계·상태 전이는
   `domain/agent_orchestration.rs`, scheduler/권한/use case는 `application`,
-  repository/worker/event journal은 `ports`, JSON/ACP/Tauri event/MCP는
-  `infrastructure`, Tauri command는 `inbound`에서 service에 위임한다.
+  repository/worker/event journal port는 최상위 `ports` 모듈, JSON/ACP/Tauri event/MCP는
+  `infrastructure`, Tauri command는 `inbound`에서 service에 위임한다. 헌법 III(v1.0.1)은
+  전용 `ports` 모듈을 허용하며 이 앱은 해당 위치를 일관되게 사용하고 `ports`에는 adapter를
+  두지 않는다.
 - **Shared Core Before Shared UI**: PASS. task state machine, relationship validation,
   dispatch reducer와 runtime mapping을 pure app-local core로 먼저 구현한다. 두 번째
   소비자가 없으므로 새 shared package/UI는 만들지 않는다.
@@ -132,7 +141,8 @@ specs/033-agent-orchestration/
 apps/agentic-workbench/src/
 ├── pages/project-worktree-session/ui/
 │   ├── project-worktree-session-page.tsx
-│   └── project-worktree-session-page.test.tsx
+│   ├── project-worktree-session-page.test.tsx
+│   └── project-worktree-session-page.stories.tsx
 ├── entities/agent-orchestration/
 │   ├── api/
 │   │   ├── orchestration-repository.ts
@@ -145,7 +155,9 @@ apps/agentic-workbench/src/
 │       ├── relationships.ts
 │       ├── relationships.test.ts
 │       ├── prompt-dispatch.ts
-│       └── prompt-dispatch.test.ts
+│       ├── prompt-dispatch.test.ts
+│       ├── task-communication.ts
+│       └── task-communication.test.ts
 ├── entities/agent-run/
 │   └── model/
 │       ├── agent-run-workspace.ts
@@ -162,21 +174,26 @@ apps/agentic-workbench/src/
 │   │   └── prompt-target-selection.test.ts
 │   └── ui/
 │       ├── agent-run-panel.tsx
+│       ├── agent-run-panel.test.tsx
 │       ├── agent-run-runtime-host.tsx
+│       ├── agent-run-runtime-host.test.tsx
 │       ├── worktree-agent-run-area.tsx
+│       ├── worktree-agent-run-area.test.tsx
 │       ├── workspace-prompt-composer.tsx
 │       ├── workspace-prompt-composer.test.tsx
+│       ├── workspace-prompt-composer.stories.tsx
 │       ├── prompt-dispatch-status.tsx
 │       ├── task-activity-rail.tsx
 │       ├── task-activity-item.tsx
 │       ├── task-activity-rail.test.tsx
+│       ├── task-activity-rail.stories.tsx
 │       ├── coordinator-handoff-dialog.tsx
-│       └── *.test.tsx
-└── stories/
-│   ├── atoms.stories.tsx
-│   ├── molecules.stories.tsx
-│   ├── organisms.stories.tsx
-│   └── pages.stories.tsx
+│       ├── coordinator-handoff-dialog.test.tsx
+│       └── orchestration-workspace.stories.tsx
+└── shared/storybook/
+    ├── agent-orchestration-sample-data.ts
+    ├── agent-orchestration-atoms.stories.tsx
+    └── agent-orchestration-molecules.stories.tsx
 
 apps/agentic-workbench/scripts/
 ├── acp-orchestration-smoke-agent.mjs
@@ -230,9 +247,24 @@ Tauri UI와 MCP inbound adapter는 동일한 `orchestration_command_service`를 
 command/notification dispatcher는 repository lock 밖에서 runtime port를 호출하고 durable
 outbox receipt로 crash와 retry를 조정한다.
 
+Storybook 배치는 두 위치로 나눈다. 단일 컴포넌트에 종속된 organism/page 사례는 해당
+컴포넌트 옆(`features/agent-run/ui/*.stories.tsx`,
+`pages/project-worktree-session/ui/*.stories.tsx`)에 두고, 여러 컴포넌트가 공유하는
+atom/molecule 사례와 결정적 fixture는 `shared/storybook/agent-orchestration-*`에 둔다.
+기존 앱 전역 `src/stories/*`는 이 기능에서 변경하지 않는다.
+
 ## Complexity Tracking
 
-No constitution violations.
+현재 미해결 위반이나 편차가 없다.
+
+### 해소된 항목
+
+| ID | 편차였던 내용 | 해소 방법 |
+| --- | --- | --- |
+| C1 | 헌법 III v1.0.0은 "순수 도메인 모델과 **port**는 `domain`에 둔다"고 규정했으나, 이 기능의 `OrchestrationRepositoryPort`, `AgentWorkerPort`, `CoordinatorNotificationPort`, `OrchestrationEventSinkPort`, `RuntimeEventJournalPort`는 앱 전역 관례에 따라 최상위 `apps/agentic-workbench/src-tauri/src/ports/`에 있었다. | 2026-07-29 헌법 **v1.0.1** PATCH 개정으로 해소. 개정된 원칙 III은 port를 `domain` 또는 전용 `ports` 모듈에 둘 수 있게 하고(앱별로 한 위치를 일관되게 사용), `ports`에는 port 정의만 두며 `domain`·`ports` 모두 Tauri·파일시스템·영속화·UI에 의존하지 않아야 한다는 제약을 유지한다. 이 기능의 배치는 개정된 문구를 그대로 충족한다. |
+
+C1은 이 기능만의 선택이 아니라 앱 전역 관례와 헌법 문구의 불일치였기 때문에, 코드 이동이
+아니라 헌법 명확화로 해결했다. `packages/*`·`crates/*`와 다른 앱은 변경하지 않았다.
 
 ## Phase 0 Research
 
@@ -254,7 +286,9 @@ No constitution violations.
 - FIFO capacity scheduling과 explicit Coordinator generation handoff
 - provider-native orchestration은 후속 adapter로 격리
 
-모든 기술적 unknown은 해결되었으며 `NEEDS CLARIFICATION` 항목이 없다.
+모든 기술적 unknown은 해결되었으며 `NEEDS CLARIFICATION` 항목이 없다. 2026-07-29 spec 보강은
+새로운 기술적 unknown을 만들지 않았다. FR-043–FR-048은 이미 결정·구현된 경계값과 검증 규칙을
+명세로 끌어올린 것이므로 추가 research 항목이 없다.
 
 ## Phase 1 Design
 
@@ -270,6 +304,23 @@ No constitution violations.
   단일 Composer, Activity Rail, 승격/분리, runtime rehydration과 tab/tile 회귀
 - [quickstart.md](./quickstart.md): deterministic smoke Worker와 end-to-end 검증 시나리오
 
+### 2026-07-29 재평가 (spec 보강 반영)
+
+spec의 FR-043–FR-048, SC-016·SC-017과 신규 Key Entity 5개를 기준으로 Phase 1 산출물을
+재검토했고 다음을 확인·수정했다.
+
+- `data-model.md`는 `TaskCommand`, `CoordinatorNotification`, `RuntimeEventJournal`,
+  `RuntimeViewBinding`, `IdempotencyRecord`를 이미 정의하고 있어 신규 Key Entity와 일치한다.
+  `PromotionPolicy`만 FR-046의 역할별 배정 규칙을 반영해 수정했다.
+- `contracts/orchestration-service.md`의 두 가지 구현 불일치를 정정했다. (1) 별도
+  `promote_orchestration_task`/`detach_orchestration_task_panel`이 아니라 Node 대상의 단일
+  `set_orchestration_presentation`이 실제 계약이다. (2) 세분화된 error code 23개 나열을
+  실제 `{ code, message, retryable }` 구조와 12개 분류로 교체하고 FR별 대표 상황을 매핑했다.
+- 새 요구사항 중 설계 변경이 필요한 항목은 없다. FR-043–FR-047은 이미 구현된 경계값·검증
+  로직의 명세화이고, FR-022의 사유 세분화와 FR-044·FR-048의 사용자 안내만 보완이 필요해
+  `tasks.md` Phase 14(T150–T162)로 분리했다.
+- SC-016·SC-017은 새 계약을 요구하지 않으며 측정·거부 시나리오 검증으로 처리한다.
+
 ## Post-Design Constitution Check
 
 - **Monorepo Boundary First**: PASS. 최종 설계의 source 변경은 AW app-local이며
@@ -278,7 +329,7 @@ No constitution violations.
   screen composition과 UI primitive의 FSD 책임이 source tree와 UI contract에 명시됐다.
 - **Hexagonal Tauri Backend Architecture**: PASS. domain/application/ports/inbound/
   infrastructure 경계와 Tauri/MCP가 공유할 command service, worker/notification port가
-  네 계약에 명시됐다.
+  네 계약에 명시됐다. port 모듈 위치는 헌법 III(v1.0.1)이 허용하는 전용 `ports` 모듈이다.
 - **Shared Core Before Shared UI**: PASS. 관계, task/dispatch state machine과 controller를
   pure core로 정의했고 UI는 AW에 유지한다.
 - **Atomic Cross-App Verification**: N/A. 공유 package/crate 변경이 없다.
@@ -288,10 +339,20 @@ No constitution violations.
   canonical worktree/window/run/node/task/generation scope, artifact path/UTF-8/size,
   read-only 위반, terminal race, runtime snapshot/live sequence dedupe, panel mount의
   stale binding overwrite 방지, full-payload idempotency, attempt/run fencing,
-  UI/MCP command parity와 outbox crash recovery 검증이 계획됐다.
+  UI/MCP command parity와 outbox crash recovery 검증이 계획됐다. 2026-07-29 재평가에서
+  FR-043–FR-048과 SC-016·SC-017의 경계값·거부·측정 검증을 tasks.md Phase 14로 추가했다.
+
+### 2026-07-29 헌법 재점검 결과
+
+spec 보강 이후 다시 평가했고 새로운 위반은 없다. 유일하게 남아 있던 C1(port 모듈 위치)은
+같은 날 헌법 v1.0.1 PATCH 개정으로 해소되어 현재 미해결 편차가 없다. 신규 FR-047(artifact
+경로 정규화·경계 이탈 거부)은 Engineering Standards의 파일 접근 검증 요구를 명시적으로
+강화하는 방향이므로 새 편차를 만들지 않는다. `packages/*`와 `crates/*` 무변경 원칙도 그대로
+유지된다. 이 계획은 헌법 **v1.0.1**을 기준으로 점검했다.
 
 ## Agent Context Update
 
-현재 SpecKit 설치에는 `.specify/scripts/bash/update-agent-context.sh`가 없다. 사용 가능한
-scripts를 확인했으며 agent context 파일을 임의 생성하거나 수정하지 않는다. 구현 컨텍스트는
-본 plan과 `AGENTS.md`를 기준으로 한다.
+현재 SpecKit 설치에는 `.specify/scripts/bash/update-agent-context.sh`가 없다(2026-07-29
+재확인: `check-prerequisites.sh`, `common.sh`, `create-new-feature.sh`, `setup-plan.sh`,
+`setup-tasks.sh`만 존재). agent context 파일을 임의 생성하거나 수정하지 않는다. 구현
+컨텍스트는 본 plan과 `AGENTS.md`를 기준으로 한다.

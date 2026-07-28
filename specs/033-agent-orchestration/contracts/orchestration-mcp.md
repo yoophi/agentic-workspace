@@ -67,8 +67,8 @@ Rules:
 - Node 생성, task 생성, assignment와 idempotency record는 한 aggregate mutation이다.
 - `preferredNodeId`는 같은 Main의 기존 idle direct Child만 허용한다.
 - child count/capacity limit이면 task는 `ready`로 남고 이유를 반환한다.
-- caller가 active Main generation이 아니면 `forbiddenActor` 또는
-  `staleCoordinatorGeneration`이다.
+- caller가 active Main generation이 아니면 `unauthorized`다. 대상 generation 자체를 찾을 수
+  없으면 `notFound`다.
 
 ### `aw_assign_child_task`
 
@@ -283,7 +283,7 @@ Task status를 바꾸지 않는 구조화되지 않은 짧은 메시지다. 형�
     }
   ],
   "structuredContent": {
-    "code": "forbiddenActor",
+    "code": "unauthorized",
     "message": "Only the active Main Coordinator can create child tasks.",
     "retryable": false
   },

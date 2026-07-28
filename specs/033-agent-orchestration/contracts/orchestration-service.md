@@ -33,7 +33,7 @@ Rules:
 - 새 창은 기본적으로 새 `workspaceId`를 발급한다.
 - `resumeWorkspaceId`는 같은 canonical worktree의 unbound/recoverable workspace를
   사용자가 명시적으로 선택한 경우에만 허용한다.
-- 같은 workspace가 다른 live window에 bound되어 있으면 `workspaceAlreadyBound`다.
+- 같은 workspace가 다른 live window에 bound되어 있으면 `scopeMismatch`다.
 - Main Node `main-agent-run`을 정확히 하나 생성한다.
 
 ### `get_orchestration_workspace`
@@ -107,7 +107,9 @@ Response:
 
 Rules:
 
-- active Coordinator Generation이 없으면 `inactiveCoordinator`다.
+- active Coordinator Generation이나 Main run이 없으면 `coordinatorInactive`이고 `retryable`은
+  `false`다. Main run이 있으나 요청을 받을 수 없으면 `coordinatorBusy`이고 `retryable`은
+  `true`다(FR-022).
 - root task와 delegate dispatch를 한 aggregate mutation으로 저장한다.
 - 저장 후 Main run에 Coordinator prompt를 보낸다.
 - Main은 MCP의 child task 도구로 하위 작업을 생성한다.
@@ -147,7 +149,7 @@ Response:
       "panelId": "extra-agent-run-2",
       "requestId": "uuid-2",
       "status": "rejected",
-      "failureCode": "staleTargetRun",
+      "failureCode": "workerUnavailable",
       "failureReason": "Target run changed."
     }
   ]
@@ -207,7 +209,8 @@ Rules:
 - UI와 MCP는 같은 application command use case를 사용한다.
 - active worker가 있으면 durable cancel command를 저장하고 worker cancel을 요청한 뒤
   task를 terminal `cancelled`로 저장한다.
-- 완료가 먼저 확정된 race에서는 `alreadyCompleted`를 반환한다.
+- 완료가 먼저 확정된 race에서는 `invalidTransition`을 반환한다(terminal task는 재전이하지
+  않는다).
 - cancel 뒤 늦은 result는 partial report로 보존하지만 상태를 completed로 되돌리지 않는다.
 
 ### `retry_orchestration_task`
@@ -316,40 +319,33 @@ Rules:
 - 사용자 선택 전에는 task owner generation을 바꾸지 않는다.
 - stale old Main capability는 새 generation의 task를 제어할 수 없다.
 
-### `promote_orchestration_task`
+### `set_orchestration_presentation`
+
+승격과 분리를 하나의 command로 처리한다. 대상은 task가 아니라 Node이며 목표 presentation
+상태를 직접 지정한다.
 
 Request:
 
 ```json
 {
   "requestId": "uuid",
-  "taskId": "task-reviewer",
-  "placement": "right",
-  "anchorPanelId": "main-agent-run",
+  "nodeId": "child-reviewer",
+  "presentationStatus": "panel",
   "expectedRevision": 21
 }
 ```
 
 Rules:
 
-- `placement`은 `right | below`다.
-- Node와 run binding을 유지하고 presentation만 `promoting → panel`로 변경한다.
-- frontend가 기존 tile reducer로 leaf를 연결한 뒤 acknowledge한다.
-- 명시적 사용자 open이므로 성공 시 새 panel focus를 허용한다.
-
-### `detach_orchestration_task_panel`
-
-Request:
-
-```json
-{
-  "requestId": "uuid",
-  "taskId": "task-reviewer",
-  "expectedRevision": 22
-}
-```
-
-presentation과 layout leaf만 제거한다. worker cancel command를 호출하지 않는다.
+- `presentationStatus`는 `PresentationStatus` 값이며 승격은 `panel`, 분리는 `background`,
+  종료 표시는 `detached`를 사용한다.
+- Node와 run binding을 유지하고 presentation 축만 변경한다. `currentRunId`는 바뀌지 않는다.
+- tile 배치(`placement`, anchor panel 선택)는 backend 관심사가 아니다. frontend가 기존 tile
+  reducer로 leaf를 연결·제거한 뒤 acknowledge한다.
+- 명시적 사용자 open이므로 `panel`로의 전이 성공 시 새 panel focus를 허용한다. 그 외 전이는
+  현재 초점을 바꾸지 않는다.
+- `background`/`detached`로의 전이는 worker cancel command를 호출하지 않는다. 취소는
+  `cancel_orchestration_task`로만 수행한다.
 
 ## Backend → Frontend events
 
@@ -454,25 +450,33 @@ backend가 `promoting`을 저장한 뒤 frontend layout leaf 연결을 요청한
 
 ## Error codes
 
-- `workspaceNotBootstrapped`
-- `workspaceAlreadyBound`
-- `scopeMismatch`
-- `revisionConflict`
-- `unknownCoordinator`
-- `inactiveCoordinator`
-- `staleCoordinatorGeneration`
-- `unknownNode`
-- `unknownTask`
-- `staleTaskRevision`
-- `invalidTransition`
-- `forbiddenActor`
-- `staleSourceRun`
-- `staleTargetRun`
-- `readOnlyViolation`
-- `concurrencyLimit`
-- `duplicateConflict`
-- `workerUnavailable`
-- `alreadyCompleted`
-- `invalidArtifact`
-- `windowUnavailable`
-- `persistenceFailed`
+오류는 세분화된 code 나열이 아니라 `{ code, message, retryable }` 구조로 반환한다.
+`code`는 처리 분기를 위한 안정적 분류이고, `message`는 사용자에게 보여 줄 구체적 사유,
+`retryable`은 FR-048의 재시도 가능 여부다.
+
+| `code` | 의미 | 대표 상황 |
+| --- | --- | --- |
+| `invalidInput` | 입력이 계약을 위반함 | 빈 목표, 프롬프트 16KiB 초과(FR-044), 필수 필드 누락 |
+| `invalidTopology` | 관계 규칙 위반 | Main 중복, 손자 생성, 형제 배정 시도 |
+| `invalidTransition` | 허용되지 않는 상태 전이 | terminal task 재전이, 순서 역행 |
+| `scopeMismatch` | 소유 범위 불일치 | 다른 window·worktree 대상, owner 아닌 caller |
+| `revisionConflict` | 기대 revision 불일치 | 동시 mutation 경쟁 |
+| `duplicateConflict` | 같은 request ID에 다른 payload | FR-021의 idempotency 충돌 |
+| `notFound` | 대상 없음 | 미지의 workspace·node·task·report |
+| `unauthorized` | 권한 없음 또는 전제 미충족 | 폐기된 capability, active Main generation 없음(FR-022) |
+| `capacityExceeded` | 상한 초과 | Node 8개 초과(FR-045), 동시 실행 상한(FR-027) |
+| `runtimeLost` | runtime 연결 유실 | journal/worker 유실 후 조회 |
+| `workerUnavailable` | worker 실행·전달 불가 | launch 실패, 전달 거부 |
+| `readOnlyViolation` | 읽기 전용 경계 위반 | mutation tool 호출, worktree 변경 감지(FR-028) |
+| `coordinatorInactive` | Main run이 없어 오케스트레이션을 시작할 수 없음 | active generation 또는 Main run 없음(FR-022). `retryable`은 `false` |
+| `coordinatorBusy` | Main run은 있으나 지금 요청을 받을 수 없음 | Main이 통지·명령 전달을 거절(FR-022). `retryable`은 `true` |
+
+Rules:
+
+- `retryable`은 code가 아니라 상황별로 정한다. 같은 `workerUnavailable`도 일시적 실패는
+  `true`, 프로필 자체가 불가능한 경우는 `false`다. 예외적으로 `coordinatorInactive`는 항상
+  `false`(사용자가 Main을 시작해야 함), `coordinatorBusy`는 항상 `true`다.
+- UI는 `code`로 분기하고 사용자에게는 `message`를 표시한다. `message`만으로 분기하지 않는다.
+- per-target dispatch 실패의 `failureCode`와 `CommandFailure`/`TaskFailure`의 `code`는 모두
+  같은 `OrchestrationErrorCode` 집합을 사용한다. 별도의 실패 code 집합은 없으며, 세 곳 모두
+  `{ code, message, retryable }` 형태를 공유한다.
