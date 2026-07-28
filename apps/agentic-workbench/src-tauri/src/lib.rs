@@ -10,11 +10,12 @@ use inbound::tauri_commands::{
     create_project, create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt,
     get_agent_run_settings, get_goal, get_worktree_changes, get_worktree_commit_detail,
     get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
-    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
-    list_git_remotes, list_git_worktrees, list_projects, list_provider_sessions,
-    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
-    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
-    record_goal_progress, respond_agent_permission, save_agent_run_settings, send_agent_exchange,
+    get_worktree_workspace_layout, list_agent_exchanges, list_agent_tool_command_candidates,
+    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_projects,
+    list_provider_sessions, list_saved_prompts, list_worktree_changes, list_worktree_files,
+    list_worktree_git_history, open_external_url, open_settings_window, open_worktree_window,
+    read_worktree_text_file, record_goal_progress, respond_agent_permission,
+    save_agent_run_settings, save_worktree_workspace_layout, send_agent_exchange,
     send_prompt_to_run, set_run_permission_mode, start_agent_run, start_worktree_watcher,
     steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace, update_goal, update_project,
     update_saved_prompt,
@@ -85,10 +86,22 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            // 세션 창의 위치·크기를 Worktree별로 저장한다. 이동·리사이즈는 드래그 중 연속으로
+            // 들어오므로 간격을 두고 저장하고, 닫힐 때는 마지막 값을 반드시 기록한다.
+            match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    infrastructure::window_manager::save_session_window_bounds(window, false);
+                }
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+                    infrastructure::window_manager::save_session_window_bounds(window, true);
+                }
+                _ => {}
+            }
             // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
+                    infrastructure::window_manager::forget_session_window(&label);
                     let state = window.state::<AppState>().inner().clone();
                     let workspace_registry = window
                         .state::<InMemoryAgentWorkspaceRegistry>()
@@ -123,6 +136,8 @@ pub fn run() {
             record_goal_progress,
             get_agent_run_settings,
             save_agent_run_settings,
+            get_worktree_workspace_layout,
+            save_worktree_workspace_layout,
             list_git_remotes,
             list_git_branches,
             list_git_worktrees,

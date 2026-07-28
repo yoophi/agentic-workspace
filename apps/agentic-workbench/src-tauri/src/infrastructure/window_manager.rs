@@ -1,7 +1,17 @@
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use std::{sync::mpsc, time::Duration};
-use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock, mpsc},
+    time::{Duration, Instant},
+};
+use tauri::{AppHandle, Manager, Runtime, WebviewUrl, WebviewWindow, WebviewWindowBuilder, Window};
 use uuid::Uuid;
+
+use crate::{
+    application::session_window_state_service,
+    domain::session_window_state::{VisibleArea, WindowBounds},
+    infrastructure::json_session_window_state_repository::JsonSessionWindowStateRepository,
+};
 
 #[cfg(debug_assertions)]
 use crate::infrastructure::devtools;
@@ -12,8 +22,52 @@ pub const SETTINGS_WINDOW_LABEL: &str = "settings";
 const SETTINGS_WINDOW_TITLE: &str = "Settings";
 const SETTINGS_WINDOW_ROUTE: &str = "/settings-window";
 
+const SESSION_WINDOW_DEFAULT_WIDTH: u32 = 1100;
+const SESSION_WINDOW_DEFAULT_HEIGHT: u32 = 820;
+const SESSION_WINDOW_MINIMUM_WIDTH: u32 = 980;
+const SESSION_WINDOW_MINIMUM_HEIGHT: u32 = 680;
+/// 이동·리사이즈 이벤트는 드래그 중 연속으로 들어온다. 매 이벤트마다 JSON 저장소를 다시 쓰면
+/// 메인 스레드에서 디스크 쓰기가 폭주하므로, 최소 간격을 두고 저장한다. 창을 닫을 때는
+/// 간격과 무관하게 마지막 값을 반드시 기록한다.
+const BOUNDS_SAVE_INTERVAL: Duration = Duration::from_millis(700);
+
 pub fn session_label(session_id: &str) -> String {
     format!("session-{session_id}")
+}
+
+/// 세션 창 label과 Worktree 경로의 대응. 창 이벤트에는 Worktree 경로가 없고, 세션 URL은
+/// HashRouter라서 `worktreePath`가 fragment 안에 들어가 `Url::query_pairs()`로는 읽히지 않는다.
+/// 그래서 창을 만든 window manager가 경로를 직접 기억한다.
+fn session_worktree_paths() -> &'static Mutex<HashMap<String, String>> {
+    static PATHS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    PATHS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn last_bounds_save() -> &'static Mutex<HashMap<String, Instant>> {
+    static SAVED_AT: OnceLock<Mutex<HashMap<String, Instant>>> = OnceLock::new();
+    SAVED_AT.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_session_worktree_path(label: &str, worktree_path: &str) {
+    if let Ok(mut paths) = session_worktree_paths().lock() {
+        paths.insert(label.to_string(), worktree_path.to_string());
+    }
+}
+
+fn session_worktree_path(label: &str) -> Option<String> {
+    session_worktree_paths()
+        .lock()
+        .ok()
+        .and_then(|paths| paths.get(label).cloned())
+}
+
+pub fn forget_session_window(label: &str) {
+    if let Ok(mut paths) = session_worktree_paths().lock() {
+        paths.remove(label);
+    }
+    if let Ok(mut saved_at) = last_bounds_save().lock() {
+        saved_at.remove(label);
+    }
 }
 
 fn new_session_id() -> String {
@@ -107,11 +161,25 @@ fn build_window(
     worktree_path: &str,
     title: &str,
 ) -> Result<WebviewWindow, String> {
+    // 창 이벤트에서 Worktree 경로를 되찾을 수 있도록 생성 시점에 기억한다.
+    remember_session_worktree_path(label, worktree_path);
+
+    let restored = restore_session_bounds(app, worktree_path);
+    let (width, height) = restored
+        .map(|bounds| (bounds.width, bounds.height))
+        .unwrap_or((SESSION_WINDOW_DEFAULT_WIDTH, SESSION_WINDOW_DEFAULT_HEIGHT));
+
     #[allow(unused_mut)]
     let mut builder = WebviewWindowBuilder::new(app, label, session_url(project_id, worktree_path))
         .title(title)
-        .inner_size(1100.0, 820.0)
-        .min_inner_size(980.0, 680.0);
+        .inner_size(width as f64, height as f64)
+        .min_inner_size(
+            SESSION_WINDOW_MINIMUM_WIDTH as f64,
+            SESSION_WINDOW_MINIMUM_HEIGHT as f64,
+        );
+    if let Some(bounds) = restored {
+        builder = builder.position(bounds.x as f64, bounds.y as f64);
+    }
 
     #[cfg(target_os = "macos")]
     {
@@ -126,6 +194,110 @@ fn build_window(
     }
 
     Ok(window)
+}
+
+/// 저장된 창 상태를 현재 모니터 구성에 맞게 보정해 돌려준다. 저장 값이 없거나 화면 정보를
+/// 읽을 수 없으면 기본 크기로 열도록 `None`을 준다.
+fn restore_session_bounds(app: &AppHandle, worktree_path: &str) -> Option<WindowBounds> {
+    let repository = JsonSessionWindowStateRepository::from_app(app)
+        .inspect_err(|error| eprintln!("session window state store unavailable: {error}"))
+        .ok()?;
+    let saved = session_window_state_service::get_bounds(&repository, worktree_path)
+        .inspect_err(|error| eprintln!("failed to read session window state: {error}"))
+        .ok()??;
+
+    let areas = visible_areas(app);
+    if areas.is_empty() {
+        return Some(saved);
+    }
+    session_window_state_service::fit_bounds_to_visible_areas(
+        saved,
+        &areas,
+        SESSION_WINDOW_MINIMUM_WIDTH,
+        SESSION_WINDOW_MINIMUM_HEIGHT,
+    )
+}
+
+/// 모니터 정보는 물리 픽셀로 오므로 각 모니터의 scale factor로 논리 좌표로 바꾼다.
+/// 저장 값과 최소 크기 상수가 모두 논리 단위이므로 같은 단위로 비교해야 한다.
+fn visible_areas(app: &AppHandle) -> Vec<VisibleArea> {
+    app.available_monitors()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|monitor| {
+            let scale = monitor.scale_factor();
+            let position = monitor.position().to_logical::<i32>(scale);
+            let size = monitor.size().to_logical::<u32>(scale);
+            VisibleArea {
+                x: position.x,
+                y: position.y,
+                width: size.width,
+                height: size.height,
+            }
+        })
+        .collect()
+}
+
+/// 세션 창의 현재 위치·내부 크기를 Worktree별로 저장한다.
+///
+/// `flush`가 false면 최소 간격 안에 들어온 연속 이벤트를 건너뛴다. 창을 닫을 때는 true로
+/// 호출해 마지막 값을 반드시 남긴다.
+pub fn save_session_window_bounds(window: &Window, flush: bool) {
+    let label = window.label().to_string();
+    if !label.starts_with("session-") {
+        return;
+    }
+    let Some(worktree_path) = session_worktree_path(&label) else {
+        return;
+    };
+    if !flush && !should_save_now(&label) {
+        return;
+    }
+
+    let (Ok(position), Ok(size), Ok(scale)) = (
+        window.outer_position(),
+        window.inner_size(),
+        window.scale_factor(),
+    ) else {
+        return;
+    };
+    // 최소화된 창은 위치·크기가 실제 사용 값이 아니므로 저장하지 않는다.
+    if window.is_minimized().unwrap_or(false) || size.width == 0 || size.height == 0 {
+        return;
+    }
+
+    let Ok(repository) = JsonSessionWindowStateRepository::from_app(window.app_handle()) else {
+        return;
+    };
+    // `outer_position`·`inner_size`는 물리 픽셀을 주지만 창을 만들 때 쓰는
+    // `WebviewWindowBuilder::position`·`inner_size`는 논리 단위를 받는다. 그대로 저장하면
+    // Retina(2x) 화면에서 다음 실행 때 창이 두 배 크기·위치로 열린다. 논리 단위로 바꿔 저장한다.
+    let position = position.to_logical::<i32>(scale);
+    let size = size.to_logical::<u32>(scale);
+    let bounds = WindowBounds {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    };
+    if let Err(error) =
+        session_window_state_service::save_bounds(&repository, &worktree_path, bounds)
+    {
+        eprintln!("failed to save session window state: {error}");
+        return;
+    }
+    if let Ok(mut saved_at) = last_bounds_save().lock() {
+        saved_at.insert(label, Instant::now());
+    }
+}
+
+fn should_save_now(label: &str) -> bool {
+    let Ok(saved_at) = last_bounds_save().lock() else {
+        return false;
+    };
+    saved_at
+        .get(label)
+        .is_none_or(|last| last.elapsed() >= BOUNDS_SAVE_INTERVAL)
 }
 
 #[cfg(target_os = "macos")]
@@ -204,7 +376,11 @@ fn non_empty_or<'a>(value: &'a str, fallback: &'a str) -> &'a str {
 mod tests {
     use std::path::Path;
 
-    use super::{SETTINGS_WINDOW_LABEL, session_label, session_route, session_title, settings_url};
+    use super::{
+        SETTINGS_WINDOW_LABEL, forget_session_window, remember_session_worktree_path,
+        session_label, session_route, session_title, session_url, session_worktree_path,
+        settings_url,
+    };
     use tauri::WebviewUrl;
 
     #[test]
@@ -260,5 +436,57 @@ mod tests {
             ),
             "Agentic Workbench / feature-login"
         );
+    }
+
+    /// 세션 URL은 HashRouter라서 `worktreePath`가 fragment 안에 들어간다. 따라서 창 이벤트에서
+    /// `Url::query_pairs()`로 Worktree 경로를 되찾으려 하면 항상 빈 결과가 나온다.
+    /// 창 상태 저장이 이 방식으로 되돌아가지 않도록 고정한다.
+    #[test]
+    fn worktree_path_is_not_readable_from_the_url_query() {
+        let WebviewUrl::App(path) = session_url("project-1", "/repo/tree-a") else {
+            panic!("session window must use an app URL");
+        };
+        let raw = format!("http://tauri.localhost/{}", path.to_string_lossy());
+        let url = tauri::Url::parse(&raw).expect("parse session url");
+
+        assert_eq!(url.query(), None);
+        assert!(url.fragment().expect("fragment").contains("worktreePath="));
+        assert!(
+            url.query_pairs()
+                .find(|(key, _)| key == "worktreePath")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn window_manager_remembers_worktree_path_per_session_label() {
+        let label = "session-test-remember";
+        remember_session_worktree_path(label, "/repo/tree-a");
+
+        assert_eq!(
+            session_worktree_path(label).as_deref(),
+            Some("/repo/tree-a")
+        );
+
+        forget_session_window(label);
+        assert_eq!(session_worktree_path(label), None);
+    }
+
+    #[test]
+    fn separate_session_windows_keep_separate_worktree_paths() {
+        remember_session_worktree_path("session-test-a", "/repo/tree-a");
+        remember_session_worktree_path("session-test-b", "/repo/tree-b");
+
+        assert_eq!(
+            session_worktree_path("session-test-a").as_deref(),
+            Some("/repo/tree-a")
+        );
+        assert_eq!(
+            session_worktree_path("session-test-b").as_deref(),
+            Some("/repo/tree-b")
+        );
+
+        forget_session_window("session-test-a");
+        forget_session_window("session-test-b");
     }
 }

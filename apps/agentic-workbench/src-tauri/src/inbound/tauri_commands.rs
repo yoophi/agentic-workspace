@@ -17,6 +17,7 @@ use crate::{
         send_prompt::SendPromptUseCase, set_permission_mode::SetPermissionModeUseCase,
         start_agent_run::StartAgentRunUseCase, steer_prompt::SteerPromptUseCase,
         worktree_changes_service, worktree_file_service, worktree_git_service,
+        worktree_workspace_layout_service,
     },
     domain::{
         agent::AgentDescriptor,
@@ -42,6 +43,7 @@ use crate::{
         worktree_git::{
             GitCommitDetail, GitCommitGraph, GitCommitHistory, GitFileDiff as WorktreeGitFileDiff,
         },
+        worktree_workspace_layout::WorkspaceLayoutSettings,
     },
     infrastructure::{
         acp::runner::AcpAgentRunner,
@@ -63,6 +65,7 @@ use crate::{
         json_goal_repository::JsonGoalRepository,
         json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
+        json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
         mcp::title_tool,
         mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv, McpServerState},
         perf_log::run_blocking_command,
@@ -367,6 +370,28 @@ pub fn save_agent_run_settings(
 ) -> Result<AgentRunSettings, String> {
     let repository = JsonAgentRunSettingsRepository::from_app(&app)?;
     agent_run_settings_service::save_settings(&repository, settings)
+}
+
+#[tauri::command]
+pub fn get_worktree_workspace_layout(
+    app: AppHandle,
+    working_directory: String,
+) -> Result<Option<WorkspaceLayoutSettings>, String> {
+    worktree_workspace_layout_service::get_layout(
+        &JsonWorkspaceLayoutRepository::from_app(&app)?,
+        working_directory,
+    )
+}
+
+#[tauri::command]
+pub fn save_worktree_workspace_layout(
+    app: AppHandle,
+    layout: WorkspaceLayoutSettings,
+) -> Result<WorkspaceLayoutSettings, String> {
+    worktree_workspace_layout_service::save_layout(
+        &JsonWorkspaceLayoutRepository::from_app(&app)?,
+        layout,
+    )
 }
 
 #[tauri::command]
