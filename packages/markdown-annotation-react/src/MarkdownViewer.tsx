@@ -327,6 +327,7 @@ function MarkdownBlockRenderer({
   onRequestBlockDelete,
   onLinkActivate,
   nestedList,
+  orderedNumber,
 }: {
   block: MarkdownBlock;
   annotated: boolean;
@@ -340,6 +341,7 @@ function MarkdownBlockRenderer({
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
   onLinkActivate?: (href: string) => void;
   nestedList?: ReactNode;
+  orderedNumber?: number;
 }) {
   const shellProps = {
     annotated,
@@ -425,8 +427,8 @@ function MarkdownBlockRenderer({
             className="flex items-start gap-3"
             style={{ marginLeft: `${(block.level ?? 0) * 1.25}rem` }}
           >
-            <span className="mt-0.5 text-muted-foreground">
-              {block.ordered ? `${block.orderedStart ?? 1}.` : "-"}
+            <span className="mt-0.5 shrink-0 whitespace-nowrap text-muted-foreground">
+              {block.ordered ? `${orderedNumber ?? block.orderedStart ?? 1}.` : "-"}
             </span>
             <div
               className={cn(block.checked && "text-muted-foreground line-through")}
@@ -564,7 +566,7 @@ export function MarkdownViewer({
     blocksByParent.set(block.parentId, siblings);
   });
 
-  const renderBlock = (block: MarkdownBlock, nestedList?: ReactNode) => (
+  const renderBlock = (block: MarkdownBlock, nestedList?: ReactNode, orderedNumber?: number) => (
     <MarkdownBlockRenderer
       annotated={annotatedBlockIds.has(block.id)}
       block={block}
@@ -578,11 +580,11 @@ export function MarkdownViewer({
       onRequestBlockComment={onRequestBlockComment}
       onRequestBlockDelete={onRequestBlockDelete}
       onLinkActivate={onLinkActivate}
+      orderedNumber={orderedNumber}
     />
   );
 
-  const renderList = (parentId?: string): ReactNode => {
-    const items = blocksByParent.get(parentId) ?? [];
+  const renderItems = (items: MarkdownBlock[]): ReactNode => {
     if (items.length === 0) return null;
     const groups = items.reduce<MarkdownBlock[][]>((result, item) => {
       const current = result[result.length - 1];
@@ -600,10 +602,40 @@ export function MarkdownViewer({
         ordered={itemsInList[0].ordered}
         start={itemsInList[0].orderedStart}
       >
-        {itemsInList.map((item) => renderBlock(item, renderList(item.id)))}
+        {itemsInList.map((item, indexInList) => (
+          <Fragment key={item.id}>
+            {renderBlock(
+              item,
+              renderList(item.id),
+              item.ordered ? (itemsInList[0].orderedStart ?? 1) + indexInList : undefined,
+            )}
+          </Fragment>
+        ))}
       </MarkdownList>
     ));
   };
+
+  const renderList = (parentId?: string): ReactNode =>
+    renderItems(blocksByParent.get(parentId) ?? []);
+
+  // 최상위 목록 런: 문서 순서에서 최상위 list-item이 이어지는 최대 구간.
+  // 경계는 비-list-item 블록만이며, 중첩 list-item은 런을 시작하지도 끊지도 않는다.
+  const topLevelRunByFirstId = new Map<string, MarkdownBlock[]>();
+  let currentRun: MarkdownBlock[] | null = null;
+  for (const block of blocks) {
+    if (block.type === "list-item") {
+      if (block.parentId === undefined) {
+        if (currentRun) {
+          currentRun.push(block);
+        } else {
+          currentRun = [block];
+          topLevelRunByFirstId.set(block.id, currentRun);
+        }
+      }
+    } else {
+      currentRun = null;
+    }
+  }
 
   return (
     <article className="markdown-viewer max-w-none">
@@ -616,8 +648,8 @@ export function MarkdownViewer({
             />
           ) : null}
           {block.type === "list-item"
-            ? block.parentId === undefined && blocks.findIndex((candidate) => candidate.id === block.id) === blocks.findIndex((candidate) => candidate.type === "list-item" && candidate.parentId === undefined)
-              ? renderList()
+            ? topLevelRunByFirstId.has(block.id)
+              ? renderItems(topLevelRunByFirstId.get(block.id) ?? [])
               : null
             : renderBlock(block)}
           {taskCountsByH1Chapter.has(index) ? (
