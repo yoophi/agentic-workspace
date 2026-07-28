@@ -55,5 +55,58 @@ describe("TaskActivityRail", () => {
     expect(html).toContain("응답 전달 실패");
     expect(html).toContain('aria-atomic="true"');
     expect(html).toContain("입력 응답");
+    // FR-048: retryability is stated in words next to the preserved backend message.
+    expect(html).toContain("재시도 가능");
+    expect(html).toContain('data-command-retryable="true"');
+  });
+
+  // FR-048: a failed task must show its reason and whether retrying is possible, without
+  // relying on color, and a non-retryable failure must not be labelled retryable.
+  it("shows a task failure reason with its retryability", () => {
+    const [first, ...rest] = orchestrationSessionFixture.tasks;
+    const session = {
+      ...orchestrationSessionFixture,
+      tasks: [
+        {
+          ...first,
+          status: "failed" as const,
+          failure: {
+            code: "readOnlyViolation",
+            message: "쓰기 도구 호출이 거부되었습니다.",
+            retryable: false,
+            partialResultReportIds: [],
+          },
+        },
+        ...rest,
+      ],
+    };
+
+    const html = renderToStaticMarkup(<TaskActivityRail session={session} />);
+
+    expect(html).toContain("쓰기 도구 호출이 거부되었습니다.");
+    expect(html).toContain("재시도 불가");
+    expect(html).toContain('data-task-failure-code="readOnlyViolation"');
+    expect(html).toContain('data-task-failure-retryable="false"');
+    expect(html).toContain("쓰기가 필요한 작업은 사용자가 직접 수행하세요.");
+  });
+
+  // FR-046: v1 assigns the promotion policy by role, so the Rail must not offer a control
+  // that edits it, and attention must never move focus on its own (FR-014).
+  it("offers no promotion-policy control and never steals focus", () => {
+    const session = {
+      ...orchestrationSessionFixture,
+      nodes: orchestrationSessionFixture.nodes.map((node) => ({
+        ...node,
+        presentationStatus:
+          node.kind === "child" ? ("attentionRequired" as const) : node.presentationStatus,
+      })),
+    };
+
+    const html = renderToStaticMarkup(<TaskActivityRail session={session} />);
+
+    expect(html).not.toContain("승격 정책");
+    expect(html).not.toContain("promotionPolicy");
+    expect(html).not.toContain("autofocus");
+    expect(html).not.toContain("autoFocus");
   });
 });

@@ -130,4 +130,62 @@ mod tests {
         assert!(snapshot.gap_detected);
         assert_eq!(snapshot.last_sequence, 4);
     }
+
+    /// FR-043: the default retention must be at least 512 events per run, because the spec
+    /// promises that range is rehydratable after promotion.
+    #[test]
+    fn default_retention_is_the_specified_minimum() {
+        assert_eq!(DEFAULT_RUNTIME_EVENT_CAPACITY, 512);
+        assert_eq!(
+            InMemoryRuntimeEventJournal::default().capacity,
+            DEFAULT_RUNTIME_EVENT_CAPACITY
+        );
+    }
+
+    /// FR-043 boundary: 511 and 512 events stay fully replayable with no gap, and the 513th
+    /// event evicts the oldest one and must be reported as a gap rather than a clean replay.
+    #[test]
+    fn retains_up_to_the_bound_and_reports_a_gap_only_past_it() {
+        for (appended, expected_len, expect_gap) in [(511usize, 511usize, false), (512, 512, false), (513, 512, true)]
+        {
+            let journal = InMemoryRuntimeEventJournal::default();
+            for index in 0..appended {
+                journal.append("run-a", json!({"index": index}), false);
+            }
+
+            let snapshot = journal.replay("run-a", 0);
+
+            assert_eq!(
+                snapshot.events.len(),
+                expected_len,
+                "{appended} appended events should replay {expected_len}"
+            );
+            assert_eq!(snapshot.last_sequence, appended as u64);
+            assert_eq!(
+                snapshot.gap_detected, expect_gap,
+                "{appended} appended events should report gap_detected={expect_gap}"
+            );
+            assert_eq!(
+                snapshot.events.first().map(|event| event.sequence),
+                Some(appended as u64 - expected_len as u64 + 1)
+            );
+        }
+    }
+
+    /// FR-034/FR-043: "no events yet" must be distinguishable from "events were evicted".
+    /// An empty run replayed from the start is not a gap; a cursor ahead of an unknown run is.
+    #[test]
+    fn separates_no_events_yet_from_an_evicted_range() {
+        let journal = InMemoryRuntimeEventJournal::default();
+
+        let untouched = journal.replay("run-missing", 0);
+        assert!(untouched.events.is_empty());
+        assert!(!untouched.gap_detected);
+        assert_eq!(untouched.last_sequence, 0);
+        assert!(!untouched.terminal);
+
+        let ahead_of_unknown_run = journal.replay("run-missing", 7);
+        assert!(ahead_of_unknown_run.events.is_empty());
+        assert!(ahead_of_unknown_run.gap_detected);
+    }
 }

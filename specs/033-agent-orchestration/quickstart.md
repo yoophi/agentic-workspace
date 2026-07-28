@@ -253,7 +253,7 @@ Expected:
 
 - 다른 workspace/window/worktree 요청은 `scopeMismatch` 또는 unknown 오류다.
 - 다른 run ID를 적어도 per-run capability source가 바뀌지 않는다.
-- Child의 spawn/assign/cancel/reassign과 sibling direct action은 `forbiddenActor`다.
+- Child의 spawn/assign/cancel/reassign과 sibling direct action은 `unauthorized`다.
 - 원 workspace 상태는 바뀌지 않는다.
 
 ## Scenario 9: Read-only enforcement
@@ -303,6 +303,31 @@ Expected:
 - 기존 peer exchange는 동일 창 exact target에 한 번 전달된다.
 - orchestration 참여 Child의 sibling ACL은 별도 적용된다.
 
+## Scenario 12: 거부 경로의 상태 불변성 (SC-017)
+
+네 가지 거부 시나리오에서 요청이 거부되고, 이유와 다음 동작이 표시되며, 기존 작업·실행
+상태가 바뀌지 않는지 확인한다.
+
+1. **프롬프트 크기 초과 (FR-044)**: Composer에 16KiB를 넘는 텍스트를 붙여넣고 전송한다.
+2. **Node·깊이 상한 초과 (FR-045)**: panel 8개를 만든 뒤 9번째 추가와 Child 승격을
+   시도하고, 별도로 같은 leaf를 반복 분할해 깊이 5를 시도한다.
+3. **산출물 경로 위반 (FR-047)**: smoke Child가 `../outside.txt`와 워크스페이스 밖을
+   가리키는 symlink를 결과 보고의 artifact로 제출한다.
+4. **Main 비활성 위임 (FR-022)**: Main run을 종료한 뒤 Coordinator 대상으로 목표를
+   제출한다.
+
+Expected:
+
+- 1: 전송 전에 거부되고 초과 바이트와 허용 범위가 표시된다. 입력한 텍스트가 유지되고
+  어떤 대상도 명령을 받지 않으며 dispatch 기록이 생기지 않는다.
+- 2: 9번째 panel과 승격이 모두 거부되고 사유(`panel-limit`, `depth-limit`)와 대안이
+  표시된다. 기존 8개 panel의 배치·초점·run이 그대로 유지된다.
+- 3: 위반 artifact 참조만 제외되고 보고의 summary·findings·결과 전이는 보존된다.
+  제외 사실이 `unresolved`에 남아 Activity Rail에서 확인된다.
+- 4: `coordinatorInactive`로 거부되고 `Main 실행 없음`과 다음 동작(Main 실행 시작)이
+  표시된다. 새 task·dispatch가 생기지 않고 workspace revision이 그대로다.
+- 네 경우 모두 실패가 재시도 가능 여부와 함께 표시되고, 기존 Child run은 계속 실행된다.
+
 ## Automated verification
 
 Frontend:
@@ -328,6 +353,41 @@ pnpm run check-types
 pnpm run test
 cargo test --workspace
 ```
+
+### 2026-07-29 명세 보강 검증 기록 (Phase 14, T150–T163)
+
+- frontend typecheck: 통과
+- frontend unit/component test: 69 files, 325 tests 통과 (이전 67 files / 298 tests에서 증가)
+- backend 단위 test: 178 tests 통과 (이전 163 tests에서 증가)
+- backend integration test: 3 tests 통과 (SC-001·SC-014 측정 구간 test 추가)
+- `cargo check -p agentic-workbench`: 통과. warning 9건은 모두 이번 변경과 무관한 기존
+  항목이다(`ports/agent_workspace_registry.rs`의 `async_fn_in_trait` 8건,
+  `infrastructure/mcp/title_tool.rs`의 미사용 함수 1건). 신규 warning 없음.
+- frontend production build: 통과
+- Storybook production build: 통과
+
+이번 단계에서 새로 고정한 검증:
+
+- runtime event 보존 하한 512와 경계값 511·512·513의 gap 판정, `event 없음`과
+  `보존 범위 초과`의 구분
+- 프롬프트 16KiB 상한을 전송 전에 UTF-8 바이트로 거부하고 입력 텍스트를 보존
+- Node 8개 상한에서 9번째 panel 추가와 Child 승격 거부, 타일 깊이 5 시도 거부, 두 경우
+  모두 기존 배치가 동일 참조로 유지
+- 역할별 승격 정책 배정(Main `always`, 자동 Child `onAttention`)과 정책 편집 수단 부재,
+  attention 상태에서도 초점 이동 없음
+- `Main 실행 없음`(`coordinatorInactive`, `retryable=false`)과 `Main 사용 중`
+  (`coordinatorBusy`, `retryable=true`)의 구분, 거부 시 task·dispatch·revision 불변
+- 워크스페이스 밖 경로와 symlink 이탈 artifact만 제외하고 보고 본문·findings·결과 전이
+  보존, 제외 사실을 `unresolved`에 기록
+- 실패 사유와 재시도 가능 여부를 색에 의존하지 않고 문구로 표시
+- 8 Node·4 active run 부하에서 상호작용당 상태 투영이 200ms 예산 이내
+- SC-001(제출→3개 배정), SC-004(기록→목록 반영), SC-014(보고 저장→Main 통지) 측정 구간의
+  상한과 트랜잭션 완결성
+
+수동 확인이 필요한 남은 항목:
+
+- Scenario 12는 자동 검증으로 네 거부 경로를 모두 덮었으나, 실제 AW 개발 앱에서의 화면
+  확인은 이번 단계에서 수행하지 않았다.
 
 ### 2026-07-27 구현 검증 기록
 
@@ -392,6 +452,15 @@ cargo test --workspace
 - partial dispatch와 partial task result 보존
 - read-only profile/permission/change violation
 - owner window에만 Tauri event 전달
+- runtime event 보존 하한 512와 경계값(511·512·513)의 gap 판정
+- 프롬프트 16KiB 상한을 전송 전에 UTF-8 바이트로 거부
+- Node 8개·타일 깊이 4단계 상한에서 추가·승격 거부와 배치 불변
+- 역할별 승격 정책 배정(Main `always`, 자동 Child `onAttention`)과 초점 유지
+- 워크스페이스 밖·symlink 이탈 artifact만 제외하고 보고 본문 보존
+- `Main 실행 없음`과 `Main 사용 중`의 구분 가능한 실패 code
+- 거부 시 사유와 재시도 가능 여부 표시, 작업 상태 불변
+- 8 Node·4 active run 부하에서 상호작용 예산 200ms
+- SC-001·SC-004·SC-014 측정 구간의 상한
 
 ## Documentation verification
 

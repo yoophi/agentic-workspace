@@ -1,4 +1,4 @@
-# Tasks: Main Agent 기반 멀티 에이전트 오케스트레이션
+# Tasks: Main Coordinator 기반 에이전트 오케스트레이션
 
 **Input**: `/specs/033-agent-orchestration/`의 `spec.md`, `plan.md`, `research.md`, `data-model.md`, `contracts/`, `quickstart.md`  
 **Prerequisites**: `plan.md`, `spec.md` (필수), `research.md`, `data-model.md`, `contracts/`, `quickstart.md`
@@ -55,7 +55,7 @@
 
 ## Phase 3: User Story 1 - Main이 하위 에이전트에 작업을 위임하고 결과를 취합 (Priority: P1) 🎯 MVP
 
-**Goal**: Main agent-run이 Researcher, Reviewer, Tester 같은 직계 자식 task를 만들고 background run에 할당하여 구조화된 진행 상황과 결과를 취합합니다.
+**Goal**: Main Coordinator가 Researcher, Reviewer, Tester 같은 직계 자식 task를 만들고 background run에 할당하여 구조화된 진행 상황과 결과를 취합합니다.
 
 **Independent Test**: Main에 하나의 목표를 주고 세 직계 자식을 생성·할당한 뒤, 각 결과의 출처와 충돌을 구분하여 Main이 종합 응답을 만들며 수동 추가 panel도 동일한 직계 자식으로 할당되는지 확인합니다.
 
@@ -81,7 +81,7 @@
 - [X] T037 [US1] bind generation, delegate, list, collect Tauri command와 event registration을 `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`, `apps/agentic-workbench/src-tauri/src/lib.rs`에 구현한다
 - [X] T038 [P] [US1] delegation command와 task/progress/result event API를 `apps/agentic-workbench/src/entities/agent-orchestration/api/orchestration-repository.ts`, `apps/agentic-workbench/src/entities/agent-orchestration/api/orchestration-repository.test.ts`에 구현한다
 - [X] T039 [P] [US1] Main 및 직계 자식 node/task/run을 정규화하고 결과 출처·충돌을 유지하는 frontend controller를 `apps/agentic-workbench/src/features/agent-run/model/orchestration-workspace.ts`, `apps/agentic-workbench/src/features/agent-run/model/orchestration-workspace.test.ts`에 구현한다
-- [X] T040 [US1] 현재 Main panel을 immutable Main node에 결합하고 수동으로 추가된 agent-run을 Main의 직계 자식 task에 할당하는 흐름을 `apps/agentic-workbench/src/features/agent-run/ui/worktree-agent-run-area.tsx`, `apps/agentic-workbench/src/features/agent-run/model/agent-run-workspace.ts`에 구현한다
+- [X] T040 [US1] 현재 Main panel을 immutable Main node에 결합하고 수동으로 추가된 agent-run을 Main의 직계 자식 task에 할당하는 흐름을 `apps/agentic-workbench/src/features/agent-run/ui/worktree-agent-run-area.tsx`, `apps/agentic-workbench/src/entities/agent-run/model/agent-run-workspace.ts`에 구현한다
 - [X] T041 [P] [US1] Researcher/Reviewer/Tester의 진행·결과·충돌을 재현하는 deterministic smoke agent와 registry를 `apps/agentic-workbench/scripts/acp-orchestration-smoke-agent.mjs`, `apps/agentic-workbench/scripts/acp-orchestration-smoke-agents.json`에 구현한다
 - [X] T042 [US1] backend service부터 mock ACP worker까지 위임·결과 취합을 검증하는 통합 테스트를 `apps/agentic-workbench/src-tauri/tests/orchestration_delegation.rs`에 추가한다
 - [X] T043 [US1] Main 고정, 직계 자식 관계, 결과 출처와 충돌 표시를 `specs/033-agent-orchestration/quickstart.md`의 시나리오 1–2로 검증한다
@@ -99,7 +99,7 @@
 ### Tests for User Story 2
 
 - [X] T044 [US2] bounded journal append/replay, sequence gap, overflow rehydrate를 검증하는 실패 테스트를 `apps/agentic-workbench/src-tauri/src/infrastructure/in_memory_runtime_event_journal.rs`에 추가한다
-- [X] T045 [P] [US2] background↔panel presentation 전이와 tab/tile 1:1:1 layout 불변식을 검증하는 실패 테스트를 `apps/agentic-workbench/src/entities/agent-orchestration/model/task-state.test.ts`, `apps/agentic-workbench/src/features/agent-run/model/agent-run-workspace.test.ts`에 추가한다
+- [X] T045 [P] [US2] background↔panel presentation 전이와 tab/tile 1:1:1 layout 불변식을 검증하는 실패 테스트를 `apps/agentic-workbench/src/entities/agent-orchestration/model/task-state.test.ts`, `apps/agentic-workbench/src/entities/agent-run/model/agent-run-workspace.test.ts`에 추가한다
 - [X] T046 [P] [US2] 상태·역할·elapsed time·attention·promote/detach 상호작용을 검증하는 실패 테스트를 `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.test.tsx`에 추가한다
 - [X] T047 [P] [US2] promote/detach가 task/run을 유지하고 worker cancel을 호출하지 않는지 검증하는 실패 테스트를 `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`에 추가한다
 
@@ -110,7 +110,7 @@
 - [X] T050 [US2] journal replay command와 gap 발생 시 durable snapshot 재조회 event를 `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`, `apps/agentic-workbench/src-tauri/src/lib.rs`에 구현한다
 - [X] T051 [P] [US2] panel 내부의 ACP runtime lifecycle과 event handling을 재사용 가능한 controller로 추출하고 회귀 테스트를 `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.ts`, `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.test.ts`에 구현한다
 - [X] T052 [US2] visible panel 없이도 동일 controller를 유지하는 runtime host를 `apps/agentic-workbench/src/features/agent-run/ui/agent-run-runtime-host.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/agent-run-panel.tsx`에 구현한다
-- [X] T053 [P] [US2] visible layout membership과 background execution membership을 분리하고 tile 진입 시 1:1:1 비율을 유지하도록 `apps/agentic-workbench/src/features/agent-run/model/agent-run-workspace.ts`, `apps/agentic-workbench/src/features/agent-run/model/agent-run-workspace.test.ts`를 변경한다
+- [X] T053 [P] [US2] visible layout membership과 background execution membership을 분리하고 tile 진입 시 1:1:1 비율을 유지하도록 `apps/agentic-workbench/src/entities/agent-run/model/agent-run-workspace.ts`, `apps/agentic-workbench/src/entities/agent-run/model/agent-run-workspace.test.ts`를 변경한다
 - [X] T054 [US2] T047을 통과하도록 promote/detach와 attention projection use case를 `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`에 구현한다
 - [X] T055 [P] [US2] promote/detach 및 journal replay command/event wrapper를 `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`, `apps/agentic-workbench/src/entities/agent-orchestration/api/orchestration-repository.ts`에 구현한다
 - [X] T056 [P] [US2] 상태·역할·elapsed time·attention 및 promote/detach action을 표시하는 `TaskActivityItem`과 `TaskActivityRail`을 `apps/agentic-workbench/src/features/agent-run/ui/task-activity-item.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.tsx`에 구현한다
@@ -177,7 +177,7 @@
 - [X] T085 [US4] interrupt/cancel/retry/reassign coordinator MCP handler와 input request/response child flow를 `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/orchestration_tool.rs`에 구현한다
 - [X] T086 [US4] respond/cancel/retry/reassign/handoff/recover Tauri command와 lifecycle hook을 `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`, `apps/agentic-workbench/src-tauri/src/lib.rs`에 등록한다
 - [X] T087 [US4] Activity Rail의 attention form과 cancel/retry/reassign action 및 명시적 Main handoff dialog를 `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/coordinator-handoff-dialog.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/worktree-agent-run-area.tsx`에 구현한다
-- [X] T088 [US4] 복구, handoff, isolation, read-only, capacity 동작을 `specs/033-agent-orchestration/quickstart.md`의 시나리오 6–10으로 검증한다
+- [X] T088 [US4] 복구, handoff, isolation, read-only, capacity 동작을 `specs/033-agent-orchestration/quickstart.md`의 Scenario 6, 7, 8, 9, 10으로 검증한다 (Scenario 6A·6B는 T131·T142가 담당)
 
 **Checkpoint**: 실패와 재시작 뒤에도 durable task 관계가 유지되고, 명시적 handoff와 최소 권한 경계 안에서 복구할 수 있습니다.
 
@@ -196,7 +196,7 @@
 - [X] T095 production build와 Storybook build를 `apps/agentic-workbench/package.json`의 `build`, `build-storybook` script로 실행하고 실패를 수정한다
 - [X] T096 keyboard navigation, screen reader label, focus restoration, color-independent status를 `apps/agentic-workbench/src/features/agent-run/ui/workspace-prompt-composer.test.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.test.tsx`에서 검증하고 수정한다
 - [X] T097 FSD·hexagonal dependency boundary와 `packages/*`, `crates/*` 무변경 원칙을 `specs/033-agent-orchestration/plan.md`의 Constitution Check에 대조하여 위반을 수정한다
-- [X] T098 전체 11개 시나리오를 수행하고 tab/tile 1:1:1, panel 생성, agent exchange 회귀 결과를 `specs/033-agent-orchestration/quickstart.md`에 기록한다
+- [X] T098 Phase 7 시점의 Scenario 1–11을 수행하고 tab/tile 1:1:1, panel 생성, agent exchange 회귀 결과를 `specs/033-agent-orchestration/quickstart.md`에 기록한다 (이후 추가된 Scenario 5A·6A·6B는 T123·T131·T142·T149가 담당)
 
 ---
 
@@ -352,6 +352,42 @@ reassign/old worker와 Main handoff/report 경쟁을 발생시켜 runtime 호출
 
 ---
 
+## Phase 14: Specification Hardening Verification (명세 보강 검증)
+
+**Purpose**: 2026-07-29 spec 보강으로 추가·정밀화된 FR-022, FR-043–FR-048, SC-016, SC-017의
+사용자 가시 동작을 검증하고 부족분을 보완합니다. 새 기능 추가가 아니라 기존 구현의 확인과
+누락된 사용자 안내 보완이 목적입니다.
+
+**사전 확인 결과**: FR-043(event 512), FR-044(프롬프트 16KiB), FR-045(Node 8·깊이 4),
+FR-046(역할별 정책 배정), FR-047(산출물 경로 검증)은 구현에 이미 존재하나 경계값 검증 또는
+사용자 안내가 비어 있습니다. FR-022는 백엔드가 `Unauthorized` 하나로 뭉쳐 반환해 `Main 실행
+없음`과 `Main 사용 중`을 구분할 수 없습니다.
+
+- [X] T150 [P] Main 활성 generation이 없을 때 delegate가 task를 만들지 않고 `Main 실행 없음`과 `Main 사용 중`을 구분 가능한 실패 사유로 반환하는지 검증하는 테스트를 추가하고 현재 단일 `Unauthorized` 사유를 구분 가능하게 보완한다 (FR-022): `apps/agentic-workbench/src-tauri/src/domain/agent_orchestration.rs`, `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`
+- [X] T151 T150의 실패 사유를 Coordinator 대상 모드에서 사유와 다음 동작(Main 실행 시작 또는 대기)으로 표시하도록 검증·보완한다 (FR-022): `apps/agentic-workbench/src/features/agent-run/ui/workspace-prompt-composer.test.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/workspace-prompt-composer.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/prompt-dispatch-status.tsx`
+- [X] T152 [P] run별 event 보존 하한 512개와 초과 시 gap 노출을 경계값 511·512·513으로 검증하는 테스트를 추가한다 (FR-043): `apps/agentic-workbench/src-tauri/src/infrastructure/in_memory_runtime_event_journal.rs`
+- [X] T153 [P] 16KiB 초과 프롬프트가 전송 전에 거부되고 초과 사실과 허용 범위가 사용자에게 표시되는지 검증하고 누락된 프런트엔드 사전 차단과 안내 문구를 보완한다 (FR-044): `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`, `apps/agentic-workbench/src/features/agent-run/ui/workspace-prompt-composer.test.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/workspace-prompt-composer.tsx`
+- [X] T154 [P] Node 8개·타일 깊이 4단계 상한에서 승격과 패널 추가가 기존 배치·실행을 바꾸지 않고 거부 사유와 대안을 제시하는지 검증한다 (FR-045): `apps/agentic-workbench/src/entities/agent-run/model/agent-run-workspace.test.ts`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.test.tsx`
+- [X] T155 [P] Main은 `always`, 자동 생성 Child는 `onAttention`으로 정책이 배정되고 사용자 편집 수단이 없으며 어떤 정책 값도 현재 초점을 옮기지 않는지 검증한다 (FR-046, FR-014): `apps/agentic-workbench/src/entities/agent-orchestration/model/relationships.test.ts`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.test.tsx`
+- [X] T156 [P] 워크스페이스 밖 경로와 symlink 이탈 산출물 참조가 거부되면서 보고 본문은 보존되는지 검증한다 (FR-047): `apps/agentic-workbench/src-tauri/src/domain/agent_orchestration.rs`, `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`
+- [X] T157 모든 거부 경로가 구분 가능한 사유와 `retryable`을 반환하고 작업 상태를 바꾸지 않는지 검증하고 Activity Rail이 재시도 가능 여부를 표시하도록 보완한다 (FR-048): `apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-item.tsx`
+- [X] T158 Node 8개·동시 실행 4개 fixture에서 Composer 입력과 Activity Rail 조작의 상태 반영이 200ms 예산 안에 들어오는지 측정하는 테스트를 추가한다 (SC-016): `apps/agentic-workbench/src/features/agent-run/model/orchestration-workspace.test.ts`
+- [X] T159 [P] SC-001·SC-004·SC-014의 측정 구간(제출→배정 완료, 상태 기록→목록 반영, 보고 저장→Main 통지)을 자동 단정으로 고정하는 테스트를 추가한다 (SC-001, SC-004, SC-014): `apps/agentic-workbench/src-tauri/tests/orchestration_delegation.rs`, `apps/agentic-workbench/src/features/agent-run/model/orchestration-workspace.test.ts`
+- [X] T160 프롬프트 초과, Node·깊이 초과, 산출물 경로 위반, Main 비활성 위임의 네 거부 시나리오에서 기존 작업·실행 상태가 불변인지 확인하는 Scenario 12를 추가하고 수행 결과를 기록한다 (SC-017): `specs/033-agent-orchestration/quickstart.md`
+- [X] T161 [P] 계약 본문에 남은 폐기 error code 이름 9건(`workspaceAlreadyBound`, `inactiveCoordinator`, `staleTargetRun`, `alreadyCompleted`, `forbiddenActor`, `staleCoordinatorGeneration`, `concurrencyLimit`)을 실제 `OrchestrationErrorCode` 12개 variant와 `message`/`retryable` 표현으로 교체하고, 폐기 이름이 남지 않았음을 확인한다 (`orchestration-service.md` 4건, `orchestration-mcp.md` 3건, `worker-runtime.md` 1건, `quickstart.md` 1건): `specs/033-agent-orchestration/contracts/orchestration-service.md`, `specs/033-agent-orchestration/contracts/orchestration-mcp.md`, `specs/033-agent-orchestration/contracts/worker-runtime.md`, `specs/033-agent-orchestration/quickstart.md`
+- [X] T162 [P] `CommandFailure`가 별도 code 집합이 아니라 `OrchestrationErrorCode`를 재사용한다는 사실을 per-target dispatch 실패와 command 실패 설명에 반영한다: `specs/033-agent-orchestration/data-model.md`, `specs/033-agent-orchestration/contracts/orchestration-service.md`
+- [X] T163 T150–T162 완료 후 `check-types`, `test`, `cargo test -p agentic-workbench`, `build-storybook`을 실행해 회귀를 확인하고 결과를 기록한다: `apps/agentic-workbench/package.json`, `specs/033-agent-orchestration/quickstart.md`
+
+**Checkpoint**: spec 보강으로 추가된 사용자 가시 한도와 거부 동작이 자동 검증으로 고정되고,
+계약 문서의 error code가 구현과 일치합니다.
+
+**진행 기록**: `contracts/orchestration-service.md`의 error code 요약 절과 승격/분리 command
+계약은 2026-07-29 plan 재평가에서 이미 실제 구현과 일치시켰다(`set_orchestration_presentation`
+단일 command, `{ code, message, retryable }` 12개 분류). T161·T162는 그때 다루지 않은 계약
+본문의 인라인 참조를 마무리하는 작업이다.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies
@@ -373,6 +409,10 @@ reassign/old worker와 Main handoff/report 경쟁을 발생시켜 runtime 호출
 - **US4 Remediation (Phase 12)**: Phase 8 이후 시작할 수 있으나 실제 Main notification
   race 통합은 Phase 9 완료 후 수행
 - **Communication Polish (Phase 13)**: 선택한 remediation story와 전체 회귀 완료 후 수행
+- **Specification Hardening Verification (Phase 14)**: Phase 13 이후 수행하며 기존 구현을
+  전제로 한다. T150→T151, T157은 순차 의존이고 나머지 `[P]` 작업은 파일 경계가 달라 병렬
+  가능하며, T163은 Phase 14의 마지막에 수행한다. T161·T162는 같은 계약 파일을 함께 편집하므로
+  서로 병렬 실행하지 않는다
 
 ### User Story Dependency Graph
 
@@ -398,6 +438,7 @@ flowchart LR
     US2R --> CommPolish["Phase 13: Communication Polish"]
     US3R --> CommPolish
     US4RIntegration --> CommPolish
+    CommPolish --> SpecHardening["Phase 14: Spec Hardening Verification"]
 ```
 
 ### Within Each User Story
@@ -543,6 +584,8 @@ T135: Activity Rail delivery state
 10. US3 Remediation → Composer/Main command를 실제 Child에 전달
 11. US4 Remediation → 입력 응답·cancel·retry·reassign 복구
 12. Communication Polish → 접근성, build와 실제 AW E2E
+13. Specification Hardening Verification → 사용자 가시 한도·거부 동작의 자동 검증과 계약
+    문서 정합
 
 ### Suggested Team Strategy
 
@@ -555,7 +598,7 @@ T135: Activity Rail delivery state
 ## Notes
 
 - `[P]` 작업은 파일 충돌과 미완료 선행 의존성이 없는 경우에만 병렬 실행합니다.
-- child agent는 항상 해당 worktree window의 Main agent-run 직계 자식이며 grandchildren은 생성하지 않습니다.
+- child agent는 항상 해당 worktree window의 Main Coordinator 직계 자식이며 grandchildren은 생성하지 않습니다.
 - panel은 presentation일 뿐이며 task나 run lifecycle의 소유자가 아닙니다.
 - task 완료의 기본 신호는 명시적 structured result이며 process exit, prompt completion, 파일 생성만으로 완료 처리하지 않습니다.
 - capability에서 caller identity를 server가 파생하고 client 제공 `callerRunId`를 신뢰하지 않습니다.

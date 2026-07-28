@@ -95,10 +95,12 @@ where
                             notification.transition(status, now())?;
                         }
                         Ok(receipt) => {
+                            // The Main run exists but declined delivery, so this is the
+                            // "Main 사용 중" case rather than a missing runtime (FR-022).
                             notification.failure = Some(CommandFailure {
-                                code: OrchestrationErrorCode::WorkerUnavailable,
+                                code: OrchestrationErrorCode::CoordinatorBusy,
                                 message: receipt.reason.unwrap_or_else(|| {
-                                    "Main rejected the report notification.".into()
+                                    "Main이 보고 통지를 아직 받을 수 없습니다. 잠시 뒤 다시 전달합니다.".into()
                                 }),
                                 retryable: true,
                             });

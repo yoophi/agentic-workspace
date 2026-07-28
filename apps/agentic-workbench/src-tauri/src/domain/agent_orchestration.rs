@@ -24,6 +24,12 @@ pub enum OrchestrationErrorCode {
     RuntimeLost,
     WorkerUnavailable,
     ReadOnlyViolation,
+    /// No Main Coordinator run is bound, so orchestration cannot start at all.
+    /// The user must start a Main run first (FR-022).
+    CoordinatorInactive,
+    /// A Main Coordinator run exists but cannot accept the request right now.
+    /// The user should wait and retry (FR-022).
+    CoordinatorBusy,
 }
 
 #[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
@@ -945,6 +951,61 @@ mod tests {
                 OrchestrationErrorCode::ReadOnlyViolation
             );
         }
+    }
+
+    /// FR-047: a symlink that resolves outside the workspace must be rejected even though
+    /// the reference itself looks workspace-relative.
+    #[test]
+    fn artifact_file_references_reject_symlink_escapes() {
+        let root = std::env::temp_dir().join(format!(
+            "aw-artifact-symlink-{}",
+            std::process::id() as u64 + 1
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "aw-artifact-outside-{}",
+            std::process::id() as u64 + 1
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
+        std::fs::create_dir_all(&root).expect("create workspace root");
+        std::fs::create_dir_all(&outside).expect("create outside dir");
+        std::fs::write(outside.join("secret.txt"), b"secret").expect("write outside file");
+
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.join("secret.txt"), root.join("linked.txt"))
+            .expect("create symlink");
+
+        let escaping = ArtifactReference {
+            kind: ArtifactKind::File,
+            // Looks relative, but resolves outside the workspace.
+            uri: "linked.txt".into(),
+            label: "linked".into(),
+            description: None,
+        };
+
+        #[cfg(unix)]
+        assert_eq!(
+            escaping
+                .validate_for_workspace(root.to_string_lossy().as_ref())
+                .unwrap_err()
+                .code,
+            OrchestrationErrorCode::ReadOnlyViolation
+        );
+
+        // A real file inside the workspace stays valid.
+        std::fs::write(root.join("inside.txt"), b"ok").expect("write inside file");
+        let inside = ArtifactReference {
+            uri: "inside.txt".into(),
+            ..escaping.clone()
+        };
+        assert!(
+            inside
+                .validate_for_workspace(root.to_string_lossy().as_ref())
+                .is_ok()
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
+        let _ = std::fs::remove_dir_all(&outside);
     }
 
     #[test]

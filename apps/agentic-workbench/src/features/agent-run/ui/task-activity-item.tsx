@@ -7,6 +7,7 @@ import type {
   TaskCommand,
   TaskReport,
 } from "@/entities/agent-orchestration";
+import { describeOrchestrationFailure } from "@/entities/agent-orchestration";
 import type { RuntimeHydrationStatus } from "@/features/agent-run/model/agent-run-controller";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,6 +71,9 @@ export function TaskActivityItem({
     task.status === "failed";
   const latest = reports[reports.length - 1];
   const latestCommand = commands[commands.length - 1];
+  const taskFailureNextAction = task.failure
+    ? describeOrchestrationFailure(task.failure).nextAction
+    : null;
   const runtimeLabel =
     runtimeHydrationStatus === "loading" || runtimeHydrationStatus === "idle"
       ? "ACP 이벤트 대기 중"
@@ -147,9 +151,31 @@ export function TaskActivityItem({
           aria-live="polite"
           aria-atomic="true"
           data-command-status={latestCommand.status}
+          data-command-retryable={
+            latestCommand.failure ? String(latestCommand.failure.retryable) : undefined
+          }
         >
           명령 {latestCommand.kind} · {latestCommand.status}
+          {/* Keep the specific backend message, and state retryability in words so it does
+              not depend on color or on reading the code (FR-048). */}
           {latestCommand.failure ? ` · ${latestCommand.failure.message}` : ""}
+          {latestCommand.failure
+            ? latestCommand.failure.retryable
+              ? " · 재시도 가능"
+              : " · 재시도 불가"
+            : ""}
+        </p>
+      )}
+
+      {task.failure && (
+        <p
+          className="text-xs text-destructive"
+          data-task-failure-code={task.failure.code}
+          data-task-failure-retryable={String(task.failure.retryable)}
+        >
+          실패 사유: {task.failure.message}
+          {task.failure.retryable ? " · 재시도 가능" : " · 재시도 불가"}
+          {taskFailureNextAction ? ` · ${taskFailureNextAction}` : ""}
         </p>
       )}
 

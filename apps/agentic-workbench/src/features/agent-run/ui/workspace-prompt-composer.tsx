@@ -2,7 +2,17 @@ import { useMemo, useRef, useState } from "react";
 import { SendIcon } from "lucide-react";
 
 import type { PromptTargetMode } from "@/entities/agent-orchestration";
+import {
+  checkPromptSize,
+  describePromptSizeViolation,
+  parseOrchestrationError,
+} from "@/entities/agent-orchestration";
 import type { AgentRunPanelSlot } from "@/features/agent-run/model/agent-run-panel-slots";
+import type { ComposerNotice } from "@/features/agent-run/model/composer-submission";
+import {
+  decideComposerSubmission,
+  noticeForFailure,
+} from "@/features/agent-run/model/composer-submission";
 import { selectPromptTargets } from "@/features/agent-run/model/prompt-target-selection";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -36,24 +46,45 @@ export function WorkspacePromptComposer({
   const [message, setMessage] = useState("");
   const [mode, setMode] = useState<PromptTargetMode>("focused");
   const [selectedPanelIds, setSelectedPanelIds] = useState<string[]>([]);
+  const [notice, setNotice] = useState<ComposerNotice | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const targets = useMemo(
     () => selectPromptTargets(slots, { mode, focusedPanelId, selectedPanelIds }),
     [focusedPanelId, mode, selectedPanelIds, slots],
   );
-  const canSubmit = !disabled && Boolean(message.trim()) && targets.valid;
+  const size = useMemo(() => checkPromptSize(message.trim()), [message]);
+  const canSubmit = !disabled && Boolean(message.trim()) && targets.valid && size.ok;
 
-  function submit() {
-    if (!canSubmit || !targets.valid) return;
+  async function submit() {
+    const decision = decideComposerSubmission({
+      message,
+      disabled,
+      targetsValid: targets.valid,
+    });
+    if (decision.kind === "ignored") return;
+    if (decision.kind === "blocked") {
+      // FR-044: refused locally, so no target is contacted and the text is kept.
+      setNotice(decision.notice);
+      composerRef.current?.focus();
+      return;
+    }
     const input = {
       requestId: crypto.randomUUID(),
-      message: message.trim(),
+      message: decision.message,
       mode,
       panelIds: targets.panelIds,
       delegate: targets.delegate,
     };
+    setNotice(null);
     setMessage("");
-    void onSubmit(input);
+    try {
+      await onSubmit(input);
+    } catch (error) {
+      // FR-022/FR-048: show a distinguishable reason with the next action, and keep the
+      // text so a rejected request costs the user nothing.
+      setNotice(noticeForFailure(parseOrchestrationError(error)));
+      setMessage(decision.message);
+    }
     requestAnimationFrame(() => composerRef.current?.focus());
   }
 
@@ -105,22 +136,42 @@ export function WorkspacePromptComposer({
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
               event.preventDefault();
-              submit();
+              void submit();
             }
           }}
           aria-label="모든 에이전트 패널의 공용 prompt"
           placeholder="명령을 입력하세요. ⌘/Ctrl+Enter로 전송"
           className="min-h-16 resize-y"
         />
-        <Button type="button" disabled={!canSubmit} onClick={submit} aria-label="Prompt 전송">
+        <Button
+          type="button"
+          disabled={!canSubmit}
+          onClick={() => void submit()}
+          aria-label="Prompt 전송"
+        >
           <SendIcon data-icon="inline-start" />
           전송
         </Button>
       </div>
+      {!size.ok && (
+        <p className="px-3 pb-2 text-xs text-destructive" role="alert">
+          {describePromptSizeViolation(size)}
+        </p>
+      )}
       {!targets.valid && mode === "selected" && (
         <p className="px-3 pb-2 text-xs text-destructive" role="alert">
           하나 이상의 패널을 선택하세요.
         </p>
+      )}
+      {notice && (
+        <div className="px-3 pb-2 text-xs text-destructive" role="alert">
+          <p data-testid="composer-notice-reason">{notice.reason}</p>
+          {notice.nextAction && (
+            <p className="text-muted-foreground" data-testid="composer-notice-next-action">
+              {notice.nextAction}
+            </p>
+          )}
+        </div>
       )}
     </section>
   );

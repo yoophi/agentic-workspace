@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAIN_AGENT_RUN_PANEL_ID,
+  MAX_AGENT_RUN_PANELS,
+  MAX_AGENT_RUN_TILE_DEPTH,
   addExtraPanel,
   closePanel,
   createInitialAgentRunWorkspaceState,
@@ -13,7 +15,11 @@ import {
   setAgentRunViewMode,
   updatePanelRunState,
 } from "./agent-run-workspace";
-import { calculateTileLayoutFrames, flattenTilePanelIds } from "./tile-layout";
+import {
+  calculateTileLayoutFrames,
+  flattenTilePanelIds,
+  getTileDepth,
+} from "./tile-layout";
 
 describe("agent run workspace", () => {
   it("starts in tab mode with a required main panel", () => {
@@ -61,6 +67,70 @@ describe("agent run workspace", () => {
       state: second.state,
       reason: "panel-limit",
     });
+  });
+
+  // FR-045: at the documented limits a further panel or promotion must be refused with a
+  // reason, and must leave the existing layout and run state untouched.
+  it("refuses a ninth panel at the real 8-panel limit without changing the layout", () => {
+    // A balanced split keeps depth within the 4-level bound while reaching 8 panels.
+    let state = createInitialAgentRunWorkspaceState();
+    let frontier = [MAIN_AGENT_RUN_PANEL_ID];
+    while (state.slots.length < MAX_AGENT_RUN_PANELS) {
+      const nextFrontier: string[] = [];
+      for (const target of frontier) {
+        if (state.slots.length >= MAX_AGENT_RUN_PANELS) break;
+        const opened = openAdjacentPanel(state, target, "right");
+        expect(opened.opened).toBe(true);
+        if (!opened.opened) throw new Error("expected the split to succeed");
+        state = opened.state;
+        nextFrontier.push(target, opened.panelId);
+      }
+      frontier = nextFrontier;
+    }
+
+    expect(state.slots).toHaveLength(MAX_AGENT_RUN_PANELS);
+    expect(getTileDepth(state.layout)).toBeLessThanOrEqual(MAX_AGENT_RUN_TILE_DEPTH);
+
+    const rejected = openAdjacentPanel(state, MAIN_AGENT_RUN_PANEL_ID, "right");
+
+    expect(rejected.opened).toBe(false);
+    if (rejected.opened) throw new Error("expected the ninth panel to be refused");
+    expect(rejected.reason).toBe("panel-limit");
+    expect(rejected.state).toBe(state);
+
+    // Promotion uses the same bound and must not mutate the workspace either.
+    const promoted = promoteOrchestrationNode(state, {
+      id: "child-extra",
+      title: "Reviewer",
+      runId: "run-child-extra",
+      isRunning: true,
+    });
+    expect(promoted).toBe(state);
+    expect(promoted.slots).toHaveLength(MAX_AGENT_RUN_PANELS);
+  });
+
+  it("refuses a split that would exceed the 4-level tile depth", () => {
+    let state = createInitialAgentRunWorkspaceState();
+    let target = MAIN_AGENT_RUN_PANEL_ID;
+    let rejection: ReturnType<typeof openAdjacentPanel> | null = null;
+
+    // Always splitting the newest leaf deepens the tree, so depth is hit before the panel cap.
+    for (let attempt = 0; attempt < MAX_AGENT_RUN_PANELS; attempt += 1) {
+      const opened = openAdjacentPanel(state, target, "below");
+      if (!opened.opened) {
+        rejection = opened;
+        break;
+      }
+      state = opened.state;
+      target = opened.panelId;
+    }
+
+    expect(rejection).not.toBeNull();
+    if (!rejection || rejection.opened) throw new Error("expected a depth rejection");
+    expect(rejection.reason).toBe("depth-limit");
+    expect(rejection.state).toBe(state);
+    expect(getTileDepth(state.layout)).toBeLessThanOrEqual(MAX_AGENT_RUN_TILE_DEPTH);
+    expect(state.slots.length).toBeLessThan(MAX_AGENT_RUN_PANELS);
   });
 
   it("keeps run state when focusing panels and collapses layout on close", () => {

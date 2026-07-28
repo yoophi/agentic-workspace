@@ -24,6 +24,8 @@ import {
   initialPromptDispatchState,
   handoffOrchestrationCoordinator,
   promptDispatchReducer,
+  describeOrchestrationFailure,
+  parseOrchestrationError,
   type OrchestrationSession,
 } from "@/entities/agent-orchestration";
 import {
@@ -781,11 +783,17 @@ export function WorktreeAgentRunArea({
               });
               dispatchPrompt({ type: "succeeded", panelId: MAIN_AGENT_NODE_ID });
             } catch (error) {
+              // Show the parsed reason instead of the raw payload, and rethrow so the
+              // Composer can restore the text and render the next action (FR-022, FR-048).
+              const guidance = describeOrchestrationFailure(parseOrchestrationError(error));
               dispatchPrompt({
                 type: "failed",
                 panelId: MAIN_AGENT_NODE_ID,
-                error: String(error),
+                error: guidance.nextAction
+                  ? `${guidance.reason} ${guidance.nextAction}`
+                  : guidance.reason,
               });
+              throw error;
             }
             return;
           }

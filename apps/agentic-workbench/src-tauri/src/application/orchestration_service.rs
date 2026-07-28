@@ -632,8 +632,8 @@ where
             .clone()
             .ok_or_else(|| {
                 OrchestrationError::new(
-                    OrchestrationErrorCode::Unauthorized,
-                    "An active Main Coordinator run is required.",
+                    OrchestrationErrorCode::CoordinatorInactive,
+                    "활성 Main Coordinator 실행이 없습니다. Main 실행을 시작한 뒤 다시 위임하세요.",
                 )
             })?;
         if request.goal.trim().is_empty()
@@ -684,8 +684,8 @@ where
             .and_then(|node| node.current_run_id.clone())
             .ok_or_else(|| {
                 OrchestrationError::new(
-                    OrchestrationErrorCode::WorkerUnavailable,
-                    "The Main Coordinator run is unavailable.",
+                    OrchestrationErrorCode::CoordinatorInactive,
+                    "Main Coordinator 실행이 연결되어 있지 않습니다. Main 실행을 시작한 뒤 다시 위임하세요.",
                 )
             })?;
         session.tasks.push(OrchestrationTask {
@@ -885,8 +885,18 @@ where
                 "Task report is invalid.",
             ));
         }
-        for artifact in &request.artifact_refs {
-            artifact.validate_for_workspace(&session.worktree_path)?;
+        // FR-047: reject only the offending artifact reference and keep the report body.
+        // Rejections are recorded in `unresolved` so the violation stays visible.
+        let mut artifact_refs = Vec::with_capacity(request.artifact_refs.len());
+        let mut rejected_artifacts = Vec::new();
+        for artifact in request.artifact_refs {
+            match artifact.validate_for_workspace(&session.worktree_path) {
+                Ok(()) => artifact_refs.push(artifact),
+                Err(error) => rejected_artifacts.push(format!(
+                    "거부된 산출물 참조 {}: {}",
+                    artifact.uri, error.message
+                )),
+            }
         }
         let task_index = session
             .tasks
@@ -928,8 +938,12 @@ where
             progress_percent: request.progress_percent,
             summary: request.summary.trim().into(),
             findings: request.findings,
-            artifact_refs: request.artifact_refs,
-            unresolved: request.unresolved,
+            artifact_refs,
+            unresolved: request
+                .unresolved
+                .into_iter()
+                .chain(rejected_artifacts)
+                .collect(),
             confidence: request.confidence,
             created_at: now.clone(),
         };
@@ -1783,8 +1797,8 @@ mod tests {
     use super::*;
     use crate::{
         domain::agent_orchestration::{
-            MAIN_AGENT_NODE_ID, OrchestrationError, OrchestrationErrorCode, OrchestrationSession,
-            TaskReportType, TaskStatus,
+            ArtifactKind, MAIN_AGENT_NODE_ID, OrchestrationError, OrchestrationErrorCode,
+            OrchestrationSession, TaskReportType, TaskStatus,
         },
         ports::{
             orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
@@ -1870,6 +1884,140 @@ mod tests {
             .bind_child_run("window-1", &created.task_id, &created.node_id, "run-child")
             .unwrap();
         (service, workspace, created)
+    }
+
+    /// FR-022: delegating without a Main run must be rejected with a reason the UI can
+    /// tell apart from "Main is busy", must not create a task, and must not be retryable.
+    #[test]
+    fn rejects_delegation_without_active_main_run_using_a_distinct_reason() {
+        let repository = MemoryRepository::default();
+        let service = OrchestrationService::new(repository.clone(), RecordingSink::default());
+        let workspace = service.bootstrap("/repo", "window-1", None).unwrap();
+
+        let error = service
+            .delegate_goal(
+                "window-1",
+                DelegateGoalRequest {
+                    request_id: "delegate-no-main".into(),
+                    goal: "세 역할로 조사한다.".into(),
+                    expected_revision: workspace.revision,
+                },
+            )
+            .expect_err("delegation must fail without an active Main run");
+
+        assert_eq!(error.code, OrchestrationErrorCode::CoordinatorInactive);
+        assert_ne!(error.code, OrchestrationErrorCode::CoordinatorBusy);
+        assert!(
+            !error.retryable,
+            "starting a Main run is a user action, not an automatic retry"
+        );
+        assert!(!error.message.trim().is_empty(), "a reason must be shown");
+
+        let stored = service.get_for_window("window-1").unwrap().unwrap();
+        assert!(
+            stored.tasks.is_empty(),
+            "a rejected delegation must not create a task"
+        );
+        assert!(stored.dispatches.is_empty());
+        assert_eq!(stored.revision, workspace.revision);
+    }
+
+    /// FR-022/FR-048: the two Coordinator reasons must serialize to distinct wire codes so
+    /// the Composer can branch on `code` instead of parsing messages.
+    #[test]
+    fn coordinator_inactive_and_busy_serialize_to_distinct_codes() {
+        let inactive = serde_json::to_string(&OrchestrationError::new(
+            OrchestrationErrorCode::CoordinatorInactive,
+            "no run",
+        ))
+        .unwrap();
+        let busy = serde_json::to_string(
+            &OrchestrationError::new(OrchestrationErrorCode::CoordinatorBusy, "busy").retryable(),
+        )
+        .unwrap();
+
+        assert!(inactive.contains("\"coordinatorInactive\""));
+        assert!(inactive.contains("\"retryable\":false"));
+        assert!(busy.contains("\"coordinatorBusy\""));
+        assert!(busy.contains("\"retryable\":true"));
+    }
+
+    /// FR-047: an out-of-workspace artifact reference is rejected on its own; the report
+    /// body, findings, and result transition must survive and the rejection must stay visible.
+    #[test]
+    fn keeps_the_report_body_when_an_artifact_reference_is_rejected() {
+        let (service, _workspace, created) = service_with_running_child();
+
+        service
+            .report_task(
+                "window-1",
+                ReportTaskRequest {
+                    request_id: "result-with-bad-artifact".into(),
+                    task_id: created.task_id.clone(),
+                    reporter_node_id: created.node_id.clone(),
+                    reporter_run_id: "run-child".into(),
+                    report_type: TaskReportType::Result,
+                    progress_percent: Some(100),
+                    summary: "조사 결과 요약".into(),
+                    findings: vec![],
+                    artifact_refs: vec![
+                        ArtifactReference {
+                            kind: ArtifactKind::File,
+                            uri: "../outside.txt".into(),
+                            label: "escaping".into(),
+                            description: None,
+                        },
+                        ArtifactReference {
+                            kind: ArtifactKind::Text,
+                            uri: "note://inline".into(),
+                            label: "note".into(),
+                            description: None,
+                        },
+                    ],
+                    unresolved: vec!["원래 미해결 항목".into()],
+                    confidence: Some(0.8),
+                },
+            )
+            .expect("a rejected artifact must not drop the whole report");
+
+        let stored = service.get_for_window("window-1").unwrap().unwrap();
+        let report = stored
+            .reports
+            .iter()
+            .find(|report| report.request_id == "result-with-bad-artifact")
+            .expect("the report body must be preserved");
+
+        assert_eq!(report.summary, "조사 결과 요약");
+        assert_eq!(
+            report.artifact_refs.len(),
+            1,
+            "only the escaping reference is dropped"
+        );
+        assert_eq!(report.artifact_refs[0].label, "note");
+        assert!(
+            report
+                .unresolved
+                .iter()
+                .any(|entry| entry.contains("../outside.txt")),
+            "the rejection must stay visible in unresolved: {:?}",
+            report.unresolved
+        );
+        assert!(
+            report
+                .unresolved
+                .iter()
+                .any(|entry| entry == "원래 미해결 항목"),
+            "existing unresolved entries must be kept"
+        );
+        assert_eq!(
+            stored
+                .tasks
+                .iter()
+                .find(|task| task.id == created.task_id)
+                .unwrap()
+                .status,
+            TaskStatus::Completed
+        );
     }
 
     #[test]
