@@ -2,7 +2,7 @@ import type { ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
-import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
+import { markdownRenderingFixtures, parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
 
 import { MarkdownViewer } from "./MarkdownViewer";
 import type {
@@ -181,6 +181,46 @@ No tasks here.
     expect(html).toContain("- [ ] code sample");
     expect(html.match(/data-task-list-item/g)).toBeNull();
     expect(html).not.toContain("data-task-summary");
+  });
+
+  it("uses semantic list containers whose direct child is a list item", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownViewer blocks={parseMarkdownToBlocks("- Parent\n  - Child\n\n3. Third")} components={components} />,
+    );
+
+    expect(html).toContain("<ul><li");
+    expect(html).toContain('<ol start="3"><li');
+    expect(html).not.toContain("<ul><div");
+    expect(html).not.toContain("<ol><div");
+  });
+
+  it.each(markdownRenderingFixtures)("renders quality fixture $id without unsafe HTML", (fixture) => {
+    const html = renderToStaticMarkup(
+      <MarkdownViewer blocks={parseMarkdownToBlocks(fixture.markdown)} components={components} />,
+    );
+
+    fixture.expectedText.forEach((text) => expect(html).toContain(text));
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("javascript:");
+  });
+
+  it("renders 2,000 independent blocks within the preview performance budget", () => {
+    const markdown = Array.from({ length: 2_000 }, (_, index) => `- item ${index + 1}`).join("\n");
+    const startedAt = performance.now();
+    const html = renderToStaticMarkup(
+      <MarkdownViewer blocks={parseMarkdownToBlocks(markdown)} components={components} />,
+    );
+
+    expect(html).toContain("item 2000");
+    expect(performance.now() - startedAt).toBeLessThan(2_000);
+  });
+
+  it("exposes source ranges on annotation blocks", () => {
+    const html = renderToStaticMarkup(
+      <MarkdownViewer blocks={parseMarkdownToBlocks("Paragraph")} components={components} />,
+    );
+    expect(html).toContain('data-source-start="0"');
+    expect(html).toContain('data-source-end="9"');
   });
 
   it("renders plain and aliased wikilinks while preserving inline code", () => {

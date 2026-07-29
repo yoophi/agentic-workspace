@@ -128,8 +128,12 @@ describe("worktree workspace file tree", () => {
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
       'type WorkspaceTabId = "git" | "files" | "markdown" | "speckit"',
     );
-    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
-      "<SpeckitWorkspaceTab worktree={worktree} onSendAnnotationPrompt={onSendAnnotationPrompt} onSendSddPrompt={onSendSddPrompt} />",
+    // prop이 추가되어도 깨지지 않게 전달 여부만 확인한다.
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toMatch(
+      /<SpeckitWorkspaceTab[^>]*onSendAnnotationPrompt=\{onSendAnnotationPrompt\}/,
+    );
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toMatch(
+      /<SpeckitWorkspaceTab[^>]*onSendSddPrompt=\{onSendSddPrompt\}/,
     );
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onSelectDocument={setSelectedDocumentPath}");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('".specify/feature.json"');
@@ -145,5 +149,80 @@ describe("worktree workspace file tree", () => {
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("staleDocumentSelection");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("선택한 Speckit 문서가 현재 목록에 없습니다");
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("Speckit preview를 표시할 수 없습니다.");
+  });
+
+  it("allows both Markdown preview paths to hide and restore the annotation area", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("const [annotationsVisible, setAnnotationsVisible] = useState(true);");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('aria-label={annotationsVisible ? "주석 영역 숨기기" : "주석 영역 보이기"}');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("annotationsVisible={annotationsVisible}");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onAnnotationsVisibleChange={setAnnotationsVisible}");
+  });
+});
+
+describe("WorktreeWorkspacePanel 패널 선택", () => {
+  it("선택된 패널 종류의 콘텐츠만 렌더링한다", () => {
+    // 네 분기가 모두 배타적이어야 선택 없음 → 표시 전환에서 잔여 콘텐츠가 남지 않는다. (FR-007)
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('selectedTab === "git" ? (');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('selectedTab === "files" ? (');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain('selectedTab === "markdown" ? (');
+  });
+
+  it("외부에서 전달한 선택 패널을 표시 대상으로 따른다", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("selectedPanel ?? initialTab");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("if (selectedPanel) setSelectedTab(selectedPanel)");
+  });
+
+  it("탭 목록 UI와 고아 tabpanel role을 남기지 않는다", () => {
+    // 제어는 화면 오른쪽 selector가 담당한다. (research.md 결정 4)
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).not.toContain('role="tablist"');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).not.toContain('role="tabpanel"');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).not.toContain('role="tab"');
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).not.toContain("workspaceTabs");
+  });
+});
+
+describe("WorktreeWorkspacePanel 내부 B 폭", () => {
+  const innerPanels = [
+    { panel: "git", a: "git-workspace-nav", b: "git-workspace-detail" },
+    { panel: "files", a: "file-workspace-tree", b: "file-workspace-preview" },
+    { panel: "markdown", a: "markdown-workspace-tree", b: "markdown-workspace-preview" },
+    { panel: "speckit", a: "speckit-workspace-list", b: "speckit-workspace-preview" },
+  ] as const;
+
+  it("네 패널 종류의 최소 폭과 기본 B 크기를 모두 정의한다", () => {
+    for (const { panel } of innerPanels) {
+      expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toMatch(
+        new RegExp(`${panel}: \\{ minimumA: \\d+, minimumB: \\d+, fallbackSize: "\\d+%" \\}`),
+      );
+    }
+  });
+
+  it("오른쪽 B에만 저장 폭을 적용하고 왼쪽 A는 남은 공간을 채운다", () => {
+    for (const { a, b } of innerPanels) {
+      // A: 저장 크기(defaultSize) 없음
+      expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(`<ResizablePanel id="${a}" minSize=`);
+      // B: 분할 저장 props 적용
+      expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+        `<ResizablePanel id="${b}" {...split.panelProps}>`,
+      );
+    }
+  });
+
+  it("표시 중인 패널 종류를 저장 키로 써서 다른 종류를 덮어쓰지 않는다", () => {
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("onPersistPanelWidth?.(selectedTab, widthPx)");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("preferredWidth: panelWidthsPx?.[selectedTab]");
+    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("resetKey: selectedTab");
+  });
+
+  it("네 패널 모두 분할선 조작 의도와 안정 시점 저장을 연결한다", () => {
+    expect(
+      WORKTREE_WORKSPACE_PANEL_SOURCE.match(/\{\.\.\.split\.groupProps\}/g) ?? [],
+    ).toHaveLength(4);
+    expect(
+      WORKTREE_WORKSPACE_PANEL_SOURCE.match(/\{\.\.\.split\.separatorProps\}/g) ?? [],
+    ).toHaveLength(4);
+    expect(
+      WORKTREE_WORKSPACE_PANEL_SOURCE.match(/\{\.\.\.split\.panelProps\}/g) ?? [],
+    ).toHaveLength(4);
   });
 });

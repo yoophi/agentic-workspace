@@ -6,6 +6,7 @@ import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 import { transformWikilinks } from "@yoophi/markdown-annotation-core";
 import { cn } from "./cn";
 import { MermaidExpandedView } from "./MermaidExpandedView";
+import { MarkdownList } from "./markdown-components";
 import { segmentTextByAnnotations } from "./segment-text";
 import type {
   MarkdownViewerBlockNote,
@@ -199,6 +200,7 @@ function BlockShell({
   notes,
   children,
   components,
+  as: Shell = "div",
   onRequestBlockComment,
   onRequestBlockDelete,
 }: {
@@ -208,6 +210,7 @@ function BlockShell({
   notes: MarkdownViewerBlockNote[];
   children: ReactNode;
   components: MarkdownViewerComponents;
+  as?: ElementType;
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
 }) {
@@ -224,7 +227,7 @@ function BlockShell({
   };
 
   return (
-    <div
+    <Shell
       className={cn(
         "group/markdown-block relative border-r-4 border-transparent bg-transparent pr-12 transition-colors",
         "hover:border-border",
@@ -234,6 +237,8 @@ function BlockShell({
       data-block-type={block.type}
       data-start-line={block.startLine}
       data-end-line={block.endLine}
+      data-source-start={block.sourceRange?.startOffset}
+      data-source-end={block.sourceRange?.endOffset}
     >
       {hasNotes ? (
         <div
@@ -305,7 +310,7 @@ function BlockShell({
         </Tooltip>
       </div>
       <div className={cn("relative z-0", deleted && deleteAnnotationClassName)}>{children}</div>
-    </div>
+    </Shell>
   );
 }
 
@@ -321,6 +326,8 @@ function MarkdownBlockRenderer({
   onRequestBlockComment,
   onRequestBlockDelete,
   onLinkActivate,
+  nestedList,
+  orderedNumber,
 }: {
   block: MarkdownBlock;
   annotated: boolean;
@@ -333,6 +340,8 @@ function MarkdownBlockRenderer({
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
   onLinkActivate?: (href: string) => void;
+  nestedList?: ReactNode;
+  orderedNumber?: number;
 }) {
   const shellProps = {
     annotated,
@@ -377,7 +386,7 @@ function MarkdownBlockRenderer({
       if (block.checked !== undefined) {
         const TaskIcon = block.checked ? CircleCheck : Circle;
         return (
-          <BlockShell {...shellProps}>
+          <BlockShell {...shellProps} as="li">
             <div
               className={cn(
                 "flex min-w-0 items-start gap-3 rounded-md border px-3 py-2",
@@ -407,18 +416,19 @@ function MarkdownBlockRenderer({
                 {inline}
               </div>
             </div>
+            {nestedList}
           </BlockShell>
         );
       }
 
       return (
-        <BlockShell {...shellProps}>
+        <BlockShell {...shellProps} as="li">
           <div
             className="flex items-start gap-3"
             style={{ marginLeft: `${(block.level ?? 0) * 1.25}rem` }}
           >
-            <span className="mt-0.5 text-muted-foreground">
-              {block.ordered ? `${block.orderedStart ?? 1}.` : "-"}
+            <span className="mt-0.5 shrink-0 whitespace-nowrap text-muted-foreground">
+              {block.ordered ? `${orderedNumber ?? block.orderedStart ?? 1}.` : "-"}
             </span>
             <div
               className={cn(block.checked && "text-muted-foreground line-through")}
@@ -427,6 +437,7 @@ function MarkdownBlockRenderer({
               {inline}
             </div>
           </div>
+          {nestedList}
         </BlockShell>
       );
 
@@ -548,6 +559,83 @@ export function MarkdownViewer({
 }: MarkdownViewerProps) {
   const taskCountsByH1Chapter = countTasksByH1Chapter(blocks);
   const preambleTaskCounts = taskCountsByH1Chapter.get(-1);
+  const blocksByParent = new Map<string | undefined, MarkdownBlock[]>();
+  blocks.filter((block) => block.type === "list-item").forEach((block) => {
+    const siblings = blocksByParent.get(block.parentId) ?? [];
+    siblings.push(block);
+    blocksByParent.set(block.parentId, siblings);
+  });
+
+  const renderBlock = (block: MarkdownBlock, nestedList?: ReactNode, orderedNumber?: number) => (
+    <MarkdownBlockRenderer
+      annotated={annotatedBlockIds.has(block.id)}
+      block={block}
+      components={components}
+      deleted={deletedBlockIds.has(block.id)}
+      inlineAnnotations={inlineAnnotationsByBlock.get(block.id) ?? []}
+      nestedList={nestedList}
+      notes={noteAnnotationsByBlock.get(block.id) ?? []}
+      onCancelInlineAnnotation={onCancelInlineAnnotation}
+      onEditInlineAnnotation={onEditInlineAnnotation}
+      onRequestBlockComment={onRequestBlockComment}
+      onRequestBlockDelete={onRequestBlockDelete}
+      onLinkActivate={onLinkActivate}
+      orderedNumber={orderedNumber}
+    />
+  );
+
+  const renderItems = (items: MarkdownBlock[]): ReactNode => {
+    if (items.length === 0) return null;
+    const groups = items.reduce<MarkdownBlock[][]>((result, item) => {
+      const current = result[result.length - 1];
+      if (!current || current[0].ordered !== item.ordered) {
+        result.push([item]);
+      } else {
+        current.push(item);
+      }
+      return result;
+    }, []);
+
+    return groups.map((itemsInList) => (
+      <MarkdownList
+        key={itemsInList[0].id}
+        ordered={itemsInList[0].ordered}
+        start={itemsInList[0].orderedStart}
+      >
+        {itemsInList.map((item, indexInList) => (
+          <Fragment key={item.id}>
+            {renderBlock(
+              item,
+              renderList(item.id),
+              item.ordered ? (itemsInList[0].orderedStart ?? 1) + indexInList : undefined,
+            )}
+          </Fragment>
+        ))}
+      </MarkdownList>
+    ));
+  };
+
+  const renderList = (parentId?: string): ReactNode =>
+    renderItems(blocksByParent.get(parentId) ?? []);
+
+  // 최상위 목록 런: 문서 순서에서 최상위 list-item이 이어지는 최대 구간.
+  // 경계는 비-list-item 블록만이며, 중첩 list-item은 런을 시작하지도 끊지도 않는다.
+  const topLevelRunByFirstId = new Map<string, MarkdownBlock[]>();
+  let currentRun: MarkdownBlock[] | null = null;
+  for (const block of blocks) {
+    if (block.type === "list-item") {
+      if (block.parentId === undefined) {
+        if (currentRun) {
+          currentRun.push(block);
+        } else {
+          currentRun = [block];
+          topLevelRunByFirstId.set(block.id, currentRun);
+        }
+      }
+    } else {
+      currentRun = null;
+    }
+  }
 
   return (
     <article className="markdown-viewer max-w-none">
@@ -559,19 +647,11 @@ export function MarkdownViewer({
               open={preambleTaskCounts.open}
             />
           ) : null}
-          <MarkdownBlockRenderer
-            annotated={annotatedBlockIds.has(block.id)}
-            block={block}
-            components={components}
-            deleted={deletedBlockIds.has(block.id)}
-            inlineAnnotations={inlineAnnotationsByBlock.get(block.id) ?? []}
-            notes={noteAnnotationsByBlock.get(block.id) ?? []}
-            onCancelInlineAnnotation={onCancelInlineAnnotation}
-            onEditInlineAnnotation={onEditInlineAnnotation}
-            onRequestBlockComment={onRequestBlockComment}
-            onRequestBlockDelete={onRequestBlockDelete}
-            onLinkActivate={onLinkActivate}
-          />
+          {block.type === "list-item"
+            ? topLevelRunByFirstId.has(block.id)
+              ? renderItems(topLevelRunByFirstId.get(block.id) ?? [])
+              : null
+            : renderBlock(block)}
           {taskCountsByH1Chapter.has(index) ? (
             <TaskSummary
               completed={taskCountsByH1Chapter.get(index)?.completed ?? 0}

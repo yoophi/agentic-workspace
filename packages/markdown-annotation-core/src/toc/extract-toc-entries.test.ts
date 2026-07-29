@@ -108,6 +108,19 @@ describe("extractTocEntries", () => {
     });
   });
 
+  it("keeps AST source metadata on headings while task metadata drives the same summary", () => {
+    const blocks = parseMarkdownToBlocks("# Release\n\n- [x] shipped\n- [ ] verify");
+    const heading = blocks.find((block) => block.type === "heading");
+    const entry = extractTocEntries(blocks)[0];
+
+    expect(heading?.sourceRange).toMatchObject({ startOffset: 0, startColumn: 1 });
+    expect(entry).toMatchObject({
+      blockId: heading?.id,
+      startLine: heading?.startLine,
+      taskSummary: { completed: 1, open: 1 },
+    });
+  });
+
   it("omits task summaries for taskless chapters and tasks before the first h1", () => {
     const markdown = [
       "- [x] preamble task",
