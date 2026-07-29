@@ -384,10 +384,53 @@ cargo test --workspace
 - SC-001(제출→3개 배정), SC-004(기록→목록 반영), SC-014(보고 저장→Main 통지) 측정 구간의
   상한과 트랜잭션 완결성
 
-수동 확인이 필요한 남은 항목:
+### 2026-07-30 Scenario 12 화면 확인과 Activity Rail row 보완
 
-- Scenario 12는 자동 검증으로 네 거부 경로를 모두 덮었으나, 실제 AW 개발 앱에서의 화면
-  확인은 이번 단계에서 수행하지 않았다.
+smoke Worker 카탈로그로 AW 개발 앱을 실행해 Scenario 12의 거부 경로를 화면에서 확인했다.
+
+```sh
+ACP_AGENT_CATALOG_PATH="$PWD/apps/agentic-workbench/scripts/acp-orchestration-smoke-agents.json" \
+ACP_WORKBENCH_MAX_RUNS=4 \
+pnpm run tauri:dev:workbench
+```
+
+- 프롬프트 16KiB 초과(FR-044): 전송 전 거부, 초과 바이트와 허용 범위 표시, 입력 텍스트
+  유지, dispatch 기록 없음 — 확인 완료
+- Node 8개·타일 깊이 4 상한(FR-045): 9번째 panel과 깊이 5 분할이 각각 `panel-limit`,
+  `depth-limit` 사유로 거부되고 기존 배치·초점·run 유지 — 확인 완료
+- Main 비활성 위임(FR-022): `coordinatorInactive`로 거부되며 `Main Coordinator 실행이
+  없습니다.`와 다음 동작이 표시되고 새 task·dispatch 없음 — 확인 완료
+
+산출물 경로 위반(FR-047)은 화면 조작으로 재현할 수 없다. task는 Main이
+`aw_create_child_task`·`aw_assign_child_task`를 호출해야 생기는데
+`scripts/acp-orchestration-smoke-agent.mjs`는 Child 측 보고 도구만 구현하므로 fixture
+Main으로는 task가 만들어지지 않고 Activity Rail 자체가 렌더되지 않는다. 이 경로는
+백엔드 자동 test(`keeps_the_report_body_when_an_artifact_reference_is_rejected`,
+`artifact_file_references_reject_absolute_and_parent_paths`,
+`artifact_file_references_reject_symlink_escapes`)로 검증한다.
+
+거부 사유와 재시도 가능 여부 표시(FR-048)도 화면 조작 대신 component test로 고정되어
+있다(`task-activity-rail.test.tsx`의 command 실패·task 실패 두 표시 지점, retryable
+true/false와 다음 동작 문구).
+
+이 과정에서 `orchestration-workspace-ui.md`가 요구하는 Activity Rail row 정보 중 진행률,
+provider/profile/model, artifact 개수, `unresolved`가 렌더되지 않는 것을 발견해 보완했다.
+`unresolved` 표시가 없으면 FR-047의 "제외 사실이 Activity Rail에서 확인된다"는 기대를
+화면에서 충족할 수 없었다.
+
+- `task-activity-item.tsx`: 진행률(`data-task-progress`), runtime profile
+  (provider·model·agent profile), artifact 개수(`data-artifact-count`), 미해결 항목 목록
+  추가. 값이 없으면 라벨을 렌더하지 않는다.
+- `task-activity-rail.test.tsx`: 위 네 항목과 값이 없을 때의 생략을 단정하는 test 3개 추가
+- `task-activity-rail.stories.tsx`: `ResultWithRejectedArtifact` story 추가
+
+`aw_report_blocked`는 task를 `Blocked`로만 바꾸고 `task.failure`를 설정하지 않는데, 이는
+FR-048 위반이 아니다. FR-048은 거부·실패한 *요청*을 대상으로 하고 blocked 자기 보고는
+성공한 요청이며, blocked row에는 이미 `차단됨` badge와 보고 요약, `재시도`·`취소`·`재할당`
+action이 제공된다.
+
+검증: frontend typecheck 통과, 69 files / 328 tests 통과(이전 325에서 +3),
+Storybook production build 통과.
 
 ### 2026-07-27 구현 검증 기록
 

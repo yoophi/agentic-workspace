@@ -82,6 +82,40 @@ export const FailedInputResponse: Story = {
   },
 };
 
+export const ResultWithRejectedArtifact: Story = {
+  args: {
+    session: {
+      ...orchestrationSessionFixture,
+      nodes: orchestrationSessionFixture.nodes.map((node) =>
+        node.kind === "child"
+          ? {
+              ...node,
+              runtimeProfile: {
+                agentProfileId: "orchestration-smoke",
+                providerId: "acp",
+                modelId: "claude-opus-5",
+                accessPolicy: "readOnly" as const,
+                supportsReadOnly: true,
+              },
+            }
+          : node,
+      ),
+      reports: orchestrationSessionFixture.reports.map((report) => ({
+        ...report,
+        type: "result" as const,
+        progressPercent: 100,
+        summary: "조사 결과와 근거를 정리했습니다.",
+        artifactRefs: [
+          { kind: "file" as const, uri: "docs/research-notes.md", label: "조사 메모" },
+        ],
+        unresolved: [
+          "Rejected artifact reference ../outside.txt: The artifact path escapes the workspace.",
+        ],
+      })),
+    },
+  },
+};
+
 export const EventGap: Story = {
   args: {
     runtimeStates: { "run-researcher": "gap" },

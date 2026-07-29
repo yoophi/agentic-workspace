@@ -388,6 +388,27 @@ FR-046(역할별 정책 배정), FR-047(산출물 경로 검증)은 구현에 �
 
 ---
 
+## Phase 15: Activity Rail Row Completeness (화면 확인 후속)
+
+**Purpose**: 2026-07-30 Scenario 12 화면 확인 중 발견한 Activity Rail row 정보 누락을
+보완합니다. `orchestration-workspace-ui.md`는 row마다 진행률, provider/profile/model,
+artifact 개수와 `unresolved`를 요구하지만 `task-activity-item.tsx`는 최근 보고 요약만
+렌더하고 있었습니다. `unresolved`가 없으면 FR-047의 "제외 사실이 Activity Rail에서
+확인된다"는 기대를 화면에서 충족할 수 없습니다.
+
+- [X] T164 Activity Rail row에 진행률, runtime profile(provider·model·agent profile), artifact 개수와 미해결 항목을 표시하고 값이 없을 때 라벨을 생략하는지 검증하는 test를 추가한 뒤 구현을 보완한다 (FR-047, `orchestration-workspace-ui.md`): `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.test.tsx`, `apps/agentic-workbench/src/features/agent-run/ui/task-activity-item.tsx`
+- [X] T165 [P] 거부된 artifact 참조가 남은 결과 보고 상태를 Storybook story로 등록하고 Scenario 12 화면 확인 결과와 자동 검증 경계를 기록한다: `apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.stories.tsx`, `specs/033-agent-orchestration/quickstart.md`
+
+**Checkpoint**: Activity Rail row가 UI 계약이 요구하는 정보를 모두 제공하고, Scenario 12의
+화면 확인 범위와 자동 검증 범위가 quickstart에 기록됩니다.
+
+**범위 밖으로 판단한 항목**: smoke Worker fixture(`acp-orchestration-smoke-agent.mjs`)에
+Coordinator 도구 호출 분기를 추가하는 일은 이번 단계에서 하지 않았다. FR-047과 FR-048은
+백엔드 단위 test와 component test로 이미 고정되어 있어 fixture 확장은 검증 범위를 넓히지
+않고, Scenario 2 이후의 수동 시나리오를 개발 앱에서 재현하려는 별도 목적에 해당한다.
+
+---
+
 ## Dependencies & Execution Order
 
 ### Phase Dependencies

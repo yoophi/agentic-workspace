@@ -71,6 +71,17 @@ export function TaskActivityItem({
     task.status === "failed";
   const latest = reports[reports.length - 1];
   const latestCommand = commands[commands.length - 1];
+  // Progress and artifacts are cumulative across a task's reports, so read the most recent
+  // report that actually carries each value instead of only the last one.
+  const progressPercent =
+    [...reports].reverse().find((report) => report.progressPercent !== null)
+      ?.progressPercent ?? null;
+  const artifactCount = reports.reduce(
+    (total, report) => total + report.artifactRefs.length,
+    0,
+  );
+  const unresolved = latest?.unresolved ?? [];
+  const runtimeProfile = node.runtimeProfile;
   const taskFailureNextAction = task.failure
     ? describeOrchestrationFailure(task.failure).nextAction
     : null;
@@ -105,9 +116,20 @@ export function TaskActivityItem({
               {statusLabels[task.status]}
             </Badge>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p
+            className="text-xs text-muted-foreground"
+            data-task-progress={progressPercent === null ? undefined : String(progressPercent)}
+          >
             {node.role.name} · {formatElapsed(task.startedAt, now)} · 시도 {task.attempt}
+            {progressPercent !== null ? ` · ${progressPercent}%` : ""}
           </p>
+          {runtimeProfile && (
+            <p className="text-xs text-muted-foreground" data-runtime-profile={runtimeProfile.agentProfileId}>
+              {runtimeProfile.providerId}
+              {runtimeProfile.modelId ? ` · ${runtimeProfile.modelId}` : ""}
+              {` · ${runtimeProfile.agentProfileId}`}
+            </p>
+          )}
         </div>
         {node.presentationStatus === "panel" ? (
           <Button
@@ -136,6 +158,28 @@ export function TaskActivityItem({
         <p className="line-clamp-2 text-xs" aria-label="최근 활동">
           {latest.summary}
         </p>
+      )}
+
+      {artifactCount > 0 && (
+        <p
+          className="text-xs text-muted-foreground"
+          data-artifact-count={String(artifactCount)}
+        >
+          산출물 {artifactCount}개
+        </p>
+      )}
+
+      {/* FR-047: a rejected artifact reference survives only as an `unresolved` entry, so the
+          Rail must state it rather than silently keep the report body. */}
+      {unresolved.length > 0 && (
+        <div className="text-xs text-muted-foreground" aria-label="미해결 항목">
+          <p>미해결 {unresolved.length}건</p>
+          <ul className="list-disc pl-4">
+            {unresolved.map((entry) => (
+              <li key={entry}>{entry}</li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {runtimeLabel && (

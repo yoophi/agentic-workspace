@@ -109,4 +109,81 @@ describe("TaskActivityRail", () => {
     expect(html).not.toContain("autofocus");
     expect(html).not.toContain("autoFocus");
   });
+
+  // UI contract: every row carries progress, provider/profile/model and artifact count, so a
+  // background task can be judged from the Rail alone without promoting it to a panel.
+  it("shows progress, runtime profile and artifact count for a background task", () => {
+    const [main, researcher] = orchestrationSessionFixture.nodes;
+    const [report] = orchestrationSessionFixture.reports;
+    const session = {
+      ...orchestrationSessionFixture,
+      nodes: [
+        main,
+        {
+          ...researcher,
+          runtimeProfile: {
+            agentProfileId: "orchestration-smoke",
+            providerId: "acp",
+            modelId: "claude-opus-5",
+            accessPolicy: "readOnly" as const,
+            supportsReadOnly: true,
+          },
+        },
+      ],
+      reports: [
+        {
+          ...report,
+          artifactRefs: [
+            { kind: "file" as const, uri: "docs/notes.md", label: "notes" },
+            { kind: "url" as const, uri: "https://example.com", label: "ref" },
+          ],
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(<TaskActivityRail session={session} />);
+
+    expect(html).toContain('data-task-progress="55"');
+    expect(html).toContain("55%");
+    expect(html).toContain("acp");
+    expect(html).toContain("claude-opus-5");
+    expect(html).toContain('data-artifact-count="2"');
+    expect(html).toContain("산출물 2개");
+  });
+
+  // FR-047: a rejected artifact reference is recorded in `unresolved`, and the Rail is where
+  // the user learns the reference was dropped while the report body was kept.
+  it("shows unresolved items so a rejected artifact reference is visible", () => {
+    const [report] = orchestrationSessionFixture.reports;
+    const session = {
+      ...orchestrationSessionFixture,
+      reports: [
+        {
+          ...report,
+          type: "result" as const,
+          summary: "조사 결과를 정리했습니다.",
+          unresolved: [
+            "Rejected artifact reference ../outside.txt: The artifact path escapes the workspace.",
+          ],
+        },
+      ],
+    };
+
+    const html = renderToStaticMarkup(<TaskActivityRail session={session} />);
+
+    expect(html).toContain("조사 결과를 정리했습니다.");
+    expect(html).toContain("미해결 1건");
+    expect(html).toContain("../outside.txt");
+  });
+
+  // A row must not render empty artifact or unresolved labels when the report carries none.
+  it("omits artifact and unresolved labels when the report carries none", () => {
+    const html = renderToStaticMarkup(
+      <TaskActivityRail session={orchestrationSessionFixture} />,
+    );
+
+    expect(html).not.toContain("data-artifact-count");
+    expect(html).not.toContain("미해결");
+    expect(html).not.toContain("산출물");
+  });
 });
