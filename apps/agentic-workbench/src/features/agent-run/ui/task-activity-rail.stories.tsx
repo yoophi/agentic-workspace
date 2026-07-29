@@ -1,6 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
-import { orchestrationSessionFixture } from "@/shared/storybook/agent-orchestration-sample-data";
+import {
+  orchestrationSessionFixture,
+  rejectedArtifactUnresolvedFixture,
+  smokeRuntimeProfileFixture,
+} from "@/shared/storybook/agent-orchestration-sample-data";
 
 import { TaskActivityRail } from "./task-activity-rail";
 
@@ -88,16 +92,7 @@ export const ResultWithRejectedArtifact: Story = {
       ...orchestrationSessionFixture,
       nodes: orchestrationSessionFixture.nodes.map((node) =>
         node.kind === "child"
-          ? {
-              ...node,
-              runtimeProfile: {
-                agentProfileId: "orchestration-smoke",
-                providerId: "acp",
-                modelId: "claude-opus-5",
-                accessPolicy: "readOnly" as const,
-                supportsReadOnly: true,
-              },
-            }
+          ? { ...node, runtimeProfile: smokeRuntimeProfileFixture }
           : node,
       ),
       reports: orchestrationSessionFixture.reports.map((report) => ({
@@ -108,9 +103,7 @@ export const ResultWithRejectedArtifact: Story = {
         artifactRefs: [
           { kind: "file" as const, uri: "docs/research-notes.md", label: "조사 메모" },
         ],
-        unresolved: [
-          "Rejected artifact reference ../outside.txt: The artifact path escapes the workspace.",
-        ],
+        unresolved: [rejectedArtifactUnresolvedFixture],
       })),
     },
   },

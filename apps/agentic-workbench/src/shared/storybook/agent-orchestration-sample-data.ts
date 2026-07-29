@@ -1,4 +1,20 @@
-import type { OrchestrationSession } from "@/entities/agent-orchestration";
+import type {
+  OrchestrationSession,
+  WorkerRuntimeProfile,
+} from "@/entities/agent-orchestration";
+
+/** Runtime profile of the deterministic smoke Worker used by the quickstart scenarios. */
+export const smokeRuntimeProfileFixture: WorkerRuntimeProfile = {
+  agentProfileId: "orchestration-smoke",
+  providerId: "acp",
+  modelId: "claude-opus-5",
+  accessPolicy: "readOnly",
+  supportsReadOnly: true,
+};
+
+/** `unresolved` entry the backend records when it rejects an out-of-workspace artifact (FR-047). */
+export const rejectedArtifactUnresolvedFixture =
+  "Rejected artifact reference ../outside.txt: The artifact path escapes the workspace.";
 
 export const sampleOrchestrationWorkspace = {
   workspaceId: "workspace-storybook",

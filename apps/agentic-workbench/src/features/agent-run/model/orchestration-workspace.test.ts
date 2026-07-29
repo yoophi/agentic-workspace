@@ -8,8 +8,12 @@ import {
   selectDirectChildren,
   selectMainNode,
   selectChildResultSummaries,
+  summarizeTaskReports,
 } from "./orchestration-workspace";
-import type { OrchestrationSession } from "@/entities/agent-orchestration";
+import type {
+  OrchestrationSession,
+  TaskReport,
+} from "@/entities/agent-orchestration";
 
 const session = {
   id: "workspace-1",
@@ -123,6 +127,8 @@ describe("orchestration workspace controller", () => {
       reports: children.map((_, index) => ({
         id: `report-${index}`,
         taskId: `task-${index}`,
+        progressPercent: null,
+        artifactRefs: [],
         unresolved: index === 0 ? ["conflict-a"] : [],
       })),
     } as unknown as OrchestrationSession;
@@ -162,6 +168,8 @@ describe("orchestration workspace controller", () => {
       reports: children.map((_, index) => ({
         id: `report-${index}`,
         taskId: `task-${index}`,
+        progressPercent: null,
+        artifactRefs: [],
         unresolved: [],
       })),
     } as unknown as OrchestrationSession;
@@ -183,5 +191,66 @@ describe("orchestration workspace controller", () => {
     const perInteractionMs = (performance.now() - started) / INTERACTIONS;
 
     expect(perInteractionMs).toBeLessThan(BUDGET_MS);
+  });
+});
+
+describe("summarizeTaskReports", () => {
+  function report(overrides: Partial<TaskReport>): TaskReport {
+    return {
+      progressPercent: null,
+      artifactRefs: [],
+      unresolved: [],
+      ...overrides,
+    } as TaskReport;
+  }
+
+  it("reports empty values for a task with no reports", () => {
+    expect(summarizeTaskReports([])).toEqual({
+      latest: undefined,
+      progressPercent: null,
+      artifactCount: 0,
+      unresolved: [],
+    });
+  });
+
+  // Progress is the newest value that was actually reported, so a later report that carries
+  // none must not blank out the row.
+  it("keeps the newest reported progress when a later report carries none", () => {
+    const reports = [
+      report({ id: "a", progressPercent: 25 }),
+      report({ id: "b", progressPercent: 70 }),
+      report({ id: "c", progressPercent: null }),
+    ];
+
+    const summary = summarizeTaskReports(reports);
+
+    expect(summary.progressPercent).toBe(70);
+    expect(summary.latest?.id).toBe("c");
+  });
+
+  // FR-047: a rejected artifact reference is appended to whichever report was being saved, so
+  // it must survive a later report that has no unresolved items of its own.
+  it("aggregates artifacts and unresolved items across the whole report history", () => {
+    const reports = [
+      report({
+        id: "a",
+        artifactRefs: [{ kind: "file", uri: "docs/a.md", label: "a" }],
+        unresolved: ["Rejected artifact reference ../outside.txt"],
+      }),
+      report({
+        id: "b",
+        artifactRefs: [
+          { kind: "file", uri: "docs/b.md", label: "b" },
+          { kind: "url", uri: "https://example.com", label: "c" },
+        ],
+      }),
+    ];
+
+    const summary = summarizeTaskReports(reports);
+
+    expect(summary.artifactCount).toBe(3);
+    expect(summary.unresolved).toEqual([
+      "Rejected artifact reference ../outside.txt",
+    ]);
   });
 });
