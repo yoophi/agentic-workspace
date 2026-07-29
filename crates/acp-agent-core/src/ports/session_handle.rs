@@ -17,6 +17,18 @@ pub trait SessionHandle: Send + Sync + 'static {
     where
         S: RunEventSink;
 
+    /// Queue a prompt behind the currently active turn.
+    ///
+    /// The default keeps adapters source-compatible, while runtimes that can
+    /// serialize turns should override this method instead of rejecting a
+    /// prompt merely because the previous turn is still producing output.
+    fn queue_prompt<S>(&self, sink: S, text: String) -> impl Future<Output = Result<String>> + Send
+    where
+        S: RunEventSink,
+    {
+        self.send_prompt(sink, text)
+    }
+
     /// Attempt to inject a steer prompt into the currently active turn.
     /// Adapters that cannot provide cancel-free steering should return an
     /// error instead of cancelling or restarting the run.

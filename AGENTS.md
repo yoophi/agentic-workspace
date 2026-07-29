@@ -45,11 +45,13 @@ When working in this repository, read the OpenWiki quickstart first, then follow
 ## Tauri Backend Architecture
 
 - Write Tauri backend code under `apps/*/src-tauri/src` using hexagonal architecture.
-- Keep pure domain models and ports in `domain`.
+- Keep pure domain models in `domain`.
+- Keep ports in `domain` or in a dedicated top-level `ports` module, and use one location consistently per app. `agentic-workbench` uses `ports`.
+- Keep only port definitions in a `ports` module; adapter implementations belong in `infrastructure`.
 - Keep use cases and business rules in `application`.
 - Keep inbound adapters such as Tauri commands in `inbound`.
 - Keep outbound adapters such as JSON file persistence in `infrastructure`.
-- Do not let `domain` depend on Tauri, filesystem APIs, or JSON storage details.
+- Do not let `domain` or `ports` depend on Tauri, filesystem APIs, or JSON storage details.
 - Do not put persistence logic directly in Tauri commands; commands should delegate to application services through ports/adapters.
 
 <!-- OPENWIKI:START -->

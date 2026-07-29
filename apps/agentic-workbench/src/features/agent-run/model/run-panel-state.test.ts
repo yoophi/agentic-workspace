@@ -20,6 +20,7 @@ import {
   moveRejectedSteerToQueue,
   moveQueuedPrompt,
   navigatePromptHistory,
+  partitionReplayedRunEvents,
   prepareQueuedPromptSteer,
   rejectPendingSteer,
   removeQueuedPrompt,
@@ -150,6 +151,20 @@ describe("run panel state", () => {
 
     expect(nextState.usageContext).toEqual({ used: 25, size: 100 });
     expect(nextState.items).toHaveLength(0);
+  });
+
+  it("keeps replayed usage and malformed events out of the timeline", () => {
+    const replay = partitionReplayedRunEvents([
+      { type: "agentMessage", text: "replayed child output" },
+      { type: "usage", used: 75, size: 100 },
+      { type: "usage", used: 80, size: 100 },
+      { unexpected: true },
+    ]);
+
+    expect(replay.timelineEvents).toEqual([
+      { type: "agentMessage", text: "replayed child output" },
+    ]);
+    expect(replay.usageContext).toEqual({ used: 80, size: 100 });
   });
 
   it("keeps session info raw payloads out of the timeline for the active run", () => {

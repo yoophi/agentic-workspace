@@ -3,5 +3,10 @@ pub use acp_agent_core::ports::{
     session_registry,
 };
 
+pub mod agent_worker;
 pub mod agent_workspace_registry;
+pub mod coordinator_notification;
+pub mod orchestration_event_sink;
+pub mod orchestration_repository;
 pub mod provider_session_repository;
+pub mod runtime_event_journal;

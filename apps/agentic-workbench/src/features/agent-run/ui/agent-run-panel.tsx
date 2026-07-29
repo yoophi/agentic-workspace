@@ -129,6 +129,7 @@ import {
   moveQueuedPrompt as reorderQueuedPrompt,
   navigatePromptHistory,
   moveRejectedSteerToQueue,
+  partitionReplayedRunEvents,
   prepareQueuedPromptSteer,
   rejectPendingSteer,
   removeRejectedSteer,
@@ -213,13 +214,20 @@ type AgentRunPanelProps = {
   scrollHeader?: ReactNode;
   onRunSettled?: () => void;
   onRunStateChange?: (state: AgentPanelRunState) => void;
+  onBeforeRunStart?: (runId: string) => Promise<void>;
   initialInputMode?: AgentInputMode;
   externalPromptRequest?: AgentPromptRequest | null;
   variant?: AgentRunPanelKind;
   onOpenSettings?: () => void;
   initialTimelineItems?: TimelineItem[];
   timelineItems?: TimelineItem[];
+  replayedEvents?: unknown[];
   initialMinimapVisible?: boolean;
+  showPromptComposer?: boolean;
+  existingRunId?: string | null;
+  existingIsRunning?: boolean;
+  runtimeHydrated?: boolean;
+  initialPermissionMode?: PermissionMode;
 };
 
 type AgentInputMode = "prompt" | "ralphLoop";
@@ -353,13 +361,20 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   scrollHeader,
   onRunSettled,
   onRunStateChange,
+  onBeforeRunStart,
   initialInputMode = "prompt",
   externalPromptRequest = null,
   variant = "main",
   onOpenSettings,
   initialTimelineItems = [],
   timelineItems,
+  replayedEvents = [],
   initialMinimapVisible = true,
+  showPromptComposer = true,
+  existingRunId,
+  existingIsRunning = false,
+  runtimeHydrated = true,
+  initialPermissionMode = "default",
 }: AgentRunPanelProps) {
   const enableGoalContinuation = variant === "main";
   const persistSettings = variant === "main";
@@ -367,7 +382,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [sessionMode, setSessionMode] = useState<AgentRunSessionMode>("new");
   const [selectedSessionId, setSelectedSessionId] = useState<string>("");
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
+  const [permissionMode, setPermissionMode] =
+    useState<PermissionMode>(initialPermissionMode);
   const [isChangingPermissionMode, setIsChangingPermissionMode] = useState(false);
   const [modelId, setModelId] = useState("providerDefault");
   const [contextSize, setContextSize] = useState<ContextSizePreset>("default");
@@ -393,9 +409,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     cursorEnd: number;
   } | null>(null);
   const [promptHistory, setPromptHistory] = useState(initialPromptHistoryState);
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
+  const [activeRunId, setActiveRunId] = useState<string | null>(
+    existingRunId ?? null,
+  );
+  const [isRunning, setIsRunning] = useState(existingIsRunning);
   const [isAwaitingPromptResponse, setIsAwaitingPromptResponse] = useState(false);
+  const [isPreparingRun, setIsPreparingRun] = useState(false);
   const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
     type: "unknown",
   });
@@ -442,6 +461,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     requestedRevision: number;
   } | null>(null);
   const hiddenMinimapRatioRef = useRef<number | null>(null);
+  const replayedEventCursorRef = useRef({ runId: "", count: 0 });
 
   // 세션 재진입 시 불필요한 refetch를 막는 신선도 정책(specs/007 research R7)은
   // entities/agent-run/api/query-options에서 key 단위로 정의된다.
@@ -470,6 +490,32 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setItems(timelineItems);
     }
   }, [timelineItems]);
+
+  useEffect(() => {
+    if (!existingRunId) return;
+    if (replayedEventCursorRef.current.runId !== existingRunId) {
+      replayedEventCursorRef.current = { runId: existingRunId, count: 0 };
+    }
+    const nextEvents = replayedEvents.slice(
+      replayedEventCursorRef.current.count,
+    );
+    if (nextEvents.length === 0) return;
+    const replay = partitionReplayedRunEvents(nextEvents);
+    if (replay.usageContext) {
+      setUsageContext(replay.usageContext);
+      usageContextRef.current = replay.usageContext;
+    }
+    if (replay.timelineEvents.length > 0) {
+      setItems((currentItems) =>
+        replay.timelineEvents.reduce(
+          (nextItems, event) =>
+            addRunEventItem(nextItems, existingRunId, event),
+          currentItems,
+        ),
+      );
+    }
+    replayedEventCursorRef.current.count = replayedEvents.length;
+  }, [existingRunId, replayedEvents]);
   // 세션 시작 선택지 = enabled 프로필(specs/008 FR-011). selectedAgentId에는
   // profile id를 저장하고, provider 흐름(세션 조회 등)에는 agentType을 쓴다.
   const enabledProfiles = useMemo(
@@ -711,6 +757,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, [activeRunId]);
 
   useEffect(() => {
+    if (existingRunId === undefined) return;
+    setActiveRunId(existingRunId);
+    activeRunIdRef.current = existingRunId;
+    setIsRunning(existingIsRunning);
+  }, [existingIsRunning, existingRunId]);
+
+  useEffect(() => {
     agentThreadStatusRef.current = agentThreadStatus;
   }, [agentThreadStatus]);
 
@@ -719,8 +772,15 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, [onRunStateChange]);
 
   useEffect(() => {
+    if (existingRunId !== undefined && !runtimeHydrated) return;
     onRunStateChangeRef.current?.({ panelId, isRunning, activeRunId });
-  }, [activeRunId, isRunning, panelId]);
+  }, [
+    activeRunId,
+    existingRunId,
+    isRunning,
+    panelId,
+    runtimeHydrated,
+  ]);
 
   useEffect(() => {
     queuedPromptsRef.current = queuedPrompts;
@@ -750,6 +810,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, []);
 
   useEffect(() => {
+    if (existingRunId !== undefined) {
+      return;
+    }
     const unlisten = listenRunEvents((envelope) => {
       if (envelope.runId !== activeRunIdRef.current) {
         return;
@@ -904,7 +967,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     return () => {
       unlisten();
     };
-  }, [onRunSettled, providerAgentId, recordRunGoalProgress, workingDirectory]);
+  }, [
+    existingRunId,
+    onRunSettled,
+    providerAgentId,
+    recordRunGoalProgress,
+    workingDirectory,
+  ]);
 
   useEffect(() => {
     if (
@@ -1216,6 +1285,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const canStartRun = Boolean(
     selectedAgentId &&
       !isRunning &&
+      !isPreparingRun &&
       (sessionMode === "new" || selectedSessionId),
   );
   const canQueuePrompt = Boolean(activeRunId && isRunning && prompt.trim());
@@ -1326,6 +1396,18 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
     const runId = crypto.randomUUID();
     const displayPrompt = options.displayPrompt ?? goal;
+    if (onBeforeRunStart) {
+      setIsPreparingRun(true);
+      try {
+        await onBeforeRunStart(runId);
+      } catch (caughtError) {
+        setError(String(caughtError));
+        setPrompt(displayPrompt);
+        return false;
+      } finally {
+        setIsPreparingRun(false);
+      }
+    }
     const runStartQueuedPrompt = createRunStartQueuedPrompt({
       id: `${runId}:initial-prompt`,
       text: displayPrompt,
@@ -1373,33 +1455,36 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     });
 
     try {
-      await startAgentRun({
-        runId,
-        goal,
-        agentId: launch?.agentId ?? selectedAgentId,
-        cwd: workingDirectory,
-        ...(launch?.agentCommand ? { agentCommand: launch.agentCommand } : {}),
-        ...(launch?.agentEnv ? { agentEnv: launch.agentEnv } : {}),
-        stdioBufferLimitMb: 50,
-        permissionMode,
-        ...(modelId !== "providerDefault" ? { modelId } : {}),
-        ...(contextSize !== "default" ? { contextSize } : {}),
-        ...(reuseSession
-          ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
-          : {}),
-        ...((options.ralphLoopEnabled ?? ralphLoopEnabled)
-          ? {
-              ralphLoop: {
-                enabled: true,
-                maxIterations: ralphMaxIterations,
-                promptTemplate: ralphPromptTemplate,
-                stopOnError: ralphStopOnError,
-                stopOnPermission: ralphStopOnPermission,
-                delayMs: Math.max(0, Math.round(ralphDelaySeconds * 1000)),
-              },
-            }
-          : {}),
-      });
+      await startAgentRun(
+        {
+          runId,
+          goal,
+          agentId: launch?.agentId ?? selectedAgentId,
+          cwd: workingDirectory,
+          ...(launch?.agentCommand ? { agentCommand: launch.agentCommand } : {}),
+          ...(launch?.agentEnv ? { agentEnv: launch.agentEnv } : {}),
+          stdioBufferLimitMb: 50,
+          permissionMode,
+          ...(modelId !== "providerDefault" ? { modelId } : {}),
+          ...(contextSize !== "default" ? { contextSize } : {}),
+          ...(reuseSession
+            ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
+            : {}),
+          ...((options.ralphLoopEnabled ?? ralphLoopEnabled)
+            ? {
+                ralphLoop: {
+                  enabled: true,
+                  maxIterations: ralphMaxIterations,
+                  promptTemplate: ralphPromptTemplate,
+                  stopOnError: ralphStopOnError,
+                  stopOnPermission: ralphStopOnPermission,
+                  delayMs: Math.max(0, Math.round(ralphDelaySeconds * 1000)),
+                },
+              }
+            : {}),
+        },
+        panelId,
+      );
       recordPromptHistory(displayPrompt);
       return true;
     } catch (caughtError) {
@@ -1650,7 +1735,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     const previousMode = permissionMode;
     setPermissionMode(nextMode);
 
-    if (!activeRunId || !isRunning) {
+    if (!activeRunId) {
       return;
     }
 
@@ -2193,6 +2278,38 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                       <AgentThreadStatusBadge status={agentThreadStatus} />
                       </>
                     )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="hidden font-medium sm:inline">Permission</span>
+                      <Select
+                        value={permissionMode}
+                        onValueChange={(value) =>
+                          void changePermissionMode(value as PermissionMode)
+                        }
+                        disabled={isChangingPermissionMode}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="max-w-40"
+                          aria-label={`${panelId} permission mode`}
+                          data-testid="agent-run-permission-mode"
+                        >
+                          {isChangingPermissionMode ? (
+                            <Loader2Icon className="animate-spin" />
+                          ) : (
+                            <SelectValue />
+                          )}
+                        </SelectTrigger>
+                        <SelectContent align="end">
+                          <SelectGroup>
+                            {permissionModeOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </SelectContent>
+                      </Select>
+                    </div>
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
@@ -2268,6 +2385,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </div>
         </ResizablePanel>
 
+        {showPromptComposer && (
+          <>
         <ResizableHandle
           aria-label="프롬프트 영역 크기 조정"
           className="relative flex h-2 shrink-0 cursor-ns-resize items-center justify-center bg-transparent transition-colors after:absolute after:left-0 after:right-0 after:h-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -2594,6 +2713,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </div>
         </PromptInput>
         </ResizablePanel>
+          </>
+        )}
       </ResizablePanelGroup>
 
       <Dialog

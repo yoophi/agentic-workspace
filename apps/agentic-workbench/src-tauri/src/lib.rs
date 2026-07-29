@@ -1,28 +1,38 @@
-mod application;
-mod domain;
+pub mod application;
+pub mod domain;
 mod inbound;
 mod infrastructure;
-mod ports;
+pub mod ports;
 
+use application::orchestration_service::OrchestrationService;
 use inbound::tauri_commands::{
-    WorktreeWatcherState, acknowledge_agent_exchange, cancel_agent_run,
-    cancel_current_prompt_and_send_to_run, clear_goal, create_git_worktree, create_goal,
-    create_project, create_saved_prompt, delete_git_worktree, delete_project, delete_saved_prompt,
-    get_agent_run_settings, get_goal, get_worktree_changes, get_worktree_commit_detail,
+    WorktreeWatcherState, acknowledge_agent_exchange, adopt_manual_orchestration_child,
+    bind_main_coordinator_run, bootstrap_orchestration_workspace, cancel_agent_run,
+    cancel_current_prompt_and_send_to_run, cancel_orchestration_task, clear_goal,
+    collect_orchestration_reports, create_git_worktree, create_goal, create_project,
+    create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
+    delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings, get_goal,
+    get_orchestration_workspace, get_worktree_changes, get_worktree_commit_detail,
     get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
-    get_worktree_workspace_layout, list_agent_exchanges, list_agent_tool_command_candidates,
-    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_projects,
-    list_provider_sessions, list_saved_prompts, list_worktree_changes, list_worktree_files,
-    list_worktree_git_history, open_external_url, open_settings_window, open_worktree_window,
-    read_worktree_text_file, record_goal_progress, respond_agent_permission,
+    get_worktree_workspace_layout, handoff_orchestration_coordinator, list_agent_exchanges,
+    list_agent_tool_command_candidates, list_agents, list_git_branches, list_git_remotes,
+    list_git_worktrees, list_orchestration_tasks, list_projects, list_provider_sessions,
+    list_recoverable_orchestration_workspaces, list_saved_prompts, list_worktree_changes,
+    list_worktree_files, list_worktree_git_history, open_external_url, open_settings_window,
+    open_worktree_window, read_worktree_text_file, reassign_orchestration_task,
+    record_goal_progress, recover_orchestration_workspace, replay_orchestration_runtime_events,
+    respond_agent_permission, respond_orchestration_input, retry_orchestration_task,
     save_agent_run_settings, save_worktree_workspace_layout, send_agent_exchange,
-    send_prompt_to_run, set_run_permission_mode, start_agent_run, start_worktree_watcher,
-    steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace, update_goal, update_project,
-    update_saved_prompt,
+    send_orchestration_child_command, send_prompt_to_run, set_orchestration_presentation,
+    set_run_permission_mode, start_agent_run, start_worktree_watcher, steer_prompt_to_run,
+    stop_worktree_watcher, sync_agent_workspace, update_goal, update_project, update_saved_prompt,
 };
 use infrastructure::{
     agent_session_registry::AppState,
-    in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry, mcp::McpServerState,
+    in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry,
+    in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
+    json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
+    tauri_orchestration_event_sink::TauriOrchestrationEventSink,
 };
 use ports::agent_workspace_registry::AgentWorkspaceRegistry;
 use tauri::{
@@ -109,9 +119,17 @@ pub fn run() {
                         .clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
+                    let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
                         state.cancel_runs_owned_by(&label).await;
                         workspace_registry.remove_window(&label).await;
+                        if let Ok(repository) = JsonOrchestrationRepository::from_app(&app) {
+                            let _ = OrchestrationService::new(
+                                repository,
+                                TauriOrchestrationEventSink::new(app),
+                            )
+                            .release_window(&label);
+                        }
                     });
                 }
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
@@ -119,6 +137,7 @@ pub fn run() {
         })
         .manage(app_state)
         .manage(agent_workspace_registry)
+        .manage(InMemoryRuntimeEventJournal::default())
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             list_projects,
@@ -170,7 +189,25 @@ pub fn run() {
             sync_agent_workspace,
             send_agent_exchange,
             acknowledge_agent_exchange,
-            list_agent_exchanges
+            list_agent_exchanges,
+            bootstrap_orchestration_workspace,
+            list_recoverable_orchestration_workspaces,
+            get_orchestration_workspace,
+            bind_main_coordinator_run,
+            delegate_orchestration_goal,
+            adopt_manual_orchestration_child,
+            list_orchestration_tasks,
+            collect_orchestration_reports,
+            set_orchestration_presentation,
+            replay_orchestration_runtime_events,
+            respond_orchestration_input,
+            send_orchestration_child_command,
+            cancel_orchestration_task,
+            retry_orchestration_task,
+            reassign_orchestration_task,
+            handoff_orchestration_coordinator,
+            dispatch_orchestration_prompt,
+            recover_orchestration_workspace
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

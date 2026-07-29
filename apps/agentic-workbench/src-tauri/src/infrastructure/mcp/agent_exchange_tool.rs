@@ -9,6 +9,7 @@ use crate::{
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
+        mcp::capability_registry::CapabilityPrincipal,
     },
 };
 
@@ -97,6 +98,7 @@ type ExchangeService =
 
 pub async fn handle_tool(
     service: &ExchangeService,
+    principal: &CapabilityPrincipal,
     name: &str,
     arguments: Option<&Value>,
 ) -> Value {
@@ -106,8 +108,11 @@ pub async fn handle_tool(
                 Ok(request) => request,
                 Err(error) => return tool_error(error),
             };
+            if let Err(error) = require_authenticated_run(principal, &request.run_id) {
+                return tool_error(error);
+            }
             service
-                .list_peers_for_run(&request.run_id)
+                .list_peers_for_run(&principal.run_id)
                 .await
                 .map(|peers| json!({ "peers": peers }))
         }
@@ -116,13 +121,16 @@ pub async fn handle_tool(
                 Ok(request) => request,
                 Err(error) => return tool_error(error),
             };
+            if let Err(error) = require_authenticated_run(principal, &request.run_id) {
+                return tool_error(error);
+            }
             service
                 .send_agent_exchange(
-                    &request.run_id,
+                    &principal.run_id,
                     SendAgentExchangeRequest {
                         request_id: request.request_id,
                         source_panel_id: String::new(),
-                        source_run_id: Some(request.run_id.clone()),
+                        source_run_id: Some(principal.run_id.clone()),
                         target_panel_id: request.target_panel_id,
                         target_run_id: request.target_run_id,
                         message: request.message,
@@ -137,8 +145,11 @@ pub async fn handle_tool(
                 Ok(request) => request,
                 Err(error) => return tool_error(error),
             };
+            if let Err(error) = require_authenticated_run(principal, &request.run_id) {
+                return tool_error(error);
+            }
             service
-                .exchange_for_source_run(&request.run_id, &request.request_id)
+                .exchange_for_source_run(&principal.run_id, &request.request_id)
                 .await
                 .map(|exchange| serde_json::to_value(exchange).unwrap_or(Value::Null))
         }
@@ -152,6 +163,19 @@ pub async fn handle_tool(
         Ok(structured) => tool_success(structured),
         Err(error) => tool_error(error),
     }
+}
+
+fn require_authenticated_run(
+    principal: &CapabilityPrincipal,
+    requested_run_id: &str,
+) -> Result<(), AgentExchangeError> {
+    if principal.run_id == requested_run_id {
+        return Ok(());
+    }
+    Err(AgentExchangeError::new(
+        "forbiddenActor",
+        "The requested run does not match the authenticated capability.",
+    ))
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(arguments: Option<&Value>) -> Result<T, AgentExchangeError> {
