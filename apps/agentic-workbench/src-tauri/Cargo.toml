@@ -1,6 +1,6 @@
 [package]
 name = "agentic-workbench"
-version = "0.1.0"
+version = "2026.31.0"
 description = "Agentic Workbench"
 authors = ["you"]
 edition = "2024"
