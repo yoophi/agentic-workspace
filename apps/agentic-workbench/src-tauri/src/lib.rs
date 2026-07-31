@@ -4,33 +4,38 @@ mod inbound;
 mod infrastructure;
 pub mod ports;
 
-use application::orchestration_service::OrchestrationService;
+use application::{
+    appearance_preferences_service::AppearancePreferencesService,
+    orchestration_service::OrchestrationService,
+};
 use inbound::tauri_commands::{
-    WorktreeWatcherState, acknowledge_agent_exchange, adopt_manual_orchestration_child,
-    bind_main_coordinator_run, bootstrap_orchestration_workspace, cancel_agent_run,
-    cancel_current_prompt_and_send_to_run, cancel_orchestration_task, clear_goal,
+    WorktreeWatcherState, acknowledge_agent_exchange, adjust_font_size_step,
+    adopt_manual_orchestration_child, bind_main_coordinator_run, bootstrap_orchestration_workspace,
+    cancel_agent_run, cancel_current_prompt_and_send_to_run, cancel_orchestration_task, clear_goal,
     collect_orchestration_reports, create_git_worktree, create_goal, create_project,
     create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
-    delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings, get_goal,
-    get_orchestration_workspace, get_worktree_changes, get_worktree_commit_detail,
-    get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
-    get_worktree_workspace_layout, handoff_orchestration_coordinator, list_agent_exchanges,
-    list_agent_tool_command_candidates, list_agents, list_git_branches, list_git_remotes,
-    list_git_worktrees, list_orchestration_tasks, list_projects, list_provider_sessions,
-    list_recoverable_orchestration_workspaces, list_saved_prompts, list_worktree_changes,
-    list_worktree_files, list_worktree_git_history, open_external_url, open_settings_window,
-    open_worktree_window, read_worktree_text_file, reassign_orchestration_task,
-    record_goal_progress, recover_orchestration_workspace, replay_orchestration_runtime_events,
-    respond_agent_permission, respond_orchestration_input, retry_orchestration_task,
-    save_agent_run_settings, save_worktree_workspace_layout, send_agent_exchange,
-    send_orchestration_child_command, send_prompt_to_run, set_orchestration_presentation,
-    set_run_permission_mode, start_agent_run, start_worktree_watcher, steer_prompt_to_run,
-    stop_worktree_watcher, sync_agent_workspace, update_goal, update_project, update_saved_prompt,
+    delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings,
+    get_appearance_preferences, get_goal, get_orchestration_workspace, get_worktree_changes,
+    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
+    get_worktree_git_graph, get_worktree_workspace_layout, handoff_orchestration_coordinator,
+    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
+    list_git_remotes, list_git_worktrees, list_orchestration_tasks, list_projects,
+    list_provider_sessions, list_recoverable_orchestration_workspaces, list_saved_prompts,
+    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
+    open_settings_window, open_worktree_window, read_worktree_text_file,
+    reassign_orchestration_task, record_goal_progress, recover_orchestration_workspace,
+    replay_orchestration_runtime_events, respond_agent_permission, respond_orchestration_input,
+    retry_orchestration_task, save_agent_run_settings, save_worktree_workspace_layout,
+    send_agent_exchange, send_orchestration_child_command, send_prompt_to_run, set_font_size_step,
+    set_orchestration_presentation, set_run_permission_mode, start_agent_run,
+    start_worktree_watcher, steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace,
+    update_goal, update_project, update_saved_prompt,
 };
 use infrastructure::{
     agent_session_registry::AppState,
     in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry,
     in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
+    json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
     json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
     tauri_orchestration_event_sink::TauriOrchestrationEventSink,
 };
@@ -73,6 +78,12 @@ pub fn run() {
             }
         })
         .setup(|_app| {
+            let appearance_repository =
+                JsonAppearancePreferencesRepository::from_app(_app.handle())?;
+            let appearance_service =
+                AppearancePreferencesService::bootstrap(appearance_repository)?;
+            _app.manage(appearance_service);
+
             let mcp_state = McpServerState::start(
                 _app.handle().clone(),
                 _app.state::<AppState>().inner().clone(),
@@ -155,6 +166,9 @@ pub fn run() {
             record_goal_progress,
             get_agent_run_settings,
             save_agent_run_settings,
+            get_appearance_preferences,
+            set_font_size_step,
+            adjust_font_size_step,
             get_worktree_workspace_layout,
             save_worktree_workspace_layout,
             list_git_remotes,

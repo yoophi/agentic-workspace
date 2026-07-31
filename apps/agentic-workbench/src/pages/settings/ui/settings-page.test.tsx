@@ -27,6 +27,16 @@ vi.mock("@/features/agent-command-override/ui/agent-command-override-editor", ()
   ),
 }));
 
+vi.mock("@/app/providers/appearance-preferences-provider", () => ({
+  useAppearancePreferences: () => ({
+    fontSizeStep: 0,
+    isHydrated: true,
+    error: null,
+    setFontSizeStep: vi.fn(),
+    adjustFontSizeStep: vi.fn(),
+  }),
+}));
+
 function renderSettingsPage(element: ReactElement) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -45,6 +55,9 @@ describe("SettingsPage", () => {
     const html = renderSettingsPage(<SettingsPage />);
 
     expect(html).toContain("Settings");
+    expect(html).toContain("Appearance");
+    expect(html).toContain("글꼴 크기");
+    expect(html).toContain("ACP agent 프로필");
     expect(html).not.toContain("돌아가기");
   });
 

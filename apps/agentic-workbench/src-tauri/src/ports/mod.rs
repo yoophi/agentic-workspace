@@ -5,6 +5,7 @@ pub use acp_agent_core::ports::{
 
 pub mod agent_worker;
 pub mod agent_workspace_registry;
+pub mod appearance_preferences_repository;
 pub mod coordinator_notification;
 pub mod orchestration_event_sink;
 pub mod orchestration_repository;

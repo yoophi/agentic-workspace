@@ -3902,7 +3902,7 @@ function ToolFileChangeView({ change }: { change: ToolFileChange }) {
       <div className="border-t">
         {content ? (
           change.diff ? (
-            <DiffViewer content={content} className="max-h-72 w-full rounded-none border-0 text-[11px]" />
+            <DiffViewer content={content} className="max-h-72 w-full rounded-none border-0 text-caption" />
           ) : (
             <pre className="max-h-72 w-full overflow-auto bg-muted/40 p-3 whitespace-pre-wrap break-words font-mono text-xs">
               {content}

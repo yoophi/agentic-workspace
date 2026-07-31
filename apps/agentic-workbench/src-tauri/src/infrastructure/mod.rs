@@ -33,6 +33,7 @@ pub mod in_memory_agent_workspace_registry;
 pub mod in_memory_runtime_event_journal;
 pub mod json_acp_session_store;
 pub mod json_agent_run_settings_repository;
+pub mod json_appearance_preferences_repository;
 pub mod json_goal_repository;
 pub mod json_orchestration_repository;
 pub mod json_project_repository;

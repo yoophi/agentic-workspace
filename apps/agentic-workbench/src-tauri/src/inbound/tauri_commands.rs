@@ -11,6 +11,7 @@ use crate::{
         agent_exchange_service::AgentExchangeService,
         agent_run_settings_service,
         agent_tool_candidate_service::AgentToolCandidateService,
+        appearance_preferences_service::AppearancePreferencesService,
         cancel_agent_run::CancelAgentRunUseCase,
         cancel_prompt_and_send::CancelPromptAndSendUseCase,
         coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
@@ -45,6 +46,7 @@ use crate::{
             APP_COMMAND_OVERRIDE_SETTINGS_KEY, AgentCommandSource, AgentRunSettings,
         },
         agent_tool_candidate::{AgentToolCandidateQuery, AgentToolCandidateResponse},
+        appearance_preferences::AppearancePreferences,
         git_branch::GitBranch,
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
@@ -81,6 +83,7 @@ use crate::{
         in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
         json_acp_session_store::JsonAcpSessionStore,
         json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
+        json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_goal_repository::JsonGoalRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
         json_project_repository::JsonProjectRepository,
@@ -110,6 +113,43 @@ use crate::{
 use std::collections::BTreeMap;
 
 const WORKTREE_CHANGED_EVENT: &str = "workspace://worktree-changed";
+pub const APPEARANCE_PREFERENCES_CHANGED_EVENT: &str = "app://appearance-preferences-changed";
+pub type AppearancePreferencesState =
+    AppearancePreferencesService<JsonAppearancePreferencesRepository>;
+
+#[tauri::command]
+pub fn get_appearance_preferences(
+    state: State<'_, AppearancePreferencesState>,
+) -> Result<AppearancePreferences, String> {
+    state.get()
+}
+
+#[tauri::command]
+pub fn set_font_size_step(
+    app: AppHandle,
+    state: State<'_, AppearancePreferencesState>,
+    font_size_step: i8,
+) -> Result<AppearancePreferences, String> {
+    broadcast_appearance_preferences(&app, state.set_font_size_step(font_size_step)?)
+}
+
+#[tauri::command]
+pub fn adjust_font_size_step(
+    app: AppHandle,
+    state: State<'_, AppearancePreferencesState>,
+    delta: i8,
+) -> Result<AppearancePreferences, String> {
+    broadcast_appearance_preferences(&app, state.adjust_font_size_step(delta)?)
+}
+
+fn broadcast_appearance_preferences(
+    app: &AppHandle,
+    preferences: AppearancePreferences,
+) -> Result<AppearancePreferences, String> {
+    app.emit(APPEARANCE_PREFERENCES_CHANGED_EVENT, preferences)
+        .map_err(|error| format!("Failed to notify windows of appearance preferences: {error}"))?;
+    Ok(preferences)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]

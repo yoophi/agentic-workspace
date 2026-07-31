@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePanelRef, type PanelSize } from "react-resizable-panels";
+import {
+  usePanelRef,
+  type PanelImperativeHandle,
+  type PanelSize,
+} from "react-resizable-panels";
 
 import {
   clampPanelWidth,
@@ -20,6 +24,62 @@ type SplitPersistenceOptions = {
   /// 같은 hook 인스턴스가 다른 분할을 담당하게 될 때(예: 표시 패널 전환) 내부 상태를 초기화할 키.
   resetKey?: string;
 };
+
+type FrameScheduler = {
+  requestFrame: (callback: FrameRequestCallback) => number;
+  cancelFrame: (handle: number) => void;
+};
+
+const DYNAMIC_PANEL_LAYOUT_ERRORS = [
+  /^Group .+ not found$/,
+  /^Panel constraints not found for Panel /,
+  /^Layout not found for Panel /,
+];
+const MAX_PANEL_RESIZE_ATTEMPTS = 3;
+
+function isPendingDynamicPanelLayout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    DYNAMIC_PANEL_LAYOUT_ERRORS.some((pattern) => pattern.test(error.message))
+  );
+}
+
+export function schedulePanelResize(
+  getPanel: () => Pick<PanelImperativeHandle, "resize"> | null,
+  displayWidth: number,
+  scheduler: FrameScheduler = {
+    // WebKit의 requestAnimationFrame/cancelAnimationFrame은 Window receiver를 검사한다.
+    // 함수를 객체 속성에 그대로 담으면 scheduler가 this가 되어 번들 앱에서 예외가 난다.
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    cancelFrame: (handle) => window.cancelAnimationFrame(handle),
+  },
+) {
+  let cancelled = false;
+  let frameHandle: number | undefined;
+  let attempts = 0;
+
+  const resizeAfterLayout = () => {
+    if (cancelled) return;
+    attempts += 1;
+
+    try {
+      getPanel()?.resize(displayWidth);
+    } catch (error) {
+      if (isPendingDynamicPanelLayout(error) && attempts < MAX_PANEL_RESIZE_ATTEMPTS) {
+        frameHandle = scheduler.requestFrame(resizeAfterLayout);
+      }
+      // 저장 폭 복원은 보조 동작이다. 패널이 끝내 준비되지 않거나 예상하지 못한
+      // 오류가 발생해도 기본 레이아웃을 유지하고 화면 렌더를 중단하지 않는다.
+    }
+  };
+
+  frameHandle = scheduler.requestFrame(resizeAfterLayout);
+
+  return () => {
+    cancelled = true;
+    if (frameHandle !== undefined) scheduler.cancelFrame(frameHandle);
+  };
+}
 
 /// 분할 하나의 `A:B = *:1` 규칙을 담당한다.
 ///
@@ -84,7 +144,7 @@ export function useSplitPersistence({
     if (latestWidthRef.current !== undefined && Math.abs(latestWidthRef.current - displayWidth) < 1) {
       return;
     }
-    panelRef.current.resize(displayWidth);
+    return schedulePanelResize(() => panelRef.current, displayWidth);
   }, [displayWidth, panelRef]);
 
   const handleResize = useCallback((size: PanelSize) => {

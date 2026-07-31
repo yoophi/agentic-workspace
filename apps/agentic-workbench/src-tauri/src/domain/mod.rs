@@ -4,6 +4,7 @@ pub mod agent_exchange;
 pub mod agent_orchestration;
 pub mod agent_run_settings;
 pub mod agent_run_settings_repository;
+pub mod appearance_preferences;
 pub mod git_branch;
 pub mod git_branch_provider;
 pub mod git_remote;

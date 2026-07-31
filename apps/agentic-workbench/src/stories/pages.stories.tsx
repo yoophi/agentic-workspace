@@ -2,6 +2,8 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 
 import { AgentCommandOverrideEditor } from "@/features/agent-command-override/ui/agent-command-override-editor";
+import { FontSizeSlider } from "@/features/font-size-adjustment/ui/font-size-slider";
+import type { FontSizeStep } from "@/entities/appearance-preferences/model/types";
 import {
   createCommandOverrideDraft,
   type CommandOverrideDraft,
@@ -56,9 +58,15 @@ const settingsAgents = [
 function SettingsPageStory({
   longContent = false,
   loadError = null,
+  fontSizeStep = 0,
+  appearanceLoading = false,
+  appearanceError = null,
 }: {
   longContent?: boolean;
   loadError?: string | null;
+  fontSizeStep?: FontSizeStep;
+  appearanceLoading?: boolean;
+  appearanceError?: string | null;
 }) {
   const [draft, setDraft] = useState<CommandOverrideDraft>(() =>
     createCommandOverrideDraft({
@@ -99,6 +107,15 @@ function SettingsPageStory({
   return (
     <div className="max-w-[920px] rounded-md border bg-muted/30 p-6">
       <SettingsPageLayout>
+        <section className="rounded-lg border bg-card p-5">
+          <h2 className="mb-4 text-lg font-semibold">Appearance</h2>
+          <FontSizeSlider
+            value={fontSizeStep}
+            isLoading={appearanceLoading}
+            error={appearanceError}
+            onValueChange={() => undefined}
+          />
+        </section>
         <AgentCommandOverrideEditor
           agents={settingsAgents}
           draft={draft}
@@ -318,20 +335,25 @@ export const SettingsWindow: Story = {
   render: () => <SettingsPageStory />,
 };
 
+export const SettingsWindowSmallestFont: Story = {
+  render: () => <SettingsPageStory fontSizeStep={-2} />,
+};
+
+export const SettingsWindowLargestFont: Story = {
+  render: () => <SettingsPageStory fontSizeStep={2} />,
+};
+
 export const SettingsWindowLoading: Story = {
-  render: () => (
-    <div className="max-w-[920px] rounded-md border bg-muted/30 p-6">
-      <SettingsPageLayout>
-        <p className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
-          설정을 불러오는 중입니다.
-        </p>
-      </SettingsPageLayout>
-    </div>
-  ),
+  render: () => <SettingsPageStory appearanceLoading />,
 };
 
 export const SettingsWindowError: Story = {
-  render: () => <SettingsPageStory loadError="설정을 불러오지 못했습니다." />,
+  render: () => (
+    <SettingsPageStory
+      loadError="Agent 설정을 불러오지 못했습니다."
+      appearanceError="화면 설정을 저장하지 못했습니다."
+    />
+  ),
 };
 
 export const SettingsWindowLongContent: Story = {
