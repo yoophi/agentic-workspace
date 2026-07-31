@@ -94,12 +94,12 @@ export function AgentRunMinimap({
       )}
       data-agent-run-minimap
     >
-      <div className="h-8 shrink-0 border-b px-2 py-2 text-[10px] font-medium text-muted-foreground">
+      <div className="h-8 shrink-0 border-b px-2 py-2 text-micro font-medium text-muted-foreground">
         대화 미니맵
       </div>
       <div ref={trackRef} className="relative min-h-0 flex-1 overflow-hidden" data-minimap-track>
         {entries.length === 0 ? (
-          <div className="grid h-full place-items-center px-2 text-center text-[10px] text-muted-foreground">
+          <div className="grid h-full place-items-center px-2 text-center text-micro text-muted-foreground">
             대화 없음
           </div>
         ) : (
@@ -118,7 +118,7 @@ export function AgentRunMinimap({
                 <div
                   key={entry.id}
                   className={cn(
-                    "absolute left-0.5 right-0.5 overflow-hidden border-l-2 px-1 text-[9px] leading-3",
+                    "absolute left-0.5 right-0.5 overflow-hidden border-l-2 px-1 text-nano leading-3",
                     entry.role === "user"
                       ? "border-amber-500 bg-amber-400/25 text-amber-950 dark:text-amber-100"
                       : "border-sky-500 bg-sky-500/20 text-foreground",

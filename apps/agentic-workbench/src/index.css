@@ -51,9 +51,28 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+    --text-xs: calc(12px + var(--aw-font-size-offset));
+    --text-sm: calc(14px + var(--aw-font-size-offset));
+    --text-base: calc(16px + var(--aw-font-size-offset));
+    --text-lg: calc(18px + var(--aw-font-size-offset));
+    --text-xl: calc(20px + var(--aw-font-size-offset));
+    --text-2xl: calc(24px + var(--aw-font-size-offset));
+    --text-3xl: calc(30px + var(--aw-font-size-offset));
+    --text-4xl: calc(36px + var(--aw-font-size-offset));
+    --text-5xl: calc(48px + var(--aw-font-size-offset));
+    --text-6xl: calc(60px + var(--aw-font-size-offset));
+    --text-7xl: calc(72px + var(--aw-font-size-offset));
+    --text-8xl: calc(96px + var(--aw-font-size-offset));
+    --text-9xl: calc(128px + var(--aw-font-size-offset));
+    --text-nano: calc(9px + var(--aw-font-size-offset));
+    --text-micro: calc(10px + var(--aw-font-size-offset));
+    --text-caption: calc(11px + var(--aw-font-size-offset));
+    --text-compact: calc(12.8px + var(--aw-font-size-offset));
+    --text-code: calc(13px + var(--aw-font-size-offset));
 }
 
 :root {
+    --aw-font-size-offset: 0px;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);
     --card: oklch(1 0 0);
@@ -86,6 +105,22 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+}
+
+:root[data-font-size-step="-2"] {
+    --aw-font-size-offset: -2px;
+}
+
+:root[data-font-size-step="-1"] {
+    --aw-font-size-offset: -1px;
+}
+
+:root[data-font-size-step="1"] {
+    --aw-font-size-offset: 1px;
+}
+
+:root[data-font-size-step="2"] {
+    --aw-font-size-offset: 2px;
 }
 
 .dark {
@@ -127,9 +162,23 @@
     @apply border-border outline-ring/50;
     }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-base text-foreground;
     }
   html {
     @apply font-sans;
-    }
+  }
+}
+
+/* Shared Git/Markdown packages keep app-independent source sizes. AW adapts only
+   their fixed micro-copy at this application boundary. */
+:root[data-font-size-step] .text-\[10px\] {
+  font-size: var(--text-micro);
+}
+
+:root[data-font-size-step] .text-\[11px\] {
+  font-size: var(--text-caption);
+}
+
+:root[data-font-size-step] .text-\[0\.625rem\] {
+  font-size: var(--text-micro);
 }

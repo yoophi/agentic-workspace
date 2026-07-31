@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePanelRef, type PanelSize } from "react-resizable-panels";
+import {
+  usePanelRef,
+  type PanelImperativeHandle,
+  type PanelSize,
+} from "react-resizable-panels";
 
 import {
   clampPanelWidth,
@@ -20,6 +24,50 @@ type SplitPersistenceOptions = {
   /// 같은 hook 인스턴스가 다른 분할을 담당하게 될 때(예: 표시 패널 전환) 내부 상태를 초기화할 키.
   resetKey?: string;
 };
+
+type FrameScheduler = {
+  requestFrame: (callback: FrameRequestCallback) => number;
+  cancelFrame: (handle: number) => void;
+};
+
+const DYNAMIC_PANEL_LAYOUT_ERROR = "Layout not found for Panel";
+const MAX_PANEL_RESIZE_ATTEMPTS = 3;
+
+export function schedulePanelResize(
+  getPanel: () => Pick<PanelImperativeHandle, "resize"> | null,
+  displayWidth: number,
+  scheduler: FrameScheduler = {
+    requestFrame: requestAnimationFrame,
+    cancelFrame: cancelAnimationFrame,
+  },
+) {
+  let cancelled = false;
+  let frameHandle: number | undefined;
+  let attempts = 0;
+
+  const resizeAfterLayout = () => {
+    if (cancelled) return;
+    attempts += 1;
+
+    try {
+      getPanel()?.resize(displayWidth);
+    } catch (error) {
+      const isPendingDynamicLayout =
+        error instanceof Error && error.message.includes(DYNAMIC_PANEL_LAYOUT_ERROR);
+      if (!isPendingDynamicLayout) throw error;
+      if (attempts < MAX_PANEL_RESIZE_ATTEMPTS) {
+        frameHandle = scheduler.requestFrame(resizeAfterLayout);
+      }
+    }
+  };
+
+  frameHandle = scheduler.requestFrame(resizeAfterLayout);
+
+  return () => {
+    cancelled = true;
+    if (frameHandle !== undefined) scheduler.cancelFrame(frameHandle);
+  };
+}
 
 /// 분할 하나의 `A:B = *:1` 규칙을 담당한다.
 ///
@@ -84,7 +132,7 @@ export function useSplitPersistence({
     if (latestWidthRef.current !== undefined && Math.abs(latestWidthRef.current - displayWidth) < 1) {
       return;
     }
-    panelRef.current.resize(displayWidth);
+    return schedulePanelResize(() => panelRef.current, displayWidth);
   }, [displayWidth, panelRef]);
 
   const handleResize = useCallback((size: PanelSize) => {

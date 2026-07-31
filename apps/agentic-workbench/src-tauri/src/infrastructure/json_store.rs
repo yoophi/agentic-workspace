@@ -5,6 +5,19 @@ use std::{
 };
 
 use serde::{Serialize, de::DeserializeOwned};
+use tauri::{AppHandle, Manager};
+
+/// Resolves `<app data dir>/<file_name>`, creating the directory if needed.
+/// Every JSON-backed repository stores its document there.
+pub fn app_data_store_path(app: &AppHandle, file_name: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+    fs::create_dir_all(&dir)
+        .map_err(|error| format!("Failed to create app data directory: {error}"))?;
+    Ok(dir.join(file_name))
+}
 
 pub fn load_json_vec<T>(store_path: &Path, label: &str) -> Result<Vec<T>, String>
 where

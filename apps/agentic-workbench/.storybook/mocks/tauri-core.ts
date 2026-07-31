@@ -22,14 +22,44 @@ import type {
   GoalUpdateInput,
   ThreadGoal,
 } from "../../src/entities/agent-run/model/types";
+import {
+  FONT_SIZE_STEPS,
+  normalizeFontSizeStep,
+} from "../../src/entities/appearance-preferences/model/font-size-step";
 import { emitMockEvent } from "./tauri-event";
 
 const AGENT_RUN_EVENT = "agent-run-event";
+const APPEARANCE_PREFERENCES_CHANGED_EVENT =
+  "app://appearance-preferences-changed";
+const MIN_FONT_SIZE_STEP = FONT_SIZE_STEPS[0];
+const MAX_FONT_SIZE_STEP = FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
 let storybookSavedPrompts: SavedPrompt[] = [...sampleSavedPrompts];
 let storybookGoal: ThreadGoal | null = sampleGoal;
+let storybookFontSizeStep = 0;
 
 export async function invoke<T>(command: string, args?: Record<string, unknown>) {
   switch (command) {
+    case "get_appearance_preferences":
+      return { fontSizeStep: storybookFontSizeStep } as T;
+    case "set_font_size_step": {
+      storybookFontSizeStep = normalizeFontSizeStep(Number(args?.fontSizeStep));
+      const preferences = { fontSizeStep: storybookFontSizeStep };
+      emitMockEvent(APPEARANCE_PREFERENCES_CHANGED_EVENT, preferences);
+      return preferences as T;
+    }
+    case "adjust_font_size_step": {
+      const delta = Number(args?.delta);
+      if (delta !== -1 && delta !== 1) {
+        throw new Error("Font size adjustment must be -1 or 1.");
+      }
+      storybookFontSizeStep = Math.min(
+        MAX_FONT_SIZE_STEP,
+        Math.max(MIN_FONT_SIZE_STEP, storybookFontSizeStep + delta),
+      );
+      const preferences = { fontSizeStep: storybookFontSizeStep };
+      emitMockEvent(APPEARANCE_PREFERENCES_CHANGED_EVENT, preferences);
+      return preferences as T;
+    }
     case "list_projects":
       return sampleProjects as T;
     case "create_project":

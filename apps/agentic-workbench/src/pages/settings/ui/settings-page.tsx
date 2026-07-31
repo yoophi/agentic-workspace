@@ -21,6 +21,8 @@ import {
 } from "@/features/agent-command-override/model/command-override-form";
 import { AgentCommandOverrideEditor } from "@/features/agent-command-override/ui/agent-command-override-editor";
 import { Button } from "@/components/ui/button";
+import { useAppearancePreferences } from "@/app/providers/appearance-preferences-provider";
+import { FontSizeSlider } from "@/features/font-size-adjustment/ui/font-size-slider";
 
 type SettingsPageProps = {
   onBack?: () => void;
@@ -89,6 +91,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
 
   return (
     <SettingsPageLayout onBack={onBack}>
+      <AppearanceSettingsSection />
       {settingsQuery.isLoading || agentsQuery.isLoading ? (
         <p className="rounded-md border bg-background px-3 py-2 text-sm text-muted-foreground">
           설정을 불러오는 중입니다.
@@ -108,6 +111,35 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
   );
 }
 
+export function AppearanceSettingsSection() {
+  const appearance = useAppearancePreferences();
+
+  return (
+    <section
+      aria-labelledby="appearance-settings-heading"
+      className="rounded-lg border bg-card p-5 text-card-foreground"
+    >
+      <div className="mb-5">
+        <h2
+          id="appearance-settings-heading"
+          className="text-lg font-semibold"
+        >
+          Appearance
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          모든 Agentic Workbench 창에 적용되는 표시 설정입니다.
+        </p>
+      </div>
+      <FontSizeSlider
+        value={appearance.fontSizeStep}
+        isLoading={!appearance.isHydrated}
+        error={appearance.error}
+        onValueChange={appearance.setFontSizeStep}
+      />
+    </section>
+  );
+}
+
 export function SettingsPageLayout({
   children,
   onBack,
@@ -121,7 +153,7 @@ export function SettingsPageLayout({
         <div>
           <h1 className="text-2xl font-semibold tracking-normal">Settings</h1>
           <p className="text-sm text-muted-foreground">
-            ACP agent 프로필(실행 명령·환경변수)을 관리합니다.
+            화면 표시와 ACP agent 프로필을 관리합니다.
           </p>
         </div>
         {onBack && (

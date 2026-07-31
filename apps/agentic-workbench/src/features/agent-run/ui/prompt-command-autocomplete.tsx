@@ -120,7 +120,7 @@ export function PromptCommandAutocomplete({
                   </span>
                 )}
               </span>
-              <span className="max-w-[35%] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-muted-foreground">
+              <span className="max-w-[35%] shrink-0 truncate rounded border px-1.5 py-0.5 text-micro uppercase tracking-wide text-muted-foreground">
                 {candidate.source}
               </span>
             </button>

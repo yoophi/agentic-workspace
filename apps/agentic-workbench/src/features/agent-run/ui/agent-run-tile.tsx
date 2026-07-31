@@ -64,7 +64,7 @@ export function AgentRunTile({
           <span className="min-w-0 flex-1 truncate text-xs font-medium">{title}</span>
           {pendingExchangeCount > 0 && (
             <span
-              className="rounded-full bg-primary/10 px-1.5 text-[10px] text-primary"
+              className="rounded-full bg-primary/10 px-1.5 text-micro text-primary"
               aria-label={`대기 중인 교환 ${pendingExchangeCount}개`}
             >
               {pendingExchangeCount}

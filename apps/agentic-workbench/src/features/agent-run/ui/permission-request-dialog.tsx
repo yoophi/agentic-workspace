@@ -105,7 +105,7 @@ export function PermissionRequestDialogFrame({
                 tabIndex={0}
                 data-testid="permission-detail"
                 data-long={model.detail.isLong ? "true" : "false"}
-                className="max-h-[min(42dvh,26rem)] overflow-auto whitespace-pre-wrap break-all rounded-lg border bg-background p-3 font-mono text-[11px] leading-relaxed text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:text-xs"
+                className="max-h-[min(42dvh,26rem)] overflow-auto whitespace-pre-wrap break-all rounded-lg border bg-background p-3 font-mono text-caption leading-relaxed text-foreground outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 sm:text-xs"
               >
                 {model.detail.text}
               </pre>
