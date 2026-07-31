@@ -1,7 +1,7 @@
 {
   "name": "@yoophi/agentic-workbench",
   "private": true,
-  "version": "0.1.0",
+  "version": "2026.8.1-rc.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
