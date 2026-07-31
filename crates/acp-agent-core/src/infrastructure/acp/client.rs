@@ -1,5 +1,5 @@
-use anyhow::{Context, Result, anyhow, bail};
-use serde_json::{Value, json};
+use anyhow::{anyhow, bail, Context, Result};
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     fs::{self, OpenOptions},
@@ -16,7 +16,7 @@ use crate::{
     },
     infrastructure::acp::{
         permission_flow,
-        session_update_mapper::{MappedSessionUpdate, map_session_update},
+        session_update_mapper::{map_session_update, MappedSessionUpdate},
         terminal::TerminalHandler,
         transport::RpcPeer,
         util::{
@@ -786,13 +786,11 @@ mod tests {
                 assert_eq!(file_changes[0].path, "new.txt");
                 assert_eq!(file_changes[0].kind, ToolFileChangeKind::Added);
                 assert_eq!(file_changes[0].status, ToolFileChangeStatus::Completed);
-                assert!(
-                    file_changes[0]
-                        .diff
-                        .as_deref()
-                        .unwrap_or("")
-                        .contains("+hello")
-                );
+                assert!(file_changes[0]
+                    .diff
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("+hello"));
             }
             other => panic!("unexpected event: {other:?}"),
         }

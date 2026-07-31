@@ -333,11 +333,9 @@ mod tests {
     fn opencode_fallback_contains_current_coding_models() {
         let models = opencode_fallback_models();
 
-        assert!(
-            models
-                .iter()
-                .any(|model| model.id == "opencode/claude-opus-4-8")
-        );
+        assert!(models
+            .iter()
+            .any(|model| model.id == "opencode/claude-opus-4-8"));
         assert!(models.iter().any(|model| model.id == "opencode/gpt-5.6"));
     }
 
@@ -436,15 +434,11 @@ mod tests {
 
         let models = parse_models_dev_opencode_models(catalog).expect("models parse");
 
-        assert!(
-            models
-                .iter()
-                .any(|model| model.id == "opencode/gpt-5.3-codex-spark")
-        );
-        assert!(
-            models
-                .iter()
-                .any(|model| model.id == "opencode/claude-sonnet-4-6")
-        );
+        assert!(models
+            .iter()
+            .any(|model| model.id == "opencode/gpt-5.3-codex-spark"));
+        assert!(models
+            .iter()
+            .any(|model| model.id == "opencode/claude-sonnet-4-6"));
     }
 }

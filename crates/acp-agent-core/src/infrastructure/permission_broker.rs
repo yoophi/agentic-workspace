@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::{collections::HashMap, sync::Arc};
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 
 use crate::ports::permission::{PermissionDecision, PermissionDecisionPort};
 

@@ -1,12 +1,12 @@
 use agent_client_protocol::{JsonRpcRequest, JsonRpcResponse};
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use serde::Serialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     process::ChildStdin,
-    sync::{Mutex, oneshot},
+    sync::{oneshot, Mutex},
 };
 
 use crate::{

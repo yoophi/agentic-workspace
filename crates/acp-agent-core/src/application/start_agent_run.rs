@@ -113,12 +113,12 @@ mod tests {
     use crate::domain::events::{LifecycleStatus, RunEvent};
     use crate::ports::session_launcher::{AbortFuture, DriverFuture, RunCommander};
     use crate::ports::session_registry::{ReserveRunError, SessionRegistry};
-    use anyhow::{Result, anyhow};
+    use anyhow::{anyhow, Result};
     use std::{
         collections::HashMap,
         sync::{
-            Arc, Mutex as StdMutex,
             atomic::{AtomicUsize, Ordering},
+            Arc, Mutex as StdMutex,
         },
     };
     use tokio::sync::{Mutex, Notify};
@@ -460,11 +460,9 @@ mod tests {
         assert_eq!(c.0.load(Ordering::SeqCst), 1);
         assert_eq!(c.1.load(Ordering::SeqCst), 0);
         let events = sink.events.lock().unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, RunEvent::Diagnostic { .. }))
-        );
+        assert!(events
+            .iter()
+            .any(|(_, event)| matches!(event, RunEvent::Diagnostic { .. })));
     }
 
     #[tokio::test]
@@ -490,11 +488,9 @@ mod tests {
         handle.await.expect("task should finish");
 
         let events = sink.events.lock().unwrap();
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, RunEvent::Error { .. }))
-        );
+        assert!(events
+            .iter()
+            .any(|(_, event)| matches!(event, RunEvent::Error { .. })));
         assert!(!events.iter().any(|(_, event)| matches!(
             event,
             RunEvent::Lifecycle {

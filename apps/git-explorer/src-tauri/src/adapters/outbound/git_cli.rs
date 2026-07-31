@@ -188,7 +188,10 @@ branch refs/heads/feature/worktree-list
         assert_eq!(worktrees[0].branch.as_deref(), Some("main"));
         assert!(worktrees[0].is_main);
         assert_eq!(worktrees[1].path, "/repo-feature");
-        assert_eq!(worktrees[1].branch.as_deref(), Some("feature/worktree-list"));
+        assert_eq!(
+            worktrees[1].branch.as_deref(),
+            Some("feature/worktree-list")
+        );
         assert!(!worktrees[1].is_main);
     }
 

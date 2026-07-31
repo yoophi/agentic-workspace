@@ -146,8 +146,11 @@ mod tests {
     /// event evicts the oldest one and must be reported as a gap rather than a clean replay.
     #[test]
     fn retains_up_to_the_bound_and_reports_a_gap_only_past_it() {
-        for (appended, expected_len, expect_gap) in [(511usize, 511usize, false), (512, 512, false), (513, 512, true)]
-        {
+        for (appended, expected_len, expect_gap) in [
+            (511usize, 511usize, false),
+            (512, 512, false),
+            (513, 512, true),
+        ] {
             let journal = InMemoryRuntimeEventJournal::default();
             for index in 0..appended {
                 journal.append("run-a", json!({"index": index}), false);
