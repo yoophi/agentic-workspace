@@ -30,15 +30,28 @@ type FrameScheduler = {
   cancelFrame: (handle: number) => void;
 };
 
-const DYNAMIC_PANEL_LAYOUT_ERROR = "Layout not found for Panel";
+const DYNAMIC_PANEL_LAYOUT_ERRORS = [
+  /^Group .+ not found$/,
+  /^Panel constraints not found for Panel /,
+  /^Layout not found for Panel /,
+];
 const MAX_PANEL_RESIZE_ATTEMPTS = 3;
+
+function isPendingDynamicPanelLayout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    DYNAMIC_PANEL_LAYOUT_ERRORS.some((pattern) => pattern.test(error.message))
+  );
+}
 
 export function schedulePanelResize(
   getPanel: () => Pick<PanelImperativeHandle, "resize"> | null,
   displayWidth: number,
   scheduler: FrameScheduler = {
-    requestFrame: requestAnimationFrame,
-    cancelFrame: cancelAnimationFrame,
+    // WebKit의 requestAnimationFrame/cancelAnimationFrame은 Window receiver를 검사한다.
+    // 함수를 객체 속성에 그대로 담으면 scheduler가 this가 되어 번들 앱에서 예외가 난다.
+    requestFrame: (callback) => window.requestAnimationFrame(callback),
+    cancelFrame: (handle) => window.cancelAnimationFrame(handle),
   },
 ) {
   let cancelled = false;
@@ -52,12 +65,11 @@ export function schedulePanelResize(
     try {
       getPanel()?.resize(displayWidth);
     } catch (error) {
-      const isPendingDynamicLayout =
-        error instanceof Error && error.message.includes(DYNAMIC_PANEL_LAYOUT_ERROR);
-      if (!isPendingDynamicLayout) throw error;
-      if (attempts < MAX_PANEL_RESIZE_ATTEMPTS) {
+      if (isPendingDynamicPanelLayout(error) && attempts < MAX_PANEL_RESIZE_ATTEMPTS) {
         frameHandle = scheduler.requestFrame(resizeAfterLayout);
       }
+      // 저장 폭 복원은 보조 동작이다. 패널이 끝내 준비되지 않거나 예상하지 못한
+      // 오류가 발생해도 기본 레이아웃을 유지하고 화면 렌더를 중단하지 않는다.
     }
   };
 
