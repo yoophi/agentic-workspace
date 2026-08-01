@@ -27,6 +27,15 @@ When working in this repository, read the OpenWiki quickstart first, then follow
 - `AW` means `apps/agentic-workbench`.
 - `MA` means `apps/markdown-annotator`.
 - `GE` means `apps/git-explorer`.
+- `HL` means `apps/hushline`.
+
+## Versioning
+
+- Use calendar versioning (CALVER) for AW, MA, GE, and HL release artifacts.
+- Use the `YYYY.M.D` format for stable releases and `YYYY.M.D-rc.N` for release candidates, for example `2026.8.1-rc.1`.
+- Apply CALVER only when producing a release build by overriding the Tauri bundle version at build time.
+- Do not change versions in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, or any `Cargo.lock` merely to produce a CALVER build.
+- Keep all desktop application artifacts on the same CALVER during a coordinated workspace release unless the user explicitly requests independent versions.
 
 ## Frontend Architecture
 
