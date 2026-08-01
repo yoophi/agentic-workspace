@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"baseUrl":".","paths":{"@yoophi/file-browser-core":["./src/index.ts"]}},"include":["src"]}

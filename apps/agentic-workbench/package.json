@@ -22,6 +22,8 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "@vitejs/plugin-react": "^5.0.0",
     "@yoophi/agent-client": "workspace:*",
+    "@yoophi/file-browser-core": "workspace:*",
+    "@yoophi/file-browser-react": "workspace:*",
     "@yoophi/git-graph": "workspace:*",
     "@yoophi/git-ui": "workspace:*",
     "@yoophi/markdown-annotation-core": "workspace:*",

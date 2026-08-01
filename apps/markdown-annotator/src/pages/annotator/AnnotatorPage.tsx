@@ -6,12 +6,25 @@ import {
   MessageSquarePlus,
   PanelLeftClose,
   PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
   StickyNote,
   Terminal,
   Trash2,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ROOT_DOCUMENT_SELECTED_EVENT } from "@/app/providers/application-events-provider";
+import { FileBrowserPanel } from "@/features/file-browser/ui/FileBrowserPanel";
+import { openExternalLink, resolveInternalLink } from "@/features/document-navigation/model/internal-link-resolver";
+import { ReviewDecisionPanel } from "@/features/review-session/ui/ReviewDecisionPanel";
+import { FeedbackExportPanel } from "@/features/feedback-export/ui/FeedbackExportPanel";
+import { AttachmentStatusPanel } from "@/features/review-session/ui/AttachmentStatusPanel";
+import { DocumentActionsMenu } from "@/features/external-document-actions/ui/DocumentActionsMenu";
+import { useReviewSessionStore } from "@/features/review-session/model/review-session-store";
+import { ReviewSessionPersistence } from "@/features/review-session/model/review-session-persistence";
+import { loadReviewSession, saveReviewSession } from "@/entities/review-session/api/review-session-api";
+import { useDocumentNavigationStore } from "@/features/document-navigation/model/document-navigation-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,15 +50,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,14 +66,15 @@ import {
   checkCliInstalled,
   installCli,
   readMarkdownDocument,
+  readRootMarkdownDocument,
   startMarkdownDocumentWatcher,
   stopMarkdownDocumentWatcher,
 } from "@/entities/document/api/documentApi";
-import { exampleMarkdownDocuments } from "@/entities/document/model/examples";
 import type { MarkdownDocument } from "@/entities/document";
 import type { MarkdownBlock } from "@/entities/markdown-block";
 import {
   getDocumentPathFromWindowQuery,
+  getRootPathFromWindowQuery,
   openMarkdownDocumentTab,
 } from "@/features/open-document/openMarkdownDocument";
 import { resolveWikilinkTarget } from "@/features/open-document/resolveWikilinkTarget";
@@ -127,16 +133,9 @@ function isTauriRuntime() {
 }
 
 export function AnnotatorPage() {
+  const rootPath = getRootPathFromWindowQuery();
   const documentPaneRef = useRef<HTMLDivElement>(null);
-  const [selectedExampleId, setSelectedExampleId] = useState(exampleMarkdownDocuments[0]?.id ?? "");
-  const [document, setDocument] = useState<MarkdownDocument>(() => {
-    const initial = exampleMarkdownDocuments[0];
-    return {
-      fileName: initial.fileName,
-      absolutePath: `examples/markdown-annotator/${initial.fileName}`,
-      markdownText: initial.markdownText,
-    };
-  });
+  const [document, setDocument] = useState<MarkdownDocument>({ fileName: "문서를 여는 중…", absolutePath: "", markdownText: "" });
   const latestDocumentRef = useRef(document);
   const [selection, setSelection] = useState("");
   const [selectionAnchor, setSelectionAnchor] = useState<AnnotationAnchor | null>(null);
@@ -145,10 +144,7 @@ export function AnnotatorPage() {
   const [comment, setComment] = useState("");
   const [promptGoal, setPromptGoal] = useState<AgentPromptGoal>("edit-document");
   const [promptInstruction, setPromptInstruction] = useState("수정 요청은 문서에 반영하고, note는 참고 정보로만 사용하세요.");
-  const [promptFilePath, setPromptFilePath] = useState(() => {
-    const initial = exampleMarkdownDocuments[0];
-    return initial ? `examples/markdown-annotator/${initial.fileName}` : "";
-  });
+  const [promptFilePath, setPromptFilePath] = useState("");
   const [annotations, setAnnotations] = useState<AnnotationDraft[]>([]);
   const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null);
   const [noteDialogOpen, setNoteDialogOpen] = useState(false);
@@ -161,8 +157,33 @@ export function AnnotatorPage() {
   const [documentReloadError, setDocumentReloadError] = useState<string | null>(null);
   const [staleDocument, setStaleDocument] = useState<StaleSelection | null>(null);
   const [isTocOpen, setTocOpen] = useState(true);
+  const [isReviewOpen, setReviewOpen] = useState(true);
+  const [isFocusMode, setFocusMode] = useState(false);
 
   latestDocumentRef.current = document;
+  const hydrateReviewSession = useReviewSessionStore((state) => state.hydrate);
+  const reviewSession = useReviewSessionStore((state) => state.session);
+  const updateReviewAnnotation = useReviewSessionStore((state) => state.update);
+  const removeReviewAnnotation = useReviewSessionStore((state) => state.removeGroup);
+  const persistenceRef = useRef(new ReviewSessionPersistence({ load: async (key) => {
+    const relativePath = rootPath && key.startsWith(`${rootPath}/`) ? key.slice(rootPath.length + 1) : key;
+    return loadReviewSession(rootPath ?? "standalone", relativePath, "", new TextEncoder().encode(document.markdownText).byteLength);
+  }, save: saveReviewSession }));
+
+  useEffect(() => {
+    if (!isTauriRuntime()) { hydrateReviewSession({ sessionId: document.absolutePath, revision: 0, documentPath: document.absolutePath, decision: "draft", annotations: [] }); return; }
+    void persistenceRef.current.hydrate(document.absolutePath).then((session) => { if (session) hydrateReviewSession(session); });
+  }, [document.absolutePath, hydrateReviewSession]);
+
+  useEffect(() => { if (isTauriRuntime() && reviewSession) void persistenceRef.current.save(reviewSession); }, [reviewSession?.annotations, reviewSession?.decision]);
+
+  useEffect(() => {
+    const pane = documentPaneRef.current; if (!pane) return;
+    pane.scrollTop = useDocumentNavigationStore.getState().positionFor(document.absolutePath);
+    const remember = () => useDocumentNavigationStore.getState().rememberPosition(document.absolutePath, pane.scrollTop);
+    pane.addEventListener("scroll", remember, { passive: true });
+    return () => { remember(); pane.removeEventListener("scroll", remember); };
+  }, [document.absolutePath]);
 
   const title = document.fileName;
   const isReloadableDocument =
@@ -204,7 +225,6 @@ export function AnnotatorPage() {
   }
 
   function loadDocumentIntoWindow(opened: MarkdownDocument, message: string) {
-    setSelectedExampleId("");
     setDocument(opened);
     setPromptFilePath(opened.absolutePath);
     setAnnotations([]);
@@ -242,48 +262,25 @@ export function AnnotatorPage() {
     }));
   }
 
-  function loadExample(exampleId: string | null) {
-    if (!exampleId) {
-      return;
-    }
-
-    const example = exampleMarkdownDocuments.find((candidate) => candidate.id === exampleId);
-    if (!example) {
-      return;
-    }
-
-    setSelectedExampleId(example.id);
-    setDocument({
-      fileName: example.fileName,
-      absolutePath: `examples/markdown-annotator/${example.fileName}`,
-      markdownText: example.markdownText,
-    });
-    setPromptFilePath(`examples/markdown-annotator/${example.fileName}`);
-    setAnnotations([]);
-    setDocumentReloadError(null);
-    setStaleDocument(null);
-    resetSelectionState();
-    setEditingAnnotationId(null);
-    setNoteDialogOpen(false);
-    setComment("");
-    setStatus(`${example.fileName} 예제를 불러왔습니다.`);
-  }
-
   async function handleWikilinkActivate(href: string) {
     try {
-      const target = resolveWikilinkTarget(document.absolutePath, href);
-      const example = exampleMarkdownDocuments.find(
-        (candidate) => candidate.fileName === target.fileName,
-      );
-
-      if (document.absolutePath.startsWith("examples/markdown-annotator/")) {
-        if (!example) {
-          throw new Error(`예제 wikilink 대상을 찾을 수 없습니다: ${target.fileName}`);
+      if (rootPath && document.absolutePath.startsWith(`${rootPath}/`)) {
+        const currentRelativePath = document.absolutePath.slice(rootPath.length + 1);
+        const intent = resolveInternalLink(currentRelativePath, href);
+        if (intent.kind === "external") {
+          await openExternalLink(intent.url);
+          return;
         }
-        loadExample(example.id);
+        if (intent.kind === "heading") {
+          const entry = tocEntries.find((candidate) => candidate.text === intent.heading);
+          if (!entry) throw new Error(`heading을 찾을 수 없습니다: ${intent.heading}`);
+          handleTocEntrySelect(entry);
+          return;
+        }
+        await selectRootDocument(intent.relativePath, intent.heading);
         return;
       }
-
+      const target = resolveWikilinkTarget(document.absolutePath, href);
       if (!isTauriRuntime()) {
         throw new Error("브라우저에서 연 로컬 문서의 연결 파일은 데스크톱 앱에서 열 수 있습니다.");
       }
@@ -467,26 +464,31 @@ export function AnnotatorPage() {
   });
 
   useEffect(() => {
-    const documentPath = getDocumentPathFromWindowQuery();
-    if (!documentPath || !isTauriRuntime()) {
+    if (!isTauriRuntime()) {
       return;
     }
 
     let cancelled = false;
-    void readMarkdownDocument(documentPath)
-      .then((opened) => {
-        if (!cancelled) {
-          loadDocumentIntoWindow(opened, `${opened.fileName} 파일을 열었습니다.`);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setStatus(error instanceof Error ? error.message : "파일을 열 수 없습니다.");
-        }
-      });
+    const openPath = (documentPath: string) => {
+      void readMarkdownDocument(documentPath)
+        .then((opened) => {
+          if (!cancelled) loadDocumentIntoWindow(opened, `${opened.fileName} 파일을 열었습니다.`);
+        })
+        .catch((error) => {
+          if (!cancelled) setStatus(error instanceof Error ? error.message : "파일을 열 수 없습니다.");
+        });
+    };
+    const documentPath = getDocumentPathFromWindowQuery();
+    if (documentPath) openPath(documentPath);
+    const handleRootDocumentSelected = (event: Event) => {
+      const path = (event as CustomEvent<string>).detail;
+      if (path) openPath(path);
+    };
+    window.addEventListener(ROOT_DOCUMENT_SELECTED_EVENT, handleRootDocumentSelected);
 
     return () => {
       cancelled = true;
+      window.removeEventListener(ROOT_DOCUMENT_SELECTED_EVENT, handleRootDocumentSelected);
     };
   }, []);
 
@@ -739,6 +741,23 @@ export function AnnotatorPage() {
     setStatus("Agent용 Markdown 출력을 클립보드에 복사했습니다.");
   }
 
+  async function selectRootDocument(relativePath: string, heading: string | null = null) {
+    if (!rootPath) return;
+    try {
+      const opened = await readRootMarkdownDocument(rootPath, relativePath);
+      loadDocumentIntoWindow(opened, `${opened.fileName} 파일을 열었습니다.`);
+      if (heading) {
+        const entry = extractTocEntries(parseMarkdownToBlocks(opened.markdownText)).find((candidate) => candidate.text === heading);
+        if (entry) window.setTimeout(() => scrollToBlock(documentPaneRef.current, entry.blockId), 0);
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.set("path", opened.absolutePath);
+      window.history.replaceState(null, "", url);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "문서를 열 수 없습니다.");
+    }
+  }
+
   return (
     <main className="flex h-screen min-h-0 flex-col bg-background text-foreground">
       <header className="flex min-h-16 items-center justify-between border-b bg-card px-4">
@@ -752,24 +771,10 @@ export function AnnotatorPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Select value={selectedExampleId} onValueChange={loadExample}>
-            <SelectTrigger className="w-[260px]">
-              <SelectValue placeholder="예제 선택" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectLabel>Examples</SelectLabel>
-                {exampleMarkdownDocuments.map((example) => (
-                  <SelectItem key={example.id} value={example.id}>
-                    {example.title}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
+          {rootPath && document.absolutePath.startsWith(`${rootPath}/`) ? <DocumentActionsMenu rootPath={rootPath} relativePath={document.absolutePath.slice(rootPath.length + 1)} /> : null}
           <Button type="button" variant="outline" onClick={handleOpenFileAsTab}>
             <FolderOpen data-icon="inline-start" aria-hidden="true" />
-            Open
+            열기
           </Button>
           {isTauriRuntime() ? (
             <Button
@@ -779,24 +784,21 @@ export function AnnotatorPage() {
               disabled={isCliInstalling}
             >
               <Terminal data-icon="inline-start" aria-hidden="true" />
-              {isCliInstalling ? "Installing" : isCliInstalled ? "CLI installed" : "Install CLI"}
+              {isCliInstalling ? "설치 중" : isCliInstalled ? "CLI 설치됨" : "CLI 설치"}
             </Button>
           ) : null}
           <Button type="button" onClick={copyExport}>
             <ClipboardCopy data-icon="inline-start" aria-hidden="true" />
-            Copy prompt
+            프롬프트 복사
           </Button>
+          <Button type="button" variant="ghost" onClick={()=>setFocusMode((value)=>!value)}>{isFocusMode?"집중 모드 종료":"집중 모드"}</Button>
+          <Button aria-label={isReviewOpen?"검토 패널 숨기기":"검토 패널 표시"} size="icon-sm" variant="ghost" onClick={()=>setReviewOpen((value)=>!value)}>{isReviewOpen?<PanelRightClose/>:<PanelRightOpen/>}</Button>
         </div>
       </header>
 
-      <section
-        className={
-          tocEntries.length > 0
-            ? "grid min-h-0 flex-1 grid-cols-[auto_minmax(0,1fr)_420px]"
-            : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_420px]"
-        }
-      >
-        {tocEntries.length > 0 ? (
+      <section className="relative flex min-h-0 flex-1 overflow-hidden">
+        {rootPath && !isFocusMode ? <div className="w-[280px] shrink-0"><FileBrowserPanel rootPath={rootPath} exclusions={[".git", "node_modules", "target", "dist", "build", ".next"]} selectedPath={document.absolutePath.startsWith(`${rootPath}/`) ? document.absolutePath.slice(rootPath.length + 1) : null} onSelect={(path) => void selectRootDocument(path)} /></div> : null}
+        {tocEntries.length > 0 && !isFocusMode ? (
           <div className="flex min-h-0 border-r bg-card">
             {isTocOpen ? (
               <div className="flex min-h-0 w-64 flex-col">
@@ -831,7 +833,7 @@ export function AnnotatorPage() {
             )}
           </div>
         ) : null}
-        <div className="min-h-0 bg-muted/30">
+        <div className="min-h-0 min-w-0 flex-1 bg-muted/30">
           <ScrollArea className="h-full">
             <div className="relative mx-auto max-w-5xl p-6" ref={documentPaneRef} onMouseUp={scheduleCaptureSelection}>
               <Card>
@@ -923,27 +925,30 @@ export function AnnotatorPage() {
           </ScrollArea>
         </div>
 
-        <aside className="min-h-0 border-l bg-card">
+        {isReviewOpen && !isFocusMode ? <aside className="min-h-0 w-[420px] shrink-0 border-l bg-card max-xl:absolute max-xl:inset-y-0 max-xl:right-0 max-xl:z-20 max-xl:shadow-xl">
           <Tabs defaultValue="annotate" className="h-full gap-0">
             <div className="border-b p-3">
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="annotate">Annotate</TabsTrigger>
-                <TabsTrigger value="prompt">Prompt</TabsTrigger>
+                <TabsTrigger value="annotate">검토</TabsTrigger>
+                <TabsTrigger value="prompt">프롬프트</TabsTrigger>
               </TabsList>
             </div>
 
             <TabsContent value="annotate" className="min-h-0 flex-1">
+              <div className="border-b p-3"><ReviewDecisionPanel /></div>
+              {reviewSession ? <div className="border-b p-3"><AttachmentStatusPanel annotations={reviewSession.annotations} onDiscard={removeReviewAnnotation} onRelink={(id)=>updateReviewAnnotation(id,{attachmentState:"attached"})} /></div> : null}
+              {reviewSession ? <div className="border-b p-3"><FeedbackExportPanel session={reviewSession} /></div> : null}
               <ScrollArea className="h-[calc(100vh-8rem)]">
                 <div className="flex flex-col gap-4 p-4">
                   <Card>
                     <CardHeader>
-                      <CardTitle>Add annotation</CardTitle>
+                      <CardTitle>Annotation 추가</CardTitle>
                       <CardDescription>문서에서 텍스트를 선택한 뒤 comment를 입력합니다.</CardDescription>
                     </CardHeader>
                     <CardContent>
                       <FieldGroup>
                         <Field>
-                          <FieldLabel>Selected text</FieldLabel>
+                          <FieldLabel>선택한 텍스트</FieldLabel>
                           <div className="min-h-16 rounded-lg border bg-muted/50 p-3 text-sm text-muted-foreground">
                             {selection || "문서에서 텍스트를 드래그하세요."}
                           </div>
@@ -954,7 +959,7 @@ export function AnnotatorPage() {
                           </FieldDescription>
                         </Field>
                         <Field>
-                          <FieldLabel>Type</FieldLabel>
+                          <FieldLabel>유형</FieldLabel>
                           <Select
                             value={annotationType}
                             onValueChange={(value) => {
@@ -968,7 +973,7 @@ export function AnnotatorPage() {
                             </SelectTrigger>
                             <SelectContent>
                               <SelectGroup>
-                                <SelectLabel>Annotation type</SelectLabel>
+                                <SelectLabel>Annotation 유형</SelectLabel>
                                 {annotationTypes.map((type) => (
                                   <SelectItem key={type.value} value={type.value}>
                                     {type.label}
@@ -990,7 +995,7 @@ export function AnnotatorPage() {
                         </Field>
                         <Button type="button" onClick={addAnnotation}>
                           <MessageSquarePlus data-icon="inline-start" aria-hidden="true" />
-                          {editingAnnotationId ? "Save annotation" : "Add annotation"}
+                          {editingAnnotationId ? "Annotation 저장" : "Annotation 추가"}
                         </Button>
                       </FieldGroup>
                     </CardContent>
@@ -1009,9 +1014,9 @@ export function AnnotatorPage() {
                         <EmptyMedia variant="icon">
                           <CheckCircle2 aria-hidden="true" />
                         </EmptyMedia>
-                        <EmptyTitle>No annotations yet</EmptyTitle>
+                        <EmptyTitle>아직 annotation이 없습니다</EmptyTitle>
                         <EmptyDescription>
-                          Select text in the document to create structured feedback.
+                          문서에서 텍스트를 선택해 구조화된 피드백을 만드세요.
                         </EmptyDescription>
                       </EmptyHeader>
                     </Empty>
@@ -1132,7 +1137,7 @@ export function AnnotatorPage() {
               </div>
             </TabsContent>
           </Tabs>
-        </aside>
+        </aside> : null}
       </section>
 
       <AnnotationInputDialog
