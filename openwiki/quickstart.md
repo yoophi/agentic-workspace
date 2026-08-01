@@ -1,3 +1,10 @@
+---
+type: Repository Guide
+title: Agentic Workspace quickstart
+description: A practical starting guide to the Agentic Workspace monorepo, including the Agentic Workbench desktop application, shared packages, and SpecKit workflow.
+tags: [agentic-workspace, monorepo, tauri, acp]
+---
+
 # Agentic Workspace — 퀵스타트
 
 Agentic Workspace는 에이전트 기반 소프트웨어 개발을 지원하는 로컬 데스크톱 도구 모노레포입니다. 핵심 앱인 **Agentic Workbench(AW)** 는 로컬 코딩 프로젝트, Git worktree, ACP(Agent Client Protocol) 에이전트 세션을 관리합니다.
@@ -124,6 +131,9 @@ Rust 검증은 해당 `apps/*/src-tauri` 디렉토리에서 `cargo check` 실행
 - ACP 실행 출력, 툴 업데이트, 권한 프롬프트를 UI로 스트리밍
 - worktree별 목표(ThreadGoal), 저장 프롬프트, 프로바이더 세션, 실행 설정 추적
 - 로컬 MCP 서버를 통해 에이전트에게 worktree 컨텍스트 제공
+- Delegates, observes, and collects read-only child-agent tasks in a worktree-scoped orchestration workspace led by the Main Coordinator
+- Projects agent panels as tabs or tiles and promotes background child tasks into panels only when needed
+- Restores the per-worktree auxiliary workspace-panel layout and the app-wide font-size preference
 
 ## 주요 개념
 
@@ -132,13 +142,15 @@ Rust 검증은 해당 `apps/*/src-tauri` 디렉토리에서 `cargo check` 실행
 - **Permission Mode**: 에이전트의 권한 수준 (`Default`, `Auto`, `ReadOnly`, `Plan`, `AcceptEdits`, `DangerouslySkipAllPermissions`).
 - **Ralph Loop**: 목표 달성 시까지 에이전트에게 자동으로 후속 프롬프트를 보내는 반복 실행 모드.
 - **ThreadGoal**: worktree별 스레드 목표 — 상태 추적 및 토큰 예산 관리.
+- **Main Coordinator / Child**: `main-agent-run` is the one stable parent identity in each window; children can be direct children only. Task, execution, and presentation state are separate, so closing a panel does not automatically cancel a background task. See [Agent execution and orchestration flow](agent-run-flow.md) for the runtime path.
+- **Markdown annotation**: MA and AW share AST-based Markdown blocks, annotation anchors, and list rendering, but MA is for general document review while AW connects to the worktree, SpecKit, and agent workflow. [Shared packages and crates](shared-packages.md) documents the shared implementation.
 
 ## 문서 탐색
 
 | 문서 | 내용 |
 |------|------|
 | [아키텍처](architecture.md) | 모노레포 구조, Feature-Sliced Design, 헥사고날 아키텍처 원칙 |
-| [Agentic Workbench](agentic-workbench.md) | 메인 앱의 프론트엔드/백엔드 구조 상세 |
-| [에이전트 실행 흐름](agent-run-flow.md) | ACP 실행, 권한, MCP, 세션 관리 심층 분석 |
-| [공유 패키지](shared-packages.md) | `crates/git-core`, `packages/*` 공유 모듈 |
+| [Agentic Workbench](agentic-workbench.md) | 메인 앱 frontend/backend 구조, orchestration workspace, panel layout, 글꼴 크기 설정 |
+| [에이전트 실행 및 오케스트레이션 흐름](agent-run-flow.md) | ACP 실행, permission, MCP, session 관리, Main Coordinator child-task orchestration |
+| [공유 패키지와 크레이트](shared-packages.md) | `crates/git-core`, `packages/*`, AST 기반 Markdown renderer를 포함한 공유 모듈 |
 | [스펙 주도 개발](spec-workflow.md) | SpecKit 워크플로와 `specs/` 구조 |

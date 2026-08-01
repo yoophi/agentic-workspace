@@ -1,3 +1,10 @@
+---
+type: Shared Code Reference
+title: Shared packages and crates
+description: Shared Rust crates and TypeScript packages that provide Git, ACP runtime, Markdown annotation, UI, and refresh capabilities to applications in the monorepo.
+tags: [shared-packages, crates, typescript, rust]
+---
+
 # 공유 패키지와 크레이트
 
 모노레포 전체에서 재사용되는 공유 코드. JavaScript/TypeScript는 `packages/`, Rust는 `crates/`에 위치합니다. 공유 승격 기준은 "최소 2개 소비자"입니다.
@@ -87,9 +94,9 @@ ACP 기반 agent 실행(domain · ports · application · 인프라)을 담당�
 | 파일 | 주요 내보내기 |
 |------|-------------|
 | `types/annotation.ts` | `AnnotationType` (delete/question/change-request/note/approve), `AnnotationAnchor`, `AnnotationDraft` |
-| `types/markdown-block.ts` | `MarkdownBlockType` (heading/paragraph/blockquote/list-item/code/table/hr), `MarkdownBlock` (`mermaid?` 메타데이터 포함) |
+| `types/markdown-block.ts` | `MarkdownBlockType` (heading/paragraph/blockquote/list-item/code/table/hr), `MarkdownBlock` — `mermaid?`와 `sourceRange`, `parentId`, list level/ordered/task metadata 포함 |
 | `types/toc.ts` | `TocLevel` (1\|2\|3), `TocEntry` (`taskSummary?` — 하위 체크리스트 완료/미완료 카운트) |
-| `parse/parse-markdown-to-blocks.ts` | `parseMarkdownToBlocks(markdown)` — 줄 기반 파서: frontmatter, 제목, 펜스드 코드, 테이블, 인용구, 리스트, HR 처리. 안정적인 `block-N` ID와 줄 범위 할당. 파싱 전 `stripHtmlComments`로 HTML 주석 제거 |
+| `parse/parse-markdown-to-blocks.ts` | `parseMarkdownToBlocks(markdown)` — `unified` + `remark-parse` + `remark-gfm` CommonMark/GFM AST에서 annotation·TOC용 의미 블록을 추출. 안정적인 `block-N`, source range, 중첩 list의 `parentId`를 만듭니다. 파싱 전 `stripHtmlComments`로 HTML 주석을 제거합니다. |
 | `parse/inline-markdown.ts` | `transformWikilinks(markdown)` — `[[target\|label]]` 형태의 wikilink를 표준 Markdown 링크로 변환 (인라인 코드 영역 보존). `stripHtmlComments(markdown)` — 펜스드/인라인 코드 영역을 제외한 HTML 주석 제거 (줄 앵커 안정성 유지) |
 | `mermaid/detect-mermaid-block.ts` | `detectMermaidBlock()` — 언어가 `mermaid`이거나 30+ 선언 토큰(`graph`, `flowchart`, `sequenceDiagram` 등)으로 감지 |
 | `format/format-annotations-for-agent.ts` | `formatAnnotationsForAgent()` — 주석을 타입별 지시문으로 포맷 (delete/change-request/question/note/approve), 원본 Markdown 컨텍스트와 줄 범위 포함. `AgentPromptGoal` (edit-document/review-reference/custom) |
@@ -104,13 +111,15 @@ React 컴포넌트 라이브러리. Markdown 뷰잉 + 주석 오버레이 + Merm
 
 | 컴포넌트 | 역할 |
 |---------|------|
-| `MarkdownViewer` | 블록을 `react-markdown` + `remark-gfm`으로 렌더링. 인라인 `<mark>` 주석, 블록 레벨 노트 아이콘, Mermaid 확대 표시. 주입형 `components` prop |
+| `MarkdownViewer` | 블록을 `react-markdown` + `remark-gfm`으로 렌더링. 인라인 `<mark>` 주석, 블록 레벨 노트 아이콘, Mermaid 확대 표시. AST의 `parentId`로 중첩 목록을 재귀 렌더하며 최상위 목록은 원문 순서의 연속 run으로 묶어 heading·paragraph·code·table 사이에서 병합/재정렬하지 않습니다. 커스텀 marker만 사용해 중복 marker를 방지합니다. 주입형 `components` prop |
 | `MarkdownToc` | 목차 네비게이션 (들여쓰기 제목 버튼). `taskSummary`가 있는 H1 항목은 완료/미완료 체크리스트 카운트 표시 |
 | `AnnotationInputDialog` | 주석 생성/편집 모달 (타입 선택 + 코멘트). 주입형 `DialogShell` + `TypeSelect` |
 | `MermaidDiagram` | 동적 `import("mermaid")`로 Mermaid 렌더. 렌더 상태 관리 (loading/rendered/failed), 오류 분류 |
 | `MermaidExpandedView` | Mermaid 확대 모달 뷰 |
 | `scroll-to-block.ts` | 블록 ID → 스크롤 이동 헬퍼 |
 | `test-fixtures.ts` | 테스트용 Markdown 파싱 픽스처 (wikilink, HTML 주석, 체크리스트 포함) |
+
+`quality/fixtures.ts`의 구조 20개, annotation 10개, recovery/safety 10개 사례와 `list-render-order.test.tsx`가 parser/renderer 계약을 지킵니다. 특히 stale `blockId` annotation은 다른 블록으로 자동 재결합하지 않고 무시합니다. 이 안전 규칙과 shared renderer는 [Agentic Workbench](agentic-workbench.md)의 Markdown/SpecKit 미리보기와 `apps/markdown-annotator`에 함께 적용됩니다.
 
 ## packages/ui
 

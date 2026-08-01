@@ -1,6 +1,13 @@
+---
+type: Runtime Workflow
+title: Agent execution and orchestration flow
+description: How Agentic Workbench launches ACP runs, streams run events, mediates permissions and MCP access, and coordinates read-only child tasks through the Main Coordinator.
+tags: [agentic-workbench, acp, mcp, orchestration, runtime]
+---
+
 # 에이전트 실행 흐름
 
-ACP 에이전트 실행의 전체 라이프사이클 — 시작부터 종료까지. 이 문서는 `apps/agentic-workbench/src-tauri/src/`의 ACP 엔진, 권한 처리, MCP 통합을 중심으로 설명합니다.
+ACP 에이전트 실행의 시작부터 완료까지의 lifecycle입니다. 이 문서는 `apps/agentic-workbench/src-tauri/src/` 아래의 ACP engine, permission handling, MCP integration, orchestration-specific layer를 다룹니다. 기반이 되는 재사용 ACP runtime은 [공유 패키지와 크레이트](shared-packages.md)에 설명합니다.
 
 ## 실행 흐름 개요
 
@@ -118,6 +125,46 @@ steer 요청은 다음 `LifecycleStatus` 변형을 emit합니다 (`domain/events
 
 → 프론트엔드에서 `run-panel-state.ts`가 이 상태들을 처리하여 UI에 steer 결과를 반영합니다.
 
+## Main Coordinator 오케스트레이션
+
+Agentic Workbench는 기존 단일 ACP run 위에 창·worktree 범위의 `OrchestrationSession`을 얹습니다. `main-agent-run`은 안정적인 Main Coordinator panel identity이고, ACP run은 교체 가능한 Coordinator generation입니다. Child work는 최대 8개 노드이며 첫 버전의 `AccessPolicy`는 `ReadOnly`입니다. 즉 병렬 조사·검토를 지원하지만 동시 worktree 쓰기나 손자 에이전트는 지원하지 않습니다. UI와 persistence 경계는 [Agentic Workbench](agentic-workbench.md)에 설명합니다.
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant UI as WorktreeAgentRunArea
+    participant Cmd as TauriCommands
+    participant Service as OrchestrationService
+    participant Main as MainCoordinator
+    participant Child as ChildWorker
+    participant MCP as MCPServer
+
+    UI->>Cmd: bootstrap worktree workspace
+    Cmd->>Service: create or recover session
+    UI->>Cmd: bind main run
+    Cmd->>MCP: bind coordinator capability
+    User->>UI: delegate goal
+    UI->>Cmd: delegate orchestration goal
+    Cmd->>Main: send goal to active run
+    Main->>MCP: create and assign child task
+    MCP->>Child: launch read only task
+    Child->>MCP: report progress or result
+    MCP->>Service: persist task and report
+    Service-->>UI: orchestration workspace update
+    MCP->>Main: deliver coordinator notification
+    Main-->>User: synthesize results
+```
+
+이 다이어그램은 worktree 목표 위임, capability로 인증된 MCP task tool, UI update 경로를 보여 줍니다.
+
+### 작업과 결과 수명
+
+`OrchestrationService`는 session을 window label에 결합하고 revision을 확인해 stale UI mutation을 거부합니다. 작업은 `pending → ready → running`에서 `input_required`, `blocked`, `completed`, `failed`, `cancelled`로 전이할 수 있습니다. 완료는 ACP process 종료만으로 판단하지 않고 Child가 제출한 명시적 structured result report로 판정합니다. report에는 summary, evidence, artifact reference, unresolved item, confidence가 포함될 수 있습니다.
+
+MCP에서 Coordinator는 `aw_create_child_task`, `aw_assign_child_task`, `aw_list_child_tasks`, `aw_send_child_message`, `aw_wait_child_tasks`, `aw_collect_child_results`와 child-control tool을 받습니다. Child는 인증된 자기 task만 조회할 수 있고 `aw_get_own_task`, `aw_report_progress`, `aw_report_result`, `aw_request_parent_input`, `aw_report_blocked`, `aw_send_parent_message`만 받습니다. `CapabilityRegistry`는 run-scoped token을 Coordinator 또는 Child principal에 결합하고 run/generation 종료 때 제거하므로 raw run ID는 orchestration authority가 아닙니다.
+
+Task, execution, presentation state는 분리됩니다. `TaskActivityRail`의 `background`, `attentionRequired`, `panel`, `detached`는 작업을 취소하지 않으며 panel을 닫아도 task는 계속됩니다. Coordinator run이 바뀌면 `handoff_orchestration_coordinator`는 새 generation으로 open work를 옮기기 전에 summary와 confirmation을 요구합니다. 창을 잃은 session은 JSON repository에서 복구 가능하지만 in-memory runtime event journal 전체를 보장하지 않으며, live run이 없는 active Child는 재시도 가능한 `runtimeLost` 상태로 조정됩니다.
+
 ## 권한 처리
 
 ### 권한 모드 (`domain/run.rs`의 `PermissionMode`)
@@ -153,6 +200,7 @@ steer 요청은 다음 `LifecycleStatus` 변형을 emit합니다 (`domain/events
 
 **제공 툴**:
 - `set_window_title` (`title_tool.rs`) — 에이전트가 세션 창 제목을 변경할 수 있음. 검증: 최대 80자, 제어문자 없음. 오리진 허용 목록 (tauri://localhost, 127.0.0.1, localhost)
+- 오케스트레이션 도구 (`orchestration_tool.rs`) — capability로 식별된 Coordinator에만 자식 생성·할당·목록·메시지·대기·결과 수집·interrupt/cancel/retry/reassign tool을, Child에만 자기 task 조회·진행/결과/차단 보고·부모 입력 요청/메시지 tool을 공개합니다. 권한과 generation/task 범위 검증은 [Agentic Workbench](agentic-workbench.md)의 `capability_registry.rs` 설명을 따릅니다.
 
 **에이전트에게 주입되는 컨텍스트**: MCP env와 함께 에이전트 지시문이 프롬프트에 주입되어, 에이전트가 worktree 요약, 목표, 세션 정보를 자연어로 쿼리할 수 있습니다.
 
@@ -215,7 +263,9 @@ Started → Initialized → SessionCreated → SessionIdle
 | 권한 브로커 | `src-tauri/src/infrastructure/permission_broker.rs` |
 | 세션 레지스트리 | `src-tauri/src/infrastructure/agent_session_registry.rs` |
 | MCP 서버 | `src-tauri/src/infrastructure/mcp/mod.rs` |
-| 이벤트 싱크 | `src-tauri/src/infrastructure/tauri_run_event_sink.rs` |
+| 오케스트레이션 도메인/서비스 | `src-tauri/src/domain/agent_orchestration.rs`, `src-tauri/src/application/orchestration_service.rs` |
+| 오케스트레이션 MCP/권한 | `src-tauri/src/infrastructure/mcp/orchestration_tool.rs`, `src-tauri/src/infrastructure/mcp/capability_registry.rs` |
+| 이벤트 싱크 | `src-tauri/src/infrastructure/tauri_run_event_sink.rs`, `src-tauri/src/infrastructure/tauri_orchestration_event_sink.rs` |
 | 도메인 이벤트 | `src-tauri/src/domain/events.rs` |
 | 프론트엔드 패널 | `src/features/agent-run/ui/agent-run-panel.tsx` |
 | 프론트엔드 상태 | `src/features/agent-run/model/run-panel-state.ts` |

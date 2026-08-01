@@ -1,3 +1,10 @@
+---
+type: Architecture Reference
+title: Architecture
+description: The monorepo architecture, including its pnpm and Cargo workspaces, Feature-Sliced Design frontend, hexagonal Tauri backends, shared packages, persistence, and events.
+tags: [architecture, monorepo, tauri, rust, typescript]
+---
+
 # 아키텍처
 
 이 모노레포는 두 가지 빌드 시스템으로 구성됩니다: 프론트엔드는 **pnpm workspace + Turbo**, 백엔드는 **Cargo workspace**. 두 워크스페이스는 독립적으로 동작하지만 Tauri 앱에서 만납니다.
@@ -126,6 +133,9 @@ AW와 GE는 JSON 파일 기반 영속성을 사용합니다 (Rust `infrastructur
 - 저장 프롬프트 (`json_saved_prompt_repository`)
 - 에이전트 실행 설정 (`json_agent_run_settings_repository`)
 - ACP 세션 기록 (`json_acp_session_store`)
+- Per-worktree orchestration session/task/node/report/command snapshots (`json_orchestration_repository`); the live runtime event journal is memory-only.
+- Per-worktree workspace-panel selection and widths (`json_worktree_workspace_layout_repository`)
+- The app-wide font-size preference for every AW window (`json_appearance_preferences_repository`)
 - Git 저장소 목록 — GE (`json_repository_store`)
 
 ## 이벤트 통신
@@ -135,6 +145,8 @@ Tauri 이벤트 시스템으로 백엔드→프론트엔드 통신:
 - `agent-run-event`: ACP 실행 이벤트 스트림 (메시지, 툴, 권한 등)
 - `workspace://worktree-changed`: 파일시스템 감시 기반 worktree 변경 알림
 - `workspace://mcp-window-title`: MCP 툴에서 발생한 창 제목 변경 요청
+- `orchestration-workspace-updated`: A window-scoped orchestration snapshot changed; the UI rereads it only when its revision is newer.
+- `app://appearance-preferences-changed`: Broadcasts the successfully persisted app-wide font-size preference to every AW WebView.
 - `repository-changed` (GE): 저장소 변경 알림
 
-→ 에이전트 실행 흐름의 이벤트 세부사항은 [에이전트 실행 흐름](agent-run-flow.md)을 참조.
+→ 에이전트 실행 흐름과 Coordinator/Child MCP 경계는 [에이전트 실행 흐름](agent-run-flow.md)을 참조하고, shared Markdown renderer가 두 앱에 연결되는 방식은 [공유 패키지와 크레이트](shared-packages.md)를 참조하세요.
