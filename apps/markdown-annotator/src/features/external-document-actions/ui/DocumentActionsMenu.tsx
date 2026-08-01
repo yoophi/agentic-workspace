@@ -1,0 +1,3 @@
+import { invoke } from "@tauri-apps/api/core";
+import { Button } from "@/components/ui/button";
+export function DocumentActionsMenu({ rootPath, relativePath }: { rootPath: string; relativePath: string }) { const copy=async()=>navigator.clipboard.writeText(await invoke<string>("validated_document_path",{rootPath,relativePath})); return <div aria-label="문서 작업"><Button variant="ghost" onClick={()=>void invoke("reveal_document_in_finder",{rootPath,relativePath})}>Finder에서 보기</Button><Button variant="ghost" onClick={()=>void invoke("open_document_in_default_app",{rootPath,relativePath})}>기본 앱으로 열기</Button><Button variant="ghost" onClick={()=>void copy()}>경로 복사</Button></div>; }

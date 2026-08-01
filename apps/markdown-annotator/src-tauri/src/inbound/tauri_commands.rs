@@ -1,18 +1,20 @@
 use crate::{
-    application::document_service::DocumentService,
+    application::{document_service::DocumentService, launch_target_service::LaunchTargetService},
     domain::document::MarkdownDocument,
     infrastructure::{
         fs_document_reader::FsDocumentReader,
         fs_document_watcher::{DocumentWatchHandle, watch_document},
     },
 };
+use crate::{
+    infrastructure::{cli_installer::CliInstaller, macos_native_shell::MacOsNativeShell},
+    ports::native_shell::NativeShell,
+};
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    collections::hash_map::DefaultHasher,
     env, fs,
-    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Mutex,
 };
@@ -49,11 +51,98 @@ pub struct CliInstallStatus {
     path: String,
     target: String,
 }
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentTarget {
+    path: String,
+    kind: String,
+}
+#[tauri::command]
+pub fn load_recent_targets(app: tauri::AppHandle) -> Result<Vec<RecentTarget>, String> {
+    let path = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recent.json");
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    serde_json::from_slice(&fs::read(path).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+fn remember_recent(app: &tauri::AppHandle, path: &Path) -> Result<(), String> {
+    let file = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("recent.json");
+    let mut values = if file.exists() {
+        serde_json::from_slice::<Vec<RecentTarget>>(&fs::read(&file).map_err(|e| e.to_string())?)
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let canonical = path
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .to_string_lossy()
+        .into_owned();
+    values.retain(|item| item.path != canonical);
+    values.insert(
+        0,
+        RecentTarget {
+            path: canonical,
+            kind: if path.is_dir() {
+                "folder".into()
+            } else {
+                "document".into()
+            },
+        },
+    );
+    values.truncate(12);
+    if let Some(parent) = file.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?
+    }
+    fs::write(
+        file,
+        serde_json::to_vec_pretty(&values).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 pub fn read_markdown_file(path: String) -> Result<MarkdownDocument, String> {
     let service = DocumentService::new(FsDocumentReader);
     service.read_markdown_file(&path)
+}
+#[tauri::command]
+pub fn get_build_info() -> crate::domain::build_info::BuildInfo {
+    crate::domain::build_info::build_info()
+}
+fn open_singleton_page(app: &tauri::AppHandle, label: &str, title: &str) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(label) {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return Ok(());
+    }
+    let window = WebviewWindowBuilder::new(
+        app,
+        label,
+        WebviewUrl::App(format!("index.html?page={label}").into()),
+    )
+    .title(title)
+    .inner_size(720.0, 640.0)
+    .build()
+    .map_err(|e| e.to_string())?;
+    window.show().map_err(|e| e.to_string())?;
+    window.set_focus().map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
+    open_singleton_page(&app, "settings", "Markdown Annotator 설정")
+}
+#[tauri::command]
+pub fn open_about_window(app: tauri::AppHandle) -> Result<(), String> {
+    open_singleton_page(&app, "about", "Markdown Annotator 정보")
 }
 
 #[tauri::command]
@@ -95,33 +184,8 @@ pub fn stop_markdown_document_watcher(
 pub fn install_cli() -> Result<CliInstallStatus, String> {
     let current_exe =
         env::current_exe().map_err(|error| format!("failed to locate app executable: {error}"))?;
-    let bin_dir = user_bin_dir()?;
-    fs::create_dir_all(&bin_dir).map_err(|error| {
-        format!(
-            "failed to create CLI install directory {}: {error}",
-            bin_dir.display()
-        )
-    })?;
-
-    let cli_path = bin_dir.join("ma");
-    if cli_path.is_dir() {
-        return Err(format!(
-            "cannot install ma because path is a directory: {}",
-            cli_path.display()
-        ));
-    }
-
-    let script = cli_launcher_script(&current_exe);
-    fs::write(&cli_path, script)
-        .map_err(|error| format!("failed to write {}: {error}", cli_path.display()))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&cli_path, fs::Permissions::from_mode(0o755)).map_err(|error| {
-            format!("failed to mark {} executable: {error}", cli_path.display())
-        })?;
-    }
+    let cli_path = user_bin_dir()?.join("ma");
+    CliInstaller::new(&cli_path).install(&current_exe)?;
 
     Ok(cli_install_status(true, &cli_path, &current_exe))
 }
@@ -131,12 +195,49 @@ pub fn check_cli_installed() -> Result<CliInstallStatus, String> {
     let current_exe =
         env::current_exe().map_err(|error| format!("failed to locate app executable: {error}"))?;
     let cli_path = user_bin_dir()?.join("ma");
-    let expected = cli_launcher_script(&current_exe);
-    let installed = fs::read_to_string(&cli_path)
-        .map(|content| content == expected)
-        .unwrap_or(false);
+    let installed = CliInstaller::new(&cli_path).status(&current_exe);
 
     Ok(cli_install_status(installed, &cli_path, &current_exe))
+}
+#[tauri::command]
+pub fn remove_cli() -> Result<(), String> {
+    CliInstaller::new(user_bin_dir()?.join("ma")).remove()
+}
+
+#[tauri::command]
+pub fn reveal_document_in_finder(root_path: String, relative_path: String) -> Result<(), String> {
+    let shell = MacOsNativeShell;
+    let path = shell.validated_display_path(Path::new(&root_path), &relative_path)?;
+    shell.reveal(Path::new(&path))
+}
+#[tauri::command]
+pub fn open_document_in_default_app(
+    root_path: String,
+    relative_path: String,
+) -> Result<(), String> {
+    let shell = MacOsNativeShell;
+    let path = shell.validated_display_path(Path::new(&root_path), &relative_path)?;
+    shell.open_default(Path::new(&path))
+}
+#[tauri::command]
+pub fn validated_document_path(root_path: String, relative_path: String) -> Result<String, String> {
+    MacOsNativeShell.validated_display_path(Path::new(&root_path), &relative_path)
+}
+#[tauri::command]
+pub fn open_external_https(url: String) -> Result<(), String> {
+    let parsed = url::Url::parse(&url).map_err(|e| e.to_string())?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err("only HTTP/HTTPS links are allowed".into());
+    }
+    let status = std::process::Command::new("/usr/bin/open")
+        .arg(parsed.as_str())
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("open failed: {status}"))
+    }
 }
 
 #[tauri::command]
@@ -147,19 +248,10 @@ pub fn request_open_document_window(app: tauri::AppHandle, path: String) -> Resu
 #[tauri::command]
 pub fn request_open_document_tab(
     app: tauri::AppHandle,
-    window: WebviewWindow,
+    _window: WebviewWindow,
     path: String,
 ) -> Result<(), String> {
-    let document_path = resolve_markdown_file(&path)?;
-    let label = label_for_document(&document_path);
-
-    if focus_if_open(&app, &label) {
-        return Ok(());
-    }
-
-    let new_window = create_document_window(&app, &label, &document_path)?;
-    attach_window_as_tab(&window, &new_window);
-    Ok(())
+    open_document_window_path(&app, &path)
 }
 
 pub fn open_welcome_window(app: &tauri::AppHandle) {
@@ -167,31 +259,39 @@ pub fn open_welcome_window(app: &tauri::AppHandle) {
         return;
     }
 
-    let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+    let builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title("Markdown Annotator")
         .inner_size(1280.0, 860.0)
         .min_inner_size(980.0, 680.0);
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.tabbing_identifier("markdown-annotator");
-    }
-
     match builder.build() {
-        Ok(window) => show_native_tab_bar(&window),
+        Ok(_) => {}
         Err(error) => eprintln!("failed to create main window: {error}"),
     }
 }
 
 pub fn open_document_window_path(app: &tauri::AppHandle, path: &str) -> Result<(), String> {
-    let document_path = resolve_markdown_file(path)?;
-    let label = label_for_document(&document_path);
+    remember_recent(app, Path::new(path))?;
+    let cwd = env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
+    let target = LaunchTargetService::resolve(Some(Path::new(path)), &cwd)
+        .map_err(|error| error.to_string())?;
+    let label = target.root.root_id.as_str();
+    let selected_path = target
+        .selected_document
+        .as_deref()
+        .map(|relative| target.root.canonical_path.join(relative));
 
-    if focus_if_open(app, &label) {
+    if focus_if_open(app, label, selected_path.as_deref()) {
         return Ok(());
     }
 
-    create_document_window(app, &label, &document_path).map(|_| ())
+    create_root_window(
+        app,
+        label,
+        &target.root.canonical_path,
+        selected_path.as_deref(),
+    )
+    .map(|_| ())
 }
 
 pub fn open_document_from_cli_args(
@@ -213,7 +313,6 @@ pub fn focus_any_window(app: &tauri::AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
-        show_native_tab_bar(&window);
     }
 }
 
@@ -227,58 +326,43 @@ pub fn initial_cli_args() -> Result<Option<(Vec<String>, PathBuf)>, String> {
     Ok(Some((argv, cwd)))
 }
 
-fn create_document_window(
+fn create_root_window(
     app: &tauri::AppHandle,
     label: &str,
-    path: &Path,
+    root_path: &Path,
+    selected_path: Option<&Path>,
 ) -> Result<WebviewWindow, String> {
-    let encoded_path = utf8_percent_encode(&path.to_string_lossy(), NON_ALPHANUMERIC).to_string();
-    let url = format!("index.html?path={encoded_path}");
-    let title = path
+    let encoded_root =
+        utf8_percent_encode(&root_path.to_string_lossy(), NON_ALPHANUMERIC).to_string();
+    let encoded_path = selected_path
+        .map(|path| utf8_percent_encode(&path.to_string_lossy(), NON_ALPHANUMERIC).to_string());
+    let url = encoded_path.map_or_else(
+        || format!("index.html?root={encoded_root}"),
+        |path| format!("index.html?root={encoded_root}&path={path}"),
+    );
+    let title = root_path
         .file_name()
         .and_then(|name| name.to_str())
-        .unwrap_or("Markdown document");
+        .unwrap_or("Markdown folder");
 
-    let mut builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+    let builder = WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
         .title(title)
         .inner_size(1280.0, 860.0)
         .min_inner_size(980.0, 680.0);
 
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.tabbing_identifier("markdown-annotator");
-    }
-
     let window = builder
         .build()
-        .map_err(|error| format!("failed to create document window: {error}"))?;
-    show_native_tab_bar(&window);
+        .map_err(|error| format!("failed to create root window: {error}"))?;
+    window
+        .show()
+        .map_err(|error| format!("failed to show root window: {error}"))?;
+    window
+        .set_focus()
+        .map_err(|error| format!("failed to focus root window: {error}"))?;
     Ok(window)
 }
 
-#[cfg(target_os = "macos")]
-fn attach_window_as_tab(base_window: &WebviewWindow, new_window: &WebviewWindow) {
-    use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
-
-    let Ok(base_ptr) = base_window.ns_window() else {
-        return;
-    };
-    let Ok(new_ptr) = new_window.ns_window() else {
-        return;
-    };
-
-    let base_ns_window: &NSWindow = unsafe { &*base_ptr.cast::<NSWindow>() };
-    let new_ns_window: &NSWindow = unsafe { &*new_ptr.cast::<NSWindow>() };
-
-    if base_ns_window.tabbingIdentifier().to_string() == "markdown-annotator" {
-        base_ns_window.addTabbedWindow_ordered(new_ns_window, NSWindowOrderingMode::Above);
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn attach_window_as_tab(_base_window: &WebviewWindow, _new_window: &WebviewWindow) {}
-
-fn focus_if_open(app: &tauri::AppHandle, label: &str) -> bool {
+fn focus_if_open(app: &tauri::AppHandle, label: &str, selected_path: Option<&Path>) -> bool {
     let Some(window) = app.get_webview_window(label) else {
         return false;
     };
@@ -286,69 +370,14 @@ fn focus_if_open(app: &tauri::AppHandle, label: &str) -> bool {
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
-    show_native_tab_bar(&window);
+    if let Some(path) = selected_path {
+        let _ = window.emit(
+            "markdown-annotator://root-document-selected",
+            path.to_string_lossy().to_string(),
+        );
+    }
     let _ = window.emit(WINDOW_HIGHLIGHT_EVENT, ());
     true
-}
-
-#[cfg(target_os = "macos")]
-fn show_native_tab_bar(window: &WebviewWindow) {
-    use objc2::MainThreadMarker;
-    use objc2_app_kit::NSWindow;
-
-    let window = window.clone();
-    let app = window.app_handle().clone();
-    let _ = app.run_on_main_thread(move || {
-        let Some(_mtm) = MainThreadMarker::new() else {
-            return;
-        };
-        let Ok(ptr) = window.ns_window() else {
-            return;
-        };
-        let ns_window: &NSWindow = unsafe { &*ptr.cast::<NSWindow>() };
-
-        if ns_window
-            .tabGroup()
-            .map(|tab_group| tab_group.isTabBarVisible())
-            .unwrap_or(false)
-        {
-            return;
-        }
-
-        ns_window.toggleTabBar(None);
-    });
-}
-
-#[cfg(not(target_os = "macos"))]
-fn show_native_tab_bar(_window: &WebviewWindow) {}
-
-fn label_for_document(path: &Path) -> String {
-    let mut hasher = DefaultHasher::new();
-    path.hash(&mut hasher);
-    format!("document-{}", hasher.finish())
-}
-
-fn resolve_markdown_file(raw_path: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(raw_path);
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| format!("failed to resolve {raw_path}: {error}"))?;
-
-    if !canonical.is_file() {
-        return Err(format!(
-            "target must be a markdown file: {}",
-            canonical.display()
-        ));
-    }
-
-    if !is_markdown_file(&canonical) {
-        return Err(format!(
-            "target must be a markdown file: {}",
-            canonical.display()
-        ));
-    }
-
-    Ok(canonical)
 }
 
 fn cli_path_arg(argv: &[String]) -> Option<&str> {
@@ -381,34 +410,4 @@ fn user_bin_dir() -> Result<PathBuf, String> {
         .map(PathBuf::from)
         .ok_or_else(|| "failed to locate HOME directory".to_string())?;
     Ok(home.join(".local").join("bin"))
-}
-
-fn cli_launcher_script(app_exe: &Path) -> String {
-    format!(
-        r#"#!/bin/sh
-APP_EXE={}
-if [ ! -x "$APP_EXE" ]; then
-  echo "ma: Markdown Annotator executable is not available: $APP_EXE" >&2
-  exit 1
-fi
-nohup "$APP_EXE" "$@" >/dev/null 2>&1 &
-"#,
-        shell_quote(&app_exe.to_string_lossy())
-    )
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
-fn is_markdown_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdx"
-            )
-        })
-        .unwrap_or(false)
 }

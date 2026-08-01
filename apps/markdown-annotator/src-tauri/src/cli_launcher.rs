@@ -31,7 +31,7 @@ pub fn run(command_name: &str, mode: CliMode) -> Result<(), String> {
     };
 
     let cwd = env::current_dir().map_err(|error| format!("failed to read cwd: {error}"))?;
-    let target = resolve_markdown_file(&raw_target, &cwd)?;
+    let target = resolve_launch_path(&raw_target, &cwd)?;
     let app = match mode {
         CliMode::Dev => find_dev_app()?,
         CliMode::Release => find_release_app()?,
@@ -50,7 +50,7 @@ pub fn run(command_name: &str, mode: CliMode) -> Result<(), String> {
 fn parse_target_arg(command_name: &str) -> Result<Option<String>, String> {
     let mut args = env::args().skip(1);
     let Some(target) = args.next() else {
-        return Err(format!("usage: {command_name} <markdown-file>"));
+        return Ok(Some(".".into()));
     };
 
     if matches!(target.as_str(), "-h" | "--help") {
@@ -64,7 +64,7 @@ fn parse_target_arg(command_name: &str) -> Result<Option<String>, String> {
     Ok(Some(target))
 }
 
-fn resolve_markdown_file(raw_target: &str, cwd: &Path) -> Result<PathBuf, String> {
+fn resolve_launch_path(raw_target: &str, cwd: &Path) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw_target);
     let candidate = if path.is_absolute() {
         path
@@ -76,14 +76,14 @@ fn resolve_markdown_file(raw_target: &str, cwd: &Path) -> Result<PathBuf, String
         .canonicalize()
         .map_err(|error| format!("failed to resolve {}: {error}", candidate.display()))?;
 
-    if !canonical.is_file() {
+    if !canonical.is_file() && !canonical.is_dir() {
         return Err(format!(
             "target must be a markdown file: {}",
             canonical.display()
         ));
     }
 
-    if !is_markdown_file(&canonical) {
+    if canonical.is_file() && !is_markdown_file(&canonical) {
         return Err(format!(
             "target must be a markdown file: {}",
             canonical.display()
@@ -421,11 +421,6 @@ fn app_executable_name() -> &'static str {
 fn is_markdown_file(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .map(|extension| {
-            matches!(
-                extension.to_ascii_lowercase().as_str(),
-                "md" | "markdown" | "mdx"
-            )
-        })
+        .map(|extension| matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown"))
         .unwrap_or(false)
 }

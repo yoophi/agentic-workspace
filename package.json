@@ -16,6 +16,7 @@
     "check-types": "turbo run check-types",
     "generate:contracts": "pnpm --filter @yoophi/workbench-client generate",
     "test": "turbo run test",
+    "check:app-boundaries": "node scripts/check-app-boundaries.mjs",
     "preview": "turbo run preview --filter=@yoophi/agentic-workbench",
     "preview:workbench": "turbo run preview --filter=@yoophi/agentic-workbench",
     "preview:ask-code": "turbo run preview --filter=@yoophi/ask-code",

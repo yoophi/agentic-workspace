@@ -79,6 +79,10 @@ export function getDocumentPathFromWindowQuery() {
   return new URLSearchParams(window.location.search).get("path");
 }
 
+export function getRootPathFromWindowQuery() {
+  return new URLSearchParams(window.location.search).get("root");
+}
+
 async function selectMarkdownDocumentPath() {
   const selected = await open({
     multiple: false,

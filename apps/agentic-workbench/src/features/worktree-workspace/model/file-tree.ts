@@ -1,42 +1,19 @@
 import type { WorktreeFileEntry } from "@/entities/worktree-file/model/types";
+import {
+  buildWorktreeFileTreeRows,
+  mergeWorktreeFileEntries,
+  type WorktreeFileTreeRow,
+} from "@/entities/worktree-file/lib/file-browser-adapter";
 
-export type FileTreeRow = WorktreeFileEntry & {
-  depth: number;
-  isExpanded: boolean;
-};
+export type FileTreeRow = WorktreeFileTreeRow;
 
-export function mergeWorktreeFileEntries(
-  entryGroups: Array<readonly WorktreeFileEntry[] | null | undefined>,
-) {
-  const entries = entryGroups.flatMap((group) => group ?? []);
-  const seen = new Set<string>();
-
-  return entries
-    .filter((entry) => {
-      if (seen.has(entry.relativePath)) {
-        return false;
-      }
-      seen.add(entry.relativePath);
-      return true;
-    })
-    .sort((left, right) =>
-      left.relativePath
-        .toLowerCase()
-        .localeCompare(right.relativePath.toLowerCase()),
-    );
-}
+export { mergeWorktreeFileEntries };
 
 export function buildFileTreeRows(
   entries: WorktreeFileEntry[],
   expandedFolders: ReadonlySet<string>,
 ): FileTreeRow[] {
-  return entries
-    .filter((entry) => isEntryVisible(entry, expandedFolders))
-    .map((entry) => ({
-      ...entry,
-      depth: pathDepth(entry.relativePath),
-      isExpanded: entry.isDir && expandedFolders.has(entry.relativePath),
-    }));
+  return buildWorktreeFileTreeRows(entries, expandedFolders);
 }
 
 export function isEntryVisible(
