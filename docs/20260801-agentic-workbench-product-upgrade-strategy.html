@@ -1,0 +1,712 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Agentic Workbench 제품 업그레이드 전략</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0b1020;
+      --surface: #121a30;
+      --surface-2: #18233d;
+      --text: #f4f7ff;
+      --muted: #a8b3cc;
+      --line: #2a3858;
+      --accent: #83e6c0;
+      --accent-2: #8eb8ff;
+      --warn: #ffd27d;
+      --danger: #ff9b9b;
+      --shadow: 0 24px 80px rgb(0 0 0 / 35%);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 15% 12%, rgb(89 126 247 / 16%), transparent 28%),
+        radial-gradient(circle at 85% 80%, rgb(79 219 170 / 12%), transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font-family: Inter, Pretendard, "Apple SD Gothic Neo", system-ui, sans-serif;
+    }
+
+    button { font: inherit; }
+
+    .deck { position: relative; width: 100%; height: 100%; }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      align-content: center;
+      gap: clamp(20px, 3vh, 34px);
+      padding: clamp(42px, 7vw, 112px);
+      opacity: 0;
+      transform: translateX(42px) scale(.985);
+      pointer-events: none;
+      transition: opacity 260ms ease, transform 260ms ease;
+    }
+
+    .slide.active {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+      pointer-events: auto;
+    }
+
+    .eyebrow {
+      color: var(--accent);
+      font-size: clamp(13px, 1.15vw, 18px);
+      font-weight: 750;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3, p { margin: 0; }
+
+    h1 {
+      max-width: 1100px;
+      font-size: clamp(44px, 6.4vw, 96px);
+      line-height: 1.02;
+      letter-spacing: -.055em;
+    }
+
+    h2 {
+      max-width: 1180px;
+      font-size: clamp(34px, 4.6vw, 72px);
+      line-height: 1.08;
+      letter-spacing: -.045em;
+    }
+
+    h3 {
+      font-size: clamp(19px, 1.7vw, 28px);
+      line-height: 1.25;
+    }
+
+    .lead {
+      max-width: 1060px;
+      color: var(--muted);
+      font-size: clamp(20px, 2vw, 31px);
+      line-height: 1.52;
+    }
+
+    .accent { color: var(--accent); }
+    .accent-2 { color: var(--accent-2); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+
+    .grid-2, .grid-3, .grid-4 {
+      display: grid;
+      gap: clamp(14px, 1.8vw, 28px);
+      align-items: stretch;
+    }
+
+    .grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: linear-gradient(145deg, rgb(24 35 61 / 92%), rgb(15 23 43 / 92%));
+      padding: clamp(20px, 2.2vw, 34px);
+      box-shadow: 0 10px 36px rgb(0 0 0 / 16%);
+    }
+
+    .card p, .card li {
+      color: var(--muted);
+      font-size: clamp(15px, 1.25vw, 20px);
+      line-height: 1.55;
+    }
+
+    .card h3 { margin-bottom: 12px; }
+
+    ul {
+      margin: 14px 0 0;
+      padding-left: 1.1em;
+    }
+
+    li + li { margin-top: 8px; }
+
+    .statement {
+      max-width: 1240px;
+      padding: clamp(26px, 3vw, 48px);
+      border-left: 5px solid var(--accent);
+      border-radius: 0 24px 24px 0;
+      background: rgb(131 230 192 / 8%);
+      font-size: clamp(25px, 3vw, 47px);
+      font-weight: 720;
+      line-height: 1.35;
+      letter-spacing: -.025em;
+    }
+
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+    }
+
+    .flow .step {
+      flex: 1;
+      min-width: 0;
+      display: grid;
+      place-items: center;
+      min-height: 110px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      text-align: center;
+      font-size: clamp(14px, 1.25vw, 20px);
+      font-weight: 720;
+    }
+
+    .flow .arrow {
+      align-self: center;
+      color: var(--accent-2);
+      font-size: 28px;
+    }
+
+    .matrix {
+      display: grid;
+      grid-template-columns: 1.25fr 1fr 1.35fr;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      overflow: hidden;
+      background: rgb(13 20 37 / 76%);
+    }
+
+    .matrix > div {
+      padding: clamp(12px, 1.35vw, 20px);
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      font-size: clamp(13px, 1.05vw, 17px);
+      line-height: 1.45;
+    }
+
+    .matrix > div:nth-child(3n) { border-right: 0; }
+    .matrix > div:nth-last-child(-n + 3) { border-bottom: 0; }
+    .matrix .head { color: var(--accent); font-weight: 760; background: var(--surface-2); }
+    .matrix .dim { color: var(--muted); }
+
+    .roadmap {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      counter-reset: phase;
+    }
+
+    .phase {
+      counter-increment: phase;
+      min-height: 260px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgb(29 42 73 / 96%), rgb(14 22 40 / 96%));
+    }
+
+    .phase::before {
+      content: "0" counter(phase);
+      display: block;
+      margin-bottom: 28px;
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: .18em;
+    }
+
+    .phase h3 { font-size: clamp(17px, 1.45vw, 23px); }
+    .phase p { margin-top: 12px; color: var(--muted); font-size: clamp(13px, 1vw, 16px); line-height: 1.5; }
+
+    .evidence {
+      color: #8290ad;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: clamp(10px, .85vw, 13px);
+      line-height: 1.55;
+      overflow-wrap: anywhere;
+    }
+
+    .pill-row { display: flex; flex-wrap: wrap; gap: 10px; }
+    .pill {
+      padding: 9px 13px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgb(255 255 255 / 3%);
+      font-size: clamp(12px, 1vw, 16px);
+    }
+
+    .controls {
+      position: fixed;
+      right: 24px;
+      bottom: 22px;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .controls button {
+      width: 42px;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      background: rgb(18 26 48 / 86%);
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .counter {
+      min-width: 66px;
+      color: var(--muted);
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+    }
+
+    .progress {
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      z-index: 20;
+      height: 4px;
+      width: 0;
+      background: linear-gradient(90deg, var(--accent-2), var(--accent));
+      transition: width 220ms ease;
+    }
+
+    .source-list {
+      columns: 2;
+      column-gap: 36px;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .source-list li {
+      break-inside: avoid;
+      margin: 0 0 12px;
+      color: var(--muted);
+      font-size: clamp(12px, 1vw, 16px);
+    }
+
+    .source-list a { color: var(--accent-2); text-decoration: none; }
+
+    @media (max-width: 900px) {
+      .slide { overflow-y: auto; align-content: start; padding: 54px 26px 90px; }
+      .grid-3, .grid-4, .roadmap { grid-template-columns: 1fr 1fr; }
+      .matrix { grid-template-columns: 1fr; }
+      .matrix > div { border-right: 0; }
+      .matrix .head { display: none; }
+      .flow { flex-direction: column; }
+      .flow .arrow { transform: rotate(90deg); }
+      .source-list { columns: 1; }
+    }
+
+    @media print {
+      html, body { overflow: visible; background: #fff; color: #111; }
+      .deck { height: auto; }
+      .slide { position: relative; min-height: 100vh; opacity: 1; transform: none; page-break-after: always; color: #111; }
+      .card, .phase, .matrix { background: #fff; box-shadow: none; }
+      .card p, .card li, .lead, .phase p, .matrix .dim, .source-list li { color: #3f4652; }
+      .controls, .progress { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck" aria-live="polite">
+    <section class="slide active">
+      <div class="eyebrow">Product direction review · 2026.08.01</div>
+      <h1>Agentic Workbench<br /><span class="accent">제품 업그레이드 전략</span></h1>
+      <p class="lead">현재 제품 상태를 목표 가치와 비교하고, “워크플로를 실행해 제품을 만드는 도구”로 발전하기 위한 과정을 정리한다.</p>
+      <div class="pill-row">
+        <span class="pill">제품 가치 중심</span>
+        <span class="pill">저장소 근거 기반</span>
+        <span class="pill">Human-in-the-loop</span>
+        <span class="pill">Workflow as Product</span>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">01 · Core thesis</div>
+      <h2>목표 자체는 <span class="accent">논리적으로 정합적이다</span></h2>
+      <div class="statement">개발 흐름은 사용자가 설계하고, 실행은 에이전트가 담당하며, 중요한 결정은 사용자가 내린다.</div>
+      <p class="lead">이 정의는 자동화의 효율과 인간의 통제를 충돌시키지 않는다. 반복 가능한 작업은 자동화하고, 제품 방향과 위험을 바꾸는 순간은 명시적인 검토 지점으로 남긴다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">02 · Value hierarchy</div>
+      <h2>목표·수단·구성요소를 구분한다</h2>
+      <div class="flow">
+        <div class="step"><span><strong class="accent">목표</strong><br />소프트웨어 제품을 만든다</span></div><div class="arrow">←</div>
+        <div class="step"><span><strong class="accent-2">수단</strong><br />개발 Workflow를 설계·실행한다</span></div><div class="arrow">←</div>
+        <div class="step"><span><strong class="warn">구성요소</strong><br />Agent + Data</span></div>
+      </div>
+      <p class="lead">워크플로 자체가 목적이 아니다. 에이전트가 올바른 데이터와 문서를 읽고 작업하며, 결과를 다음 단계의 Artifact로 전달해 최종 제품을 만드는 것이 목적이다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">03 · Product value</div>
+      <h2>제품이 제공해야 할 세 가지 가치</h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3 class="accent">실행 가능한 개발 과정</h3>
+          <p>요구사항, Spec, Task, 구현, 검증을 대화의 연속이 아니라 재사용 가능한 워크플로로 만든다.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent-2">통제 가능한 자동화</h3>
+          <p>에이전트가 백그라운드에서 진행하되 산출물 리뷰와 중요한 의사결정에서 사용자가 방향을 통제한다.</p>
+        </article>
+        <article class="card">
+          <h3 class="warn">누적되는 제품 자산</h3>
+          <p>실행 결과가 일회성 채팅으로 사라지지 않고 코드, 문서, 결정과 실행 이력으로 축적된다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">04 · Correct positioning</div>
+      <h2>ACP도, 채팅 UI도, 데스크톱 앱도 <span class="accent">제품의 본질은 아니다</span></h2>
+      <div class="grid-2">
+        <article class="card">
+          <h3>수단</h3>
+          <ul>
+            <li>ACP: 에이전트 연결과 실행</li>
+            <li>Desktop·Web·CLI: 사용자 접점</li>
+            <li>MCP: 에이전트가 시스템을 제어하는 인터페이스</li>
+            <li>Markdown: 산출물 검토 표면</li>
+          </ul>
+        </article>
+        <article class="card">
+          <h3 class="accent">제품</h3>
+          <p>사람과 에이전트가 같은 제품 개발 워크플로를 설계하고 운영하며, 그 실행을 통해 실제 소프트웨어가 만들어지는 시스템.</p>
+        </article>
+      </div>
+      <p class="lead">따라서 기술이나 특정 UI를 제품 정체성으로 설명하면 가치가 좁아진다. 중심 명사는 <strong>Agentic Workflow</strong>다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">05 · Current reality</div>
+      <h2>현재 Workbench는 어디까지 왔는가</h2>
+      <div class="grid-4">
+        <article class="card">
+          <h3 class="accent">에이전트 실행</h3>
+          <p>ACP 실행, 세션 복원, 스트리밍 이벤트, 권한, steer·cancel과 다중 공급자 기반.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent">병렬 협업</h3>
+          <p>Main·Child 위임, Task 상태, 결과 보고, 입력 요청, 취소·재시도·재배정.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent-2">산출물 리뷰</h3>
+          <p>Spec·Task Markdown 탐색, 렌더링, 주석과 에이전트 프롬프트 연결.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent-2">복구의 씨앗</h3>
+          <p>오케스트레이션 스냅샷, revision·idempotency와 런타임 이벤트 replay 개념.</p>
+        </article>
+      </div>
+      <p class="evidence">근거: crates/acp-agent-core · apps/agentic-workbench/src-tauri/src/domain/agent_orchestration.rs · application/orchestration_service.rs · infrastructure/mcp/orchestration_tool.rs · features/worktree-workspace</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">06 · Honest diagnosis</div>
+      <h2>현재 제품의 정확한 위치</h2>
+      <div class="statement">재사용 가능한 제품 개발 워크플로 플랫폼이라기보다, <span class="accent-2">Worktree 단위 다중 에이전트 협업 워크스페이스</span>에 가깝다.</div>
+      <div class="grid-3">
+        <article class="card">
+          <h3 class="danger">실행 수명</h3>
+          <p>Run이 세션 창에 귀속되고 창이 닫히면 취소된다. 백그라운드 지속 실행 가치와 충돌한다.</p>
+        </article>
+        <article class="card">
+          <h3 class="danger">워크플로 정의</h3>
+          <p>재사용·버전 관리할 Workflow Definition과 Run의 구분이 없다. 현재 모델은 Main과 direct Child 중심이다.</p>
+        </article>
+        <article class="card">
+          <h3 class="danger">접속과 제어</h3>
+          <p>Tauri 창 이벤트가 중심이며 여러 UI가 동일한 실행을 관찰·제어하는 제품 인터페이스가 없다.</p>
+        </article>
+      </div>
+      <p class="evidence">근거: apps/agentic-workbench/src-tauri/src/lib.rs의 WindowEvent::Destroyed 처리 · inbound/tauri_commands.rs · tauri_run_event_sink.rs</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">07 · Gap analysis</div>
+      <h2>현재 역량과 목표 가치의 간극</h2>
+      <div class="matrix" role="table" aria-label="현재 상태와 목표 비교">
+        <div class="head">제품 역량</div><div class="head">현재</div><div class="head">목표</div>
+        <div>실행 소유권</div><div class="dim">세션 창과 Worktree</div><div>UI와 독립된 지속 실행</div>
+        <div>자동화 단위</div><div class="dim">Main·Child Task 협업</div><div>버전된 제품 개발 Workflow</div>
+        <div>사용자 개입</div><div class="dim">권한·입력 요청·주석</div><div>산출물 Review와 Decision Gate</div>
+        <div>워크플로 편집</div><div class="dim">고정 SDD 단계와 MCP Task 제어</div><div>Visual·DSL·MCP의 동일 모델</div>
+        <div>사용자 접점</div><div class="dim">Tauri Desktop 중심</div><div>Desktop·Web·CLI·Remote</div>
+        <div>실행 기록</div><div class="dim">JSON snapshot과 메모리 replay</div><div>장기 이력·결정·산출물 추적</div>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">08 · Confirmed initial scope</div>
+      <h2>초기 제품의 공식 범위</h2>
+      <div class="grid-3">
+        <article class="card"><h3 class="accent">사용자</h3><p>로컬 저장소에서 여러 AI Agent를 운영하는 1인 개발자·기술 창업자.</p></article>
+        <article class="card"><h3 class="accent-2">제품 단위</h3><p>Product 하나와 Repository 하나. Worktree는 병렬 Task를 격리하는 실행 자원.</p></article>
+        <article class="card"><h3 class="warn">대표 결과</h3><p>테스트를 통과하고 사용자 검토를 마친 <strong>Ready to Merge</strong> 기능 변경.</p></article>
+        <article class="card"><h3>Workflow</h3><p>제품이 제공하는 검증된 기본 흐름. 초기에는 구조보다 자동화 정책을 설정.</p></article>
+        <article class="card"><h3>실행 환경</h3><p>로컬 Background Service가 Run을 소유하고 Desktop UI가 관찰·제어.</p></article>
+        <article class="card"><h3>초기 제외</h3><p>자유형 그래프 편집, 다중 저장소, 원격 실행, 팀 협업과 자동 병합.</p></article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">09 · Golden workflow</div>
+      <h2>첫 번째 기본 Workflow</h2>
+      <div class="flow">
+        <div class="step">Intake<br />요구사항 명확화</div><div class="arrow">→</div>
+        <div class="step">Spec 작성<br /><strong class="accent">승인</strong></div><div class="arrow">→</div>
+        <div class="step">설계·Task 분해<br /><strong class="accent">승인</strong></div><div class="arrow">→</div>
+        <div class="step">병렬 구현<br />통합·검증</div><div class="arrow">→</div>
+        <div class="step">최종 결과<br /><strong class="accent">리뷰</strong></div><div class="arrow">→</div>
+        <div class="step">Ready to Merge<br />사용자 병합</div>
+      </div>
+      <p class="lead">기본 필수 개입은 세 Gate로 제한한다. 최종 승인은 병합을 자동 실행하지 않으며 사용자의 명시적 병합 명령을 기다린다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">10 · Execution contract</div>
+      <h2>Agent 자동화의 경계</h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3 class="accent">자율 실행</h3>
+          <p>Sub-agent 생성, worktree 할당, Task 세분화, 최대 2회 재시도, 재배정, Artifact 종합.</p>
+        </article>
+        <article class="card">
+          <h3 class="warn">사용자 승인</h3>
+          <p>Spec·완료 조건, 핵심 설계, 범위 확대, 의미적 충돌과 최종 병합.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent-2">완료 근거</h3>
+          <p>모든 Sub-agent는 변경 파일, 테스트, 완료 조건, 위험을 담은 Task Result Artifact를 제출.</p>
+        </article>
+      </div>
+      <div class="statement">Agent 프로세스 종료는 Task 완료가 아니다. <span class="accent">Artifact와 검증 근거</span>가 있어야 완료다.</div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">11 · Strategic choice</div>
+      <h2>새로 만드는 것이 아니라 <span class="accent">현재 강점을 승격한다</span></h2>
+      <div class="flow">
+        <div class="step">ACP Agent Runtime</div><div class="arrow">→</div>
+        <div class="step">Main·Child Orchestration</div><div class="arrow">→</div>
+        <div class="step">Workflow 실행 역량</div><div class="arrow">→</div>
+        <div class="step">제품 개발 자동화</div>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <h3>유지할 것</h3>
+          <p>ACP 실행 코어, Task·Report 모델, 사용자 권한 개입, Markdown·Spec 리뷰, 재시도와 결과 수집.</p>
+        </article>
+        <article class="card">
+          <h3>재정의할 것</h3>
+          <p>현재 Main·Child 오케스트레이션을 제품 전체가 아니라 범용 워크플로 안의 강력한 실행 Node 또는 Sub-workflow로 본다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">12 · Required product surfaces</div>
+      <h2>Agent와 Data를 다루는 네 가지 도구</h2>
+      <div class="grid-4">
+        <article class="card">
+          <h3 class="accent">Agent UI</h3>
+          <p>에이전트의 역할, 작업, 진행 상태, 요청과 결과를 이해하고 필요한 순간에 개입한다.</p>
+        </article>
+        <article class="card">
+          <h3 class="accent-2">Workflow Design</h3>
+          <p>에이전트, 데이터, 단계, 분기, 검토 지점과 완료 조건을 구성한다.</p>
+        </article>
+        <article class="card">
+          <h3 class="warn">Workflow Inspection</h3>
+          <p>설계된 흐름의 누락, 모순, 위험, 도달 불가능한 단계와 필요한 입력을 점검한다.</p>
+        </article>
+        <article class="card">
+          <h3>Run Inspection</h3>
+          <p>실행 중인 흐름, 대기 중인 결정, 생성된 Artifact와 실패·재시도 상태를 확인한다.</p>
+        </article>
+      </div>
+      <p class="lead">이 네 표면은 별도 제품이 아니라 하나의 Workflow Model과 Run 상태를 서로 다른 관점으로 보여주는 도구다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">13 · Agent and data loop</div>
+      <h2>에이전트 협업은 <span class="accent">Artifact 전달 과정</span>이어야 한다</h2>
+      <div class="flow">
+        <div class="step">상위 Agent가<br />작업과 Context 정의</div><div class="arrow">→</div>
+        <div class="step">Sub-agent 호출</div><div class="arrow">→</div>
+        <div class="step">진행·입력 요청·대기</div><div class="arrow">→</div>
+        <div class="step">검증 가능한<br />Artifact 반환</div><div class="arrow">→</div>
+        <div class="step">다음 단계의<br />Data로 전달</div>
+      </div>
+      <div class="grid-2">
+        <article class="card">
+          <h3>Artifact가 필요한 이유</h3>
+          <p>에이전트 응답을 일회성 메시지가 아니라 출처, 상태, 버전, 검토 결과를 가진 워크플로 데이터로 만든다.</p>
+        </article>
+        <article class="card">
+          <h3>문서 시스템이 필요한 이유</h3>
+          <p>에이전트가 읽어야 할 요구사항, 결정, 규칙과 기존 산출물을 목적과 단계에 맞게 찾고 전달해야 결과의 일관성이 유지된다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">14 · Upgrade journey</div>
+      <h2>목표 제품으로 가는 다섯 단계</h2>
+      <div class="roadmap">
+        <article class="phase">
+          <h3>실행 독립성</h3>
+          <p>UI가 닫혀도 실행이 지속되고 다시 접속해 현재 상태를 확인할 수 있게 한다.</p>
+        </article>
+        <article class="phase">
+          <h3>워크플로 자산화</h3>
+          <p>검증된 기본 흐름을 Definition과 Run으로 분리하고 저장·버전·재사용한다.</p>
+        </article>
+        <article class="phase">
+          <h3>인간 개입의 구조화</h3>
+          <p>문서·Artifact와 중요한 결정을 워크플로의 명시적인 단계와 기록으로 승격한다.</p>
+        </article>
+        <article class="phase">
+          <h3>공동 편집</h3>
+          <p>사람은 Visual·DSL로, 에이전트는 MCP로 같은 워크플로를 만들고 개선한다.</p>
+        </article>
+        <article class="phase">
+          <h3>접점 확장</h3>
+          <p>Desktop, Web, CLI와 원격 채널이 동일한 실행 상태와 의사결정 흐름에 연결된다.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">15 · Validation gates</div>
+      <h2>각 단계는 기능 목록이 아니라 <span class="accent">제품 가치로 검증한다</span></h2>
+      <div class="grid-3">
+        <article class="card">
+          <h3>지속성</h3>
+          <p>사용자가 UI를 닫아도 작업은 계속되고, 돌아왔을 때 맥락 손실 없이 이어갈 수 있는가?</p>
+        </article>
+        <article class="card">
+          <h3>재사용성</h3>
+          <p>성공한 개발 과정을 다른 프로젝트에서 다시 실행하고 개선할 수 있는가?</p>
+        </article>
+        <article class="card">
+          <h3>통제 가능성</h3>
+          <p>사용자가 중요한 순간을 놓치지 않고 결과와 선택의 이유를 확인할 수 있는가?</p>
+        </article>
+        <article class="card">
+          <h3>일관성</h3>
+          <p>어떤 UI나 에이전트로 접속해도 같은 실행 상태와 결정을 보는가?</p>
+        </article>
+        <article class="card">
+          <h3>추적성</h3>
+          <p>어떤 워크플로와 결정이 현재 코드와 제품 결과를 만들었는지 설명할 수 있는가?</p>
+        </article>
+        <article class="card">
+          <h3>완결성</h3>
+          <p>하나의 대표 워크플로가 아이디어에서 검증된 소프트웨어 제품까지 끝까지 이어지는가?</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">16 · Priority</div>
+      <h2>가장 먼저 증명해야 할 것</h2>
+      <div class="statement">“워크플로 편집기가 멋진가?”보다 먼저, <span class="accent">“사용자가 자리를 비운 동안에도 개발 흐름이 안전하게 계속되고, 필요한 순간에만 정확히 돌아오게 하는가?”</span>를 증명한다.</div>
+      <p class="lead">이 경험이 성립해야 Visual Builder, DSL, MCP 편집과 원격 접속이 하나의 제품 가치를 확장한다. 반대로 지속 실행과 산출물·결정의 연결이 약하면 여러 인터페이스는 복잡성만 늘린다.</p>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">17 · Product narrative</div>
+      <h2>최종 제품 메시지</h2>
+      <div class="statement">Agentic Workbench는 1인 개발자가 기능 개발 Workflow를 실행해 Ready to Merge 소프트웨어 변경을 만드는 로컬 우선 Human-in-the-loop 플랫폼이다.</div>
+      <div class="grid-3">
+        <article class="card"><h3>사람</h3><p>목표를 정하고 흐름을 설계하며 중요한 산출물과 결정을 책임진다.</p></article>
+        <article class="card"><h3>에이전트</h3><p>워크플로 안에서 분석, 구현, 테스트와 반복 작업을 수행한다.</p></article>
+        <article class="card"><h3>Workbench</h3><p>에이전트, 문서, Artifact, 결정과 실행 상태를 연결해 제품이 만들어지는 흐름을 지속한다.</p></article>
+      </div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Sources · repository primary evidence</div>
+      <h2>조사 근거</h2>
+      <ul class="source-list">
+        <li><a href="../openwiki/quickstart.md">openwiki/quickstart.md</a> — 저장소와 제품 개요</li>
+        <li><a href="../openwiki/agentic-workbench.md">openwiki/agentic-workbench.md</a> — Workbench 기능과 구조</li>
+        <li><a href="../openwiki/agent-run-flow.md">openwiki/agent-run-flow.md</a> — ACP 실행과 사용자 개입</li>
+        <li><a href="../crates/acp-agent-core/src/domain/run.rs">crates/acp-agent-core/src/domain/run.rs</a> — Run과 Ralph Loop</li>
+        <li><a href="../crates/acp-agent-core/src/domain/events.rs">crates/acp-agent-core/src/domain/events.rs</a> — 실행 이벤트 모델</li>
+        <li><a href="../apps/agentic-workbench/src-tauri/src/domain/agent_orchestration.rs">domain/agent_orchestration.rs</a> — Main·Child·Task·Report 모델</li>
+        <li><a href="../apps/agentic-workbench/src-tauri/src/application/orchestration_service.rs">application/orchestration_service.rs</a> — 위임과 상태 전이</li>
+        <li><a href="../apps/agentic-workbench/src-tauri/src/application/orchestration_scheduler.rs">application/orchestration_scheduler.rs</a> — 병렬 실행 스케줄링</li>
+        <li><a href="../apps/agentic-workbench/src-tauri/src/infrastructure/mcp/orchestration_tool.rs">mcp/orchestration_tool.rs</a> — 에이전트의 Task 제어</li>
+        <li><a href="../apps/agentic-workbench/src-tauri/src/lib.rs">src-tauri/src/lib.rs</a> — 창 종료와 Run 수명</li>
+        <li><a href="../apps/agentic-workbench/src/features/agent-run/ui/task-activity-rail.tsx">task-activity-rail.tsx</a> — 백그라운드 Task 관찰 UX</li>
+        <li><a href="../apps/agentic-workbench/src/features/worktree-workspace/ui/worktree-workspace-panel.tsx">worktree-workspace-panel.tsx</a> — Markdown·Spec 산출물 검토</li>
+      </ul>
+      <p class="evidence">조사 방식: 저장소의 소스 코드, OpenWiki, 테스트와 구현된 스펙만 1차 근거로 사용. 전체 테스트 스위트는 이번 조사에서 실행하지 않음.</p>
+    </section>
+  </main>
+
+  <div class="controls" aria-label="슬라이드 제어">
+    <button id="prev" type="button" aria-label="이전 슬라이드">←</button>
+    <span class="counter" id="counter"></span>
+    <button id="next" type="button" aria-label="다음 슬라이드">→</button>
+  </div>
+  <div class="progress" id="progress"></div>
+
+  <script>
+    (() => {
+      const slides = [...document.querySelectorAll('.slide')];
+      const counter = document.getElementById('counter');
+      const progress = document.getElementById('progress');
+      let index = Math.max(0, Math.min(slides.length - 1, Number(location.hash.slice(1)) - 1 || 0));
+
+      function render(nextIndex) {
+        index = Math.max(0, Math.min(slides.length - 1, nextIndex));
+        slides.forEach((slide, slideIndex) => slide.classList.toggle('active', slideIndex === index));
+        counter.textContent = `${index + 1} / ${slides.length}`;
+        progress.style.width = `${((index + 1) / slides.length) * 100}%`;
+        history.replaceState(null, '', `#${index + 1}`);
+      }
+
+      document.getElementById('prev').addEventListener('click', () => render(index - 1));
+      document.getElementById('next').addEventListener('click', () => render(index + 1));
+      document.addEventListener('keydown', (event) => {
+        if (['ArrowRight', 'PageDown', ' '].includes(event.key)) {
+          event.preventDefault();
+          render(index + 1);
+        }
+        if (['ArrowLeft', 'PageUp'].includes(event.key)) {
+          event.preventDefault();
+          render(index - 1);
+        }
+        if (event.key === 'Home') render(0);
+        if (event.key === 'End') render(slides.length - 1);
+      });
+
+      let touchStart = null;
+      document.addEventListener('touchstart', (event) => { touchStart = event.touches[0].clientX; }, { passive: true });
+      document.addEventListener('touchend', (event) => {
+        if (touchStart === null) return;
+        const delta = event.changedTouches[0].clientX - touchStart;
+        if (Math.abs(delta) > 60) render(index + (delta < 0 ? 1 : -1));
+        touchStart = null;
+      }, { passive: true });
+
+      render(index);
+    })();
+  </script>
+</body>
+</html>
