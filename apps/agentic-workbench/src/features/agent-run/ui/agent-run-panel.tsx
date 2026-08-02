@@ -62,7 +62,7 @@ import {
   createSessionIdleLifecycleStatusMessage,
   createSessionStartLifecycleStatusMessage,
   eventGroups,
-  filterToolCommandCandidates,
+  filterPromptAutocompleteCandidates,
   findPromptAutocompleteTrigger,
   formatAvailableCommandsSummary,
   formatSessionFreshnessLabel,
@@ -1162,12 +1162,22 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     ],
     [availableCommandCandidates, toolCommandCandidatesQuery.data?.candidates],
   );
+  const autocompletePrefixCandidates = useMemo(
+    () =>
+      autocompleteTrigger
+        ? filterPromptAutocompleteCandidates(autocompleteSourceCandidates, {
+            prefix: autocompleteTrigger.prefix,
+            query: "",
+          })
+        : [],
+    [autocompleteSourceCandidates, autocompleteTrigger],
+  );
   const autocompleteCandidates = useMemo(
     () =>
       autocompleteTrigger
-        ? filterToolCommandCandidates(
+        ? filterPromptAutocompleteCandidates(
             autocompleteSourceCandidates,
-            autocompleteTrigger.query,
+            autocompleteTrigger,
           )
         : [],
     [autocompleteSourceCandidates, autocompleteTrigger],
@@ -1185,13 +1195,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     if (toolCommandCandidatesQuery.isError && autocompleteSourceCandidates.length === 0) {
       return "error" as const;
     }
-    if (autocompleteSourceCandidates.length === 0) {
+    if (autocompletePrefixCandidates.length === 0) {
       return "empty" as const;
     }
     return "noMatch" as const;
   }, [
     autocompleteCandidates.length,
-    autocompleteSourceCandidates.length,
+    autocompletePrefixCandidates.length,
     autocompleteTrigger,
     toolCommandCandidatesQuery.isError,
     toolCommandCandidatesQuery.isLoading,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   availableCommandCandidatesFromSessionUpdate,
   clampHighlightedIndex,
+  filterPromptAutocompleteCandidates,
   filterToolCommandCandidates,
   findPromptAutocompleteTrigger,
   insertionTextForPrefix,
@@ -52,6 +53,8 @@ describe("prompt autocomplete helpers", () => {
 
   it("ignores selection ranges and ordinary words", () => {
     expect(findPromptAutocompleteTrigger("plain text", 5)).toBeNull();
+    expect(findPromptAutocompleteTrigger("plain/path", 10)).toBeNull();
+    expect(findPromptAutocompleteTrigger("price$usd", 9)).toBeNull();
     expect(findPromptAutocompleteTrigger("$tool", 1, 3)).toBeNull();
   });
 
@@ -62,6 +65,26 @@ describe("prompt autocomplete helpers", () => {
     expect(filterToolCommandCandidates(candidates, "manage").map((item) => item.name)).toEqual([
       "goal",
     ]);
+    expect(
+      filterToolCommandCandidates(
+        [{ ...candidates[0], name: "window", insertText: "$set_window_title" }],
+        "set_window",
+      ).map((item) => item.name),
+    ).toEqual(["window"]);
+  });
+
+  it("keeps slash and dollar candidate sources separate while searching source labels", () => {
+    expect(
+      filterPromptAutocompleteCandidates(candidates, { prefix: "/", query: "manage" }).map(
+        (item) => item.name,
+      ),
+    ).toEqual(["goal"]);
+    expect(
+      filterPromptAutocompleteCandidates(candidates, {
+        prefix: "$",
+        query: "sessionTool",
+      }).map((item) => item.name),
+    ).toEqual(["set_window_title"]);
   });
 
   it("clamps highlighted index around candidate boundaries", () => {

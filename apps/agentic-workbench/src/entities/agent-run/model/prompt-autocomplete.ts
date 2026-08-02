@@ -166,6 +166,20 @@ export function filterToolCommandCandidates(
   });
 }
 
+export function filterPromptAutocompleteCandidates(
+  candidates: AgentToolCommandCandidate[],
+  trigger: Pick<PromptAutocompleteTrigger, "prefix" | "query">,
+) {
+  const sources: Set<AgentToolCommandCandidateSource> =
+    trigger.prefix === "/"
+      ? new Set(["appCommand"])
+      : new Set(["extension", "sessionTool"]);
+  return filterToolCommandCandidates(
+    candidates.filter((candidate) => sources.has(candidate.source)),
+    trigger.query,
+  );
+}
+
 export function clampHighlightedIndex(index: number, candidateCount: number) {
   if (candidateCount <= 0) {
     return -1;

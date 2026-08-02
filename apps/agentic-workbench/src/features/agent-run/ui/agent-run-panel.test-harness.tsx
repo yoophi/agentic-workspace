@@ -17,6 +17,9 @@ type AgentRunPanelHarness = {
   queryClient: QueryClient;
   enterPrompt: (value: string) => Promise<void>;
   pressPromptKey: (key: string, options?: PromptKeyOptions) => Promise<void>;
+  promptValue: () => string;
+  promptSelection: () => { start: number; end: number };
+  selectSuggestionWithPointer: (name: string) => Promise<void>;
   clickButton: (name: string) => Promise<void>;
   emitRunEvent: (envelope: RunEventEnvelope) => Promise<void>;
   rerender: (props: Partial<AgentRunPanelProps>) => Promise<void>;
@@ -66,6 +69,15 @@ export async function renderAgentRunPanel(
         setNativeTextareaValue(textarea, value);
         textarea.dispatchEvent(new Event("input", { bubbles: true }));
       });
+      await act(async () => {
+        textarea.setSelectionRange(value.length, value.length);
+        textarea.dispatchEvent(
+          new KeyboardEvent("keyup", {
+            key: value[value.length - 1] ?? "Unidentified",
+            bubbles: true,
+          }),
+        );
+      });
     },
     pressPromptKey: async (key, options = {}) => {
       const textarea = getPromptTextarea(container);
@@ -85,6 +97,22 @@ export async function renderAgentRunPanel(
             cancelable: true,
           }),
         );
+      });
+    },
+    promptValue: () => getPromptTextarea(container).value,
+    promptSelection: () => {
+      const textarea = getPromptTextarea(container);
+      return { start: textarea.selectionStart, end: textarea.selectionEnd };
+    },
+    selectSuggestionWithPointer: async (name) => {
+      const option = [...container.querySelectorAll<HTMLButtonElement>("[role='option']")].find(
+        (candidate) => candidate.textContent?.includes(name),
+      );
+      if (!option) {
+        throw new Error(`AgentRunPanel autocomplete option was not rendered: ${name}`);
+      }
+      await act(async () => {
+        option.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
       });
     },
     clickButton: async (name) => {

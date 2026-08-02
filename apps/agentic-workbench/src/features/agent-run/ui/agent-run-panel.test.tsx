@@ -2,6 +2,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type {
+  AgentToolCommandCandidate,
+  AgentToolCommandCandidateResponse,
+} from "@/entities/agent-run/model/types";
+
 import {
   cleanupAgentRunPanelTests,
   renderAgentRunPanel,
@@ -16,8 +21,40 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: invokeMock,
 }));
 
+let toolCommandCandidateResponse: AgentToolCommandCandidateResponse;
+let loadToolCommandCandidates: () => Promise<AgentToolCommandCandidateResponse>;
+
+const mixedCommandCandidates: AgentToolCommandCandidate[] = [
+  {
+    id: "session:set_window_title",
+    name: "set_window_title",
+    description: "Change the current Worktree Session window title.",
+    insertText: "$set_window_title",
+    source: "sessionTool",
+    scope: { runId: "run-autocomplete", agentId: "codex", workingDirectory: "/tmp/repo" },
+  },
+  {
+    id: "app:goal",
+    name: "goal",
+    description: "Manage the current AW goal.",
+    insertText: "/goal",
+    source: "appCommand",
+    scope: { agentId: "codex", workingDirectory: "/tmp/repo" },
+  },
+  {
+    id: "extension:speckit-implement",
+    name: "speckit-implement",
+    description: "Execute the current specification tasks.",
+    insertText: "$speckit-implement",
+    source: "extension",
+    scope: { agentId: "codex", workingDirectory: "/tmp/repo" },
+  },
+];
+
 beforeEach(() => {
   invokeMock.mockReset();
+  toolCommandCandidateResponse = { status: "empty", candidates: [] };
+  loadToolCommandCandidates = async () => toolCommandCandidateResponse;
   invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
       case "list_agents":
@@ -34,7 +71,7 @@ beforeEach(() => {
       case "get_goal":
         return null;
       case "list_agent_tool_command_candidates":
-        return { candidates: [] };
+        return loadToolCommandCandidates();
       case "list_provider_sessions":
       case "list_saved_prompts":
         return [];
@@ -61,6 +98,157 @@ afterEach(async () => {
 });
 
 describe("AgentRunPanel user boundary", () => {
+  it("shows only slash command sources and applies the highlighted command", async () => {
+    toolCommandCandidateResponse = {
+      status: "ready",
+      candidates: mixedCommandCandidates,
+    };
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-main",
+    });
+
+    await panel.enterPrompt("/");
+    await waitForAgentRunPanel(() => Boolean(panel.container.querySelector("[role='listbox']")));
+
+    const suggestions = panel.container.querySelector("[role='listbox']")?.textContent ?? "";
+    expect(suggestions).toContain("goal");
+    expect(suggestions).toContain("Manage the current AW goal.");
+    expect(suggestions).toContain("appCommand");
+    expect(suggestions).not.toContain("set_window_title");
+    expect(suggestions).not.toContain("speckit-implement");
+
+    await panel.pressPromptKey("Enter");
+    expect(panel.promptValue()).toBe("/goal");
+    expect(panel.promptSelection()).toEqual({ start: 5, end: 5 });
+    expect(invocationsFor("start_agent_run")).toEqual([]);
+  });
+
+  it("uses dollar command sources with keyboard and pointer selection in an additional panel", async () => {
+    toolCommandCandidateResponse = {
+      status: "ready",
+      candidates: mixedCommandCandidates,
+    };
+    const panel = await renderAgentRunPanel({
+      panelId: "child-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-child",
+      variant: "extra",
+    });
+
+    await panel.enterPrompt("$");
+    await waitForAgentRunPanel(() => Boolean(panel.container.querySelector("[role='listbox']")));
+
+    const suggestions = panel.container.querySelector("[role='listbox']")?.textContent ?? "";
+    expect(suggestions).toContain("set_window_title");
+    expect(suggestions).toContain("sessionTool");
+    expect(suggestions).toContain("speckit-implement");
+    expect(suggestions).toContain("extension");
+    expect(suggestions).not.toContain("Manage the current AW goal.");
+
+    await panel.pressPromptKey("ArrowDown");
+    await waitForAgentRunPanel(() =>
+      Boolean(
+        [...panel.container.querySelectorAll("[role='option']")].find(
+          (option) =>
+            option.textContent?.includes("set_window_title") &&
+            option.getAttribute("aria-selected") === "true",
+        ),
+      ),
+    );
+    await panel.pressPromptKey("ArrowUp");
+    await waitForAgentRunPanel(() =>
+      Boolean(
+        [...panel.container.querySelectorAll("[role='option']")].find(
+          (option) =>
+            option.textContent?.includes("speckit-implement") &&
+            option.getAttribute("aria-selected") === "true",
+        ),
+      ),
+    );
+    await panel.pressPromptKey("ArrowDown");
+    await panel.pressPromptKey("Tab");
+
+    const keyboardSelection = "$set_window_title";
+    expect(panel.promptValue()).toBe(keyboardSelection);
+    expect(panel.promptSelection()).toEqual({
+      start: keyboardSelection.length,
+      end: keyboardSelection.length,
+    });
+
+    await panel.enterPrompt("$spec");
+    await waitForAgentRunPanel(() =>
+      panel.container.textContent?.includes("speckit-implement") ?? false,
+    );
+    await panel.selectSuggestionWithPointer("speckit-implement");
+
+    const pointerSelection = "$speckit-implement";
+    expect(panel.promptValue()).toBe(pointerSelection);
+    expect(panel.promptSelection()).toEqual({
+      start: pointerSelection.length,
+      end: pointerSelection.length,
+    });
+    expect(invocationsFor("start_agent_run")).toEqual([]);
+  });
+
+  it("treats candidates for the other prefix as an empty source", async () => {
+    toolCommandCandidateResponse = {
+      status: "ready",
+      candidates: [mixedCommandCandidates[0]],
+    };
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-empty-slash",
+    });
+
+    await panel.enterPrompt("/");
+    await waitForAgentRunPanel(() =>
+      panel.container.textContent?.includes("No commands available") ?? false,
+    );
+
+    expect(panel.promptValue()).toBe("/");
+    expect(panel.container.querySelectorAll("[role='option']")).toHaveLength(0);
+  });
+
+  it.each([
+    ["loading", "Loading commands..."],
+    ["empty", "No commands available"],
+    ["noMatch", "No matching commands"],
+    ["error", "Commands unavailable"],
+  ] as const)("keeps prompt editing available in the %s fallback", async (status, message) => {
+    let prompt = "/";
+    if (status === "loading") {
+      loadToolCommandCandidates = () =>
+        new Promise<AgentToolCommandCandidateResponse>(() => undefined);
+    } else if (status === "noMatch") {
+      prompt = "/missing";
+      toolCommandCandidateResponse = {
+        status: "ready",
+        candidates: [mixedCommandCandidates[1]],
+      };
+    } else if (status === "error") {
+      loadToolCommandCandidates = async () => {
+        throw new Error("candidate lookup failed");
+      };
+    }
+    const panel = await renderAgentRunPanel({
+      panelId: "child-agent-run",
+      workingDirectory: `/tmp/agent-run-panel-${status}`,
+      variant: "extra",
+    });
+
+    await panel.enterPrompt(prompt);
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(message) ?? false);
+    expect(panel.promptValue()).toBe(prompt);
+
+    await panel.pressPromptKey("Escape");
+    await waitForAgentRunPanel(() => !panel.container.querySelector("[role='listbox']"));
+    expect(panel.promptValue()).toBe(prompt);
+
+    const continuedPrompt = `${prompt} keep typing`;
+    await panel.enterPrompt(continuedPrompt);
+    expect(panel.promptValue()).toBe(continuedPrompt);
+  });
+
   it("does not publish an empty run before orchestration hydration", async () => {
     const onRunStateChange = vi.fn();
     const panel = await renderAgentRunPanel({
