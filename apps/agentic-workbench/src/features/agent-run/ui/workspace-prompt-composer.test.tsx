@@ -33,6 +33,20 @@ describe("WorkspacePromptComposer", () => {
     expect(html).toContain("⌘/Ctrl+Enter");
   });
 
+  it("exposes a mount beside the production input for focused-panel run settings", () => {
+    const state = createInitialAgentRunAreaState();
+    const html = renderToStaticMarkup(
+      <WorkspacePromptComposer
+        slots={state.slots}
+        focusedPanelId={state.focusedPanelId}
+        onRunConfigurationPortalChange={() => undefined}
+        onSubmit={() => undefined}
+      />,
+    );
+
+    expect(html).toContain('data-testid="workspace-run-configuration"');
+  });
+
   it("restores keyboard focus to the shared composer after submit", () => {
     const source = WorkspacePromptComposer.toString();
     expect(source).toContain("composerRef");

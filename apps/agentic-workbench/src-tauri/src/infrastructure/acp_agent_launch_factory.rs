@@ -55,6 +55,7 @@ pub fn build_worker_request(
         auto_allow: Some(launch.auto_allow),
         permission_mode: Some(launch.permission_mode),
         model_id: assignment.runtime_profile.model_id.clone(),
+        effort_id: None,
         context_size: None,
         run_id: Some(assignment.planned_run_id.clone()),
         resume_session_id: None,

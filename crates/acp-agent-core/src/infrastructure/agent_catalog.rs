@@ -65,6 +65,18 @@ impl AgentCatalog for StaticAgentCatalog {
                     ("gpt-5.1-codex", "GPT-5.1 Codex"),
                     ("gpt-5-codex", "GPT-5 Codex"),
                 ]),
+                // Pinned Codex 0.144.6의 known ReasoningEffort ID 집합이다.
+                // 모델별 실제 지원 여부는 session configOptions로 다시 검증한다.
+                efforts: options(&[
+                    ("none", "None"),
+                    ("minimal", "Minimal"),
+                    ("low", "Low"),
+                    ("medium", "Medium"),
+                    ("high", "High"),
+                    ("xhigh", "XHigh"),
+                    ("max", "Max"),
+                    ("ultra", "Ultra"),
+                ]),
                 context_sizes: options(&[
                     ("medium", "Medium"),
                     ("large", "Large"),
@@ -94,6 +106,7 @@ impl AgentCatalog for StaticAgentCatalog {
                     ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
                     ("claude-haiku-4-5", "Claude Haiku 4.5"),
                 ]),
+                efforts: Vec::new(),
                 context_sizes: Vec::new(),
             },
             AgentDescriptor {
@@ -102,6 +115,7 @@ impl AgentCatalog for StaticAgentCatalog {
                 command: "npx -y pi-acp".into(),
                 runtime_version: None,
                 models: Vec::new(),
+                efforts: Vec::new(),
                 context_sizes: Vec::new(),
             },
             AgentDescriptor {
@@ -110,6 +124,7 @@ impl AgentCatalog for StaticAgentCatalog {
                 command: "npx -y opencode-ai acp".into(),
                 runtime_version: None,
                 models: opencode_models().unwrap_or_else(opencode_fallback_models),
+                efforts: Vec::new(),
                 context_sizes: Vec::new(),
             },
         ]
@@ -349,6 +364,24 @@ mod tests {
                 "missing Codex model {model_id}"
             );
         }
+
+        assert_eq!(
+            codex
+                .efforts
+                .iter()
+                .map(|effort| (effort.id.as_str(), effort.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("none", "None"),
+                ("minimal", "Minimal"),
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("xhigh", "XHigh"),
+                ("max", "Max"),
+                ("ultra", "Ultra"),
+            ]
+        );
     }
 
     #[test]

@@ -20,6 +20,7 @@ type AgentRunPanelHarness = {
   promptValue: () => string;
   promptSelection: () => { start: number; end: number };
   selectSuggestionWithPointer: (name: string) => Promise<void>;
+  selectOption: (label: string, option: string) => Promise<void>;
   clickButton: (name: string) => Promise<void>;
   emitRunEvent: (envelope: RunEventEnvelope) => Promise<void>;
   rerender: (props: Partial<AgentRunPanelProps>) => Promise<void>;
@@ -114,6 +115,37 @@ export async function renderAgentRunPanel(
       await act(async () => {
         option.dispatchEvent(new Event("pointerdown", { bubbles: true, cancelable: true }));
       });
+    },
+    selectOption: async (label, option) => {
+      const trigger = document.querySelector<HTMLButtonElement>(`button[aria-label='${label}']`);
+      if (!trigger) {
+        throw new Error(`AgentRunPanel select was not rendered: ${label}`);
+      }
+      await act(async () => {
+        trigger.dispatchEvent(
+          new PointerEvent("pointerdown", {
+            bubbles: true,
+            cancelable: true,
+            button: 0,
+            pointerType: "mouse",
+          }),
+        );
+      });
+      await waitForAgentRunPanel(() =>
+        [...document.querySelectorAll<HTMLElement>("[role='option']")].some(
+          (candidate) => candidate.textContent?.trim() === option,
+        ),
+      );
+      const item = [...document.querySelectorAll<HTMLElement>("[role='option']")].find(
+        (candidate) => candidate.textContent?.trim() === option,
+      );
+      if (!item) {
+        throw new Error(`AgentRunPanel option was not rendered: ${option}`);
+      }
+      await act(async () => {
+        item.click();
+      });
+      await waitForAgentRunPanel(() => trigger.textContent?.includes(option) ?? false);
     },
     clickButton: async (name) => {
       await waitForAgentRunPanel(() => {

@@ -3,6 +3,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
+  AgentDescriptor,
+  AgentRunSettings,
   AgentToolCommandCandidate,
   AgentToolCommandCandidateResponse,
 } from "@/entities/agent-run/model/types";
@@ -23,6 +25,22 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 let toolCommandCandidateResponse: AgentToolCommandCandidateResponse;
 let loadToolCommandCandidates: () => Promise<AgentToolCommandCandidateResponse>;
+let savedRunSettings: AgentRunSettings | null;
+let loadAgents: () => Promise<AgentDescriptor[]>;
+
+const codexAgents: AgentDescriptor[] = [
+  {
+    id: "codex",
+    label: "Codex",
+    command: "codex-acp",
+    models: [{ id: "gpt-5.6", label: "GPT-5.6" }],
+    efforts: [
+      { id: "low", label: "Low" },
+      { id: "high", label: "High" },
+    ],
+    contextSizes: [{ id: "large", label: "Large" }],
+  },
+];
 
 const mixedCommandCandidates: AgentToolCommandCandidate[] = [
   {
@@ -54,20 +72,15 @@ const mixedCommandCandidates: AgentToolCommandCandidate[] = [
 beforeEach(() => {
   invokeMock.mockReset();
   toolCommandCandidateResponse = { status: "empty", candidates: [] };
+  savedRunSettings = null;
+  loadAgents = async () => codexAgents;
   loadToolCommandCandidates = async () => toolCommandCandidateResponse;
   invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
     switch (command) {
       case "list_agents":
-        return [
-          {
-            id: "codex",
-            label: "Codex",
-            command: "codex-acp",
-            models: [{ id: "gpt-5.6", label: "GPT-5.6" }],
-            contextSizes: [{ id: "large", label: "Large" }],
-          },
-        ];
+        return loadAgents();
       case "get_agent_run_settings":
+        return savedRunSettings;
       case "get_goal":
         return null;
       case "list_agent_tool_command_candidates":
@@ -98,6 +111,143 @@ afterEach(async () => {
 });
 
 describe("AgentRunPanel user boundary", () => {
+  it("reloads the worktree-scoped Codex model and effort selections", async () => {
+    let finishLoadingAgents: ((agents: AgentDescriptor[]) => void) | undefined;
+    loadAgents = () =>
+      new Promise<AgentDescriptor[]>((resolve) => {
+        finishLoadingAgents = resolve;
+      });
+    savedRunSettings = {
+      workingDirectory: "/tmp/agent-run-panel-restored-settings",
+      agentId: "codex",
+      permissionMode: "default",
+      modelId: "gpt-5.6",
+      effortId: "high",
+      contextSize: "default",
+      sessionMode: "new",
+      ralphLoop: {
+        enabled: false,
+        maxIterations: 5,
+        delayMs: 0,
+        stopOnError: true,
+        stopOnPermission: false,
+        promptTemplate: "",
+      },
+    };
+    await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-restored-settings",
+    });
+
+    await waitForAgentRunPanel(() => invocationsFor("get_agent_run_settings").length > 0);
+    finishLoadingAgents?.(codexAgents);
+
+    await waitForAgentRunPanel(() =>
+      document
+        .querySelector("button[aria-label='main-agent-run model']")
+        ?.textContent?.includes("GPT-5.6") ?? false,
+    );
+    expect(
+      document.querySelector("button[aria-label='main-agent-run effort']")?.textContent,
+    ).toContain("High");
+  });
+
+  it("shows compact Codex settings in the external production composer and sends selections", async () => {
+    const runConfigurationPortal = document.createElement("div");
+    document.body.append(runConfigurationPortal);
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-codex-settings",
+      showPromptComposer: false,
+      runConfigurationPortal,
+    });
+
+    await waitForAgentRunPanel(() =>
+      Boolean(document.querySelector("button[aria-label='main-agent-run model']")),
+    );
+    const model = document.querySelector<HTMLButtonElement>(
+      "button[aria-label='main-agent-run model']",
+    );
+    const effort = document.querySelector<HTMLButtonElement>(
+      "button[aria-label='main-agent-run effort']",
+    );
+    expect(model?.textContent).toContain("Provider default");
+    expect(effort?.textContent).toContain("Provider default");
+
+    await panel.selectOption("main-agent-run model", "GPT-5.6");
+    await panel.selectOption("main-agent-run effort", "High");
+    await panel.rerender({
+      externalPromptRequest: {
+        id: "production-composer-request",
+        text: "Use the selected Codex configuration",
+        delivery: "send",
+      },
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);
+
+    expect(invocationsFor("start_agent_run")[0]).toMatchObject({
+      request: {
+        modelId: "gpt-5.6",
+        effortId: "high",
+      },
+    });
+    expect(model?.disabled).toBe(true);
+    expect(effort?.disabled).toBe(true);
+
+    await waitForAgentRunPanel(() =>
+      invocationsFor("save_agent_run_settings").some(
+        (args) =>
+          (args as { settings?: { effortId?: string } }).settings?.effortId === "high",
+      ),
+    );
+  });
+
+  it("persists a focused additional panel selection through the main worktree owner", async () => {
+    let worktreeRunConfiguration: { modelId: string; effortId: string } = {
+      modelId: "providerDefault",
+      effortId: "providerDefault",
+    };
+    const onWorktreeRunConfigurationChange = vi.fn((configuration) => {
+      worktreeRunConfiguration = configuration;
+    });
+    const runConfigurationPortal = document.createElement("div");
+    document.body.append(runConfigurationPortal);
+    const extraPanel = await renderAgentRunPanel({
+      panelId: "extra-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-shared-settings",
+      variant: "extra",
+      showPromptComposer: false,
+      runConfigurationPortal,
+      worktreeRunConfiguration,
+      onWorktreeRunConfigurationChange,
+    });
+
+    await extraPanel.selectOption("extra-agent-run model", "GPT-5.6");
+    await extraPanel.selectOption("extra-agent-run effort", "High");
+    await waitForAgentRunPanel(
+      () => worktreeRunConfiguration?.modelId === "gpt-5.6" && worktreeRunConfiguration.effortId === "high",
+    );
+    await extraPanel.unmount();
+
+    await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-shared-settings",
+      worktreeRunConfiguration,
+    });
+
+    await waitForAgentRunPanel(
+      () =>
+        document
+          .querySelector("button[aria-label='main-agent-run effort']")
+          ?.textContent?.includes("High") ?? false,
+    );
+    await waitForAgentRunPanel(() => invocationsFor("save_agent_run_settings").length > 0);
+    const saveInvocations = invocationsFor("save_agent_run_settings");
+    expect(saveInvocations[saveInvocations.length - 1]).toMatchObject({
+      settings: { modelId: "gpt-5.6", effortId: "high" },
+    });
+  });
+
   it("shows only slash command sources and applies the highlighted command", async () => {
     toolCommandCandidateResponse = {
       status: "ready",
@@ -289,6 +439,16 @@ describe("AgentRunPanel user boundary", () => {
     await waitForAgentRunPanel(() => onBeforeRunStart.mock.calls.length === 1);
 
     expect(invocationsFor("start_agent_run")).toEqual([]);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        "button[aria-label='main-agent-run model']",
+      )?.disabled,
+    ).toBe(true);
+    expect(
+      document.querySelector<HTMLButtonElement>(
+        "button[aria-label='main-agent-run effort']",
+      )?.disabled,
+    ).toBe(true);
 
     finishPreparing?.();
     await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);

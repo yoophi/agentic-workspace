@@ -18,6 +18,7 @@ describe("agent-client contract (camelCase)", () => {
       autoAllow: false,
       resumePolicy: "fresh",
       permissionMode: "readOnly",
+      effortId: "high",
       contextSize: "default",
     };
 
@@ -29,6 +30,7 @@ describe("agent-client contract (camelCase)", () => {
         "autoAllow",
         "contextSize",
         "cwd",
+        "effortId",
         "goal",
         "permissionMode",
         "resumePolicy",

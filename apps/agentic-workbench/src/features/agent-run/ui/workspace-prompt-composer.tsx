@@ -21,6 +21,7 @@ type WorkspacePromptComposerProps = {
   slots: AgentRunPanelSlot[];
   focusedPanelId: string;
   disabled?: boolean;
+  onRunConfigurationPortalChange?: (element: HTMLDivElement | null) => void;
   onSubmit: (input: {
     requestId: string;
     message: string;
@@ -41,6 +42,7 @@ export function WorkspacePromptComposer({
   slots,
   focusedPanelId,
   disabled = false,
+  onRunConfigurationPortalChange,
   onSubmit,
 }: WorkspacePromptComposerProps) {
   const [message, setMessage] = useState("");
@@ -128,30 +130,37 @@ export function WorkspacePromptComposer({
           </div>
         )}
       </div>
-      <div className="flex items-end gap-2 p-3">
-        <Textarea
-          ref={composerRef}
-          value={message}
-          onChange={(event) => setMessage(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-              event.preventDefault();
-              void submit();
-            }
-          }}
-          aria-label="모든 에이전트 패널의 공용 prompt"
-          placeholder="명령을 입력하세요. ⌘/Ctrl+Enter로 전송"
-          className="min-h-16 resize-y"
+      <div className="flex flex-col gap-2 p-3">
+        <div
+          ref={onRunConfigurationPortalChange}
+          data-testid="workspace-run-configuration"
+          className="flex min-h-7 flex-wrap items-center gap-2 empty:hidden"
         />
-        <Button
-          type="button"
-          disabled={!canSubmit}
-          onClick={() => void submit()}
-          aria-label="Prompt 전송"
-        >
-          <SendIcon data-icon="inline-start" />
-          전송
-        </Button>
+        <div className="flex items-end gap-2">
+          <Textarea
+            ref={composerRef}
+            value={message}
+            onChange={(event) => setMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                void submit();
+              }
+            }}
+            aria-label="모든 에이전트 패널의 공용 prompt"
+            placeholder="명령을 입력하세요. ⌘/Ctrl+Enter로 전송"
+            className="min-h-16 resize-y"
+          />
+          <Button
+            type="button"
+            disabled={!canSubmit}
+            onClick={() => void submit()}
+            aria-label="Prompt 전송"
+          >
+            <SendIcon data-icon="inline-start" />
+            전송
+          </Button>
+        </div>
       </div>
       {!size.ok && (
         <p className="px-3 pb-2 text-xs text-destructive" role="alert">

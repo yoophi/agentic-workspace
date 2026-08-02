@@ -69,6 +69,7 @@ export function SettingsPage({ onBack }: SettingsPageProps) {
       agentId: agents[0]?.id ?? "",
       permissionMode: "default",
       modelId: "providerDefault",
+      effortId: "providerDefault",
       contextSize: "default",
       sessionMode: "new",
       ralphLoop: {

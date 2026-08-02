@@ -13,6 +13,7 @@ export type AgentDescriptor = {
   command: string;
   runtimeVersion?: string;
   models?: AgentOptionDescriptor[];
+  efforts?: AgentOptionDescriptor[];
   contextSizes?: AgentOptionDescriptor[];
 };
 
@@ -52,6 +53,7 @@ export type AgentRunRequest = {
   resumePolicy?: ResumePolicy;
   permissionMode?: PermissionMode;
   modelId?: string;
+  effortId?: string;
   contextSize?: ContextSizePreset;
   ralphLoop?: RalphLoopRequest;
 };

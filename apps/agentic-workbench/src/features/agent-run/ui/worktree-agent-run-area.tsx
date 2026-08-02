@@ -42,6 +42,7 @@ import type {
 import {
   AgentRunPanel,
   type AgentPromptRequest,
+  type WorktreeRunConfiguration,
 } from "@/features/agent-run/ui/agent-run-panel";
 import { AgentRunPanelTabs } from "@/features/agent-run/ui/agent-run-panel-tabs";
 import { AgentRunTileLayout } from "@/features/agent-run/ui/agent-run-tile-layout";
@@ -120,6 +121,10 @@ export function WorktreeAgentRunArea({
   );
   const [pendingMainHandoffRunId, setPendingMainHandoffRunId] =
     useState<string | null>(null);
+  const [runConfigurationPortal, setRunConfigurationPortal] =
+    useState<HTMLDivElement | null>(null);
+  const [worktreeRunConfiguration, setWorktreeRunConfiguration] =
+    useState<WorktreeRunConfiguration | null>(null);
   const pendingMainStartRef = useRef<{
     runId: string;
     resolve: () => void;
@@ -685,6 +690,11 @@ export function WorktreeAgentRunArea({
                   }
                   scrollHeader={scrollHeader}
                   showPromptComposer={false}
+                  runConfigurationPortal={
+                    slot.id === state.focusedPanelId ? runConfigurationPortal : null
+                  }
+                  worktreeRunConfiguration={worktreeRunConfiguration}
+                  onWorktreeRunConfigurationChange={setWorktreeRunConfiguration}
                   existingRunId={
                     orchestrationNode?.kind === "child"
                       ? orchestrationNode.currentRunId
@@ -768,6 +778,7 @@ export function WorktreeAgentRunArea({
         slots={state.slots}
         focusedPanelId={state.focusedPanelId}
         disabled={!orchestrationSession}
+        onRunConfigurationPortalChange={setRunConfigurationPortal}
         onSubmit={async ({ requestId, message, mode, panelIds, delegate }) => {
           lastDirectPromptRef.current = message;
           dispatchPrompt({ type: "queued", dispatchId: requestId, panelIds });

@@ -18,5 +18,7 @@ pub struct AgentDescriptor {
     #[serde(default)]
     pub models: Vec<AgentOptionDescriptor>,
     #[serde(default)]
+    pub efforts: Vec<AgentOptionDescriptor>,
+    #[serde(default)]
     pub context_sizes: Vec<AgentOptionDescriptor>,
 }

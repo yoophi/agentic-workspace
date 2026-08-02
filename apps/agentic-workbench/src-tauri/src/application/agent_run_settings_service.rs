@@ -39,6 +39,7 @@ fn normalize_settings(mut settings: AgentRunSettings) -> Result<AgentRunSettings
         normalize_required(settings.working_directory, "Working directory")?;
     settings.agent_id = settings.agent_id.trim().to_string();
     settings.model_id = normalize_optional_with_default(settings.model_id, "providerDefault");
+    settings.effort_id = normalize_optional_with_default(settings.effort_id, "providerDefault");
     settings.ralph_loop = normalize_ralph_loop(settings.ralph_loop);
     settings.command_overrides = normalize_command_overrides(settings.command_overrides);
     ensure_active_built_in_profile(&settings.command_overrides)?;
@@ -254,6 +255,7 @@ mod tests {
             agent_id: agent_id.into(),
             permission_mode: PermissionMode::Plan,
             model_id: " gpt-5 ".into(),
+            effort_id: " high ".into(),
             context_size: ContextSizePreset::Large,
             session_mode: AgentRunSessionMode::Reuse,
             ralph_loop: AgentRunSettingsRalphLoop {
@@ -279,6 +281,7 @@ mod tests {
         assert_eq!(saved.working_directory, "/repo/worktree");
         assert_eq!(saved.agent_id, "claude-code");
         assert_eq!(saved.model_id, "gpt-5");
+        assert_eq!(saved.effort_id, "high");
         assert_eq!(saved.ralph_loop.max_iterations, MAX_RALPH_ITERATIONS);
         assert_eq!(saved.ralph_loop.delay_ms, MAX_RALPH_DELAY_MS);
         assert!(saved.ralph_loop.stop_on_permission);
@@ -354,6 +357,7 @@ mod tests {
             serde_json::from_value(value).expect("legacy settings should deserialize");
 
         assert_eq!(settings.command_overrides, AgentCommandOverrides::default());
+        assert_eq!(settings.effort_id, "providerDefault");
     }
 
     #[test]

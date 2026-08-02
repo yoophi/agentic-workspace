@@ -20,5 +20,9 @@ describe("WorktreeAgentRunArea orchestration runtime ownership", () => {
     expect(SOURCE).toContain("onBeforeRunStart=");
     expect(SOURCE).toContain("pendingMainStartRef");
     expect(SOURCE).toContain('orchestrationNode?.kind === "child" ? "readOnly"');
+    expect(SOURCE).toContain("worktreeRunConfiguration={worktreeRunConfiguration}");
+    expect(SOURCE).toContain(
+      "onWorktreeRunConfigurationChange={setWorktreeRunConfiguration}",
+    );
   });
 });

@@ -270,7 +270,23 @@ export const sampleWorktrees: GitWorktree[] = [
 ];
 
 export const sampleAgents: AgentDescriptor[] = [
-  { id: "codex", label: "Codex", command: "codex" },
+  {
+    id: "codex",
+    label: "Codex",
+    command: "codex",
+    models: [
+      { id: "gpt-5.6", label: "GPT-5.6" },
+      { id: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    ],
+    efforts: [
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+      { id: "xhigh", label: "XHigh" },
+      { id: "max", label: "Max" },
+      { id: "ultra", label: "Ultra" },
+    ],
+  },
   { id: "claude", label: "Claude Code", command: "claude" },
 ];
 

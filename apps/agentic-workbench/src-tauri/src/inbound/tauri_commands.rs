@@ -1876,6 +1876,7 @@ mod tests {
             resume_policy: Some(ResumePolicy::ResumeIfAvailable),
             permission_mode: None,
             model_id: None,
+            effort_id: None,
             context_size: None,
             ralph_loop: None,
         }

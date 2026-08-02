@@ -80,6 +80,7 @@ pub struct AgentRunRequest {
     pub auto_allow: Option<bool>,
     pub permission_mode: Option<PermissionMode>,
     pub model_id: Option<String>,
+    pub effort_id: Option<String>,
     pub context_size: Option<ContextSizePreset>,
     pub run_id: Option<String>,
     pub resume_session_id: Option<String>,
@@ -125,7 +126,7 @@ impl AgentRun {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_RALPH_DELAY_MS, MAX_RALPH_ITERATIONS, RalphLoopRequest};
+    use super::{AgentRunRequest, RalphLoopRequest, MAX_RALPH_DELAY_MS, MAX_RALPH_ITERATIONS};
 
     fn request(max_iterations: usize, prompt: &str, delay_ms: u64) -> RalphLoopRequest {
         RalphLoopRequest {
@@ -155,5 +156,34 @@ mod tests {
         let sanitized = request(3, "  keep going  ", MAX_RALPH_DELAY_MS + 1_000).sanitized();
         assert_eq!(sanitized.delay_ms, MAX_RALPH_DELAY_MS);
         assert_eq!(sanitized.prompt_template, "keep going");
+    }
+
+    #[test]
+    fn explicit_effort_uses_the_shared_camel_case_request_key() {
+        let request = AgentRunRequest {
+            goal: "inspect".into(),
+            agent_id: "codex".into(),
+            workspace_id: None,
+            checkout_id: None,
+            cwd: Some("/repo".into()),
+            agent_command: None,
+            agent_env: None,
+            mcp_servers: Vec::new(),
+            stdio_buffer_limit_mb: None,
+            auto_allow: None,
+            permission_mode: None,
+            model_id: None,
+            effort_id: Some("high".into()),
+            context_size: None,
+            run_id: None,
+            resume_session_id: None,
+            resume_policy: None,
+            ralph_loop: None,
+        };
+
+        let value = serde_json::to_value(request).expect("serialize run request");
+
+        assert_eq!(value["effortId"], serde_json::json!("high"));
+        assert!(value.get("effort_id").is_none());
     }
 }

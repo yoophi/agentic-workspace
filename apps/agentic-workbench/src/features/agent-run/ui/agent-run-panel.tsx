@@ -1,5 +1,6 @@
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DiffViewer } from "@yoophi/git-ui";
 import {
@@ -224,10 +225,18 @@ type AgentRunPanelProps = {
   replayedEvents?: unknown[];
   initialMinimapVisible?: boolean;
   showPromptComposer?: boolean;
+  runConfigurationPortal?: HTMLElement | null;
+  worktreeRunConfiguration?: WorktreeRunConfiguration | null;
+  onWorktreeRunConfigurationChange?: (configuration: WorktreeRunConfiguration) => void;
   existingRunId?: string | null;
   existingIsRunning?: boolean;
   runtimeHydrated?: boolean;
   initialPermissionMode?: PermissionMode;
+};
+
+export type WorktreeRunConfiguration = {
+  modelId: string;
+  effortId: string;
 };
 
 type AgentInputMode = "prompt" | "ralphLoop";
@@ -305,6 +314,12 @@ const providerDefaultModelOption: SelectOption = {
   description: "Use the selected agent/provider default model.",
 };
 
+const providerDefaultEffortOption: SelectOption = {
+  value: "providerDefault",
+  label: "Provider default",
+  description: "Use the selected agent/provider default reasoning effort.",
+};
+
 const defaultContextSizeOption: SelectOption<ContextSizePreset> = {
   value: "default",
   label: "Default context",
@@ -371,6 +386,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   replayedEvents = [],
   initialMinimapVisible = true,
   showPromptComposer = true,
+  runConfigurationPortal = null,
+  worktreeRunConfiguration = null,
+  onWorktreeRunConfigurationChange,
   existingRunId,
   existingIsRunning = false,
   runtimeHydrated = true,
@@ -386,6 +404,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     useState<PermissionMode>(initialPermissionMode);
   const [isChangingPermissionMode, setIsChangingPermissionMode] = useState(false);
   const [modelId, setModelId] = useState("providerDefault");
+  const [effortId, setEffortId] = useState("providerDefault");
   const [contextSize, setContextSize] = useState<ContextSizePreset>("default");
   const [ralphLoopEnabled, setRalphLoopEnabled] = useState(
     initialInputMode === "ralphLoop",
@@ -650,14 +669,23 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
 
     const savedSettings = settingsQuery.data;
+    let hydratedRunConfiguration: WorktreeRunConfiguration = worktreeRunConfiguration ?? {
+      modelId: "providerDefault",
+      effortId: "providerDefault",
+    };
     if (savedSettings) {
+      hydratedRunConfiguration =
+        worktreeRunConfiguration ??
+        {
+          modelId: isModelOptionValue(savedSettings.modelId)
+            ? savedSettings.modelId
+            : "providerDefault",
+          effortId: isModelOptionValue(savedSettings.effortId)
+            ? savedSettings.effortId
+            : "providerDefault",
+        };
       setSelectedAgentId(savedSettings.agentId);
       setPermissionMode(savedSettings.permissionMode);
-      setModelId(
-        isModelOptionValue(savedSettings.modelId)
-          ? savedSettings.modelId
-          : "providerDefault",
-      );
       setContextSize(savedSettings.contextSize);
       setSessionMode(savedSettings.sessionMode);
       setRalphLoopEnabled(savedSettings.ralphLoop.enabled);
@@ -675,15 +703,48 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         savedSettings.ralphLoop.promptTemplate.trim() || RALPH_DEFAULT_PROMPT,
       );
     }
+    setModelId(hydratedRunConfiguration.modelId);
+    setEffortId(hydratedRunConfiguration.effortId);
 
     settingsHydratedRef.current = true;
+    onWorktreeRunConfigurationChange?.(hydratedRunConfiguration);
   }, [
+    onWorktreeRunConfigurationChange,
     settingsQuery.data,
     settingsQuery.error,
     settingsQuery.isError,
     settingsQuery.isLoading,
     persistSettings,
+    worktreeRunConfiguration,
   ]);
+
+  useEffect(() => {
+    if (!settingsHydratedRef.current || !worktreeRunConfiguration) {
+      return;
+    }
+    setModelId(worktreeRunConfiguration.modelId);
+    setEffortId(worktreeRunConfiguration.effortId);
+  }, [
+    worktreeRunConfiguration,
+    worktreeRunConfiguration?.effortId,
+    worktreeRunConfiguration?.modelId,
+  ]);
+
+  const changeModelId = useCallback(
+    (nextModelId: string) => {
+      setModelId(nextModelId);
+      onWorktreeRunConfigurationChange?.({ modelId: nextModelId, effortId });
+    },
+    [effortId, onWorktreeRunConfigurationChange],
+  );
+
+  const changeEffortId = useCallback(
+    (nextEffortId: string) => {
+      setEffortId(nextEffortId);
+      onWorktreeRunConfigurationChange?.({ modelId, effortId: nextEffortId });
+    },
+    [modelId, onWorktreeRunConfigurationChange],
+  );
 
   function changeInputMode(nextMode: AgentInputMode) {
     if (isRunning) {
@@ -711,6 +772,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       agentId: selectedAgentId,
       permissionMode,
       modelId,
+      effortId,
       contextSize,
       sessionMode,
       ralphLoop: {
@@ -732,6 +794,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     return () => window.clearTimeout(timeoutId);
   }, [
     contextSize,
+    effortId,
     modelId,
     permissionMode,
     ralphDelaySeconds,
@@ -1096,6 +1159,17 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       })),
     ];
   }, [selectedAgent]);
+  const effortOptions = useMemo<SelectOption[]>(() => {
+    const advertisedEfforts = selectedAgent?.efforts ?? [];
+    return [
+      providerDefaultEffortOption,
+      ...advertisedEfforts.map((effort) => ({
+        value: effort.id,
+        label: effort.label,
+        description: `Use ${effort.label} reasoning effort with ${selectedAgent?.label ?? "the selected agent"}.`,
+      })),
+    ];
+  }, [selectedAgent]);
   const contextSizeOptions = useMemo<SelectOption<ContextSizePreset>[]>(() => {
     const advertisedContextSizes = selectedAgent?.contextSizes ?? [];
     if (advertisedContextSizes.length === 0) {
@@ -1116,17 +1190,36 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     ];
   }, [selectedAgent]);
   useEffect(() => {
+    if (agentsQuery.isLoading || appCommandSettingsQuery.isLoading || !selectedAgent) {
+      return;
+    }
     if (!modelOptions.some((option) => option.value === modelId)) {
-      setModelId(providerDefaultModelOption.value);
+      changeModelId(providerDefaultModelOption.value);
+    }
+    if (!effortOptions.some((option) => option.value === effortId)) {
+      changeEffortId(providerDefaultEffortOption.value);
     }
     if (!contextSizeOptions.some((option) => option.value === contextSize)) {
       setContextSize(defaultContextSizeOption.value);
     }
-  }, [contextSize, contextSizeOptions, modelId, modelOptions]);
+  }, [
+    agentsQuery.isLoading,
+    appCommandSettingsQuery.isLoading,
+    changeEffortId,
+    changeModelId,
+    contextSize,
+    contextSizeOptions,
+    effortId,
+    effortOptions,
+    modelId,
+    modelOptions,
+    selectedAgent,
+  ]);
   const selectedPermissionModeOption = permissionModeOptions.find(
     (option) => option.value === permissionMode,
   );
   const selectedModelOption = modelOptions.find((option) => option.value === modelId);
+  const selectedEffortOption = effortOptions.find((option) => option.value === effortId);
   const selectedContextSizeOption = contextSizeOptions.find(
     (option) => option.value === contextSize,
   );
@@ -1318,6 +1411,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     ? canQueuePrompt
     : canSteerPrompt;
   const canCancel = Boolean(activeRunId && isRunning);
+  const isRunConfigurationLocked = isRunning || isPreparingRun;
 
   useEffect(() => {
     setAutocompleteHighlightedIndex((current) =>
@@ -1476,6 +1570,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           stdioBufferLimitMb: 50,
           permissionMode,
           ...(modelId !== "providerDefault" ? { modelId } : {}),
+          ...(effortId !== "providerDefault" ? { effortId } : {}),
           ...(contextSize !== "default" ? { contextSize } : {}),
           ...(reuseSession
             ? { resumeSessionId: selectedSessionId, resumePolicy: "resumeIfAvailable" }
@@ -2103,8 +2198,58 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
+  const compactRunConfigurationControls = providerAgentId === "codex" && (
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+        <span>Model</span>
+        <Select value={modelId} onValueChange={changeModelId} disabled={isRunConfigurationLocked}>
+          <SelectTrigger
+            size="sm"
+            className="max-w-44"
+            aria-label={`${panelId} model`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {modelOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+      <label className="flex items-center gap-1 text-xs text-muted-foreground">
+        <span>Effort</span>
+        <Select value={effortId} onValueChange={changeEffortId} disabled={isRunConfigurationLocked}>
+          <SelectTrigger
+            size="sm"
+            className="max-w-36"
+            aria-label={`${panelId} effort`}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {effortOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
+        </Select>
+      </label>
+    </div>
+  );
+
   return (
     <div className="h-full min-h-0">
+      {!showPromptComposer && runConfigurationPortal && compactRunConfigurationControls
+        ? createPortal(compactRunConfigurationControls, runConfigurationPortal)
+        : null}
       <ResizablePanelGroup
         orientation="vertical"
         className="flex h-full min-h-0 w-full flex-col"
@@ -2546,15 +2691,18 @@ export const AgentRunPanel = memo(function AgentRunPanel({
             />
           </div>
           <div className="flex shrink-0 flex-col gap-3 px-4 pb-1 sm:flex-row sm:items-center sm:justify-between">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setIsRunSettingsDialogOpen(true)}
-            >
-              <SettingsIcon data-icon="inline-start" />
-              Settings
-            </Button>
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setIsRunSettingsDialogOpen(true)}
+              >
+                <SettingsIcon data-icon="inline-start" />
+                Settings
+              </Button>
+              {compactRunConfigurationControls}
+            </div>
             <PromptInputActions className="justify-end">
               <Popover>
                 <PopoverTrigger asChild>
@@ -2597,6 +2745,17 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                             {selectedModelOption?.description}
                           </span>
                         </div>
+                        {providerAgentId === "codex" && (
+                          <div className="grid gap-1">
+                            <span className="text-xs font-medium text-muted-foreground">Effort</span>
+                            <span>
+                              {selectedEffortOption?.label ?? providerDefaultEffortOption.label}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {selectedEffortOption?.description}
+                            </span>
+                          </div>
+                        )}
                         <div className="grid gap-1">
                           <span className="text-xs font-medium text-muted-foreground">Context</span>
                           <span>
@@ -2776,7 +2935,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           <DialogHeader>
             <DialogTitle>Run 설정</DialogTitle>
             <DialogDescription>
-              권한 모드, 모델, 컨텍스트 크기를 설정합니다.
+              권한 모드, 모델, effort, 컨텍스트 크기를 설정합니다.
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-4">
@@ -2813,8 +2972,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                 Model
                 <Select
                   value={modelId}
-                  onValueChange={setModelId}
-                  disabled={isRunning}
+                  onValueChange={changeModelId}
+                  disabled={isRunConfigurationLocked}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -2830,11 +2989,39 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                   </SelectContent>
                 </Select>
                 <span className="text-xs font-normal text-muted-foreground">
-                  {isRunning
+                  {isRunConfigurationLocked
                     ? "실행 중에는 모델을 변경할 수 없습니다."
                     : selectedModelOption?.description}
                 </span>
               </label>
+              {providerAgentId === "codex" && (
+                <label className="flex flex-col gap-2 text-sm font-medium">
+                  Effort
+                  <Select
+                    value={effortId}
+                    onValueChange={changeEffortId}
+                    disabled={isRunConfigurationLocked}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {effortOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {isRunConfigurationLocked
+                      ? "실행 중에는 effort를 변경할 수 없습니다."
+                      : selectedEffortOption?.description}
+                  </span>
+                </label>
+              )}
               <label className="flex flex-col gap-2 text-sm font-medium">
                 Context
                 <Select

@@ -256,6 +256,7 @@ where
             &run_id,
             &session_id,
             request.model_id.as_deref(),
+            request.effort_id.as_deref(),
             request.context_size.unwrap_or_default(),
             &session_setup.response,
             &sink,
@@ -896,6 +897,7 @@ async fn apply_run_configuration<S>(
     run_id: &str,
     session_id: &str,
     model_id: Option<&str>,
+    effort_id: Option<&str>,
     context_size: ContextSizePreset,
     session_response: &Value,
     sink: &S,
@@ -903,29 +905,55 @@ async fn apply_run_configuration<S>(
 where
     S: RunEventSink,
 {
+    let mut advertised_configuration = session_response.clone();
     let model_id = model_id
         .map(str::trim)
         .filter(|value| !value.is_empty() && *value != "providerDefault");
     if let Some(model_id) = model_id {
-        apply_session_config_option(
+        if let Some(response) = apply_session_config_option(
             peer,
             run_id,
             session_id,
-            session_response,
+            &advertised_configuration,
             "model",
             &["model", "modelId"],
             &[json!(model_id)],
+            false,
             sink,
         )
-        .await?;
+        .await?
+        {
+            refresh_advertised_configuration(&mut advertised_configuration, response);
+        }
     }
 
-    if let Some((label, candidates)) = context_size_candidates(context_size) {
-        apply_session_config_option(
+    let effort_id = effort_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "providerDefault");
+    if let Some(effort_id) = effort_id {
+        if let Some(response) = apply_session_config_option(
             peer,
             run_id,
             session_id,
-            session_response,
+            &advertised_configuration,
+            "reasoning effort",
+            &["reasoning_effort", "reasoningEffort", "effort"],
+            &[json!(effort_id)],
+            true,
+            sink,
+        )
+        .await?
+        {
+            refresh_advertised_configuration(&mut advertised_configuration, response);
+        }
+    }
+
+    if let Some((label, candidates)) = context_size_candidates(context_size) {
+        let _ = apply_session_config_option(
+            peer,
+            run_id,
+            session_id,
+            &advertised_configuration,
             "context size",
             &[
                 "context",
@@ -935,6 +963,7 @@ where
                 "maxContextTokens",
             ],
             &candidates,
+            false,
             sink,
         )
         .await?;
@@ -957,23 +986,40 @@ async fn apply_session_config_option<S>(
     label: &str,
     config_ids: &[&str],
     candidates: &[Value],
+    continue_with_default_on_error: bool,
     sink: &S,
-) -> Result<()>
+) -> Result<Option<Value>>
 where
     S: RunEventSink,
 {
     for config_id in config_ids {
         if let Some(value) = session_config_option_value(session_response, config_id, candidates) {
-            peer.request(
-                "session/set_config_option",
-                json!({
-                    "sessionId": session_id,
-                    "configId": config_id,
-                    "value": value,
-                }),
-            )
-            .await
-            .map_err(rpc_to_anyhow)?;
+            let response = match peer
+                .request(
+                    "session/set_config_option",
+                    json!({
+                        "sessionId": session_id,
+                        "configId": config_id,
+                        "value": value,
+                    }),
+                )
+                .await
+            {
+                Ok(response) => response,
+                Err(error) if continue_with_default_on_error => {
+                    sink.emit(
+                        run_id,
+                        RunEvent::Diagnostic {
+                            message: format!(
+                                "{label} config was rejected ({}); continuing with the agent default",
+                                error.message
+                            ),
+                        },
+                    );
+                    return Ok(None);
+                }
+                Err(error) => return Err(rpc_to_anyhow(error)),
+            };
 
             sink.emit(
                 run_id,
@@ -981,7 +1027,7 @@ where
                     message: format!("{label} applied via config option {config_id}"),
                 },
             );
-            return Ok(());
+            return Ok(Some(response));
         }
     }
 
@@ -993,7 +1039,13 @@ where
             ),
         },
     );
-    Ok(())
+    Ok(None)
+}
+
+fn refresh_advertised_configuration(current: &mut Value, response: Value) {
+    if response.get("configOptions").is_some() || response.get("config_options").is_some() {
+        *current = response;
+    }
 }
 
 fn context_size_candidates(context_size: ContextSizePreset) -> Option<(&'static str, Vec<Value>)> {
@@ -1335,10 +1387,12 @@ fn is_session_not_found(err: &RpcError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        active_turn_steer_unsupported_message, context_size_candidates, load_session_params,
-        new_session_params, resume_session_id, run_prompt_sequence, session_config_option_value,
+        active_turn_steer_unsupported_message, apply_run_configuration, context_size_candidates,
+        load_session_params, new_session_params, refresh_advertised_configuration,
+        resume_session_id, run_prompt_sequence, session_config_option_value,
         should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
     };
+    use crate::infrastructure::acp::{transport::RpcPeer, util::RpcError};
     use crate::{
         domain::{
             events::{RalphLoopStatus, RunEvent},
@@ -1351,9 +1405,15 @@ mod tests {
     };
     use anyhow::anyhow;
     use serde_json::json;
+    use std::process::Stdio;
     use std::sync::{
         atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+    };
+    use tokio::{
+        io::{AsyncBufReadExt, BufReader},
+        process::Command,
+        time::{timeout, Duration},
     };
 
     #[derive(Clone, Default)]
@@ -1569,6 +1629,238 @@ mod tests {
             session_config_option_value(&response, "contextWindowTokens", &candidates),
             Some(json!(128000))
         );
+    }
+
+    #[test]
+    fn model_config_response_refreshes_the_efforts_used_for_matching() {
+        let mut advertised = json!({
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "options": [{ "value": "low" }]
+            }]
+        });
+
+        refresh_advertised_configuration(
+            &mut advertised,
+            json!({
+                "configOptions": [{
+                    "id": "reasoning_effort",
+                    "options": [{ "value": "high" }]
+                }]
+            }),
+        );
+
+        assert_eq!(
+            session_config_option_value(&advertised, "reasoning_effort", &[json!("high")]),
+            Some(json!("high"))
+        );
+    }
+
+    #[tokio::test]
+    async fn supported_effort_is_applied_before_the_first_prompt() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        let peer = RpcPeer::new(child.stdin.take().expect("stdin"));
+        let stdout = child.stdout.take().expect("stdout");
+        let responder = {
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                let mut requests = Vec::new();
+                for _ in 0..2 {
+                    let line = lines
+                        .next_line()
+                        .await
+                        .expect("read request")
+                        .expect("request line");
+                    let request: serde_json::Value =
+                        serde_json::from_str(&line).expect("json request");
+                    let id = request["id"].as_u64().expect("request id");
+                    requests.push(request);
+                    let sender = peer
+                        .pending
+                        .lock()
+                        .await
+                        .remove(&id)
+                        .expect("pending request");
+                    sender.send(Ok(json!({}))).expect("respond");
+                }
+                requests
+            })
+        };
+        let sink = CollectingSink::default();
+        let session_response = json!({
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "options": [
+                    { "value": "medium", "name": "Medium" },
+                    { "value": "high", "name": "High" }
+                ]
+            }]
+        });
+
+        apply_run_configuration(
+            &peer,
+            "run-1",
+            "session-1",
+            None,
+            Some("high"),
+            ContextSizePreset::Default,
+            &session_response,
+            &sink,
+        )
+        .await
+        .expect("configuration applies");
+        peer.request("session/prompt", json!({ "sessionId": "session-1" }))
+            .await
+            .expect("prompt response");
+
+        let requests = responder.await.expect("capture requests");
+        assert_eq!(requests[0]["method"], json!("session/set_config_option"));
+        assert_eq!(requests[0]["params"]["configId"], json!("reasoning_effort"));
+        assert_eq!(requests[0]["params"]["value"], json!("high"));
+        assert_eq!(requests[1]["method"], json!("session/prompt"));
+        assert!(sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, event)| matches!(
+                event,
+                RunEvent::Diagnostic { message }
+                    if message == "reasoning effort applied via config option reasoning_effort"
+            )));
+        child.kill().await.expect("kill cat");
+    }
+
+    #[tokio::test]
+    async fn provider_default_and_unsupported_effort_do_not_send_config_requests() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        let peer = RpcPeer::new(child.stdin.take().expect("stdin"));
+        let stdout = child.stdout.take().expect("stdout");
+        let mut lines = BufReader::new(stdout).lines();
+        let sink = CollectingSink::default();
+        let response = json!({
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "options": [{ "value": "medium" }]
+            }]
+        });
+
+        apply_run_configuration(
+            &peer,
+            "run-default",
+            "session-1",
+            None,
+            Some("providerDefault"),
+            ContextSizePreset::Default,
+            &response,
+            &sink,
+        )
+        .await
+        .expect("provider default is omitted");
+        apply_run_configuration(
+            &peer,
+            "run-stale",
+            "session-1",
+            None,
+            Some("ultra"),
+            ContextSizePreset::Default,
+            &response,
+            &sink,
+        )
+        .await
+        .expect("unsupported effort falls back");
+
+        assert!(timeout(Duration::from_millis(50), lines.next_line())
+            .await
+            .is_err());
+        assert!(sink.events.lock().unwrap().iter().any(|(run_id, event)| matches!(
+            event,
+            RunEvent::Diagnostic { message }
+                if run_id == "run-stale"
+                    && message == "reasoning effort is not advertised by the agent; continuing with the agent default"
+        )));
+        child.kill().await.expect("kill cat");
+    }
+
+    #[tokio::test]
+    async fn rejected_effort_falls_back_without_failing_run_setup() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        let peer = RpcPeer::new(child.stdin.take().expect("stdin"));
+        let stdout = child.stdout.take().expect("stdout");
+        let responder = {
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                let line = BufReader::new(stdout)
+                    .lines()
+                    .next_line()
+                    .await
+                    .expect("read request")
+                    .expect("request line");
+                let request: serde_json::Value = serde_json::from_str(&line).expect("json request");
+                let id = request["id"].as_u64().expect("request id");
+                let sender = peer
+                    .pending
+                    .lock()
+                    .await
+                    .remove(&id)
+                    .expect("pending request");
+                sender
+                    .send(Err(RpcError {
+                        code: -32602,
+                        message: "effort is stale for the selected model".into(),
+                        data: None,
+                    }))
+                    .expect("reject request");
+            })
+        };
+        let sink = CollectingSink::default();
+        let response = json!({
+            "configOptions": [{
+                "id": "reasoning_effort",
+                "options": [{ "value": "high" }]
+            }]
+        });
+
+        apply_run_configuration(
+            &peer,
+            "run-stale",
+            "session-1",
+            None,
+            Some("high"),
+            ContextSizePreset::Default,
+            &response,
+            &sink,
+        )
+        .await
+        .expect("rejected effort falls back");
+        responder.await.expect("reject effort request");
+
+        assert!(sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(run_id, event)| matches!(
+                event,
+                RunEvent::Diagnostic { message }
+                    if run_id == "run-stale"
+                        && message.contains("effort is stale for the selected model")
+                        && message.contains("continuing with the agent default")
+            )));
+        child.kill().await.expect("kill cat");
     }
 
     #[tokio::test]

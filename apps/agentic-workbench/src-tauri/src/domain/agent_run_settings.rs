@@ -24,6 +24,8 @@ pub struct AgentRunSettings {
     pub permission_mode: PermissionMode,
     #[serde(default = "default_model_id")]
     pub model_id: String,
+    #[serde(default = "default_model_id")]
+    pub effort_id: String,
     #[serde(default)]
     pub context_size: ContextSizePreset,
     #[serde(default)]

@@ -36,6 +36,7 @@ export type AgentRunSettings = {
   agentId: string;
   permissionMode: PermissionMode;
   modelId: string;
+  effortId: string;
   contextSize: ContextSizePreset;
   sessionMode: AgentRunSessionMode;
   ralphLoop: AgentRunSettingsRalphLoop;
