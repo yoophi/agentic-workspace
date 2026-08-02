@@ -22,6 +22,9 @@ type ActivePointer = {
   grabOffset: number;
 };
 
+const MINIMAP_LABEL_FONT_SIZE = "10px";
+const MINIMAP_ENTRY_FONT_SIZE = "9px";
+
 export function AgentRunMinimap({
   entries,
   layoutSnapshot,
@@ -94,12 +97,18 @@ export function AgentRunMinimap({
       )}
       data-agent-run-minimap
     >
-      <div className="h-8 shrink-0 border-b px-2 py-2 text-micro font-medium text-muted-foreground">
+      <div
+        className="h-8 shrink-0 border-b px-2 py-2 font-medium text-muted-foreground"
+        style={{ fontSize: MINIMAP_LABEL_FONT_SIZE }}
+      >
         대화 미니맵
       </div>
       <div ref={trackRef} className="relative min-h-0 flex-1 overflow-hidden" data-minimap-track>
         {entries.length === 0 ? (
-          <div className="grid h-full place-items-center px-2 text-center text-micro text-muted-foreground">
+          <div
+            className="grid h-full place-items-center px-2 text-center text-muted-foreground"
+            style={{ fontSize: MINIMAP_LABEL_FONT_SIZE }}
+          >
             대화 없음
           </div>
         ) : (
@@ -118,7 +127,7 @@ export function AgentRunMinimap({
                 <div
                   key={entry.id}
                   className={cn(
-                    "absolute left-0.5 right-0.5 overflow-hidden border-l-2 px-1 text-nano leading-3",
+                    "absolute left-0.5 right-0.5 overflow-hidden border-l-2 px-1 leading-3",
                     entry.role === "user"
                       ? "border-amber-500 bg-amber-400/25 text-amber-950 dark:text-amber-100"
                       : "border-sky-500 bg-sky-500/20 text-foreground",
@@ -127,6 +136,7 @@ export function AgentRunMinimap({
                   style={{
                     top: `${Math.min(1, Math.max(0, topRatio)) * 100}%`,
                     height: `${Math.min(0.12, Math.max(0.004, heightRatio)) * 100}%`,
+                    fontSize: MINIMAP_ENTRY_FONT_SIZE,
                   }}
                   title={entry.summary || (entry.role === "user" ? "사용자 프롬프트" : "Agent 출력")}
                 >

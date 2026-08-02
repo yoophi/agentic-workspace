@@ -1,12 +1,95 @@
+// @vitest-environment happy-dom
+
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { resolve } from "node:path";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { afterEach, describe, expect, it } from "vitest";
+
+import type { MinimapEntry } from "@/entities/agent-run/model";
+import { EMPTY_TIMELINE_LAYOUT_SNAPSHOT } from "@/features/agent-run/model/agent-run-minimap";
+
+import { AgentRunMinimap } from "./agent-run-minimap";
 
 const MINIMAP_SOURCE = readFileSync(
-  new URL("./agent-run-minimap.tsx", import.meta.url),
+  resolve(process.cwd(), "src/features/agent-run/ui/agent-run-minimap.tsx"),
   "utf8",
 );
 
+(
+  globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT: boolean;
+  }
+).IS_REACT_ACT_ENVIRONMENT = true;
+
+const mountedRoots: Array<ReturnType<typeof createRoot>> = [];
+
+afterEach(async () => {
+  document.documentElement.removeAttribute("data-font-size-step");
+  await act(async () => {
+    mountedRoots.splice(0).forEach((root) => root.unmount());
+  });
+  document.body.replaceChildren();
+});
+
+async function renderMinimap(fontSizeStep: "0" | "2", entries: MinimapEntry[] = []) {
+  document.documentElement.dataset.fontSizeStep = fontSizeStep;
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  mountedRoots.push(root);
+
+  await act(async () => {
+    root.render(
+      <AgentRunMinimap
+        entries={entries}
+        layoutSnapshot={EMPTY_TIMELINE_LAYOUT_SNAPSHOT}
+        onSeek={() => undefined}
+      />,
+    );
+  });
+
+  return container;
+}
+
+function findElementWithExactText(container: HTMLElement, text: string) {
+  return Array.from(container.querySelectorAll<HTMLElement>("div")).find(
+    (element) => element.childElementCount === 0 && element.textContent === text,
+  );
+}
+
 describe("agent run minimap UI contract", () => {
+  it.each(["0", "2"] as const)(
+    "keeps its title and empty state at 10px for font size step %s",
+    async (fontSizeStep) => {
+      const container = await renderMinimap(fontSizeStep);
+
+      expect(findElementWithExactText(container, "대화 미니맵")?.style.fontSize).toBe("10px");
+      expect(findElementWithExactText(container, "대화 없음")?.style.fontSize).toBe("10px");
+    },
+  );
+
+  it.each(["0", "2"] as const)(
+    "keeps entry summaries at 9px for font size step %s",
+    async (fontSizeStep) => {
+      const container = await renderMinimap(fontSizeStep, [
+        {
+          id: "user-1",
+          runId: "run-1",
+          role: "user",
+          summary: "Inspect the worktree",
+          contentWeight: 1,
+          sourceOrder: 0,
+        },
+      ]);
+
+      expect(
+        (container.querySelector("[data-minimap-entry-role='user']") as HTMLElement | null)?.style
+          .fontSize,
+      ).toBe("9px");
+    },
+  );
+
   it("renders semantic conversation entries without duplicating rich timeline content", () => {
     expect(MINIMAP_SOURCE).toContain('data-minimap-entry-role={entry.role}');
     expect(MINIMAP_SOURCE).toContain('entry.role === "user"');
