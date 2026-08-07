@@ -25,6 +25,7 @@ When working in this repository, read the OpenWiki quickstart first, then follow
 ## Project Aliases
 
 - `AW` means `apps/agentic-workbench`.
+- `AC` means `apps/ask-code`.
 - `MA` means `apps/markdown-annotator`.
 - `GE` means `apps/git-explorer`.
 - `HL` means `apps/hushline`.

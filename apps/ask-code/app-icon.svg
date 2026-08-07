@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title">
+  <title id="title">Ask Code</title>
+  <rect width="1024" height="1024" rx="224" fill="#171717" />
+  <path
+    d="M382 298 190 512l192 214M642 298l192 214-192 214"
+    fill="none"
+    stroke="#fafafa"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="72"
+  />
+  <path
+    d="M470 426c14-57 60-91 123-91 73 0 126 45 126 111 0 58-31 86-77 115-42 27-57 48-57 90v9"
+    fill="none"
+    stroke="#a3a3a3"
+    stroke-linecap="round"
+    stroke-width="58"
+  />
+  <circle cx="585" cy="754" r="35" fill="#a3a3a3" />
+</svg>
