@@ -15,6 +15,7 @@
     "build": "turbo run build",
     "check-types": "turbo run check-types",
     "test": "turbo run test",
+    "check:app-boundaries": "node scripts/check-app-boundaries.mjs",
     "preview": "turbo run preview --filter=@yoophi/agentic-workbench",
     "preview:workbench": "turbo run preview --filter=@yoophi/agentic-workbench",
     "preview:ask-code": "turbo run preview --filter=@yoophi/ask-code",

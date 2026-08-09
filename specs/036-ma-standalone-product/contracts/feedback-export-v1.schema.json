@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://yoophi.dev/schemas/markdown-annotator/feedback-export-v1.schema.json",
+  "title": "Markdown Annotator Feedback Export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "exportedAt", "document", "decision", "annotations"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "exportedAt": { "type": "string", "format": "date-time" },
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "fingerprint"],
+      "properties": {
+        "relativePath": { "type": "string", "minLength": 1 },
+        "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      }
+    },
+    "decision": {
+      "enum": ["draft", "changes-requested", "approved", "stopped"]
+    },
+    "annotations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/annotation" }
+    }
+  },
+  "$defs": {
+    "annotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "status", "comment", "anchor", "attachmentState"],
+      "properties": {
+        "id": { "type": "string", "format": "uuid" },
+        "groupId": { "type": ["string", "null"], "format": "uuid" },
+        "type": { "enum": ["change-request", "question", "note", "delete"] },
+        "status": { "enum": ["open", "resolved"] },
+        "comment": { "type": "string" },
+        "attachmentState": { "enum": ["attached", "conflict", "orphan", "missing"] },
+        "anchor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["selectedText", "prefix", "suffix", "headingPath"],
+          "properties": {
+            "blockId": { "type": ["string", "null"] },
+            "selectedText": { "type": "string" },
+            "prefix": { "type": "string" },
+            "suffix": { "type": "string" },
+            "headingPath": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

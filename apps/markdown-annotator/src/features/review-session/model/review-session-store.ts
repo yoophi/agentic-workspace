@@ -1,0 +1,12 @@
+import { create } from "zustand";
+import type { ReviewAnnotation, ReviewAnnotationType, ReviewDecision, ReviewSession } from "@/entities/review-session/model/types";
+
+type Store = { session: ReviewSession | null; warning: string | null; hydrate: (session: ReviewSession) => void; add: (input: { type: ReviewAnnotationType; comment: string; selectedTexts: string[] }) => void; update: (id: string, patch: Partial<ReviewAnnotation>) => void; removeGroup: (id: string) => void; setDecision: (decision: ReviewDecision, confirmed?: boolean) => boolean };
+
+export const useReviewSessionStore = create<Store>((set, get) => ({
+  session: null, warning: null, hydrate: (session) => set({ session, warning: null }),
+  add(input) { const session = get().session; if (!session) return; const groupId = input.selectedTexts.length > 1 ? crypto.randomUUID() : null; const annotations = input.selectedTexts.map((selectedText) => ({ id: crypto.randomUUID(), groupId, type: input.type, status: "open" as const, comment: input.comment, selectedText, attachmentState: "attached" as const })); const decision = session.decision === "approved" ? (input.type === "change-request" || input.type === "delete" ? "changes-requested" : "draft") : session.decision; set({ session: { ...session, annotations: [...session.annotations, ...annotations], decision }, warning: session.decision === "approved" ? "승인 상태가 변경되었습니다." : null }); },
+  update(id, patch) { const session = get().session; if (session) set({ session: { ...session, annotations: session.annotations.map((item) => item.id === id || (item.groupId && item.groupId === session.annotations.find((candidate) => candidate.id === id)?.groupId) ? { ...item, ...patch } : item) } }); },
+  removeGroup(id) { const session = get().session; if (!session) return; const groupId = session.annotations.find((item) => item.id === id)?.groupId; set({ session: { ...session, annotations: session.annotations.filter((item) => groupId ? item.groupId !== groupId : item.id !== id) } }); },
+  setDecision(decision, confirmed = false) { const session = get().session; if (!session) return false; const blocking = session.annotations.some((item) => item.status === "open" && (item.type === "change-request" || item.type === "delete")); if (decision === "approved" && blocking && !confirmed) { set({ warning: "열린 수정 또는 삭제 요청이 있어 확인이 필요합니다." }); return false; } set({ session: { ...session, decision }, warning: null }); return true; },
+}));

@@ -1,2 +1,9 @@
+pub mod cli_installer;
 pub mod fs_document_reader;
 pub mod fs_document_watcher;
+pub mod fs_file_browser;
+pub mod fs_root_watcher;
+pub mod json_preferences_repository;
+pub mod json_review_session_repository;
+pub mod macos_native_shell;
+pub mod sha256_fingerprint;

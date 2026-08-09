@@ -3,13 +3,9 @@ import { listen } from "@tauri-apps/api/event";
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
   FileDiffIcon,
   FileIcon,
   FileTextIcon,
-  FolderIcon,
-  FolderOpenIcon,
   GitCommitIcon,
   GitPullRequestIcon,
   ListTreeIcon,
@@ -107,7 +103,6 @@ import {
   buildFileTreeRows,
   isParentDirectoryLoaded,
   mergeWorktreeFileEntries,
-  type FileTreeRow,
 } from "@/features/worktree-workspace/model/file-tree";
 import {
   buildSpeckitFeatures,
@@ -118,6 +113,7 @@ import { cn } from "@/lib/utils";
 import { markdownViewerComponents } from "@/features/worktree-workspace/ui/markdown-viewer-components";
 import { MarkdownPreviewToc } from "@/features/worktree-workspace/ui/markdown-preview-toc";
 import { SpeckitFilesPanel } from "@/features/worktree-workspace/ui/speckit-files-panel";
+import { WorktreeFileBrowserTree } from "@/features/worktree-workspace/ui/file-browser-components";
 import { SddWorkflowControls } from "@/features/worktree-workspace/ui/sdd-workflow-controls";
 import { getSddStageStates, readActiveFeaturePointer, type SddActionRequest } from "@/features/worktree-workspace/model/sdd-workflow";
 import { useMarkdownAnnotationWorkspace } from "@/features/worktree-workspace/model/use-markdown-annotation-workspace";
@@ -953,17 +949,7 @@ function FileWorkspaceTab({
                 className="min-h-56"
               />
             ) : (
-              <div className="flex flex-col text-sm">
-                {rows.map((row) => (
-                  <FileTreeRowButton
-                    key={row.relativePath}
-                    row={row}
-                    selected={row.relativePath === selectedFilePath}
-                    onToggleFolder={toggleFolder}
-                    onSelectFile={selectFile}
-                  />
-                ))}
-              </div>
+              <WorktreeFileBrowserTree rows={rows} selectedPath={selectedFilePath} onToggleFolder={toggleFolder} onSelectFile={selectFile} />
             )}
           </div>
         </div>
@@ -1583,17 +1569,7 @@ function MarkdownWorkspaceTab({
                 className="min-h-56"
               />
             ) : (
-              <div className="flex flex-col text-sm">
-                {rows.map((row) => (
-                  <FileTreeRowButton
-                    key={row.relativePath}
-                    row={row}
-                    selected={row.relativePath === selectedFilePath}
-                    onToggleFolder={toggleFolder}
-                    onSelectFile={selectMarkdownFile}
-                  />
-                ))}
-              </div>
+              <WorktreeFileBrowserTree rows={rows} selectedPath={selectedFilePath} onToggleFolder={toggleFolder} onSelectFile={selectMarkdownFile} />
             )}
           </div>
         </div>
@@ -1821,51 +1797,6 @@ function MarkdownWorkspaceTab({
         components={annotationDialogComponents}
       />
     </>
-  );
-}
-
-function FileTreeRowButton({
-  row,
-  selected,
-  onToggleFolder,
-  onSelectFile,
-}: {
-  row: FileTreeRow;
-  selected: boolean;
-  onToggleFolder: (path: string) => void;
-  onSelectFile: (path: string) => void;
-}) {
-  const Icon = row.isDir ? (row.isExpanded ? FolderOpenIcon : FolderIcon) : FileIcon;
-
-  return (
-    <button
-      type="button"
-      className="flex h-8 w-full min-w-0 items-center gap-1.5 rounded-sm px-2 text-left hover:bg-muted data-[selected=true]:bg-muted"
-      data-selected={selected}
-      style={{ paddingLeft: `${8 + row.depth * 16}px` }}
-      onClick={() => {
-        if (row.isDir) {
-          onToggleFolder(row.relativePath);
-        } else {
-          onSelectFile(row.relativePath);
-        }
-      }}
-    >
-      {row.isDir ? (
-        row.isExpanded ? (
-          <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRightIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        )
-      ) : (
-        <span className="w-3.5 shrink-0" />
-      )}
-      <Icon className="size-4 shrink-0 text-muted-foreground" />
-      <span className="min-w-0 flex-1 truncate">{row.name}</span>
-      {!row.isDir ? (
-        <span className="shrink-0 text-xs text-muted-foreground">{formatBytes(row.size)}</span>
-      ) : null}
-    </button>
   );
 }
 

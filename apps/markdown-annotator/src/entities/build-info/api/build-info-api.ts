@@ -1,0 +1,1 @@
+import{invoke}from"@tauri-apps/api/core";export type BuildInfo={version:string;commit:string;tag:string;license:string;notices:string};export const getBuildInfo=()=>invoke<BuildInfo>("get_build_info");

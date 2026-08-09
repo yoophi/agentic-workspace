@@ -1,10 +1,35 @@
 [[permission]]
 identifier = "allow-read-markdown-file"
-description = "Allows the frontend to read and open selected Markdown files through app commands."
+description = "Allows Markdown Annotator windows to use the product command surface."
 commands.allow = [
+  "resolve_launch_target",
+  "read_root_markdown_document",
+  "start_root_scan",
+  "cancel_root_scan",
+  "start_root_watcher",
+  "stop_root_watcher",
   "check_cli_installed",
   "install_cli",
+  "remove_cli",
   "read_markdown_file",
+  "get_build_info",
+  "open_settings_window",
+  "open_about_window",
+  "load_recent_targets",
+  "start_markdown_document_watcher",
+  "stop_markdown_document_watcher",
   "request_open_document_tab",
   "request_open_document_window",
+  "reveal_document_in_finder",
+  "open_document_in_default_app",
+  "validated_document_path",
+  "open_external_https",
+  "load_review_session",
+  "save_review_session",
+  "export_review_feedback",
+  "save_feedback_file",
+  "load_preferences",
+  "save_preferences",
+  "reset_preferences",
+  "trash_review_data",
 ]
