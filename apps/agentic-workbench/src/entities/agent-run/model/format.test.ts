@@ -457,6 +457,72 @@ describe("run event formatting", () => {
     expect(merged.event.fileChanges?.[0].status).toBe("unavailable");
   });
 
+  it("updates matching permission requests with the selected result", () => {
+    const request = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: { command: "pnpm test" },
+      options: [
+        { name: "Allow", kind: "allow_once", optionId: "allow" },
+        { name: "Deny", kind: "reject_once", optionId: "deny" },
+      ],
+      requiresResponse: true,
+    });
+    const result = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: { command: "pnpm test" },
+      options: [
+        { name: "Allow", kind: "allow_once", optionId: "allow" },
+        { name: "Deny", kind: "reject_once", optionId: "deny" },
+      ],
+      selected: "Allow",
+      requiresResponse: false,
+    });
+
+    const [merged] = appendOneTimelineItem([request], result);
+
+    expect(appendOneTimelineItem([request], result)).toHaveLength(1);
+    expect(merged.id).toBe(request.id);
+    expect(merged.createdAt).toBe(request.createdAt);
+    expect(merged.body).not.toContain("waiting for approval");
+    expect(merged.body).toContain("selected: Allow");
+    expect(merged.event.type).toBe("permission");
+    if (merged.event.type !== "permission") {
+      return;
+    }
+    expect(merged.event.requiresResponse).toBe(false);
+    expect(merged.event.selected).toBe("Allow");
+  });
+
+  it("keeps permission requests isolated by run id", () => {
+    const firstRunRequest = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      requiresResponse: true,
+    });
+    const secondRunResult = toTimelineItem("run-2", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      selected: "Deny",
+      requiresResponse: false,
+    });
+
+    const items = appendOneTimelineItem([firstRunRequest], secondRunResult);
+
+    expect(items).toHaveLength(2);
+    expect(items[0].runId).toBe("run-1");
+    expect(items[1].runId).toBe("run-2");
+  });
+
   it("deduplicates tool locations while merging updates", () => {
     const initial = toTimelineItem("run-1", {
       type: "tool",
