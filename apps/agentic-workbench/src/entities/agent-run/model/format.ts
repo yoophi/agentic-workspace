@@ -413,6 +413,27 @@ export function appendOneTimelineItem(items: TimelineItem[], item: TimelineItem)
     }
   }
 
+  if (item.event.type === "permission") {
+    const matchingIndex = findMatchingPermissionIndex(items, item.runId, item.event);
+    if (matchingIndex >= 0) {
+      const current = items[matchingIndex];
+      const nextItem = buildItem(
+        {
+          id: current.id,
+          runId: current.runId,
+          createdAt: current.createdAt,
+          event: item.event,
+        },
+        item.event,
+      );
+      return [
+        ...items.slice(0, matchingIndex),
+        nextItem,
+        ...items.slice(matchingIndex + 1),
+      ];
+    }
+  }
+
   if (item.event.type === "lifecycle") {
     const matchingIndex = findMatchingLifecycleIndex(items, item.runId);
     if (matchingIndex >= 0) {
@@ -514,6 +535,28 @@ function findMatchingToolIndex(items: TimelineItem[], event: Extract<TimelineRun
       continue;
     }
     if (candidate.event.toolCallId === event.toolCallId) {
+      return index;
+    }
+  }
+
+  return -1;
+}
+
+function findMatchingPermissionIndex(
+  items: TimelineItem[],
+  runId: string,
+  event: Extract<TimelineRunEvent, { type: "permission" }>,
+) {
+  if (!event.permissionId) {
+    return -1;
+  }
+
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const candidate = items[index];
+    if (candidate.runId !== runId || candidate.event.type !== "permission") {
+      continue;
+    }
+    if (candidate.event.permissionId === event.permissionId) {
       return index;
     }
   }
