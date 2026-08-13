@@ -1218,6 +1218,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const selectedPermissionModeOption = permissionModeOptions.find(
     (option) => option.value === permissionMode,
   );
+  const hasConfigurableEffort = effortOptions.length > 1;
+  const hasEffortControl = providerAgentId === "codex" || hasConfigurableEffort;
+  const hasCompactRunConfiguration = Boolean(providerAgentId);
   const selectedModelOption = modelOptions.find((option) => option.value === modelId);
   const selectedEffortOption = effortOptions.find((option) => option.value === effortId);
   const selectedContextSizeOption = contextSizeOptions.find(
@@ -2198,7 +2201,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
-  const compactRunConfigurationControls = providerAgentId === "codex" && (
+  const compactRunConfigurationControls = hasCompactRunConfiguration && (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
       <label className="flex items-center gap-1 text-xs text-muted-foreground">
         <span>Model</span>
@@ -2221,27 +2224,29 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </SelectContent>
         </Select>
       </label>
-      <label className="flex items-center gap-1 text-xs text-muted-foreground">
-        <span>Effort</span>
-        <Select value={effortId} onValueChange={changeEffortId} disabled={isRunConfigurationLocked}>
-          <SelectTrigger
-            size="sm"
-            className="max-w-36"
-            aria-label={`${panelId} effort`}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {effortOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
+      {hasEffortControl && (
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span>Effort</span>
+          <Select value={effortId} onValueChange={changeEffortId} disabled={isRunConfigurationLocked}>
+            <SelectTrigger
+              size="sm"
+              className="max-w-36"
+              aria-label={`${panelId} effort`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {effortOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </label>
+      )}
     </div>
   );
 
@@ -2994,7 +2999,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                     : selectedModelOption?.description}
                 </span>
               </label>
-              {providerAgentId === "codex" && (
+              {hasEffortControl && (
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   Effort
                   <Select

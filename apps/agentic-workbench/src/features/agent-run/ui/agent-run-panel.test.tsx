@@ -202,6 +202,86 @@ describe("AgentRunPanel user boundary", () => {
     );
   });
 
+  it("shows Claude Code effort choices and sends the selected value", async () => {
+    const runConfigurationPortal = document.createElement("div");
+    document.body.append(runConfigurationPortal);
+    loadAgents = async () => [
+      {
+        id: "codex",
+        label: "Codex",
+        command: "codex-acp",
+        models: [{ id: "gpt-5.6", label: "GPT-5.6" }],
+        efforts: [{ id: "xhigh", label: "XHigh" }],
+      },
+      {
+        id: "claude-code",
+        label: "Claude Code",
+        command: "claude-agent-acp",
+        models: [{ id: "sonnet", label: "Sonnet alias" }],
+        efforts: [
+          { id: "high", label: "High" },
+          { id: "max", label: "Max" },
+        ],
+      },
+    ];
+    savedRunSettings = {
+      workingDirectory: "/tmp/agent-run-panel-claude-settings",
+      agentId: "claude-code",
+      permissionMode: "default",
+      modelId: "sonnet",
+      effortId: "high",
+      contextSize: "default",
+      sessionMode: "new",
+      ralphLoop: {
+        enabled: false,
+        maxIterations: 5,
+        delayMs: 0,
+        stopOnError: true,
+        stopOnPermission: false,
+        promptTemplate: "",
+      },
+    };
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-claude-settings",
+      showPromptComposer: false,
+      runConfigurationPortal,
+    });
+
+    await waitForAgentRunPanel(() =>
+      document
+        .querySelector(`button[aria-label="main-agent-run effort"]`)
+        ?.textContent?.includes("High") ?? false,
+    );
+    expect(
+      document.querySelector(`button[aria-label="main-agent-run model"]`)?.textContent,
+    ).toContain("Sonnet alias");
+
+    await panel.selectOption("main-agent-run effort", "Max");
+    await panel.rerender({
+      externalPromptRequest: {
+        id: "claude-composer-request",
+        text: "Use Claude effort",
+        delivery: "send",
+      },
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);
+
+    expect(invocationsFor("start_agent_run")[0]).toMatchObject({
+      request: {
+        agentId: "claude-code",
+        modelId: "sonnet",
+        effortId: "max",
+      },
+    });
+    await waitForAgentRunPanel(() =>
+      invocationsFor("save_agent_run_settings").some((args) => {
+        const settings = (args as { settings?: { agentId?: string; effortId?: string } }).settings;
+        return settings?.agentId === "claude-code" && settings.effortId === "max";
+      }),
+    );
+  });
+
   it("persists a focused additional panel selection through the main worktree owner", async () => {
     let worktreeRunConfiguration: { modelId: string; effortId: string } = {
       modelId: "providerDefault",

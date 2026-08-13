@@ -1,24 +1,24 @@
 use agent_client_protocol::{
+    JsonRpcMessage,
     schema::{
+        ProtocolVersion,
         v1::{
             ClientCapabilities, ContentBlock, FileSystemCapabilities, Implementation,
             InitializeRequest, LoadSessionRequest, NewSessionRequest, PromptRequest, SessionId,
             StopReason, TextContent,
         },
-        ProtocolVersion,
     },
-    JsonRpcMessage,
 };
-use anyhow::{anyhow, bail, Context, Result};
-use serde_json::{json, Value};
+use anyhow::{Context, Result, anyhow, bail};
+use serde_json::{Value, json};
 use std::{
     fs,
     future::Future,
     path::PathBuf,
     process::Stdio,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::Duration,
 };
@@ -40,11 +40,11 @@ use crate::{
         },
     },
     infrastructure::acp::{
-        client::{lifecycle, AcpClient},
-        transport::{read_loop, RpcPeer},
+        client::{AcpClient, lifecycle},
+        transport::{RpcPeer, read_loop},
         util::{
-            display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
-            rpc_to_anyhow, RpcError,
+            RpcError, display_command, enriched_path, expand_tilde, normalize_path,
+            resolve_program, rpc_to_anyhow,
         },
     },
     ports::{
@@ -937,7 +937,7 @@ where
             session_id,
             &advertised_configuration,
             "reasoning effort",
-            &["reasoning_effort", "reasoningEffort", "effort"],
+            &["effort", "reasoning_effort", "reasoningEffort", "thinking"],
             &[json!(effort_id)],
             true,
             sink,
@@ -1407,13 +1407,13 @@ mod tests {
     use serde_json::json;
     use std::process::Stdio;
     use std::sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     };
     use tokio::{
         io::{AsyncBufReadExt, BufReader},
         process::Command,
-        time::{timeout, Duration},
+        time::{Duration, timeout},
     };
 
     #[derive(Clone, Default)]
@@ -1723,16 +1723,103 @@ mod tests {
         assert_eq!(requests[0]["params"]["configId"], json!("reasoning_effort"));
         assert_eq!(requests[0]["params"]["value"], json!("high"));
         assert_eq!(requests[1]["method"], json!("session/prompt"));
-        assert!(sink
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(_, event)| matches!(
-                event,
-                RunEvent::Diagnostic { message }
-                    if message == "reasoning effort applied via config option reasoning_effort"
-            )));
+        assert!(
+            sink.events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, event)| matches!(
+                    event,
+                    RunEvent::Diagnostic { message }
+                        if message == "reasoning effort applied via config option reasoning_effort"
+                ))
+        );
+        child.kill().await.expect("kill cat");
+    }
+
+    #[tokio::test]
+    async fn claude_effort_config_id_is_applied_before_the_first_prompt() {
+        let mut child = Command::new("cat")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("spawn cat");
+        let peer = RpcPeer::new(child.stdin.take().expect("stdin"));
+        let stdout = child.stdout.take().expect("stdout");
+        let responder = {
+            let peer = peer.clone();
+            tokio::spawn(async move {
+                let mut lines = BufReader::new(stdout).lines();
+                let mut requests = Vec::new();
+                for _ in 0..2 {
+                    let line = lines
+                        .next_line()
+                        .await
+                        .expect("read request")
+                        .expect("request line");
+                    let request: serde_json::Value =
+                        serde_json::from_str(&line).expect("json request");
+                    let id = request["id"].as_u64().expect("request id");
+                    requests.push(request);
+                    let sender = peer
+                        .pending
+                        .lock()
+                        .await
+                        .remove(&id)
+                        .expect("pending request");
+                    sender.send(Ok(json!({}))).expect("respond");
+                }
+                requests
+            })
+        };
+        let sink = CollectingSink::default();
+        let session_response = json!({
+            "configOptions": [{
+                "id": "effort",
+                "name": "Effort",
+                "category": "thought_level",
+                "type": "select",
+                "currentValue": "default",
+                "options": [
+                    { "value": "default", "name": "Default" },
+                    { "value": "high", "name": "High" },
+                    { "value": "max", "name": "Max" }
+                ]
+            }]
+        });
+
+        apply_run_configuration(
+            &peer,
+            "run-claude",
+            "session-claude",
+            None,
+            Some("max"),
+            ContextSizePreset::Default,
+            &session_response,
+            &sink,
+        )
+        .await
+        .expect("Claude effort applies");
+        peer.request("session/prompt", json!({ "sessionId": "session-claude" }))
+            .await
+            .expect("prompt response");
+
+        let requests = responder.await.expect("capture requests");
+        assert_eq!(requests[0]["method"], json!("session/set_config_option"));
+        assert_eq!(requests[0]["params"]["configId"], json!("effort"));
+        assert_eq!(requests[0]["params"]["value"], json!("max"));
+        assert_eq!(requests[1]["method"], json!("session/prompt"));
+        assert!(
+            sink.events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(_, event)| matches!(
+                    event,
+                    RunEvent::Diagnostic { message }
+                        if message == "reasoning effort applied via config option effort"
+                ))
+        );
         child.kill().await.expect("kill cat");
     }
 
@@ -1779,9 +1866,11 @@ mod tests {
         .await
         .expect("unsupported effort falls back");
 
-        assert!(timeout(Duration::from_millis(50), lines.next_line())
-            .await
-            .is_err());
+        assert!(
+            timeout(Duration::from_millis(50), lines.next_line())
+                .await
+                .is_err()
+        );
         assert!(sink.events.lock().unwrap().iter().any(|(run_id, event)| matches!(
             event,
             RunEvent::Diagnostic { message }
@@ -1848,18 +1937,19 @@ mod tests {
         .expect("rejected effort falls back");
         responder.await.expect("reject effort request");
 
-        assert!(sink
-            .events
-            .lock()
-            .unwrap()
-            .iter()
-            .any(|(run_id, event)| matches!(
-                event,
-                RunEvent::Diagnostic { message }
-                    if run_id == "run-stale"
-                        && message.contains("effort is stale for the selected model")
-                        && message.contains("continuing with the agent default")
-            )));
+        assert!(
+            sink.events
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(run_id, event)| matches!(
+                    event,
+                    RunEvent::Diagnostic { message }
+                        if run_id == "run-stale"
+                            && message.contains("effort is stale for the selected model")
+                            && message.contains("continuing with the agent default")
+                ))
+        );
         child.kill().await.expect("kill cat");
     }
 

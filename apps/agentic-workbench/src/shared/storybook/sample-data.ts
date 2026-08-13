@@ -287,7 +287,21 @@ export const sampleAgents: AgentDescriptor[] = [
       { id: "ultra", label: "Ultra" },
     ],
   },
-  { id: "claude", label: "Claude Code", command: "claude" },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    command: "claude",
+    models: [
+      { id: "sonnet", label: "Sonnet alias" },
+      { id: "opus", label: "Opus alias" },
+    ],
+    efforts: [
+      { id: "low", label: "Low" },
+      { id: "medium", label: "Medium" },
+      { id: "high", label: "High" },
+      { id: "max", label: "Max" },
+    ],
+  },
 ];
 
 export const sampleSavedPrompts: SavedPrompt[] = [

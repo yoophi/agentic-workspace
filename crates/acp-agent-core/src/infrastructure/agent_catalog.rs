@@ -106,7 +106,15 @@ impl AgentCatalog for StaticAgentCatalog {
                     ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
                     ("claude-haiku-4-5", "Claude Haiku 4.5"),
                 ]),
-                efforts: Vec::new(),
+                // Pinned Claude ACP 0.60.0 advertises an "effort" config option
+                // per selected model. The runner still verifies the live
+                // session-advertised values before applying any explicit choice.
+                efforts: options(&[
+                    ("low", "Low"),
+                    ("medium", "Medium"),
+                    ("high", "High"),
+                    ("max", "Max"),
+                ]),
                 context_sizes: Vec::new(),
             },
             AgentDescriptor {
@@ -421,6 +429,19 @@ mod tests {
                 "missing Claude model {model_id}"
             );
         }
+        assert_eq!(
+            claude
+                .efforts
+                .iter()
+                .map(|effort| (effort.id.as_str(), effort.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("low", "Low"),
+                ("medium", "Medium"),
+                ("high", "High"),
+                ("max", "Max"),
+            ]
+        );
     }
 
     #[test]
