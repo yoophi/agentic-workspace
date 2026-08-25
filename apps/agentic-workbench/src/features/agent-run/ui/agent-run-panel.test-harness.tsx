@@ -117,6 +117,12 @@ export async function renderAgentRunPanel(
       });
     },
     selectOption: async (label, option) => {
+      // 모델·effort 컨트롤은 agent catalog가 로드된 뒤에야 렌더된다.
+      await waitForAgentRunPanel(() =>
+        Boolean(document.querySelector(`button[aria-label='${label}']`)),
+      ).catch(() => {
+        throw new Error(`AgentRunPanel select was not rendered: ${label}`);
+      });
       const trigger = document.querySelector<HTMLButtonElement>(`button[aria-label='${label}']`);
       if (!trigger) {
         throw new Error(`AgentRunPanel select was not rendered: ${label}`);

@@ -44,7 +44,12 @@ export type AgentRunSettings = {
 };
 
 // 실제 agent catalog id와 동일한 집합(이슈 #121의 claude_code/pi는 예시 표기).
-export type AgentType = "codex" | "claude-code" | "opencode" | "pi-coding-agent";
+export type AgentType =
+  | "codex"
+  | "claude-code"
+  | "opencode"
+  | "pi-coding-agent"
+  | "kiro-cli";
 
 /**
  * agent 실행 프로필(specs/008). 같은 type을 서로 다른 command/env 조합으로

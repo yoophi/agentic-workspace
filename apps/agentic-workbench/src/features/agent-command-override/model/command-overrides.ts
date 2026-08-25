@@ -10,7 +10,7 @@ import type {
 export const APP_COMMAND_OVERRIDE_SETTINGS_KEY = "__app_agent_command_overrides__";
 
 /**
- * 기본 프로필 4종(specs/008). id/agentType은 실제 agent catalog id와 동일해
+ * 기본 프로필 5종(specs/008). id/agentType은 실제 agent catalog id와 동일해
  * legacy agentCommands 매핑·세션 재사용(agent id 기반)과 무변경으로 호환된다.
  */
 export const BUILT_IN_AGENT_PROFILES: ReadonlyArray<{
@@ -21,6 +21,7 @@ export const BUILT_IN_AGENT_PROFILES: ReadonlyArray<{
   { agentType: "claude-code", defaultName: "Claude Code" },
   { agentType: "opencode", defaultName: "OpenCode" },
   { agentType: "pi-coding-agent", defaultName: "Pi Coding Agent" },
+  { agentType: "kiro-cli", defaultName: "Kiro CLI" },
 ];
 
 export function builtInProfileDefaultName(agentType: string) {

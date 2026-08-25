@@ -1170,6 +1170,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       })),
     ];
   }, [selectedAgent]);
+  // 모델·effort 컨트롤은 선택된 agent가 실제로 광고하는 경우에만 노출한다.
+  const supportsModelSelection = (selectedAgent?.models?.length ?? 0) > 0;
+  const supportsEffortSelection = (selectedAgent?.efforts?.length ?? 0) > 0;
   const contextSizeOptions = useMemo<SelectOption<ContextSizePreset>[]>(() => {
     const advertisedContextSizes = selectedAgent?.contextSizes ?? [];
     if (advertisedContextSizes.length === 0) {
@@ -2198,50 +2201,55 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
-  const compactRunConfigurationControls = providerAgentId === "codex" && (
+  const compactRunConfigurationControls = (supportsModelSelection ||
+    supportsEffortSelection) && (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <label className="flex items-center gap-1 text-xs text-muted-foreground">
-        <span>Model</span>
-        <Select value={modelId} onValueChange={changeModelId} disabled={isRunConfigurationLocked}>
-          <SelectTrigger
-            size="sm"
-            className="max-w-44"
-            aria-label={`${panelId} model`}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {modelOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
-      <label className="flex items-center gap-1 text-xs text-muted-foreground">
-        <span>Effort</span>
-        <Select value={effortId} onValueChange={changeEffortId} disabled={isRunConfigurationLocked}>
-          <SelectTrigger
-            size="sm"
-            className="max-w-36"
-            aria-label={`${panelId} effort`}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectGroup>
-              {effortOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </SelectContent>
-        </Select>
-      </label>
+      {supportsModelSelection && (
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span>Model</span>
+          <Select value={modelId} onValueChange={changeModelId} disabled={isRunConfigurationLocked}>
+            <SelectTrigger
+              size="sm"
+              className="max-w-44"
+              aria-label={`${panelId} model`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {modelOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </label>
+      )}
+      {supportsEffortSelection && (
+        <label className="flex items-center gap-1 text-xs text-muted-foreground">
+          <span>Effort</span>
+          <Select value={effortId} onValueChange={changeEffortId} disabled={isRunConfigurationLocked}>
+            <SelectTrigger
+              size="sm"
+              className="max-w-36"
+              aria-label={`${panelId} effort`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {effortOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </label>
+      )}
     </div>
   );
 
@@ -2745,7 +2753,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                             {selectedModelOption?.description}
                           </span>
                         </div>
-                        {providerAgentId === "codex" && (
+                        {supportsEffortSelection && (
                           <div className="grid gap-1">
                             <span className="text-xs font-medium text-muted-foreground">Effort</span>
                             <span>
@@ -2994,7 +3002,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                     : selectedModelOption?.description}
                 </span>
               </label>
-              {providerAgentId === "codex" && (
+              {supportsEffortSelection && (
                 <label className="flex flex-col gap-2 text-sm font-medium">
                   Effort
                   <Select
