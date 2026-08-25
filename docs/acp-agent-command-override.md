@@ -12,8 +12,9 @@
 
 ## 기본 프로필과 커스텀 프로필
 
-- 최초 실행 시 `codex`, `claude-code`, `opencode`, `pi-coding-agent` 4개가
-  **기본 프로필**로 자동 등록된다(저장 데이터에 없으면 로드 시 자동 seed).
+- 최초 실행 시 `codex`, `claude-code`, `opencode`, `pi-coding-agent`,
+  `kiro-cli` 5개가 **기본 프로필**로 자동 등록된다(저장 데이터에 없으면 로드 시
+  자동 seed).
 - 기본 프로필은 명령/환경변수 수정과 활성/비활성 전환만 가능하고 **삭제할 수
   없다**. 기본 프로필의 id는 agent catalog id와 동일해 세션 재사용 등 기존
   agent id 기반 흐름과 호환된다.
@@ -39,6 +40,20 @@ flowchart TD
   `사용자 PATH:보강 PATH` 순으로 결합되어 npx/node 탐색이 깨지지 않는다.
 - 환경변수 key가 비어 있거나 공백뿐인 항목은 저장 시 제거된다(빈 value는 허용
   — "빈 값 설정"과 "미설정"은 다르다).
+
+### 모델·effort 전달 경로
+
+대부분의 agent는 세션 생성 응답에 실린 ACP `configOptions`를 통해
+`session/set_config_option`으로 모델·effort를 적용받는다. 반면 **Kiro CLI**는
+`configOptions`를 광고하지 않고 ACP 표준 `models.availableModels`만 싣기
+때문에, 선택값을 프로세스 기동 인자로 넘겨야 반영된다.
+
+- Kiro CLI는 `kiro-cli acp --model <id> --effort <id>` 형태로 실행된다.
+- 사용자가 프로필 command에 같은 플래그(`--model` / `--model=…`)를 직접 적어
+  두면 그 값을 존중해 자동 주입을 건너뛴다.
+- 기동 인자로 넘긴 설정은 세션 config로 중복 적용하지 않는다.
+- 모델·effort가 `providerDefault`이거나 비어 있으면 아무 인자도 붙지 않고
+  agent 기본값(Kiro의 경우 `auto`)이 쓰인다.
 
 ## 저장과 하위 호환
 

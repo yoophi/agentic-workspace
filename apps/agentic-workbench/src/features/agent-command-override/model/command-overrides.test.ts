@@ -5,6 +5,7 @@ import type {
   AgentDescriptor,
 } from "@/entities/agent-run/model/types";
 import {
+  BUILT_IN_AGENT_PROFILES,
   effectiveProfiles,
   normalizeCommandOverrides,
   resolveAgentCommand,
@@ -109,7 +110,7 @@ describe("normalizeCommandOverrides — env/프로필 (specs/008)", () => {
 });
 
 describe("effectiveProfiles (specs/008 seed + legacy 매핑)", () => {
-  it("seeds the four built-in profiles when none are stored", () => {
+  it("seeds every built-in profile when none are stored", () => {
     const profiles = effectiveProfiles({});
 
     expect(profiles.map((profile) => profile.id)).toEqual([
@@ -117,6 +118,7 @@ describe("effectiveProfiles (specs/008 seed + legacy 매핑)", () => {
       "claude-code",
       "opencode",
       "pi-coding-agent",
+      "kiro-cli",
     ]);
     expect(profiles.every((profile) => profile.builtIn && profile.enabled)).toBe(true);
   });
@@ -158,7 +160,9 @@ describe("effectiveProfiles (specs/008 seed + legacy 매핑)", () => {
 
     expect(profiles.find((profile) => profile.id === "claude-code")?.name).toBe("Claude 수정본");
     expect(profiles.find((profile) => profile.id === "custom-1")).toBeDefined();
-    expect(profiles.filter((profile) => profile.builtIn)).toHaveLength(4);
+    expect(profiles.filter((profile) => profile.builtIn)).toHaveLength(
+      BUILT_IN_AGENT_PROFILES.length,
+    );
   });
 });
 

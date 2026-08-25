@@ -127,7 +127,58 @@ impl AgentCatalog for StaticAgentCatalog {
                 efforts: Vec::new(),
                 context_sizes: Vec::new(),
             },
+            AgentDescriptor {
+                id: "kiro-cli".into(),
+                label: "Kiro CLI".into(),
+                command: "kiro-cli acp".into(),
+                runtime_version: None,
+                // Kiro는 session/new 응답의 ACP 표준 `models.availableModels`로 모델을 광고하고
+                // `session/set_model`로 전환한다. 아래 목록은 그 광고값의 기본 스냅샷이며,
+                // 실제 가용 목록은 세션 생성 시 응답으로 다시 검증한다.
+                models: options(&[
+                    ("auto", "Auto (task-optimized)"),
+                    ("claude-opus-5", "Claude Opus 5"),
+                    ("claude-sonnet-5", "Claude Sonnet 5"),
+                    ("gpt-5.6-sol", "GPT-5.6 Sol"),
+                    ("gpt-5.6-terra", "GPT-5.6 Terra"),
+                    ("gpt-5.6-luna", "GPT-5.6 Luna"),
+                    ("deepseek-3.2", "DeepSeek 3.2"),
+                    ("minimax-m2.5", "MiniMax M2.5"),
+                    ("glm-5", "GLM-5"),
+                ]),
+                // `kiro-cli acp --effort`가 받는 thinking effort 단계다.
+                efforts: options(&[
+                    ("low", "Low"),
+                    ("medium", "Medium"),
+                    ("high", "High"),
+                    ("xhigh", "XHigh"),
+                    ("max", "Max"),
+                ]),
+                context_sizes: Vec::new(),
+            },
         ]
+    }
+}
+
+/// ACP `configOptions`를 광고하지 않고 CLI 인자로만 모델/effort를 받는 에이전트의 플래그.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CliRunOptionFlags {
+    pub model: Option<&'static str>,
+    pub effort: Option<&'static str>,
+}
+
+/// 실행 설정을 기동 인자로 넘겨야 하는 에이전트인지 판별한다.
+///
+/// Kiro CLI는 세션 응답에 ACP 표준 `models.availableModels`만 싣고
+/// `session/set_config_option`은 지원하지 않는다. 따라서 모델·effort 선택값은
+/// `kiro-cli acp --model <id> --effort <id>` 형태로 프로세스 기동 시 넘겨야 반영된다.
+pub fn cli_run_option_flags(agent_id: &str) -> Option<CliRunOptionFlags> {
+    match agent_id {
+        "kiro-cli" => Some(CliRunOptionFlags {
+            model: Some("--model"),
+            effort: Some("--effort"),
+        }),
+        _ => None,
     }
 }
 
@@ -316,6 +367,47 @@ fn capitalize_model_segment(segment: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn kiro_catalog_exposes_acp_command_with_models_and_efforts() {
+        let agents = StaticAgentCatalog.list_agents();
+        let kiro = agents
+            .iter()
+            .find(|agent| agent.id == "kiro-cli")
+            .expect("Kiro CLI agent");
+
+        assert_eq!(kiro.command, "kiro-cli acp");
+        for model_id in [
+            "auto",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "gpt-5.6-sol",
+            "glm-5",
+        ] {
+            assert!(
+                kiro.models.iter().any(|model| model.id == model_id),
+                "missing Kiro model {model_id}"
+            );
+        }
+        assert_eq!(
+            kiro.efforts
+                .iter()
+                .map(|effort| effort.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["low", "medium", "high", "xhigh", "max"]
+        );
+    }
+
+    #[test]
+    fn only_kiro_receives_run_options_as_cli_flags() {
+        let flags = cli_run_option_flags("kiro-cli").expect("Kiro CLI flags");
+        assert_eq!(flags.model, Some("--model"));
+        assert_eq!(flags.effort, Some("--effort"));
+
+        // 나머지 에이전트는 세션 configOptions로 설정을 받는다.
+        assert!(cli_run_option_flags("codex").is_none());
+        assert!(cli_run_option_flags("claude-code").is_none());
+    }
 
     #[test]
     fn formats_provider_model_ids_for_display() {

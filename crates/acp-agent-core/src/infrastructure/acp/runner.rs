@@ -39,13 +39,16 @@ use crate::{
             RalphLoopRequest, ResumePolicy,
         },
     },
-    infrastructure::acp::{
-        client::{lifecycle, AcpClient},
-        transport::{read_loop, RpcPeer},
-        util::{
-            display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
-            rpc_to_anyhow, RpcError,
+    infrastructure::{
+        acp::{
+            client::{lifecycle, AcpClient},
+            transport::{read_loop, RpcPeer},
+            util::{
+                display_command, enriched_path, expand_tilde, normalize_path, resolve_program,
+                rpc_to_anyhow, RpcError,
+            },
         },
+        agent_catalog::cli_run_option_flags,
     },
     ports::{
         acp_session_store::AcpSessionStore,
@@ -110,6 +113,13 @@ where
         if agent_argv.is_empty() {
             bail!("agent command cannot be empty");
         }
+        // configOptions를 광고하지 않는 에이전트(Kiro CLI 등)는 모델·effort를 기동 인자로 받는다.
+        let agent_argv = with_cli_run_options(
+            agent_argv,
+            &request.agent_id,
+            request.model_id.as_deref(),
+            request.effort_id.as_deref(),
+        );
 
         sink.emit(
             &run_id,
@@ -251,12 +261,20 @@ where
             &sink,
         )
         .await?;
+        // 기동 인자로 이미 넘긴 설정은 세션 config로 다시 적용하지 않는다.
+        let cli_flags = cli_run_option_flags(&request.agent_id);
         apply_run_configuration(
             &peer,
             &run_id,
             &session_id,
-            request.model_id.as_deref(),
-            request.effort_id.as_deref(),
+            request
+                .model_id
+                .as_deref()
+                .filter(|_| cli_flags.is_none_or(|flags| flags.model.is_none())),
+            request
+                .effort_id
+                .as_deref()
+                .filter(|_| cli_flags.is_none_or(|flags| flags.effort.is_none())),
             request.context_size.unwrap_or_default(),
             &session_setup.response,
             &sink,
@@ -892,6 +910,47 @@ fn new_session_params(workspace: &PathBuf, mcp_servers: &[AgentMcpServerConfig])
     Ok(params)
 }
 
+/// configOptions 대신 CLI 인자로 실행 설정을 받는 에이전트에 한해,
+/// 선택된 모델·effort를 기동 인자로 덧붙인다.
+///
+/// 사용자가 command override에서 같은 플래그를 직접 지정했다면 그 값을 존중해 건너뛴다.
+fn with_cli_run_options(
+    mut argv: Vec<String>,
+    agent_id: &str,
+    model_id: Option<&str>,
+    effort_id: Option<&str>,
+) -> Vec<String> {
+    let Some(flags) = cli_run_option_flags(agent_id) else {
+        return argv;
+    };
+
+    for (flag, value) in [(flags.model, model_id), (flags.effort, effort_id)] {
+        let (Some(flag), Some(value)) = (flag, selected_option_value(value)) else {
+            continue;
+        };
+        if argv_contains_flag(&argv, flag) {
+            continue;
+        }
+        argv.push(flag.to_string());
+        argv.push(value.to_string());
+    }
+
+    argv
+}
+
+fn argv_contains_flag(argv: &[String], flag: &str) -> bool {
+    let assigned = format!("{flag}=");
+    argv.iter()
+        .any(|arg| arg == flag || arg.starts_with(&assigned))
+}
+
+/// 빈 값과 `providerDefault`는 "에이전트 기본값 사용"을 뜻하므로 전달하지 않는다.
+fn selected_option_value(value: Option<&str>) -> Option<&str> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != "providerDefault")
+}
+
 async fn apply_run_configuration<S>(
     peer: &RpcPeer,
     run_id: &str,
@@ -906,9 +965,7 @@ where
     S: RunEventSink,
 {
     let mut advertised_configuration = session_response.clone();
-    let model_id = model_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != "providerDefault");
+    let model_id = selected_option_value(model_id);
     if let Some(model_id) = model_id {
         if let Some(response) = apply_session_config_option(
             peer,
@@ -927,9 +984,7 @@ where
         }
     }
 
-    let effort_id = effort_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != "providerDefault");
+    let effort_id = selected_option_value(effort_id);
     if let Some(effort_id) = effort_id {
         if let Some(response) = apply_session_config_option(
             peer,
@@ -1391,6 +1446,7 @@ mod tests {
         load_session_params, new_session_params, refresh_advertised_configuration,
         resume_session_id, run_prompt_sequence, session_config_option_value,
         should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
+        with_cli_run_options,
     };
     use crate::infrastructure::acp::{transport::RpcPeer, util::RpcError};
     use crate::{
@@ -1628,6 +1684,74 @@ mod tests {
         assert_eq!(
             session_config_option_value(&response, "contextWindowTokens", &candidates),
             Some(json!(128000))
+        );
+    }
+
+    #[test]
+    fn kiro_run_options_are_passed_as_launch_arguments() {
+        let argv = with_cli_run_options(
+            vec!["kiro-cli".into(), "acp".into()],
+            "kiro-cli",
+            Some("claude-sonnet-5"),
+            Some("high"),
+        );
+
+        assert_eq!(
+            argv,
+            vec![
+                "kiro-cli",
+                "acp",
+                "--model",
+                "claude-sonnet-5",
+                "--effort",
+                "high",
+            ]
+        );
+    }
+
+    #[test]
+    fn cli_run_options_skip_defaults_and_agents_without_flags() {
+        // providerDefault/빈 값은 "에이전트 기본값 사용"이므로 넘기지 않는다.
+        assert_eq!(
+            with_cli_run_options(
+                vec!["kiro-cli".into(), "acp".into()],
+                "kiro-cli",
+                Some("providerDefault"),
+                Some("   "),
+            ),
+            vec!["kiro-cli", "acp"]
+        );
+
+        // configOptions로 설정을 받는 에이전트의 기동 인자는 건드리지 않는다.
+        assert_eq!(
+            with_cli_run_options(
+                vec!["npx".into(), "-y".into(), "pi-acp".into()],
+                "pi-coding-agent",
+                Some("gpt-5.6"),
+                Some("high"),
+            ),
+            vec!["npx", "-y", "pi-acp"]
+        );
+    }
+
+    #[test]
+    fn command_override_flags_win_over_selected_run_options() {
+        let argv = with_cli_run_options(
+            vec![
+                "kiro-cli".into(),
+                "acp".into(),
+                "--model".into(),
+                "glm-5".into(),
+                "--effort=low".into(),
+            ],
+            "kiro-cli",
+            Some("claude-opus-5"),
+            Some("max"),
+        );
+
+        assert_eq!(
+            argv,
+            vec!["kiro-cli", "acp", "--model", "glm-5", "--effort=low"]
         );
     }
 
