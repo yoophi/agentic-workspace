@@ -5,6 +5,10 @@ import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 import { markdownRenderingFixtures, parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
 
 import { MarkdownViewer } from "./MarkdownViewer";
+import {
+  elapsedCpuMilliseconds,
+  startCpuMeasurement,
+} from "./performance-budget.test-utils";
 import type {
   MarkdownViewerComponents,
   MermaidExpandedDialogContentProps,
@@ -204,15 +208,16 @@ No tasks here.
     expect(html).not.toContain("javascript:");
   });
 
-  it("renders 2,000 independent blocks within the preview performance budget", () => {
+  it("renders 2,000 independent blocks within the preview CPU budget", () => {
     const markdown = Array.from({ length: 2_000 }, (_, index) => `- item ${index + 1}`).join("\n");
-    const startedAt = performance.now();
+    const startedAt = startCpuMeasurement();
     const html = renderToStaticMarkup(
       <MarkdownViewer blocks={parseMarkdownToBlocks(markdown)} components={components} />,
     );
+    const elapsedCpuMs = elapsedCpuMilliseconds(startedAt);
 
     expect(html).toContain("item 2000");
-    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(elapsedCpuMs).toBeLessThan(2_000);
   });
 
   it("exposes source ranges on annotation blocks", () => {
