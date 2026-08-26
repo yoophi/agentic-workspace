@@ -58,9 +58,13 @@ impl JsonRpcResponse {
     }
 }
 
-pub fn parse_request(value: Value) -> Result<JsonRpcRequest, JsonRpcResponse> {
+pub fn parse_request(value: Value) -> Result<JsonRpcRequest, Box<JsonRpcResponse>> {
     serde_json::from_value::<JsonRpcRequest>(value).map_err(|error| {
-        JsonRpcResponse::error(None, -32600, format!("Invalid JSON-RPC request: {error}"))
+        Box::new(JsonRpcResponse::error(
+            None,
+            -32600,
+            format!("Invalid JSON-RPC request: {error}"),
+        ))
     })
 }
 

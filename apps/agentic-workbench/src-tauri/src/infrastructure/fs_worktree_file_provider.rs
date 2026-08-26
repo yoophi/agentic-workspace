@@ -43,10 +43,7 @@ impl WorktreeFileProvider for FsWorktreeFileProvider {
         }
         let mut entries = Vec::new();
 
-        for entry in walker
-            .into_iter()
-            .filter_entry(|entry| should_descend(entry))
-        {
+        for entry in walker.into_iter().filter_entry(should_descend) {
             let entry = entry.map_err(|error| format!("Failed to read worktree entry: {error}"))?;
             let path = entry.path();
             let metadata = entry.metadata().map_err(|error| {

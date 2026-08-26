@@ -120,7 +120,7 @@ impl SystemToolchain {
             .next()
             .and_then(|line| line.strip_prefix("#!"))
         {
-            let executable = shebang.trim().split_whitespace().next().unwrap_or("");
+            let executable = shebang.split_whitespace().next().unwrap_or("");
             let name = Path::new(executable)
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -142,7 +142,7 @@ impl SystemToolchain {
     /// pipx/uv 폴리글롯 래퍼는 exec할 python 절대경로를 따옴표로 담는다(경로에 공백 포함 가능).
     fn wrapped_python_candidates(script: &str) -> Vec<PathBuf> {
         script
-            .split(|c| c == '\'' || c == '"')
+            .split(['\'', '"'])
             .map(str::trim)
             .filter(|segment| !segment.is_empty())
             .map(PathBuf::from)
@@ -207,8 +207,7 @@ impl SystemToolchain {
         let prefix = &line[..line.find('%')?];
         prefix
             .split(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .filter(|s| !s.is_empty())
-            .next_back()?
+            .rfind(|segment| !segment.is_empty())?
             .parse()
             .ok()
     }

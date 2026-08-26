@@ -417,6 +417,13 @@ export function appendOneTimelineItem(items: TimelineItem[], item: TimelineItem)
     const matchingIndex = findMatchingPermissionIndex(items, item.runId, item.event);
     if (matchingIndex >= 0) {
       const current = items[matchingIndex];
+      if (
+        current.event.type === "permission" &&
+        !current.event.requiresResponse &&
+        item.event.requiresResponse
+      ) {
+        return items;
+      }
       const nextItem = buildItem(
         {
           id: current.id,

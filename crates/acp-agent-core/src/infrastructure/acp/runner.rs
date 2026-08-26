@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::{
     fs,
     future::Future,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -141,7 +141,7 @@ where
             .current_dir(&workspace)
             // 프로필/global env(specs/008)와 보강 PATH를 함께 주입한다. env value는
             // 로그·오류에 노출하지 않는다.
-            .envs(spawn_env_vars(request.agent_env.as_ref(), &enriched_path()))
+            .envs(spawn_env_vars(request.agent_env.as_ref(), enriched_path()))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -233,11 +233,13 @@ where
             );
             resume_or_create_session(
                 &peer,
-                &workspace,
-                &session_id,
-                init.agent_capabilities.load_session,
-                resume_policy,
-                &session_mcp_servers,
+                ResumeSessionRequest {
+                    workspace: &workspace,
+                    session_id: &session_id,
+                    load_supported: init.agent_capabilities.load_session,
+                    resume_policy,
+                    mcp_servers: &session_mcp_servers,
+                },
                 &run_id,
                 &sink,
             )
@@ -267,15 +269,17 @@ where
             &peer,
             &run_id,
             &session_id,
-            request
-                .model_id
-                .as_deref()
-                .filter(|_| cli_flags.is_none_or(|flags| flags.model.is_none())),
-            request
-                .effort_id
-                .as_deref()
-                .filter(|_| cli_flags.is_none_or(|flags| flags.effort.is_none())),
-            request.context_size.unwrap_or_default(),
+            RunConfigurationSelection {
+                model_id: request
+                    .model_id
+                    .as_deref()
+                    .filter(|_| cli_flags.is_none_or(|flags| flags.model.is_none())),
+                effort_id: request
+                    .effort_id
+                    .as_deref()
+                    .filter(|_| cli_flags.is_none_or(|flags| flags.effort.is_none())),
+                context_size: request.context_size.unwrap_or_default(),
+            },
             &session_setup.response,
             &sink,
         )
@@ -608,14 +612,13 @@ where
 
     send_prompt(tracking_sink.clone(), prompt)
         .await
-        .map_err(|err| {
+        .inspect_err(|err| {
             tracking_sink.emit(
                 run_id,
                 RunEvent::Error {
                     message: err.to_string(),
                 },
             );
-            err
         })?;
 
     Ok(PromptDispatchOutcome {
@@ -880,7 +883,7 @@ struct AcpCreatedSession {
 
 async fn create_agent_session(
     peer: &RpcPeer,
-    workspace: &PathBuf,
+    workspace: &Path,
     mcp_servers: &[AgentMcpServerConfig],
 ) -> Result<AcpCreatedSession> {
     let params = new_session_params(workspace, mcp_servers)?;
@@ -901,8 +904,8 @@ async fn create_agent_session(
     })
 }
 
-fn new_session_params(workspace: &PathBuf, mcp_servers: &[AgentMcpServerConfig]) -> Result<Value> {
-    let mut params = serde_json::to_value(NewSessionRequest::new(workspace.clone()))?;
+fn new_session_params(workspace: &Path, mcp_servers: &[AgentMcpServerConfig]) -> Result<Value> {
+    let mut params = serde_json::to_value(NewSessionRequest::new(workspace.to_path_buf()))?;
     let Value::Object(ref mut object) = params else {
         bail!("session/new params must serialize to an object");
     };
@@ -951,13 +954,24 @@ fn selected_option_value(value: Option<&str>) -> Option<&str> {
         .filter(|value| !value.is_empty() && *value != "providerDefault")
 }
 
+struct RunConfigurationSelection<'a> {
+    model_id: Option<&'a str>,
+    effort_id: Option<&'a str>,
+    context_size: ContextSizePreset,
+}
+
+struct SessionConfigOptionRequest<'a> {
+    label: &'a str,
+    config_ids: &'a [&'a str],
+    candidates: &'a [Value],
+    continue_with_default_on_error: bool,
+}
+
 async fn apply_run_configuration<S>(
     peer: &RpcPeer,
     run_id: &str,
     session_id: &str,
-    model_id: Option<&str>,
-    effort_id: Option<&str>,
-    context_size: ContextSizePreset,
+    selection: RunConfigurationSelection<'_>,
     session_response: &Value,
     sink: &S,
 ) -> Result<()>
@@ -965,17 +979,19 @@ where
     S: RunEventSink,
 {
     let mut advertised_configuration = session_response.clone();
-    let model_id = selected_option_value(model_id);
+    let model_id = selected_option_value(selection.model_id);
     if let Some(model_id) = model_id {
         if let Some(response) = apply_session_config_option(
             peer,
             run_id,
             session_id,
             &advertised_configuration,
-            "model",
-            &["model", "modelId"],
-            &[json!(model_id)],
-            false,
+            SessionConfigOptionRequest {
+                label: "model",
+                config_ids: &["model", "modelId"],
+                candidates: &[json!(model_id)],
+                continue_with_default_on_error: false,
+            },
             sink,
         )
         .await?
@@ -984,17 +1000,19 @@ where
         }
     }
 
-    let effort_id = selected_option_value(effort_id);
+    let effort_id = selected_option_value(selection.effort_id);
     if let Some(effort_id) = effort_id {
         if let Some(response) = apply_session_config_option(
             peer,
             run_id,
             session_id,
             &advertised_configuration,
-            "reasoning effort",
-            &["reasoning_effort", "reasoningEffort", "effort"],
-            &[json!(effort_id)],
-            true,
+            SessionConfigOptionRequest {
+                label: "reasoning effort",
+                config_ids: &["reasoning_effort", "reasoningEffort", "effort"],
+                candidates: &[json!(effort_id)],
+                continue_with_default_on_error: true,
+            },
             sink,
         )
         .await?
@@ -1003,22 +1021,24 @@ where
         }
     }
 
-    if let Some((label, candidates)) = context_size_candidates(context_size) {
+    if let Some((label, candidates)) = context_size_candidates(selection.context_size) {
         let _ = apply_session_config_option(
             peer,
             run_id,
             session_id,
             &advertised_configuration,
-            "context size",
-            &[
-                "context",
-                "contextSize",
-                "contextWindow",
-                "contextWindowTokens",
-                "maxContextTokens",
-            ],
-            &candidates,
-            false,
+            SessionConfigOptionRequest {
+                label: "context size",
+                config_ids: &[
+                    "context",
+                    "contextSize",
+                    "contextWindow",
+                    "contextWindowTokens",
+                    "maxContextTokens",
+                ],
+                candidates: &candidates,
+                continue_with_default_on_error: false,
+            },
             sink,
         )
         .await?;
@@ -1038,17 +1058,16 @@ async fn apply_session_config_option<S>(
     run_id: &str,
     session_id: &str,
     session_response: &Value,
-    label: &str,
-    config_ids: &[&str],
-    candidates: &[Value],
-    continue_with_default_on_error: bool,
+    option: SessionConfigOptionRequest<'_>,
     sink: &S,
 ) -> Result<Option<Value>>
 where
     S: RunEventSink,
 {
-    for config_id in config_ids {
-        if let Some(value) = session_config_option_value(session_response, config_id, candidates) {
+    for config_id in option.config_ids {
+        if let Some(value) =
+            session_config_option_value(session_response, config_id, option.candidates)
+        {
             let response = match peer
                 .request(
                     "session/set_config_option",
@@ -1061,13 +1080,13 @@ where
                 .await
             {
                 Ok(response) => response,
-                Err(error) if continue_with_default_on_error => {
+                Err(error) if option.continue_with_default_on_error => {
                     sink.emit(
                         run_id,
                         RunEvent::Diagnostic {
                             message: format!(
-                                "{label} config was rejected ({}); continuing with the agent default",
-                                error.message
+                                "{} config was rejected ({}); continuing with the agent default",
+                                option.label, error.message
                             ),
                         },
                     );
@@ -1079,7 +1098,7 @@ where
             sink.emit(
                 run_id,
                 RunEvent::Diagnostic {
-                    message: format!("{label} applied via config option {config_id}"),
+                    message: format!("{} applied via config option {config_id}", option.label),
                 },
             );
             return Ok(Some(response));
@@ -1090,7 +1109,8 @@ where
         run_id,
         RunEvent::Diagnostic {
             message: format!(
-                "{label} is not advertised by the agent; continuing with the agent default"
+                "{} is not advertised by the agent; continuing with the agent default",
+                option.label
             ),
         },
     );
@@ -1322,7 +1342,7 @@ fn session_modes_support(response: &Value, mode_id: &str) -> bool {
 async fn load_agent_session(
     peer: &RpcPeer,
     session_id: &str,
-    workspace: &PathBuf,
+    workspace: &Path,
     mcp_servers: &[AgentMcpServerConfig],
 ) -> Result<Value> {
     let params = load_session_params(session_id, workspace, mcp_servers)?;
@@ -1335,12 +1355,12 @@ async fn load_agent_session(
 
 fn load_session_params(
     session_id: &str,
-    workspace: &PathBuf,
+    workspace: &Path,
     mcp_servers: &[AgentMcpServerConfig],
 ) -> Result<Value> {
     let mut params = serde_json::to_value(LoadSessionRequest::new(
         SessionId::new(session_id),
-        workspace.clone(),
+        workspace.to_path_buf(),
     ))?;
     let Value::Object(ref mut object) = params else {
         bail!("session/load params must serialize to an object");
@@ -1352,21 +1372,25 @@ fn load_session_params(
 /// resume 요청을 처리한다. agent가 `loadSession` capability를 광고하면
 /// `session/load`로 재개하고, 그렇지 않거나 로드가 실패하면 정책에 따라
 /// 새 세션으로 폴백(ResumeIfAvailable)하거나 에러를 반환(ResumeRequired)한다.
-async fn resume_or_create_session<S>(
-    peer: &RpcPeer,
-    workspace: &PathBuf,
-    session_id: &str,
+struct ResumeSessionRequest<'a> {
+    workspace: &'a Path,
+    session_id: &'a str,
     load_supported: bool,
     resume_policy: ResumePolicy,
-    mcp_servers: &[AgentMcpServerConfig],
+    mcp_servers: &'a [AgentMcpServerConfig],
+}
+
+async fn resume_or_create_session<S>(
+    peer: &RpcPeer,
+    request: ResumeSessionRequest<'_>,
     run_id: &str,
     sink: &S,
 ) -> Result<AcpCreatedSession>
 where
     S: RunEventSink,
 {
-    if !load_supported {
-        if !should_reissue_missing_session(resume_policy) {
+    if !request.load_supported {
+        if !should_reissue_missing_session(request.resume_policy) {
             bail!("agent does not support resuming sessions (loadSession capability missing)");
         }
         sink.emit(
@@ -1375,22 +1399,29 @@ where
                 message: "agent does not support session/load; starting a new session".to_string(),
             },
         );
-        return create_agent_session(peer, workspace, mcp_servers).await;
+        return create_agent_session(peer, request.workspace, request.mcp_servers).await;
     }
 
-    match load_agent_session(peer, session_id, workspace, mcp_servers).await {
+    match load_agent_session(
+        peer,
+        request.session_id,
+        request.workspace,
+        request.mcp_servers,
+    )
+    .await
+    {
         Ok(response) => Ok(AcpCreatedSession {
-            session_id: session_id.to_string(),
+            session_id: request.session_id.to_string(),
             response,
         }),
-        Err(error) if should_reissue_missing_session(resume_policy) => {
+        Err(error) if should_reissue_missing_session(request.resume_policy) => {
             sink.emit(
                 run_id,
                 RunEvent::Diagnostic {
                     message: format!("resume failed ({error}); starting a new session"),
                 },
             );
-            create_agent_session(peer, workspace, mcp_servers).await
+            create_agent_session(peer, request.workspace, request.mcp_servers).await
         }
         Err(error) => Err(error),
     }
@@ -1446,7 +1477,7 @@ mod tests {
         load_session_params, new_session_params, refresh_advertised_configuration,
         resume_session_id, run_prompt_sequence, session_config_option_value,
         should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
-        with_cli_run_options,
+        with_cli_run_options, RunConfigurationSelection,
     };
     use crate::infrastructure::acp::{transport::RpcPeer, util::RpcError};
     use crate::{
@@ -1830,9 +1861,11 @@ mod tests {
             &peer,
             "run-1",
             "session-1",
-            None,
-            Some("high"),
-            ContextSizePreset::Default,
+            RunConfigurationSelection {
+                model_id: None,
+                effort_id: Some("high"),
+                context_size: ContextSizePreset::Default,
+            },
             &session_response,
             &sink,
         )
@@ -1882,9 +1915,11 @@ mod tests {
             &peer,
             "run-default",
             "session-1",
-            None,
-            Some("providerDefault"),
-            ContextSizePreset::Default,
+            RunConfigurationSelection {
+                model_id: None,
+                effort_id: Some("providerDefault"),
+                context_size: ContextSizePreset::Default,
+            },
             &response,
             &sink,
         )
@@ -1894,9 +1929,11 @@ mod tests {
             &peer,
             "run-stale",
             "session-1",
-            None,
-            Some("ultra"),
-            ContextSizePreset::Default,
+            RunConfigurationSelection {
+                model_id: None,
+                effort_id: Some("ultra"),
+                context_size: ContextSizePreset::Default,
+            },
             &response,
             &sink,
         )
@@ -1962,9 +1999,11 @@ mod tests {
             &peer,
             "run-stale",
             "session-1",
-            None,
-            Some("high"),
-            ContextSizePreset::Default,
+            RunConfigurationSelection {
+                model_id: None,
+                effort_id: Some("high"),
+                context_size: ContextSizePreset::Default,
+            },
             &response,
             &sink,
         )

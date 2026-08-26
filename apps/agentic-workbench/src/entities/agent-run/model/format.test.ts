@@ -497,6 +497,102 @@ describe("run event formatting", () => {
     expect(merged.event.selected).toBe("Allow");
   });
 
+  it.each([
+    ["approval", "Allow"],
+    ["rejection", "Deny"],
+    ["cancellation", "Cancel"],
+    ["no selection", undefined],
+  ])("keeps one completed permission item for %s", (_scenario, selected) => {
+    const request = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      requiresResponse: true,
+    });
+    const result = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      selected,
+      requiresResponse: false,
+    });
+
+    const items = appendOneTimelineItem([request], result);
+
+    expect(items).toHaveLength(1);
+    expect(items[0].body).toContain(`selected: ${selected ?? "none"}`);
+    expect(items[0].event).toMatchObject({
+      type: "permission",
+      permissionId: "permission-1",
+      requiresResponse: false,
+    });
+  });
+
+  it("updates only the matching item when multiple permissions are pending", () => {
+    const first = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "First command",
+      input: null,
+      options: [],
+      requiresResponse: true,
+    });
+    const second = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-2",
+      title: "Second command",
+      input: null,
+      options: [],
+      requiresResponse: true,
+    });
+    const firstResult = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "First command",
+      input: null,
+      options: [],
+      selected: "Allow",
+      requiresResponse: false,
+    });
+
+    const items = appendOneTimelineItem([first, second], firstResult);
+
+    expect(items).toHaveLength(2);
+    expect(items[0].event).toMatchObject({ permissionId: "permission-1", requiresResponse: false });
+    expect(items[1].event).toMatchObject({ permissionId: "permission-2", requiresResponse: true });
+  });
+
+  it("does not restore a stale pending state after a completed permission is replayed", () => {
+    const request = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      requiresResponse: true,
+    });
+    const result = toTimelineItem("run-1", {
+      type: "permission",
+      permissionId: "permission-1",
+      title: "Run command",
+      input: null,
+      options: [],
+      selected: "Allow",
+      requiresResponse: false,
+    });
+    const completed = appendOneTimelineItem([request], result);
+
+    const replayed = appendOneTimelineItem(completed, request);
+
+    expect(replayed).toBe(completed);
+    expect(replayed).toHaveLength(1);
+    expect(replayed[0].event).toMatchObject({ requiresResponse: false, selected: "Allow" });
+  });
+
   it("keeps permission requests isolated by run id", () => {
     const firstRunRequest = toTimelineItem("run-1", {
       type: "permission",

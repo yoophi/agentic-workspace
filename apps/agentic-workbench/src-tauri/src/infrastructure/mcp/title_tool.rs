@@ -104,14 +104,6 @@ pub fn unsupported_tool_result(name: &str) -> Value {
     ))
 }
 
-pub fn is_authorized(headers: &HeaderMap, expected_token: &str) -> bool {
-    headers
-        .get("authorization")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .is_some_and(|token| !token.is_empty() && token == expected_token)
-}
-
 pub fn origin_allowed(headers: &HeaderMap) -> bool {
     let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
         return true;
@@ -124,8 +116,8 @@ pub fn origin_allowed(headers: &HeaderMap) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        SET_WINDOW_TITLE_TOOL, is_authorized, origin_allowed, parse_title_change_request,
-        tool_command_candidates, tools_list_result, unsupported_tool_result,
+        SET_WINDOW_TITLE_TOOL, origin_allowed, parse_title_change_request, tool_command_candidates,
+        tools_list_result, unsupported_tool_result,
     };
     use axum::http::{HeaderMap, HeaderValue};
     use serde_json::json;
@@ -166,15 +158,6 @@ mod tests {
         .unwrap();
         assert_eq!(request.run_id, "run-1");
         assert_eq!(request.title, "New title");
-    }
-
-    #[test]
-    fn bearer_token_is_required() {
-        let mut headers = HeaderMap::new();
-        assert!(!is_authorized(&headers, "secret"));
-        headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
-        assert!(is_authorized(&headers, "secret"));
-        assert!(!is_authorized(&headers, "other"));
     }
 
     #[test]

@@ -487,17 +487,19 @@ mod tests {
             .expect("handle stored");
         handle.await.expect("task should finish");
 
-        let events = sink.events.lock().unwrap();
-        assert!(events
-            .iter()
-            .any(|(_, event)| matches!(event, RunEvent::Error { .. })));
-        assert!(!events.iter().any(|(_, event)| matches!(
-            event,
-            RunEvent::Lifecycle {
-                status: LifecycleStatus::Completed,
-                ..
-            }
-        )));
+        {
+            let events = sink.events.lock().unwrap();
+            assert!(events
+                .iter()
+                .any(|(_, event)| matches!(event, RunEvent::Error { .. })));
+            assert!(!events.iter().any(|(_, event)| matches!(
+                event,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::Completed,
+                    ..
+                }
+            )));
+        }
         let state = registry.inner.lock().await;
         assert_eq!(state.finished, vec!["run-1".to_string()]);
     }

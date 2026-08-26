@@ -53,6 +53,12 @@ docs/                    Architecture and feature design notes
 - Tauri desktop prerequisites for your operating system
 - Git
 
+The distributed Agentic Workbench desktop artifact currently supports Apple
+Silicon Macs running macOS 11.0 or later. Agent execution also requires a
+recent Node.js/npm installation with `npx`, network access for the pinned ACP
+adapters, and local authentication for the selected Codex, Claude Code, or
+Kiro CLI provider.
+
 ## Setup
 
 ```sh
@@ -101,6 +107,36 @@ pnpm run build
 
 For app-specific Rust validation, run `cargo check` inside the relevant
 `apps/*/src-tauri` directory.
+
+## Installing Agentic Workbench
+
+Download the Apple Silicon DMG and its `.sha256` file from the GitHub release,
+verify it, then copy `Agentic Workbench.app` to Applications:
+
+```sh
+shasum -a 256 -c Agentic.Workbench_2026.8.1-rc.2_aarch64.dmg.sha256
+```
+
+Private RC builds use ad-hoc signing. macOS may require explicit approval in
+Privacy & Security. Stable releases must use Developer ID signing,
+notarization, stapling, and Gatekeeper verification.
+
+To roll back, quit the app, back up
+`~/Library/Application Support/com.yoophi.agentic-workbench`, and replace only
+the application bundle with the previous verified release.
+
+## Release builds
+
+Release versions use `YYYY.M.D` and `YYYY.M.D-rc.N`. Source manifests stay at
+their development baseline; the release version is injected into the Tauri
+bundle and About metadata at build time. From a clean, annotated release tag:
+
+```sh
+pnpm release:build:workbench -- 2026.8.1-rc.2
+```
+
+Verified DMG and checksum files are written under
+`release-artifacts/<version>/`.
 
 ## Architecture
 

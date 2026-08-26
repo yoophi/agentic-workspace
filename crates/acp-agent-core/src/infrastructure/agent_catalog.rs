@@ -203,11 +203,8 @@ fn opencode_models() -> Option<Vec<AgentOptionDescriptor>> {
         }
     }
 
-    let models = fetch_opencode_models_from_models_dev().or_else(|| {
-        cache_path
-            .as_ref()
-            .and_then(|path| read_cached_opencode_models(path))
-    })?;
+    let models = fetch_opencode_models_from_models_dev()
+        .or_else(|| cache_path.as_ref().and_then(read_cached_opencode_models))?;
 
     if let Some(cache_path) = &cache_path {
         write_cached_opencode_models(cache_path, &models);

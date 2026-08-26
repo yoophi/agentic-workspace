@@ -1,0 +1,117 @@
+name: Release Agentic Workbench
+
+on:
+  push:
+    tags:
+      - "v20*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: macos-15
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        run: corepack enable
+
+      - name: Set up Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-apple-darwin
+
+      - name: Validate release tag and signing requirements
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ ! "$version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.([1-9]|[12][0-9]|3[01])(-rc\.[1-9][0-9]*)?$ ]]; then
+            echo "Invalid Agentic Workbench release tag: $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          if [[ "$version" != *-* ]]; then
+            for variable in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD KEYCHAIN_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+              if [[ -z "${!variable}" ]]; then
+                echo "$variable is required for a stable release." >&2
+                exit 1
+              fi
+            done
+          fi
+          if [[ -z "$APPLE_CERTIFICATE" ]]; then
+            echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          fi
+
+      - name: Import Developer ID certificate
+        if: env.APPLE_CERTIFICATE != ''
+        run: |
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/release.keychain-db"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          identity="$(security find-identity -v -p codesigning "$keychain_path" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -1)"
+          if [[ -z "$identity" ]]; then
+            echo "Developer ID Application identity was not found." >&2
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$identity" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run release quality gates
+        run: |
+          pnpm run check-types
+          pnpm run test
+          pnpm run build
+          cargo fmt --all -- --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace --all-targets
+
+      - name: Build and verify Apple Silicon artifacts
+        run: pnpm release:build:workbench -- "$RELEASE_VERSION"
+
+      - name: Upload verified artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Agentic-Workbench-${{ env.RELEASE_VERSION }}-aarch64
+          path: release-artifacts/${{ env.RELEASE_VERSION }}/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes_file="docs/release-notes-${RELEASE_VERSION}.md"
+          release_args=("$GITHUB_REF_NAME" "release-artifacts/${RELEASE_VERSION}/Agentic.Workbench_${RELEASE_VERSION}_aarch64.dmg" "release-artifacts/${RELEASE_VERSION}/Agentic.Workbench_${RELEASE_VERSION}_aarch64.dmg.sha256" --title "Agentic Workbench ${RELEASE_VERSION}")
+          if [[ -f "$notes_file" ]]; then
+            release_args+=(--notes-file "$notes_file")
+          else
+            release_args+=(--generate-notes)
+          fi
+          if [[ "$RELEASE_VERSION" == *-* ]]; then
+            release_args+=(--prerelease)
+          else
+            release_args+=(--latest)
+          fi
+          gh release create "${release_args[@]}"

@@ -637,7 +637,7 @@ where
                 )
             })?;
         if request.goal.trim().is_empty()
-            || request.goal.as_bytes().len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
+            || request.goal.len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
         {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::InvalidInput,
@@ -1169,7 +1169,7 @@ where
         let session = session_for_window_mut(&mut sessions, window_label)?;
         let message = request.message.trim();
         if message.is_empty()
-            || message.as_bytes().len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
+            || message.len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
         {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::InvalidInput,

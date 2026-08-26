@@ -289,7 +289,7 @@ mod tests {
 
         let result = pending.await.expect("pending response");
         assert!(result.is_err());
-        assert_eq!(result.err().expect("error").message, "closed for test");
+        assert_eq!(result.expect_err("error").message, "closed for test");
         let _ = child.kill().await;
     }
 }

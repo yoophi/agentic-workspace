@@ -256,7 +256,7 @@ async fn handle_post(
 
     let request = match parse_request(payload) {
         Ok(request) => request,
-        Err(response) => return (StatusCode::BAD_REQUEST, Json(response)).into_response(),
+        Err(response) => return (StatusCode::BAD_REQUEST, Json(*response)).into_response(),
     };
     let id = request.id.clone();
 
@@ -410,10 +410,12 @@ async fn handle_tool_call(
 mod tests {
     use super::{
         AW_MCP_RUN_ID_ENV, AW_MCP_SERVER_NAME, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpServerState,
+        bearer_token,
     };
     use crate::application::orchestration_scheduler::OrchestrationScheduler;
     use crate::domain::run::{AgentMcpHttpHeader, AgentMcpServerConfig};
     use crate::infrastructure::mcp::capability_registry::CapabilityRegistry;
+    use axum::http::{HeaderMap, HeaderValue};
 
     fn test_state() -> McpServerState {
         McpServerState {
@@ -428,6 +430,14 @@ mod tests {
         assert_eq!(AW_MCP_URL_ENV, "AW_MCP_URL");
         assert_eq!(AW_MCP_TOKEN_ENV, "AW_MCP_TOKEN");
         assert_eq!(AW_MCP_RUN_ID_ENV, "AW_MCP_RUN_ID");
+    }
+
+    #[test]
+    fn bearer_token_is_required() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(bearer_token(&headers), None);
+        headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
+        assert_eq!(bearer_token(&headers), Some("secret"));
     }
 
     #[test]

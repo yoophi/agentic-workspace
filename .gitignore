@@ -5,6 +5,7 @@ build/
 storybook-static/
 coverage/
 target/
+release-artifacts/
 **/src-tauri/gen/
 .turbo/
 .pnpm-store/
