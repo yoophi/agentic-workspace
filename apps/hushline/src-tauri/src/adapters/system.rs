@@ -115,7 +115,11 @@ impl SystemToolchain {
     fn whisper_python(whisper: &Path) -> Option<PathBuf> {
         let script = fs::read_to_string(whisper).ok()?;
         // 1) shebang이 실제 python이면 그대로 사용한다.
-        if let Some(shebang) = script.lines().next().and_then(|line| line.strip_prefix("#!")) {
+        if let Some(shebang) = script
+            .lines()
+            .next()
+            .and_then(|line| line.strip_prefix("#!"))
+        {
             let executable = shebang.trim().split_whitespace().next().unwrap_or("");
             let name = Path::new(executable)
                 .file_name()

@@ -62,7 +62,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Result, anyhow};
+    use anyhow::{anyhow, Result};
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex as StdMutex},
@@ -201,12 +201,11 @@ mod tests {
         done.notified().await;
         tokio::task::yield_now().await;
 
-        assert!(
-            sink.events
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(_, event)| matches!(event, RunEvent::Error { .. }))
-        );
+        assert!(sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, event)| matches!(event, RunEvent::Error { .. })));
     }
 }

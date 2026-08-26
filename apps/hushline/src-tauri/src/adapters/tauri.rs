@@ -198,8 +198,8 @@ async fn process_video(
 }
 
 pub fn run() {
-    use tauri::{Manager, WindowEvent};
     use acp_agent_core::infrastructure::agent_session_registry::AppState;
+    use tauri::{Manager, WindowEvent};
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())

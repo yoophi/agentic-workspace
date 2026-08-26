@@ -95,7 +95,7 @@ fn is_unsupported_steer(err: &anyhow::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use anyhow::{Result, anyhow};
+    use anyhow::{anyhow, Result};
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex as StdMutex},
@@ -239,19 +239,18 @@ mod tests {
             .unwrap();
 
         assert!(registry.cancelled.lock().await.is_empty());
-        assert!(
-            sink.events
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(_, event)| matches!(
-                    event,
-                    RunEvent::Lifecycle {
-                        status: LifecycleStatus::SteerAccepted,
-                        ..
-                    }
-                ))
-        );
+        assert!(sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, event)| matches!(
+                event,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::SteerAccepted,
+                    ..
+                }
+            )));
     }
 
     #[tokio::test]
@@ -264,19 +263,18 @@ mod tests {
             .await;
 
         assert!(matches!(result, Err(SteerPromptError::Unsupported(_))));
-        assert!(
-            sink.events
-                .lock()
-                .unwrap()
-                .iter()
-                .any(|(_, event)| matches!(
-                    event,
-                    RunEvent::Lifecycle {
-                        status: LifecycleStatus::SteerRejected,
-                        ..
-                    }
-                ))
-        );
+        assert!(sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, event)| matches!(
+                event,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::SteerRejected,
+                    ..
+                }
+            )));
     }
 
     #[tokio::test]

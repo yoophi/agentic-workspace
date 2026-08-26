@@ -96,8 +96,8 @@ pub fn response_for_candidates(candidates: Vec<AgentToolCandidate>) -> AgentTool
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentToolCandidate, AgentToolCandidateScope, AgentToolCandidateSource,
-        AgentToolCandidateStatus, normalize_candidates, response_for_candidates,
+        normalize_candidates, response_for_candidates, AgentToolCandidate, AgentToolCandidateScope,
+        AgentToolCandidateSource, AgentToolCandidateStatus,
     };
 
     fn candidate(id: &str, name: &str, insert_text: &str) -> AgentToolCandidate {

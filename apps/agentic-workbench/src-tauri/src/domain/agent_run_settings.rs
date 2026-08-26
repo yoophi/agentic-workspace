@@ -51,9 +51,15 @@ pub struct AgentCommandOverrides {
     pub profiles: Vec<AgentProfile>,
 }
 
-/// 기본 프로필 4종. 실제 agent catalog id와 동일해야 legacy agentCommands 매핑과
+/// 기본 프로필 5종. 실제 agent catalog id와 동일해야 legacy agentCommands 매핑과
 /// 세션 재사용(agent id 기반)이 무변경으로 호환된다(specs/008 research R3).
-pub const BUILT_IN_AGENT_TYPES: &[&str] = &["codex", "claude-code", "opencode", "pi-coding-agent"];
+pub const BUILT_IN_AGENT_TYPES: &[&str] = &[
+    "codex",
+    "claude-code",
+    "opencode",
+    "pi-coding-agent",
+    "kiro-cli",
+];
 
 /// agent 실행 프로필(specs/008). 기본 프로필의 id는 catalog agent id와 동일해
 /// 세션 재사용 등 agent id 기반 기존 흐름과 호환된다.

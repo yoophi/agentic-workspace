@@ -11,6 +11,7 @@ import {
   updateEnvRow,
   updateProfileDraft,
 } from "./command-override-form";
+import { BUILT_IN_AGENT_PROFILES } from "./command-overrides";
 
 // 프로필 기반 폼 상태(specs/008). draft는 effectiveProfiles(seed 포함)에서 만들어지고
 // 저장 payload는 normalization을 거친다.
@@ -25,7 +26,7 @@ describe("createCommandOverrideDraft (specs/008 profiles)", () => {
 
     expect(draft.globalCommand).toBe("global-acp");
     expect(draft.globalEnv).toEqual([expect.objectContaining({ key: "SHARED", value: "1" })]);
-    expect(draft.profiles).toHaveLength(4);
+    expect(draft.profiles).toHaveLength(BUILT_IN_AGENT_PROFILES.length);
     const codex = draft.profiles.find((profile) => profile.id === "codex");
     expect(codex?.command).toBe("legacy-codex");
     expect(codex?.builtIn).toBe(true);
@@ -38,7 +39,7 @@ describe("profile draft CRUD", () => {
   it("adds custom profiles with unique ids and builtIn=false", () => {
     const draft = addCustomProfileDraft(baseDraft, "claude-code");
 
-    expect(draft.profiles).toHaveLength(5);
+    expect(draft.profiles).toHaveLength(BUILT_IN_AGENT_PROFILES.length + 1);
     const custom = draft.profiles[draft.profiles.length - 1];
     expect(custom.builtIn).toBe(false);
     expect(custom.agentType).toBe("claude-code");
@@ -55,10 +56,10 @@ describe("profile draft CRUD", () => {
     const customId = withCustom.profiles[withCustom.profiles.length - 1].id;
 
     const removed = removeCustomProfileDraft(withCustom, customId);
-    expect(removed.profiles).toHaveLength(4);
+    expect(removed.profiles).toHaveLength(BUILT_IN_AGENT_PROFILES.length);
 
     // 기본 프로필 삭제 시도는 무시된다.
-    expect(removeCustomProfileDraft(removed, "codex").profiles).toHaveLength(4);
+    expect(removeCustomProfileDraft(removed, "codex").profiles).toHaveLength(BUILT_IN_AGENT_PROFILES.length);
   });
 
   it("updates profile fields immutably", () => {

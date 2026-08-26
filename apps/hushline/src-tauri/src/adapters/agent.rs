@@ -86,7 +86,13 @@ fn ensure_cwd_within(base: &Path, cwd: &str) -> Result<PathBuf, String> {
 fn sanitize_base(base_name: &str, fallback: &str) -> String {
     let safe: String = base_name
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if safe.trim_matches('_').is_empty() {
         fallback.to_string()
@@ -139,7 +145,9 @@ pub async fn send_prompt_to_run(
 ) -> Result<(), String> {
     let owner = state.owner_of(&run_id).await;
     if !owner_matches(owner.as_deref(), window.label()) {
-        return Err(format!("소유하지 않았거나 종료된 run에 프롬프트를 보냈습니다: {run_id}"));
+        return Err(format!(
+            "소유하지 않았거나 종료된 run에 프롬프트를 보냈습니다: {run_id}"
+        ));
     }
     let sink = HushlineAgentSink::new(app);
     SendPromptUseCase::new(state.inner().clone())

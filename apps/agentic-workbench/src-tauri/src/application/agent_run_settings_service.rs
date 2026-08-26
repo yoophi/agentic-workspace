@@ -105,6 +105,7 @@ fn built_in_profile_default_name(agent_type: &str) -> String {
         "claude-code" => "Claude Code".to_string(),
         "opencode" => "OpenCode".to_string(),
         "pi-coding-agent" => "Pi Coding Agent".to_string(),
+        "kiro-cli" => "Kiro CLI".to_string(),
         other => other.to_string(),
     }
 }
@@ -453,7 +454,7 @@ mod tests {
 
         let built_ins: Vec<&AgentProfile> =
             profiles.iter().filter(|profile| profile.built_in).collect();
-        assert_eq!(built_ins.len(), 4);
+        assert_eq!(built_ins.len(), BUILT_IN_AGENT_TYPES.len());
         let claude = built_ins
             .iter()
             .find(|profile| profile.id == "claude-code")
@@ -486,7 +487,10 @@ mod tests {
             Some("Claude 수정본"),
         );
         assert!(profiles.iter().any(|entry| entry.id == "custom-1"));
-        assert_eq!(profiles.iter().filter(|entry| entry.built_in).count(), 4);
+        assert_eq!(
+            profiles.iter().filter(|entry| entry.built_in).count(),
+            BUILT_IN_AGENT_TYPES.len()
+        );
     }
 
     #[test]
@@ -522,6 +526,7 @@ mod tests {
                 profile("claude-code", true, false),
                 profile("opencode", true, false),
                 profile("pi-coding-agent", true, false),
+                profile("kiro-cli", true, false),
             ],
             ..Default::default()
         };

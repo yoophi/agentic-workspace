@@ -55,7 +55,7 @@ where
 mod tests {
     use super::*;
     use crate::domain::events::RunEvent;
-    use anyhow::{Result, anyhow};
+    use anyhow::{anyhow, Result};
     use std::{
         collections::HashMap,
         sync::{Arc, Mutex as StdMutex},
