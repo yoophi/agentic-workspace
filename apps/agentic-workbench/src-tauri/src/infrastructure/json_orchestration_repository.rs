@@ -14,6 +14,7 @@ use crate::{
 };
 
 const STORE_LABEL: &str = "orchestration sessions";
+type PendingOutboxEntry = (String, Vec<String>, Vec<String>);
 
 #[derive(Clone)]
 pub struct JsonOrchestrationRepository {
@@ -42,9 +43,7 @@ impl JsonOrchestrationRepository {
     }
 
     /// Returns durable work that must be reconciled after a process restart.
-    pub fn pending_outbox(
-        &self,
-    ) -> Result<Vec<(String, Vec<String>, Vec<String>)>, OrchestrationError> {
+    pub fn pending_outbox(&self) -> Result<Vec<PendingOutboxEntry>, OrchestrationError> {
         self.load_sessions().map(|sessions| {
             sessions
                 .into_iter()

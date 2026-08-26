@@ -57,11 +57,11 @@ impl OrchestrationEventSink for TauriOrchestrationEventSink {
             let _ = window.emit(event_name, &event);
         }
         if let Ok(payload) = serde_json::to_string(&event) {
-            let _ = window.eval(&format!(
+            let _ = window.eval(format!(
                 "window.dispatchEvent(new CustomEvent('{ORCHESTRATION_WORKSPACE_UPDATED_FALLBACK_EVENT}', {{ detail: {payload} }}));"
             ));
             if let Some(event_name) = detail_event {
-                let _ = window.eval(&format!(
+                let _ = window.eval(format!(
                     "window.dispatchEvent(new CustomEvent('{event_name}-fallback', {{ detail: {payload} }}));"
                 ));
             }

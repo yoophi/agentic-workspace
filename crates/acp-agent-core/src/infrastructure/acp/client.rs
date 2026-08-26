@@ -27,6 +27,14 @@ use crate::{
     ports::{event_sink::RunEventSink, permission::PermissionDecisionPort},
 };
 
+type ToolSignature = (
+    Option<String>,
+    String,
+    String,
+    Vec<String>,
+    Vec<ToolFileChange>,
+);
+
 pub struct AcpClient<S, P>
 where
     S: RunEventSink,
@@ -37,15 +45,7 @@ where
     auto_allow: bool,
     permission_decisions: P,
     terminals: TerminalHandler,
-    last_tool_signature: Mutex<
-        Option<(
-            Option<String>,
-            String,
-            String,
-            Vec<String>,
-            Vec<ToolFileChange>,
-        )>,
-    >,
+    last_tool_signature: Mutex<Option<ToolSignature>>,
     pending_tool_locations: Mutex<HashMap<String, Vec<String>>>,
     raw_event_log_path: PathBuf,
     sink: S,

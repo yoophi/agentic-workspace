@@ -100,7 +100,7 @@ fn overlap_area(area: &VisibleArea, bounds: &WindowBounds) -> i64 {
         - area.y.max(bounds.y))
     .max(0) as i64;
     // 완전히 벗어난 창도 비교 대상이 되도록 최소 노출 기준을 가중치로 더한다.
-    overlap_width * overlap_height + i64::from(overlap_width.min(MINIMUM_VISIBLE_PX as i64))
+    overlap_width * overlap_height + overlap_width.min(MINIMUM_VISIBLE_PX as i64)
 }
 
 fn normalize_directory(value: &str) -> Result<String, String> {

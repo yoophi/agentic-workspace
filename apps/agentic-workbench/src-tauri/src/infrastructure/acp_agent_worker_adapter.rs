@@ -513,13 +513,14 @@ mod tests {
                 run_id: "run-1".into()
             }
         );
-        let recorded = runtime.requests.lock().unwrap();
-        assert_eq!(
-            recorded[0].permission_mode,
-            crate::domain::run::PermissionMode::ReadOnly
-        );
-        assert!(recorded[0].auto_allow);
-        drop(recorded);
+        {
+            let recorded = runtime.requests.lock().unwrap();
+            assert_eq!(
+                recorded[0].permission_mode,
+                crate::domain::run::PermissionMode::ReadOnly
+            );
+            assert!(recorded[0].auto_allow);
+        }
 
         let binding = WorkerBinding {
             workspace_id: "workspace-1".into(),

@@ -75,13 +75,12 @@ fn remove_existing_window_entries<R: Runtime>(
         })
         .collect::<Vec<_>>();
 
-    if let Some(first_window_index) = indexes.first().copied() {
-        if first_window_index > 0
-            && let Some(previous) = items.get(first_window_index - 1)
-            && matches!(previous, MenuItemKind::Predefined(_))
-        {
-            indexes.push(first_window_index - 1);
-        }
+    if let Some(first_window_index) = indexes.first().copied()
+        && first_window_index > 0
+        && let Some(previous) = items.get(first_window_index - 1)
+        && matches!(previous, MenuItemKind::Predefined(_))
+    {
+        indexes.push(first_window_index - 1);
     }
 
     indexes.sort_unstable();

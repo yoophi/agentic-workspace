@@ -831,8 +831,8 @@ mod tests {
     #[test]
     fn parses_commit_history() {
         let output = "\
-abc123\0Initial commit\0A Developer\02026-06-25T00:00:00+09:00\x1e
-def456\0Add feature\0B Developer\02026-06-25T01:00:00+09:00\x1e";
+abc123\0Initial commit\0A Developer\x002026-06-25T00:00:00+09:00\x1e
+def456\0Add feature\0B Developer\x002026-06-25T01:00:00+09:00\x1e";
 
         let commits = parse_commit_history(output).expect("history should parse");
 
@@ -845,8 +845,8 @@ def456\0Add feature\0B Developer\02026-06-25T01:00:00+09:00\x1e";
     #[test]
     fn parses_commit_graph_history() {
         let output = "\
-abc123\0abc123\0def456 feed00\0Merge branch\0A Developer\02026-06-25T00:00:00+09:00\x1e
-def456\0def456\0\0Initial commit\0A Developer\02026-06-24T00:00:00+09:00\x1e";
+abc123\0abc123\0def456 feed00\0Merge branch\0A Developer\x002026-06-25T00:00:00+09:00\x1e
+def456\0def456\0\0Initial commit\0A Developer\x002026-06-24T00:00:00+09:00\x1e";
 
         let commits =
             parse_commit_graph_history(output, "abc123").expect("graph history should parse");
@@ -878,7 +878,7 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 
     #[test]
     fn parses_commit_detail() {
-        let metadata = "abc123\0Initial commit\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let metadata = "abc123\0Initial commit\0A Developer\x002026-06-25T00:00:00+09:00\n";
         let files = "A\tREADME.md\nM\tapps/desktop/src/main.tsx\n";
 
         let detail = parse_commit_detail(metadata, files).expect("detail should parse");
@@ -891,7 +891,7 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 
     #[test]
     fn decodes_korean_commit_file_paths_from_git_octal_quotes() {
-        let metadata = "abc123\0Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let metadata = "abc123\0Korean path\0A Developer\x002026-06-25T00:00:00+09:00\n";
         let files = "A\t\"docs/\\355\\225\\234\\352\\270\\200.md\"\n";
 
         let detail = parse_commit_detail(metadata, files).expect("detail should parse");
@@ -902,7 +902,7 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 
     #[test]
     fn preserves_normal_utf8_korean_mixed_and_ascii_commit_file_paths() {
-        let metadata = "abc123\0Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let metadata = "abc123\0Korean path\0A Developer\x002026-06-25T00:00:00+09:00\n";
         let files = "A\tdocs/한글.md\nM\tsrc/키오스크-test_01.ts\nD\tREADME.md\n";
 
         let detail = parse_commit_detail(metadata, files).expect("detail should parse");
@@ -914,7 +914,7 @@ tagobj\0feed00\0refs/tags/v1.0.0\0v1.0.0
 
     #[test]
     fn decodes_rename_commit_file_current_path_from_git_octal_quotes() {
-        let metadata = "abc123\0Rename Korean path\0A Developer\02026-06-25T00:00:00+09:00\n";
+        let metadata = "abc123\0Rename Korean path\0A Developer\x002026-06-25T00:00:00+09:00\n";
         let files = "R100\t\"docs/\\355\\225\\234\\352\\270\\200-old.md\"\t\"docs/\\355\\225\\234\\352\\270\\200-new.md\"\n";
 
         let detail = parse_commit_detail(metadata, files).expect("detail should parse");

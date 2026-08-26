@@ -325,12 +325,12 @@ fn open_as_tab(
                 let new_win = build_window(&app, &label, &project_id, &worktree_path, &title)?;
 
                 // 기존 세션 창이 있으면 그 창에 탭으로 합친다. 없으면 새 창 그대로(첫 탭 그룹).
-                if let Some(base) = base_window {
-                    if let (Ok(base_ptr), Ok(new_ptr)) = (base.ns_window(), new_win.ns_window()) {
-                        let base_ns: &NSWindow = unsafe { &*base_ptr.cast::<NSWindow>() };
-                        let new_ns: &NSWindow = unsafe { &*new_ptr.cast::<NSWindow>() };
-                        base_ns.addTabbedWindow_ordered(new_ns, NSWindowOrderingMode::Above);
-                    }
+                if let Some(base) = base_window
+                    && let (Ok(base_ptr), Ok(new_ptr)) = (base.ns_window(), new_win.ns_window())
+                {
+                    let base_ns: &NSWindow = unsafe { &*base_ptr.cast::<NSWindow>() };
+                    let new_ns: &NSWindow = unsafe { &*new_ptr.cast::<NSWindow>() };
+                    base_ns.addTabbedWindow_ordered(new_ns, NSWindowOrderingMode::Above);
                 }
                 let _ = crate::infrastructure::native_window_menu::sync_window_menu(&app);
                 Ok(())
@@ -357,8 +357,7 @@ fn worktree_name(worktree_path: &str) -> String {
         .trim()
         .replace('\\', "/")
         .split('/')
-        .filter(|part| !part.is_empty())
-        .next_back()
+        .rfind(|part| !part.is_empty())
         .unwrap_or("worktree")
         .to_string()
 }

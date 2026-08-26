@@ -9,6 +9,9 @@ pub enum StoreExchangeOutcome {
     Existing(AgentExchange),
 }
 
+// These ports are internal to the Tauri application, so callers do not need to
+// impose additional auto-trait bounds on the returned futures.
+#[allow(async_fn_in_trait)]
 pub trait AgentWorkspaceRegistry: Clone + Send + Sync + 'static {
     async fn sync_snapshot(
         &self,
@@ -32,6 +35,7 @@ pub trait AgentWorkspaceRegistry: Clone + Send + Sync + 'static {
     async fn remove_window(&self, window_label: &str);
 }
 
+#[allow(async_fn_in_trait)]
 pub trait AgentRunOwnerLookup: Clone + Send + Sync + 'static {
     async fn active_owner_for_exchange(&self, run_id: &str) -> Option<String>;
 }

@@ -6,6 +6,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=COMMIT_SHA");
     println!("cargo:rerun-if-env-changed=GITHUB_REF_NAME");
     println!("cargo:rerun-if-env-changed=GITHUB_REF_TYPE");
+    println!("cargo:rerun-if-env-changed=AGENTIC_WORKBENCH_RELEASE_VERSION");
 
     println!(
         "cargo:rustc-env=AGENTIC_WORKBENCH_PACKAGE_VERSION={}",
@@ -24,6 +25,14 @@ fn main() {
 }
 
 fn package_json_version() -> String {
+    if let Some(version) = env::var("AGENTIC_WORKBENCH_RELEASE_VERSION")
+        .ok()
+        .map(|version| version.trim().to_owned())
+        .filter(|version| !version.is_empty())
+    {
+        return version;
+    }
+
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into()));
     let package_json_path = manifest_dir.join("../package.json");
 

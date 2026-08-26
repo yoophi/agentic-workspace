@@ -24,6 +24,12 @@ pub struct TerminalHandler {
     terminals: Mutex<HashMap<String, TerminalState>>,
 }
 
+impl Default for TerminalHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalHandler {
     pub fn new() -> Self {
         Self {

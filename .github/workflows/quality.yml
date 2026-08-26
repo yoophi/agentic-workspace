@@ -1,0 +1,53 @@
+name: Quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Set up pnpm
+        run: corepack enable
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check TypeScript
+        run: pnpm run check-types
+
+      - name: Test frontend and shared packages
+        run: pnpm run test
+
+      - name: Build frontends
+        run: pnpm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run strict Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --all-targets

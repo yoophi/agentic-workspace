@@ -12,29 +12,39 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "22"
 
-      - name: Install OpenWiki
-        run: npm install --global openwiki
+      - name: Set up pnpm
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Run OpenWiki
-        run: openwiki code --update --print
+        if: env.OPENROUTER_API_KEY != ''
+        run: >-
+          pnpm exec openwiki code --update --print
+          "새로 작성하거나 수정하는 OpenWiki 문서는 한국어로 작성하세요. 기술 식별자와 링크는 원문 그대로 유지하세요."
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENWIKI_PROVIDER: openrouter
           OPENWIKI_MODEL_ID: z-ai/glm-5.2
-          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
-          LANGCHAIN_PROJECT: openwiki
-          LANGCHAIN_TRACING_V2: "true"
+
+      - name: Report missing OpenRouter secret
+        if: env.OPENROUTER_API_KEY == ''
+        run: echo "OPENROUTER_API_KEY is not configured; skipping the scheduled wiki update."
 
       - name: Create OpenWiki update pull request
-        uses: peter-evans/create-pull-request@v7
+        if: env.OPENROUTER_API_KEY != ''
+        uses: peter-evans/create-pull-request@v8
         with:
           add-paths: openwiki
           branch: openwiki/update

@@ -178,6 +178,25 @@ fn has_changes(path: &str) -> Result<bool, String> {
     Ok(!output.stdout.is_empty())
 }
 
+fn run_git_command(mut command: Command, context: &str) -> Result<(), String> {
+    let output = command
+        .output()
+        .map_err(|error| format!("{context}: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let message = stderr.trim();
+
+    if message.is_empty() {
+        Err(context.to_owned())
+    } else {
+        Err(format!("{context}: {message}"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,24 +237,5 @@ mod tests {
 
         assert_eq!(worktree.status, GitWorktreeStatus::Prunable);
         assert!(worktree.can_delete);
-    }
-}
-
-fn run_git_command(mut command: Command, context: &str) -> Result<(), String> {
-    let output = command
-        .output()
-        .map_err(|error| format!("{context}: {error}"))?;
-
-    if output.status.success() {
-        return Ok(());
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    let message = stderr.trim();
-
-    if message.is_empty() {
-        Err(context.to_owned())
-    } else {
-        Err(format!("{context}: {message}"))
     }
 }
