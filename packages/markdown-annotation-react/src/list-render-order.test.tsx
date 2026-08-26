@@ -4,6 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import { parseMarkdownToBlocks } from "@yoophi/markdown-annotation-core";
 import { MarkdownViewer } from "./MarkdownViewer";
 import type { MarkdownViewerProps } from "./MarkdownViewer";
+import {
+  elapsedCpuMilliseconds,
+  startCpuMeasurement,
+} from "./performance-budget.test-utils";
 import type {
   MarkdownViewerComponents,
   ViewerButtonProps,
@@ -156,18 +160,19 @@ describe("MarkdownViewer list markers (no duplicate bullets/numbers)", () => {
 });
 
 describe("MarkdownViewer list rendering performance (CT-5)", () => {
-  it("renders 2,000 list items across two runs within the preview budget", () => {
+  it("renders 2,000 list items across two runs within the preview CPU budget", () => {
     const firstRun = Array.from({ length: 1_000 }, (_, index) => `- item ${index + 1}`).join("\n");
     const secondRun = Array.from({ length: 1_000 }, (_, index) => `- item ${index + 1_001}`).join("\n");
     const markdown = `${firstRun}\n\n## Divider\n\n${secondRun}`;
     const blocks = parseMarkdownToBlocks(markdown);
 
-    const startedAt = performance.now();
+    const startedAt = startCpuMeasurement();
     const html = renderToStaticMarkup(<MarkdownViewer blocks={blocks} components={components} />);
+    const elapsedCpuMs = elapsedCpuMilliseconds(startedAt);
 
     expect(html).toContain("item 2000");
     // Two separate runs split by the heading.
     expect(countMatches(html, /<ul>/g)).toBe(2);
-    expect(performance.now() - startedAt).toBeLessThan(2_000);
+    expect(elapsedCpuMs).toBeLessThan(2_000);
   });
 });
