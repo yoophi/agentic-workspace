@@ -59,6 +59,9 @@ jobs:
           else
             echo "HAS_APPLE_CERTIFICATE=true" >> "$GITHUB_ENV"
           fi
+          if [[ -n "$APPLE_ID" && -n "$APPLE_PASSWORD" && -n "$APPLE_TEAM_ID" ]]; then
+            echo "HAS_NOTARIZATION_CREDENTIALS=true" >> "$GITHUB_ENV"
+          fi
 
       - name: Import Developer ID certificate
         if: env.HAS_APPLE_CERTIFICATE == 'true'
@@ -95,11 +98,20 @@ jobs:
           cargo clippy --workspace --all-targets -- -D warnings
           cargo test --workspace --all-targets
 
-      - name: Build and verify Apple Silicon artifacts
+      - name: Configure Apple notarization
+        if: env.HAS_NOTARIZATION_CREDENTIALS == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          {
+            printf 'APPLE_ID=%s\n' "$APPLE_ID"
+            printf 'APPLE_PASSWORD=%s\n' "$APPLE_PASSWORD"
+            printf 'APPLE_TEAM_ID=%s\n' "$APPLE_TEAM_ID"
+          } >> "$GITHUB_ENV"
+
+      - name: Build and verify Apple Silicon artifacts
         run: pnpm release:build:workbench -- "$RELEASE_VERSION"
 
       - name: Upload verified artifacts

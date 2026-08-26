@@ -43,6 +43,24 @@ if ! git diff --quiet || ! git diff --cached --quiet; then
   exit 1
 fi
 
+apple_environment_variables=(
+  APPLE_CERTIFICATE
+  APPLE_CERTIFICATE_PASSWORD
+  APPLE_ID
+  APPLE_PASSWORD
+  APPLE_TEAM_ID
+  APPLE_API_KEY
+  APPLE_API_ISSUER
+  APPLE_API_KEY_PATH
+  APPLE_SIGNING_IDENTITY
+)
+for apple_environment_variable in "${apple_environment_variables[@]}"; do
+  apple_environment_value="$(printenv "$apple_environment_variable" 2>/dev/null || true)"
+  if [[ -z "$apple_environment_value" ]]; then
+    unset "$apple_environment_variable"
+  fi
+done
+
 export AGENTIC_WORKBENCH_RELEASE_VERSION="$release_version"
 export APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}"
 export COMMIT_SHA="$head_commit"
