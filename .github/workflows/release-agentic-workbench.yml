@@ -12,13 +12,6 @@ permissions:
 jobs:
   build-release:
     runs-on: macos-15
-    env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v7
@@ -39,6 +32,13 @@ jobs:
           rustup target add aarch64-apple-darwin
 
       - name: Validate release tag and signing requirements
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           version="${GITHUB_REF_NAME#v}"
           if [[ ! "$version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.([1-9]|[12][0-9]|3[01])(-rc\.[1-9][0-9]*)?$ ]]; then
@@ -56,10 +56,16 @@ jobs:
           fi
           if [[ -z "$APPLE_CERTIFICATE" ]]; then
             echo "APPLE_SIGNING_IDENTITY=-" >> "$GITHUB_ENV"
+          else
+            echo "HAS_APPLE_CERTIFICATE=true" >> "$GITHUB_ENV"
           fi
 
       - name: Import Developer ID certificate
-        if: env.APPLE_CERTIFICATE != ''
+        if: env.HAS_APPLE_CERTIFICATE == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
         run: |
           certificate_path="$RUNNER_TEMP/developer-id.p12"
           keychain_path="$RUNNER_TEMP/release.keychain-db"
@@ -90,6 +96,10 @@ jobs:
           cargo test --workspace --all-targets
 
       - name: Build and verify Apple Silicon artifacts
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm release:build:workbench -- "$RELEASE_VERSION"
 
       - name: Upload verified artifacts
