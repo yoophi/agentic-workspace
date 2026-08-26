@@ -9,6 +9,7 @@ pub enum ProviderKind {
     Claude,
     Codex,
     Pi,
+    Kiro,
 }
 
 /// 카탈로그의 `agent_id`를 provider 종류로 매핑한다. 네이티브 세션 조회를
@@ -18,6 +19,7 @@ pub fn provider_kind_for(agent_id: &str) -> Option<ProviderKind> {
         "claude-code" => Some(ProviderKind::Claude),
         "codex" => Some(ProviderKind::Codex),
         "pi-coding-agent" => Some(ProviderKind::Pi),
+        "kiro-cli" => Some(ProviderKind::Kiro),
         _ => None,
     }
 }
