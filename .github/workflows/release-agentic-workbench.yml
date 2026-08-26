@@ -1,6 +1,7 @@
 name: Release Agentic Workbench
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v20*"
