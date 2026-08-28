@@ -7,6 +7,8 @@
 > 결론: **UI 내부 상태를 직접 조작하는 CLI가 아니라, AW 서버가 소유하는 typed `Workbench` 인터페이스를 Desktop UI와 `aw` CLI가 함께 사용해야 한다.**
 >
 > 후속 소유권 정정: [서버-클라이언트 전환 조사](client-server-architecture-research.md#기능-배치-제안)를 상위 결정으로 적용한다. ACP Run·TerminalSession은 서버가 소유하지만 tab·pane layout은 Desktop presentation 상태다. 이 문서의 server-owned logical Tab/Pane 제안은 여러 client가 topology 자체를 공유하기로 별도 결정할 때의 확장안이며, 기본 CLI는 target Desktop의 presentation intent와 ACK를 사용한다. ID 계약은 [pane·tab 식별자 설계](pane-tab-identifier-design.md)를 따른다.
+>
+> ACP 우선 보강: agent pane을 terminal emulation이 아닌 structured session·turn·tool·interaction projection으로 만드는 상세 계약과 v1/v2 Adapter 전략은 [ACP-native agent Interface 설계](acp-native-agent-interface-research.md)를 기준으로 한다.
 
 ## 요약
 
