@@ -450,11 +450,7 @@ mod tests {
 
         assert_eq!(url.query(), None);
         assert!(url.fragment().expect("fragment").contains("worktreePath="));
-        assert!(
-            url.query_pairs()
-                .find(|(key, _)| key == "worktreePath")
-                .is_none()
-        );
+        assert!(!url.query_pairs().any(|(key, _)| key == "worktreePath"));
     }
 
     #[test]
