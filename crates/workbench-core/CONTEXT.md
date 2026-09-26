@@ -64,6 +64,10 @@ _Avoid_: log, journal(run 이벤트 journal과 혼동), outbox
 재시작 시 미확정 변경 기록을 자동 재실행 없이 `적용됨` 또는 `불명`으로 판정하는 절차.
 _Avoid_: recovery(손상 파일 복구와 혼동), replay
 
+**종료 상태 규칙 (End-State Rule)**:
+외부 부작용(Git Worktree 생성·삭제)의 재시작 판정 규칙. 원하는 종료 상태가 관찰되면 누가 만들었는지 구별하지 않고 `적용됨`으로 보고, 아니면 `불명`이다.
+_Avoid_: 존재 확인, idempotent check
+
 ### 도메인
 
 **Project**:

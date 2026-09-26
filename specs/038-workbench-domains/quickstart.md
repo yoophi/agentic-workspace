@@ -76,9 +76,9 @@ cargo test -p workbench-core --test list_latency -- --ignored --nocapture
 
 ```bash
 git diff --stat origin/main -- apps/agentic-workbench/src              # 0 파일
-ls apps/agentic-workbench/src-tauri/src/domain | grep -E "saved_prompt|goal|agent_run_settings|git_|worktree_(change|file|git)|provider_session"   # 없음(재노출만 mod.rs)
+ls apps/agentic-workbench/src-tauri/src/domain | grep -E "^(saved_prompt|goal|agent_run_settings|git_remote|git_branch|git_worktree|worktree_change|worktree_file|worktree_git|provider_session)(_provider|_repository)?\.rs$" | grep -v "^worktree_git\.rs$"   # 없음(재노출만 mod.rs; git-core 재노출 모듈 git_worktree_changes.rs·worktree_git.rs는 유지)
 ls apps/agentic-workbench/src-tauri/src/infrastructure | grep -E "json_(saved_prompt|goal|agent_run_settings)|git_cli_|fs_worktree_file|fs_provider_session"   # 없음
-grep -c "Json.*Repository::from_app\|GitCli.*Provider\|FsWorktreeFileProvider\|FsProviderSessionRepository" apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs   # 0
+grep -cE "Json(Project|SavedPrompt|Goal|AgentRunSettings)Repository|GitCli[A-Za-z]*Provider|Fs(WorktreeFile|ProviderSession)" apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs   # 0 (orchestration·layout 저장소의 from_app은 범위 밖이라 남는다)
 ```
 
 CI `validate`(quality.yml)가 drift 단계 포함 통과해야 한다.
