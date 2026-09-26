@@ -1,0 +1,80 @@
+{
+  "name": "git-delete-worktree-idempotent-replay",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "worktrees": [
+        {
+          "path": "wt-a",
+          "branch": "wt-a"
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "git.deleteWorktree",
+      "requestId": "r-us2-20",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-a"
+      },
+      "idempotencyKey": "k-gdw-r"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "git.deleteWorktree",
+      "requestId": "r-us2-21",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-a"
+      },
+      "idempotencyKey": "k-gdw-r"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      },
+      "absent": [
+        "revision"
+      ]
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      },
+      "absent": [
+        "revision"
+      ]
+    }
+  ],
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 1
+  }
+}

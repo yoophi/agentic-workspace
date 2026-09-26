@@ -177,6 +177,13 @@ enum Locked {
     Crashed,
 }
 
+fn without_revision(reply: CallReply) -> CallReply {
+    match reply {
+        CallReply::Complete { output, .. } => CallReply::complete(output, None),
+        other => other,
+    }
+}
+
 fn crash_fault(request_id: &RequestId) -> WorkbenchFault {
     WorkbenchFault::internal(request_id.clone(), "crash injected")
 }
@@ -215,12 +222,15 @@ where
         idempotency_key: key,
     };
 
+    let tracks_revision = spec.tracks_revision;
     let replay = |ledger: &SqliteOperationLedger| -> Result<Option<Result<CallReply, WorkbenchFault>>, WorkbenchFault> {
         let existing = ledger
             .find(&ledger_key)
             .map_err(|error| ledger_fault(request_id, error))?;
         Ok(match decide(existing.as_ref(), &fp, request_id) {
             ReplayDecision::Proceed => None,
+            // ledger는 모든 aggregate에 revision을 매기지만, 저장 단위가 아닌 Git 변경은 첫 응답처럼 revision을 싣지 않는다.
+            ReplayDecision::ReturnStored(result) if !tracks_revision => Some(result.map(without_revision)),
             ReplayDecision::ReturnStored(result) => Some(result),
             ReplayDecision::Conflict(fault) => Some(Err(fault)),
         })
@@ -284,7 +294,6 @@ where
     // 3. lock 안: expectedRevision → apply → complete
     let expected_revision = ctx.expected_revision;
     let aggregate = spec.aggregate.clone();
-    let tracks_revision = spec.tracks_revision;
     let apply_ctx = ApplyContext {
         reserved_id: reserved_id.as_deref(),
         request_id,

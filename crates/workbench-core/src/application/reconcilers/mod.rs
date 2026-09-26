@@ -4,8 +4,10 @@
 //! 규칙 3종:
 //! - 서버가 id를 만드는 생성: 예약 id가 컬렉션에 있으면 applied (`JsonCreateReconciler`)
 //! - 삭제: 대상 id가 컬렉션에 없으면 applied (`JsonDeleteReconciler`)
-//! - Git worktree 생성·삭제: 종료 상태 규칙 (US2, `git_worktree.rs`)
+//! - Git worktree 생성·삭제: 종료 상태 규칙 (`git_worktree.rs`)
 //! - upsert·수정: 등록하지 않는다 → 항상 unknown
+
+pub mod git_worktree;
 
 use std::{collections::HashMap, sync::Arc};
 

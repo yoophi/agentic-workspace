@@ -1,0 +1,81 @@
+{
+  "name": "worktree-list-files-all",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.listFiles",
+    "requestId": "r-us2-34",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "name": "docs",
+          "path": "{{repo}}/docs",
+          "relativePath": "docs",
+          "isDir": true,
+          "size": 0
+        },
+        {
+          "name": "guide.md",
+          "path": "{{repo}}/docs/guide.md",
+          "relativePath": "docs/guide.md",
+          "isDir": false,
+          "size": 8
+        },
+        {
+          "name": "README.md",
+          "path": "{{repo}}/README.md",
+          "relativePath": "README.md",
+          "isDir": false,
+          "size": 6
+        },
+        {
+          "name": "src",
+          "path": "{{repo}}/src",
+          "relativePath": "src",
+          "isDir": true,
+          "size": 0
+        },
+        {
+          "name": "a.rs",
+          "path": "{{repo}}/src/a.rs",
+          "relativePath": "src/a.rs",
+          "isDir": false,
+          "size": 10
+        }
+      ]
+    }
+  },
+  "ignoreFields": [
+    "modifiedMs"
+  ]
+}

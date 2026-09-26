@@ -9,7 +9,8 @@ use std::{fs, sync::Arc};
 
 use serde_json::Value;
 use support::{
-    fixtures::{self, Fixture},
+    fixtures::{self, Fixture, SeedContext},
+    git_repo,
     http_harness::Harness,
     TestRuntime,
 };
@@ -56,7 +57,7 @@ fn store_len(path: &std::path::Path) -> usize {
         .len()
 }
 
-fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
+fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture, seed: &SeedContext) {
     let Some(after) = &fixture.expect_after else {
         return;
     };
@@ -82,6 +83,17 @@ fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
             assert_eq!(store_len(&path), expected_len, "{label}: {name} length");
         }
     }
+    if let Some(expected_worktrees) = after.git_worktrees {
+        let repo = seed
+            .repo
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label}: gitWorktrees needs seed.gitRepo"));
+        assert_eq!(
+            git_repo::worktree_count(&repo.root),
+            expected_worktrees,
+            "{label}: git worktree count"
+        );
+    }
     if let Some(expected_applied) = after.ledger_applied {
         let applied = runtime
             .runtime
@@ -94,9 +106,18 @@ fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_fixture_matches_on_in_memory_and_http_paths() {
-    let all = fixtures::load_all();
+    // 개발 중 한 묶음만 돌릴 때: `WORKBENCH_FIXTURE_FILTER=git-create cargo test --test contract_suite`
+    let filter = std::env::var("WORKBENCH_FIXTURE_FILTER").ok();
+    let all: Vec<Fixture> = fixtures::load_all()
+        .into_iter()
+        .filter(|fixture| {
+            filter
+                .as_deref()
+                .is_none_or(|prefix| fixture.name.starts_with(prefix))
+        })
+        .collect();
     assert!(
-        all.len() >= 9,
+        filter.is_some() || all.len() >= 9,
         "expected at least the US1 fixtures, found {}",
         all.len()
     );
@@ -119,7 +140,12 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
             );
             mem_results.push(actual);
         }
-        check_after(&format!("{} [in-memory]", fixture.name), &mem, fixture);
+        check_after(
+            &format!("{} [in-memory]", fixture.name),
+            &mem,
+            fixture,
+            &mem_seed,
+        );
 
         // HTTP: 실제 loopback 왕복 (별도 seed → 별도 저장소 경로이므로 steps도 다시 치환)
         let http = TestRuntime::new();
@@ -136,14 +162,22 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
                 expect,
                 &fixture.ignore_fields,
             );
+            let mut http_value = observable(&actual, &fixture.ignore_fields);
+            http_seed.normalize_paths(&mut http_value);
+            let mut mem_value = observable(&mem_results[index], &fixture.ignore_fields);
+            mem_seed.normalize_paths(&mut mem_value);
             assert_eq!(
-                observable(&actual, &fixture.ignore_fields),
-                observable(&mem_results[index], &fixture.ignore_fields),
+                http_value, mem_value,
                 "{} #{index}: http and in-memory diverge",
                 fixture.name
             );
         }
-        check_after(&format!("{} [http]", fixture.name), &http, fixture);
+        check_after(
+            &format!("{} [http]", fixture.name),
+            &http,
+            fixture,
+            &http_seed,
+        );
     }
 }
 

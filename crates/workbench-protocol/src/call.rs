@@ -48,13 +48,41 @@ pub enum OperationId {
     AgentRunSettingsGet,
     #[serde(rename = "agentRunSettings.save")]
     AgentRunSettingsSave,
+    #[serde(rename = "git.listRemotes")]
+    GitListRemotes,
+    #[serde(rename = "git.listBranches")]
+    GitListBranches,
+    #[serde(rename = "git.listWorktrees")]
+    GitListWorktrees,
+    #[serde(rename = "git.createWorktree")]
+    GitCreateWorktree,
+    #[serde(rename = "git.deleteWorktree")]
+    GitDeleteWorktree,
+    #[serde(rename = "worktree.listChanges")]
+    WorktreeListChanges,
+    #[serde(rename = "worktree.getChanges")]
+    WorktreeGetChanges,
+    #[serde(rename = "worktree.getFileDiff")]
+    WorktreeGetFileDiff,
+    #[serde(rename = "worktree.listFiles")]
+    WorktreeListFiles,
+    #[serde(rename = "worktree.readTextFile")]
+    WorktreeReadTextFile,
+    #[serde(rename = "worktree.listHistory")]
+    WorktreeListHistory,
+    #[serde(rename = "worktree.getGraph")]
+    WorktreeGetGraph,
+    #[serde(rename = "worktree.getCommitDetail")]
+    WorktreeGetCommitDetail,
+    #[serde(rename = "worktree.getCommitFileDiff")]
+    WorktreeGetCommitFileDiff,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 16] = [
+    pub const ALL: [OperationId; 30] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -70,6 +98,20 @@ impl OperationId {
         OperationId::GoalRecordProgress,
         OperationId::AgentRunSettingsGet,
         OperationId::AgentRunSettingsSave,
+        OperationId::GitListRemotes,
+        OperationId::GitListBranches,
+        OperationId::GitListWorktrees,
+        OperationId::GitCreateWorktree,
+        OperationId::GitDeleteWorktree,
+        OperationId::WorktreeListChanges,
+        OperationId::WorktreeGetChanges,
+        OperationId::WorktreeGetFileDiff,
+        OperationId::WorktreeListFiles,
+        OperationId::WorktreeReadTextFile,
+        OperationId::WorktreeListHistory,
+        OperationId::WorktreeGetGraph,
+        OperationId::WorktreeGetCommitDetail,
+        OperationId::WorktreeGetCommitFileDiff,
         OperationId::SystemDescribe,
     ];
 
@@ -90,6 +132,20 @@ impl OperationId {
             OperationId::GoalRecordProgress => "goal.recordProgress",
             OperationId::AgentRunSettingsGet => "agentRunSettings.get",
             OperationId::AgentRunSettingsSave => "agentRunSettings.save",
+            OperationId::GitListRemotes => "git.listRemotes",
+            OperationId::GitListBranches => "git.listBranches",
+            OperationId::GitListWorktrees => "git.listWorktrees",
+            OperationId::GitCreateWorktree => "git.createWorktree",
+            OperationId::GitDeleteWorktree => "git.deleteWorktree",
+            OperationId::WorktreeListChanges => "worktree.listChanges",
+            OperationId::WorktreeGetChanges => "worktree.getChanges",
+            OperationId::WorktreeGetFileDiff => "worktree.getFileDiff",
+            OperationId::WorktreeListFiles => "worktree.listFiles",
+            OperationId::WorktreeReadTextFile => "worktree.readTextFile",
+            OperationId::WorktreeListHistory => "worktree.listHistory",
+            OperationId::WorktreeGetGraph => "worktree.getGraph",
+            OperationId::WorktreeGetCommitDetail => "worktree.getCommitDetail",
+            OperationId::WorktreeGetCommitFileDiff => "worktree.getCommitFileDiff",
             OperationId::SystemDescribe => "system.describe",
         }
     }

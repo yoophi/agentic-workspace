@@ -1,0 +1,59 @@
+{
+  "name": "worktree-read-text-file-truncated",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        },
+        {
+          "message": "big",
+          "files": {
+            "big.txt": {
+              "repeat": "a",
+              "count": 614400
+            }
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.readTextFile",
+    "requestId": "r-us2-40",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "big.txt"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "relativePath": "big.txt",
+        "size": 614400,
+        "truncated": true
+      }
+    }
+  },
+  "ignoreFields": [
+    "content"
+  ]
+}

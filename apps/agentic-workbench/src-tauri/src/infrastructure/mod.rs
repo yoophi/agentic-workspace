@@ -1,16 +1,6 @@
-/// 파일 목록 스캔(fs_worktree_file_provider)과 worktree watcher가 공유하는
-/// 제외 디렉터리 목록. 화면에 표시되지 않는 디렉터리의 변경이 rescan을
-/// 유발하지 않도록 단일 소스로 관리한다(specs/007 research R3).
-pub const WORKSPACE_EXCLUDED_DIRS: &[&str] = &[
-    ".git",
-    ".next",
-    ".turbo",
-    "build",
-    "coverage",
-    "dist",
-    "node_modules",
-    "target",
-];
+/// 파일 목록 스캔과 worktree watcher가 공유하는 제외 디렉터리 목록. 038 US2에서 파일 목록 어댑터와 함께
+/// `workbench-core`로 옮겼고, watcher는 이 재노출로 같은 단일 소스를 쓴다(specs/007 research R3).
+pub use workbench_core::infrastructure::fs::WORKSPACE_EXCLUDED_DIRS;
 
 #[allow(unused_imports)]
 pub use acp_agent_core::infrastructure::{
@@ -22,13 +12,7 @@ pub mod acp_agent_worker_adapter;
 #[cfg(debug_assertions)]
 pub mod devtools;
 pub mod fs_provider_session_repository;
-pub mod fs_worktree_file_provider;
 pub mod fs_worktree_watcher;
-pub mod git_cli_branch_provider;
-pub mod git_cli_remote_provider;
-pub mod git_cli_worktree_change_provider;
-pub mod git_cli_worktree_git_provider;
-pub mod git_cli_worktree_provider;
 pub mod in_memory_agent_workspace_registry;
 pub mod in_memory_runtime_event_journal;
 pub mod json_acp_session_store;

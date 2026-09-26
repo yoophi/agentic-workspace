@@ -1,0 +1,44 @@
+{
+  "name": "worktree-read-text-file-directory-not-regular",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.readTextFile",
+    "requestId": "r-us2-44",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "src"
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "message": "Only regular files can be previewed.",
+      "outcome": "notApplied"
+    }
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "name": "worktree-list-changes-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "workingChanges": {
+        "README.md": "hello world\n",
+        "notes.txt": "n\n"
+      }
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.listChanges",
+    "requestId": "r-us2-28",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "path": "README.md",
+          "oldPath": null,
+          "changeType": "modified",
+          "binary": false,
+          "content": null,
+          "truncated": false
+        },
+        {
+          "path": "notes.txt",
+          "oldPath": null,
+          "changeType": "untracked",
+          "binary": false,
+          "diff": null,
+          "content": "n\n",
+          "truncated": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "name": "worktree-get-commit-detail-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getCommitDetail",
+    "requestId": "r-us2-52",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "commitHash": "{{headHash}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "hash": "{{commit:2}}",
+        "message": "feat",
+        "author": "Fixture Author",
+        "files": [
+          {
+            "path": "src/a.rs",
+            "status": "A"
+          }
+        ]
+      }
+    }
+  }
+}

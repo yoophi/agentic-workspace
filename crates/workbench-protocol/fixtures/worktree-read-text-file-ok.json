@@ -1,0 +1,49 @@
+{
+  "name": "worktree-read-text-file-ok",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.readTextFile",
+    "requestId": "r-us2-39",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "README.md"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "path": "{{repo}}/README.md",
+        "relativePath": "README.md",
+        "content": "hello\n",
+        "size": 6,
+        "truncated": false
+      }
+    }
+  }
+}

@@ -66,6 +66,9 @@ pub struct Expect {
     /// describe 응답의 각 operation에 `inputSchema`/`outputSchema` 객체가 있는지 확인한다.
     #[serde(default, rename = "schemaPresent")]
     pub schema_present: bool,
+    /// reply 최상위에 **없어야** 하는 키(예: Git 변경의 `revision`). 부분 일치로는 부재를 표현할 수 없어서 둔다.
+    #[serde(default)]
+    pub absent: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -117,6 +120,17 @@ impl SeedContext {
         }
     }
 
+    /// 두 경로(in-memory·HTTP)는 서로 다른 임시 저장소를 쓰므로, 결과를 비교하기 전에 저장소 경로를 자리표시자로
+    /// 되돌린다. 긴 경로(`{{repo}}`)를 먼저 바꾼다 — `{{repoParent}}`는 그 접두어다. 해시는 결정적이라 두지 않는다.
+    pub fn normalize_paths(&self, value: &mut Value) {
+        let mut pairs: Vec<(&String, &str)> = ["{{repo}}", "{{repoParent}}"]
+            .into_iter()
+            .filter_map(|key| self.substitutions.get(key).map(|actual| (actual, key)))
+            .collect();
+        pairs.sort_by_key(|(actual, _)| std::cmp::Reverse(actual.len()));
+        normalize(value, &pairs);
+    }
+
     pub fn substitute(&self, value: &mut Value) {
         if self.substitutions.is_empty() {
             return;
@@ -135,6 +149,21 @@ impl SeedContext {
             Value::Object(map) => map.values_mut().for_each(|item| self.substitute(item)),
             _ => {}
         }
+    }
+}
+
+fn normalize(value: &mut Value, pairs: &[(&String, &str)]) {
+    match value {
+        Value::String(text) => {
+            for (actual, placeholder) in pairs {
+                if text.contains(actual.as_str()) {
+                    *text = text.replace(actual.as_str(), placeholder);
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(|item| normalize(item, pairs)),
+        Value::Object(map) => map.values_mut().for_each(|item| normalize(item, pairs)),
+        _ => {}
     }
 }
 
@@ -313,6 +342,14 @@ pub fn assert_matches(
             let mut actual_value = serde_json::to_value(reply).expect("reply json");
             strip_ignored(&mut actual_value, ignore);
             subset_matches(expected_reply, &actual_value, "reply", &mut mismatches);
+            for key in &expect.absent {
+                if actual_value.get(key).is_some() {
+                    mismatches.push(format!(
+                        "reply/{key}: expected absent, got {}",
+                        actual_value[key]
+                    ));
+                }
+            }
             if expect.schema_present {
                 let operations = actual_value["output"]["operations"]
                     .as_array()

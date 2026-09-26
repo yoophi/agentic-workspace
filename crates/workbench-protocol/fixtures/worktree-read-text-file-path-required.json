@@ -1,0 +1,47 @@
+{
+  "name": "worktree-read-text-file-path-required",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.readTextFile",
+    "requestId": "r-us2-43",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "  "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "File path is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/path"
+      }
+    }
+  }
+}

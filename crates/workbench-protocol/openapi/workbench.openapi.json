@@ -756,6 +756,441 @@
           },
           {
             "type": "object",
+            "title": "CallReply_git_listRemotes",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listRemotes"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GitRemoteDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_git_listBranches",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listBranches"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GitBranchDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_git_listWorktrees",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listWorktrees"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/GitWorktreeDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_git_createWorktree",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.createWorktree"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_git_deleteWorktree",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.deleteWorktree"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_listChanges",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listChanges"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorktreeChangeDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_getChanges",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getChanges"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitWorktreeChangesDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_getFileDiff",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getFileDiff"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitWorktreeFileDiffDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_listFiles",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listFiles"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/WorktreeFileEntryDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_readTextFile",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.readTextFile"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/WorktreeTextFileDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_listHistory",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listHistory"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitCommitHistoryDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_getGraph",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getGraph"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitCommitGraphDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_getCommitDetail",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getCommitDetail"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitCommitDetailDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_worktree_getCommitFileDiff",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getCommitFileDiff"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/GitFileDiffDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallReply_system_describe",
             "required": [
               "kind",
@@ -1386,6 +1821,554 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_git_listRemotes",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listRemotes"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/GitListRemotesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_git_listBranches",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listBranches"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/GitListBranchesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_git_listWorktrees",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.listWorktrees"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/GitListWorktreesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_git_createWorktree",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.createWorktree"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/GitCreateWorktreeInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_git_deleteWorktree",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "git.deleteWorktree"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/GitDeleteWorktreeInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_listChanges",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listChanges"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeListChangesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_getChanges",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getChanges"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeGetChangesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_getFileDiff",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getFileDiff"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeGetFileDiffInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_listFiles",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listFiles"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeListFilesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_readTextFile",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.readTextFile"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeReadTextFileInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_listHistory",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.listHistory"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeListHistoryInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_getGraph",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getGraph"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeGetGraphInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_getCommitDetail",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getCommitDetail"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeGetCommitDetailInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_worktree_getCommitFileDiff",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "worktree.getCommitFileDiff"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/WorktreeGetCommitFileDiffInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_system_describe",
             "required": [
               "protocolVersion",
@@ -1526,6 +2509,557 @@
           "unavailable",
           "deadlineExceeded",
           "internal"
+        ]
+      },
+      "GitBranchDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "isCurrent",
+          "isRemote"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "isCurrent": {
+            "type": "boolean"
+          },
+          "isRemote": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GitChangedFileDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "group"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "stagedStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "unstagedStatus": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "group": {
+            "$ref": "#/components/schemas/GitChangedFileGroup"
+          }
+        }
+      },
+      "GitChangedFileGroup": {
+        "type": "string",
+        "enum": [
+          "staged",
+          "unstaged",
+          "untracked",
+          "conflicted"
+        ]
+      },
+      "GitCommitDetailDto": {
+        "type": "object",
+        "required": [
+          "hash",
+          "message",
+          "author",
+          "date",
+          "files"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitCommitFileChangeDto"
+            }
+          }
+        }
+      },
+      "GitCommitFileChangeDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "status"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "GitCommitGraphDto": {
+        "type": "object",
+        "required": [
+          "commits",
+          "refs",
+          "page",
+          "layoutHints"
+        ],
+        "properties": {
+          "commits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitGraphCommitDto"
+            }
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitGraphRefDto"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/GitCommitPageDto"
+          },
+          "layoutHints": {
+            "$ref": "#/components/schemas/GitGraphLayoutHintsDto"
+          }
+        }
+      },
+      "GitCommitHistoryDto": {
+        "type": "object",
+        "required": [
+          "commits",
+          "page"
+        ],
+        "properties": {
+          "commits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitCommitSummaryDto"
+            }
+          },
+          "page": {
+            "$ref": "#/components/schemas/GitCommitPageDto"
+          }
+        }
+      },
+      "GitCommitPageDto": {
+        "type": "object",
+        "required": [
+          "offset",
+          "limit",
+          "hasMore"
+        ],
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "totalCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "첫 페이지에서만 계산된다.",
+            "minimum": 0
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "cursorInvalidated": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      },
+      "GitCommitSummaryDto": {
+        "type": "object",
+        "required": [
+          "hash",
+          "message",
+          "author",
+          "date"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          }
+        }
+      },
+      "GitCreateWorktreeInput": {
+        "type": "object",
+        "description": "`path`가 빈 문자열이면 서버가 `<parent>/worktrees/<repoName>/<branch>`를, `branch`가 없으면\n`worktree-{nanos:x}`를 채운다. 채운 뒤의 경로가 변경 기록에 남는다(FR-005).",
+        "required": [
+          "workingDirectory",
+          "path"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitDeleteWorktreeInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "path"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitFileDiffDto": {
+        "type": "object",
+        "required": [
+          "commitHash",
+          "path",
+          "content",
+          "isBinary",
+          "isTruncated"
+        ],
+        "properties": {
+          "commitHash": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "isBinary": {
+            "type": "boolean"
+          },
+          "isTruncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GitGraphCommitDto": {
+        "type": "object",
+        "required": [
+          "hash",
+          "shortHash",
+          "parents",
+          "message",
+          "author",
+          "date",
+          "isHead",
+          "isMerge"
+        ],
+        "properties": {
+          "hash": {
+            "type": "string"
+          },
+          "shortHash": {
+            "type": "string"
+          },
+          "parents": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message": {
+            "type": "string"
+          },
+          "author": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          },
+          "isHead": {
+            "type": "boolean"
+          },
+          "isMerge": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GitGraphLayoutHintsDto": {
+        "type": "object",
+        "required": [
+          "rowHeight",
+          "maxInitialLanes"
+        ],
+        "properties": {
+          "rowHeight": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "maxInitialLanes": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        }
+      },
+      "GitGraphRefDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "target",
+          "kind"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/GitGraphRefKind"
+          }
+        }
+      },
+      "GitGraphRefKind": {
+        "type": "string",
+        "enum": [
+          "localBranch",
+          "remoteBranch",
+          "tag"
+        ]
+      },
+      "GitListBranchesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitListRemotesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitListWorktreesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "includeStatus": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "생략하면 `true`(worktree별 clean/dirty 계산). 오늘의 데스크톱 기본값과 같다."
+          }
+        },
+        "additionalProperties": false
+      },
+      "GitRemoteDto": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "fetchUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pushUrl": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "GitWorktreeChangesDto": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "files",
+          "stagedCount",
+          "unstagedCount",
+          "untrackedCount",
+          "conflictedCount"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GitChangedFileDto"
+            }
+          },
+          "stagedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unstagedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "untrackedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "conflictedCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "GitWorktreeDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "status",
+          "canDelete"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "head": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/GitWorktreeStatus"
+          },
+          "pruneReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "canDelete": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GitWorktreeFileDiffDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "content",
+          "isBinary",
+          "isTruncated"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "isBinary": {
+            "type": "boolean"
+          },
+          "isTruncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "GitWorktreeStatus": {
+        "type": "string",
+        "enum": [
+          "clean",
+          "prunable",
+          "dirty",
+          "unknown"
         ]
       },
       "GoalClearInput": {
@@ -2040,6 +3574,339 @@
               "object",
               "null"
             ]
+          }
+        }
+      },
+      "WorktreeChangeDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "changeType",
+          "binary",
+          "truncated"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "changeType": {
+            "$ref": "#/components/schemas/WorktreeChangeType"
+          },
+          "binary": {
+            "type": "boolean"
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorktreeChangeType": {
+        "type": "string",
+        "enum": [
+          "added",
+          "modified",
+          "deleted",
+          "renamed",
+          "untracked"
+        ]
+      },
+      "WorktreeFileEntryDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "path",
+          "relativePath",
+          "isDir",
+          "size"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string"
+          },
+          "isDir": {
+            "type": "boolean"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "modifiedMs": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "WorktreeFileListKind": {
+        "type": "string",
+        "enum": [
+          "all",
+          "markdown"
+        ]
+      },
+      "WorktreeFileListScopeDto": {
+        "type": "object",
+        "description": "조회 범위. 기본값(전체 트리)은 범위를 생략한 호출과 같다. 중첩 객체라 unknown 필드를 거절하지 않는다(R2).",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/WorktreeFileListKind"
+          },
+          "dir": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "조회 시작 상대 경로. worktree 밖이면 `forbidden`."
+          },
+          "depth": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "1이면 해당 디렉터리 직계만. 없으면 무제한.",
+            "minimum": 0
+          }
+        }
+      },
+      "WorktreeGetChangesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeGetCommitDetailInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "commitHash"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "commitHash": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeGetCommitFileDiffInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "commitHash",
+          "path"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "commitHash": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeGetFileDiffInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "path"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeGetGraphInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "maxCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeListChangesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeListFilesInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "scope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorktreeFileListScopeDto"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeListHistoryInput": {
+        "type": "object",
+        "description": "`maxCount` 기본 100(이력)·300(그래프), 상한 500(초과 시 clamp).",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "maxCount": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "offset": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "마지막으로 받은 commit hash. 이력이 재작성됐으면 `page.cursorInvalidated: true`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeReadTextFileInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "path"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "WorktreeTextFileDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "relativePath",
+          "content",
+          "size",
+          "truncated"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "relativePath": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
           }
         }
       }

@@ -1,6 +1,9 @@
 pub mod agent_run_settings_service;
 pub mod authorization;
 pub mod dto;
+pub mod git_dto;
+pub mod git_service;
+pub mod git_worktree_service;
 pub mod goal_service;
 pub mod handlers;
 pub mod idempotency;
@@ -10,3 +13,6 @@ pub mod reconcilers;
 pub mod registry;
 pub mod saved_prompt_service;
 pub mod workbench_runtime;
+pub mod worktree_changes_service;
+pub mod worktree_file_service;
+pub mod worktree_git_service;

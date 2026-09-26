@@ -1,0 +1,22 @@
+{
+  "name": "git-list-worktrees-working-directory-required",
+  "principal": "desktop",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.listWorktrees",
+    "requestId": "r-us2-8",
+    "input": {
+      "workingDirectory": " "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Working directory is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/workingDirectory"
+      }
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "name": "git-delete-worktree-conflict-different-payload",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "worktrees": [
+        {
+          "path": "wt-a",
+          "branch": "wt-a"
+        },
+        {
+          "path": "wt-b",
+          "branch": "wt-b"
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "git.deleteWorktree",
+      "requestId": "r-us2-22",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-a"
+      },
+      "idempotencyKey": "k-gdw-c"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "git.deleteWorktree",
+      "requestId": "r-us2-23",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-b"
+      },
+      "idempotencyKey": "k-gdw-c"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      }
+    },
+    {
+      "fault": {
+        "code": "conflict",
+        "outcome": "applied",
+        "retryable": false
+      }
+    }
+  ],
+  "expectAfter": {
+    "gitWorktrees": 2,
+    "ledgerApplied": 1
+  }
+}

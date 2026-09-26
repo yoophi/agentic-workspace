@@ -5,7 +5,8 @@ use std::{
 
 /// `AW_PERF_LOG=1` 환경 변수로 켜는 성능 계측 로그.
 /// 포맷: `perf kind=<command|git|watcher> name=<..> wait_ms=<n> run_ms=<n> [extra]`
-/// stderr 전용이며 외부 소비 계약이 아니다(specs/007 research R12).
+/// stderr 전용이며 외부 소비 계약이 아니다(specs/007 research R12). `kind=git` 줄은 Git 어댑터와 함께
+/// `workbench-core`(`infrastructure::perf`)로 옮겼다(038 US2) — 같은 환경 변수·형식이다.
 pub fn perf_log_enabled() -> bool {
     static ENABLED: OnceLock<bool> = OnceLock::new();
     *ENABLED.get_or_init(|| std::env::var("AW_PERF_LOG").is_ok_and(|value| value == "1"))
@@ -38,12 +39,6 @@ pub async fn log_async_command<T>(
     let result = task.await;
     log_async_command_run(name, started_at.elapsed());
     result
-}
-
-pub fn log_git(name: &str, run: Duration) {
-    if perf_log_enabled() {
-        eprintln!("perf kind=git name={name} run_ms={}", run.as_millis());
-    }
 }
 
 pub fn log_watcher(name: &str, extra: &str) {

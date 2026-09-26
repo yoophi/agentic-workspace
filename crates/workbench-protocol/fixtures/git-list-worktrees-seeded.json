@@ -1,0 +1,65 @@
+{
+  "name": "git-list-worktrees-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "worktrees": [
+        {
+          "path": "wt-a",
+          "branch": "wt-a"
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.listWorktrees",
+    "requestId": "r-us2-6",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "path": "{{repo}}",
+          "head": "{{headHash}}",
+          "branch": "main",
+          "status": "clean",
+          "pruneReason": null,
+          "canDelete": false
+        },
+        {
+          "path": "{{repoParent}}/wt-a",
+          "head": "{{headHash}}",
+          "branch": "wt-a",
+          "status": "clean",
+          "pruneReason": null,
+          "canDelete": true
+        }
+      ]
+    }
+  }
+}

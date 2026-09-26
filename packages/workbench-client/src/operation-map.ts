@@ -24,6 +24,18 @@ export type SavedPrompt = Schemas["SavedPromptDto"];
 export type Goal = Schemas["GoalDto"];
 export type GoalStatus = Schemas["GoalStatus"];
 export type AgentRunSettings = Schemas["AgentRunSettingsDto"];
+// 038 US2: Git·worktree 조회 결과. 프론트 `entities/project`·`entities/worktree-*`의 타입과 필드·표기가 같다.
+export type GitRemote = Schemas["GitRemoteDto"];
+export type GitBranch = Schemas["GitBranchDto"];
+export type GitWorktree = Schemas["GitWorktreeDto"];
+export type WorktreeChange = Schemas["WorktreeChangeDto"];
+export type GitWorktreeChanges = Schemas["GitWorktreeChangesDto"];
+export type WorktreeFileEntry = Schemas["WorktreeFileEntryDto"];
+export type WorktreeTextFile = Schemas["WorktreeTextFileDto"];
+export type GitCommitHistory = Schemas["GitCommitHistoryDto"];
+export type GitCommitGraph = Schemas["GitCommitGraphDto"];
+export type GitCommitDetail = Schemas["GitCommitDetailDto"];
+export type GitFileDiff = Schemas["GitFileDiffDto"];
 
 export type OperationId = CallRequest["operation"];
 

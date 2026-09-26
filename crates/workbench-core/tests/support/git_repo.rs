@@ -54,6 +54,9 @@ pub struct WorktreeSeed {
     /// 저장소 **부모** 디렉터리 기준 상대 경로.
     pub path: String,
     pub branch: String,
+    /// worktree를 만든 뒤 그 안에 쓰는 커밋하지 않은 파일(삭제 전 검사 `dirty` 시나리오용).
+    #[serde(default)]
+    pub files: BTreeMap<String, FileContent>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -185,6 +188,9 @@ pub fn build(seed: &GitRepoSeed, parent: &Path) -> BuiltRepo {
             ],
             None,
         );
+        for (relative, content) in &worktree.files {
+            write_file(&path, relative, content);
+        }
     }
     for (relative, content) in &seed.working_changes {
         match content {
@@ -200,6 +206,22 @@ pub fn build(seed: &GitRepoSeed, parent: &Path) -> BuiltRepo {
         name: seed.name.clone(),
         commits,
     }
+}
+
+/// `git worktree list --porcelain`의 항목 수(main 포함).
+pub fn worktree_count(root: &Path) -> usize {
+    git(root, &["worktree", "list", "--porcelain"], None)
+        .lines()
+        .filter(|line| line.starts_with("worktree "))
+        .count()
+}
+
+/// `git worktree list --porcelain`의 경로들(실제 경로).
+pub fn worktree_paths(root: &Path) -> Vec<String> {
+    git(root, &["worktree", "list", "--porcelain"], None)
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree ").map(str::to_owned))
+        .collect()
 }
 
 /// 저장소 root의 canonical 문자열. Git이 `worktree list --porcelain`에 내는 형식과 같다.

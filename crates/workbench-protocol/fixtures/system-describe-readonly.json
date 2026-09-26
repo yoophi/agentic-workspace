@@ -42,6 +42,90 @@
             ]
           },
           {
+            "id": "git.listRemotes",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "git.listBranches",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "git.listWorktrees",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "worktree.listChanges",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getChanges",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getFileDiff",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.listFiles",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.readTextFile",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.listHistory",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getGraph",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getCommitDetail",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getCommitFileDiff",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

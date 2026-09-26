@@ -1,0 +1,51 @@
+{
+  "name": "git-create-worktree-bad-reference-internal",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.createWorktree",
+    "requestId": "r-us2-17",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/wt-new",
+      "branch": "feature/new",
+      "reference": "no-such-ref"
+    },
+    "idempotencyKey": "k-gcw-bad"
+  },
+  "expect": {
+    "fault": {
+      "code": "internal",
+      "outcome": "notApplied",
+      "retryable": false
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 0
+  }
+}

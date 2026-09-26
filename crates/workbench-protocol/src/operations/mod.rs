@@ -2,10 +2,12 @@
 
 pub mod agent_run_settings;
 pub mod common;
+pub mod git;
 pub mod goal;
 pub mod project;
 pub mod saved_prompt;
 pub mod system;
+pub mod worktree;
 
 use utoipa::PartialSchema;
 
@@ -46,7 +48,7 @@ const fn command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 16] = [
+pub const OPERATIONS: [OperationSpec; 30] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -67,6 +69,23 @@ pub const OPERATIONS: [OperationSpec; 16] = [
     command(
         OperationId::AgentRunSettingsSave,
         &[Scope::AgentRunSettingsWrite],
+    ),
+    query(OperationId::GitListRemotes, &[Scope::GitRead]),
+    query(OperationId::GitListBranches, &[Scope::GitRead]),
+    query(OperationId::GitListWorktrees, &[Scope::GitRead]),
+    command(OperationId::GitCreateWorktree, &[Scope::GitWrite]),
+    command(OperationId::GitDeleteWorktree, &[Scope::GitWrite]),
+    query(OperationId::WorktreeListChanges, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeGetChanges, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeGetFileDiff, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeListFiles, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeReadTextFile, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeListHistory, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeGetGraph, &[Scope::WorktreeRead]),
+    query(OperationId::WorktreeGetCommitDetail, &[Scope::WorktreeRead]),
+    query(
+        OperationId::WorktreeGetCommitFileDiff,
+        &[Scope::WorktreeRead],
     ),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
@@ -129,6 +148,60 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::AgentRunSettingsSave => (
             agent_run_settings::AgentRunSettingsSaveInput::schema(),
             agent_run_settings::AgentRunSettingsDto::schema(),
+        ),
+        OperationId::GitListRemotes => (
+            git::GitListRemotesInput::schema(),
+            common::array_schema(git::GitRemoteDto::schema()),
+        ),
+        OperationId::GitListBranches => (
+            git::GitListBranchesInput::schema(),
+            common::array_schema(git::GitBranchDto::schema()),
+        ),
+        OperationId::GitListWorktrees => (
+            git::GitListWorktreesInput::schema(),
+            common::array_schema(git::GitWorktreeDto::schema()),
+        ),
+        OperationId::GitCreateWorktree => {
+            (git::GitCreateWorktreeInput::schema(), EmptyOutput::schema())
+        }
+        OperationId::GitDeleteWorktree => {
+            (git::GitDeleteWorktreeInput::schema(), EmptyOutput::schema())
+        }
+        OperationId::WorktreeListChanges => (
+            worktree::WorktreeListChangesInput::schema(),
+            common::array_schema(worktree::WorktreeChangeDto::schema()),
+        ),
+        OperationId::WorktreeGetChanges => (
+            worktree::WorktreeGetChangesInput::schema(),
+            worktree::GitWorktreeChangesDto::schema(),
+        ),
+        OperationId::WorktreeGetFileDiff => (
+            worktree::WorktreeGetFileDiffInput::schema(),
+            worktree::GitWorktreeFileDiffDto::schema(),
+        ),
+        OperationId::WorktreeListFiles => (
+            worktree::WorktreeListFilesInput::schema(),
+            common::array_schema(worktree::WorktreeFileEntryDto::schema()),
+        ),
+        OperationId::WorktreeReadTextFile => (
+            worktree::WorktreeReadTextFileInput::schema(),
+            worktree::WorktreeTextFileDto::schema(),
+        ),
+        OperationId::WorktreeListHistory => (
+            worktree::WorktreeListHistoryInput::schema(),
+            worktree::GitCommitHistoryDto::schema(),
+        ),
+        OperationId::WorktreeGetGraph => (
+            worktree::WorktreeGetGraphInput::schema(),
+            worktree::GitCommitGraphDto::schema(),
+        ),
+        OperationId::WorktreeGetCommitDetail => (
+            worktree::WorktreeGetCommitDetailInput::schema(),
+            worktree::GitCommitDetailDto::schema(),
+        ),
+        OperationId::WorktreeGetCommitFileDiff => (
+            worktree::WorktreeGetCommitFileDiffInput::schema(),
+            worktree::GitFileDiffDto::schema(),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

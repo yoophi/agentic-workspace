@@ -1,0 +1,22 @@
+{
+  "name": "worktree-get-graph-working-directory-required",
+  "principal": "desktop",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getGraph",
+    "requestId": "r-us2-51",
+    "input": {
+      "workingDirectory": " "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Working directory is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/workingDirectory"
+      }
+    }
+  }
+}

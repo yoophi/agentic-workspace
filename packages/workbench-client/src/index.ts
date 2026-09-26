@@ -9,6 +9,14 @@ export type {
   CallRequest,
   DescribeOutput,
   FaultCode,
+  GitBranch,
+  GitCommitDetail,
+  GitCommitGraph,
+  GitCommitHistory,
+  GitFileDiff,
+  GitRemote,
+  GitWorktree,
+  GitWorktreeChanges,
   Goal,
   GoalStatus,
   OperationDescriptor,
@@ -20,5 +28,8 @@ export type {
   SavedPrompt,
   Schemas,
   WorkbenchFault,
+  WorktreeChange,
+  WorktreeFileEntry,
+  WorktreeTextFile,
 } from "./operation-map";
 export { CALLS_PATH, PROTOCOL_VERSION } from "./operation-map";

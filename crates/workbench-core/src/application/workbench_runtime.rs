@@ -45,6 +45,11 @@ pub enum CrashPoint {
     BeforeApplied,
 }
 
+impl CrashPoint {
+    /// 부작용(JSON 저장 또는 Git 명령) 직후. Git 변경 테스트에서 의미가 드러나도록 붙인 이름이다.
+    pub const AFTER_SIDE_EFFECT: CrashPoint = CrashPoint::AfterJsonSave;
+}
+
 /// 프로세스는 살아 있지만 특정 저장 단계가 실패하는 상황을 주입한다(crash와 달리 handler가 계속 실행된다).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailPoint {

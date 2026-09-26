@@ -10,7 +10,12 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use workbench_core::{
     application::workbench_runtime::WorkbenchRuntime,
-    domain::{agent_run_settings::AgentRunSettings, project::Project},
+    domain::{
+        agent_run_settings::AgentRunSettings,
+        git_worktree::GitWorktreeCreateDraft,
+        project::Project,
+        worktree_file::{WorktreeFileListKind, WorktreeFileListScope},
+    },
 };
 use workbench_protocol::{
     AuthenticatedPrincipal, CallReply, CallRequest, IdempotencyKey, OperationId, PROTOCOL_VERSION,
@@ -164,6 +169,101 @@ pub fn agent_run_settings_get_input(working_directory: String) -> Value {
 
 pub fn agent_run_settings_save_input(settings: AgentRunSettings) -> Value {
     serde_json::json!({ "settings": settings })
+}
+
+// ---- 038 US2: Git·worktree 14개 command의 인자 → `CallRequest.input` (contracts/tauri-compat-commands.md 변환 규칙) ----
+// `Option::None`은 필드를 생략한다. 서버 기본값은 오늘의 command 기본값과 같다(`includeStatus` → true, 범위 → 전체).
+
+/// `workingDirectory` 하나만 받는 조회(`git.listRemotes`·`git.listBranches`·`worktree.listChanges`·`worktree.getChanges`).
+pub fn working_directory_input(working_directory: String) -> Value {
+    serde_json::json!({ "workingDirectory": working_directory })
+}
+
+pub fn git_list_worktrees_input(working_directory: String, include_status: Option<bool>) -> Value {
+    let mut value = working_directory_input(working_directory);
+    if let Some(include_status) = include_status {
+        value["includeStatus"] = serde_json::json!(include_status);
+    }
+    value
+}
+
+pub fn git_create_worktree_input(
+    working_directory: String,
+    draft: GitWorktreeCreateDraft,
+) -> Value {
+    let mut value =
+        serde_json::json!({ "workingDirectory": working_directory, "path": draft.path });
+    if let Some(branch) = draft.branch {
+        value["branch"] = serde_json::json!(branch);
+    }
+    if let Some(reference) = draft.reference {
+        value["reference"] = serde_json::json!(reference);
+    }
+    value
+}
+
+pub fn git_delete_worktree_input(working_directory: String, path: String) -> Value {
+    serde_json::json!({ "workingDirectory": working_directory, "path": path })
+}
+
+/// `workingDirectory` + 상대 `path`(`worktree.getFileDiff`·`worktree.readTextFile`).
+pub fn worktree_path_input(working_directory: String, path: String) -> Value {
+    serde_json::json!({ "workingDirectory": working_directory, "path": path })
+}
+
+pub fn worktree_list_files_input(
+    working_directory: String,
+    scope: Option<WorktreeFileListScope>,
+) -> Value {
+    let mut value = working_directory_input(working_directory);
+    if let Some(scope) = scope {
+        let mut scope_value = serde_json::json!({
+            "kind": match scope.kind {
+                WorktreeFileListKind::All => "all",
+                WorktreeFileListKind::Markdown => "markdown",
+            }
+        });
+        if let Some(dir) = scope.dir {
+            scope_value["dir"] = serde_json::json!(dir);
+        }
+        if let Some(depth) = scope.depth {
+            scope_value["depth"] = serde_json::json!(depth);
+        }
+        value["scope"] = scope_value;
+    }
+    value
+}
+
+/// 이력·그래프 페이지 요청(`worktree.listHistory`·`worktree.getGraph`).
+pub fn worktree_page_input(
+    working_directory: String,
+    max_count: Option<usize>,
+    offset: Option<usize>,
+    cursor: Option<String>,
+) -> Value {
+    let mut value = working_directory_input(working_directory);
+    if let Some(max_count) = max_count {
+        value["maxCount"] = serde_json::json!(max_count);
+    }
+    if let Some(offset) = offset {
+        value["offset"] = serde_json::json!(offset);
+    }
+    if let Some(cursor) = cursor {
+        value["cursor"] = serde_json::json!(cursor);
+    }
+    value
+}
+
+pub fn worktree_commit_input(working_directory: String, commit_hash: String) -> Value {
+    serde_json::json!({ "workingDirectory": working_directory, "commitHash": commit_hash })
+}
+
+pub fn worktree_commit_file_input(
+    working_directory: String,
+    commit_hash: String,
+    path: String,
+) -> Value {
+    serde_json::json!({ "workingDirectory": working_directory, "commitHash": commit_hash, "path": path })
 }
 
 pub fn list_projects_request(request_id: RequestId) -> CallRequest {
@@ -370,10 +470,25 @@ mod tests {
         }
     }
 
-    /// 038 US1: fixture의 `input`을 AW `*Input`으로 읽어 변환하면 fixture와 같은 `input`이 나와야 한다.
+    fn wd(input: &Value) -> String {
+        input["workingDirectory"].as_str().unwrap().to_owned()
+    }
+
+    fn text(input: &Value, key: &str) -> String {
+        input[key].as_str().unwrap().to_owned()
+    }
+
+    fn opt_usize(input: &Value, key: &str) -> Option<usize> {
+        input
+            .get(key)
+            .and_then(Value::as_u64)
+            .map(|value| value as usize)
+    }
+
+    /// 038 US1·US2: fixture의 `input`을 AW `*Input`으로 읽어 변환하면 fixture와 같은 `input`이 나와야 한다.
     /// (`operation` 접두어별로 변환 함수를 고른다. 키 누락·readonly fixture도 입력 형태는 같다.)
     #[test]
-    fn us1_inputs_match_fixture_shapes() {
+    fn inputs_match_fixture_shapes() {
         let all = fs::read_dir(fixtures_dir())
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -434,6 +549,47 @@ mod tests {
                             Err(_) => continue, // 검증 실패 fixture(빈 workingDirectory 등)는 AW 타입도 거절하지 않지만 형태 비교 대상 아님
                         }
                     }
+                    "git.listRemotes"
+                    | "git.listBranches"
+                    | "worktree.listChanges"
+                    | "worktree.getChanges" => working_directory_input(wd(&input)),
+                    "git.listWorktrees" => git_list_worktrees_input(
+                        wd(&input),
+                        input.get("includeStatus").and_then(Value::as_bool),
+                    ),
+                    "git.createWorktree" => git_create_worktree_input(
+                        wd(&input),
+                        serde_json::from_value(input.clone()).unwrap(),
+                    ),
+                    "git.deleteWorktree" => {
+                        git_delete_worktree_input(wd(&input), text(&input, "path"))
+                    }
+                    "worktree.getFileDiff" | "worktree.readTextFile" => {
+                        worktree_path_input(wd(&input), text(&input, "path"))
+                    }
+                    "worktree.listFiles" => worktree_list_files_input(
+                        wd(&input),
+                        input
+                            .get("scope")
+                            .map(|scope| serde_json::from_value(scope.clone()).unwrap()),
+                    ),
+                    "worktree.listHistory" | "worktree.getGraph" => worktree_page_input(
+                        wd(&input),
+                        opt_usize(&input, "maxCount"),
+                        opt_usize(&input, "offset"),
+                        input
+                            .get("cursor")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned),
+                    ),
+                    "worktree.getCommitDetail" => {
+                        worktree_commit_input(wd(&input), text(&input, "commitHash"))
+                    }
+                    "worktree.getCommitFileDiff" => worktree_commit_file_input(
+                        wd(&input),
+                        text(&input, "commitHash"),
+                        text(&input, "path"),
+                    ),
                     _ => continue,
                 };
                 // `null`은 AW 타입이 None으로 읽어 생략하고, 도메인 타입의 serde default가 채운 필드는 fixture에 없을 수
@@ -448,7 +604,10 @@ mod tests {
                 checked += 1;
             }
         }
-        assert!(checked >= 13, "expected US1 fixtures, checked {checked}");
+        assert!(
+            checked >= 13 + 52,
+            "expected US1+US2 fixtures, checked {checked}"
+        );
     }
 
     #[test]

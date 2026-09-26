@@ -1,0 +1,81 @@
+{
+  "name": "worktree-get-graph-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getGraph",
+    "requestId": "r-us2-50",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "commits": [
+          {
+            "hash": "{{commit:2}}",
+            "parents": [
+              "{{commit:1}}"
+            ],
+            "message": "feat",
+            "isHead": true,
+            "isMerge": false
+          },
+          {
+            "hash": "{{commit:1}}",
+            "parents": [
+              "{{commit:0}}"
+            ],
+            "message": "docs",
+            "isHead": false,
+            "isMerge": false
+          },
+          {
+            "hash": "{{commit:0}}",
+            "parents": [],
+            "message": "init",
+            "isHead": false,
+            "isMerge": false
+          }
+        ],
+        "refs": [
+          {
+            "name": "main",
+            "target": "{{commit:2}}",
+            "kind": "localBranch"
+          }
+        ],
+        "layoutHints": {
+          "rowHeight": 32,
+          "maxInitialLanes": 10
+        }
+      }
+    }
+  }
+}

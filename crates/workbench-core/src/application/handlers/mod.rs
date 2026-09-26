@@ -2,14 +2,17 @@
 //! handler + reconciler 등록을 한다.
 
 pub mod agent_run_settings;
+pub mod git;
 pub mod goal;
 pub mod project;
 pub mod saved_prompt;
 pub mod system;
+pub mod worktree;
 
-use std::sync::Arc;
+use std::{marker::PhantomData, sync::Arc};
 
-use serde::Serialize;
+use async_trait::async_trait;
+use serde::{de::DeserializeOwned, Serialize};
 use workbench_protocol::{CallReply, FaultCode, OperationId, RequestId, WorkbenchFault};
 
 use crate::{
@@ -19,11 +22,11 @@ use crate::{
         reconcilers::{
             JsonCreateReconciler, JsonDeleteReconciler, LoadCollection, ReconcilerRegistry,
         },
-        registry::Registry,
+        registry::{decode_input, CallContext, OperationHandler, Registry},
         workbench_runtime::TestHooks,
     },
     domain::{
-        errors::{AgentRunSettingsError, GoalError, SavedPromptError},
+        errors::{AgentRunSettingsError, GitError, GoalError, SavedPromptError, WorktreeFileError},
         project_error::ProjectError,
     },
     infrastructure::{
@@ -107,6 +110,53 @@ pub fn agent_run_settings_fault(
     }
 }
 
+/// Git 오류 → Fault(research R7). stderr는 해석하지 않는다: 비정상 종료는 전부 `internal`(재시도 불가).
+pub fn git_fault(request_id: &RequestId, error: GitError) -> WorkbenchFault {
+    match &error {
+        GitError::Required(_) | GitError::Unresolvable(_) => WorkbenchFault::invalid_argument(
+            request_id.clone(),
+            error.to_string(),
+            error.field_path(),
+        ),
+        GitError::GitNotFound(_) => {
+            WorkbenchFault::unavailable(request_id.clone(), error.to_string())
+        }
+        GitError::WorktreeNotFound => {
+            WorkbenchFault::new(FaultCode::NotFound, request_id.clone(), error.to_string())
+        }
+        GitError::WorktreeHasChanges | GitError::StatusUnresolved => WorkbenchFault::new(
+            FaultCode::PreconditionFailed,
+            request_id.clone(),
+            error.to_string(),
+        ),
+        GitError::CommandFailed(_) | GitError::Io(_) | GitError::Clock(_) => {
+            WorkbenchFault::internal(request_id.clone(), error.to_string())
+        }
+    }
+}
+
+/// 파일 목록·미리보기 오류 → Fault. worktree 밖 경로는 `forbidden`, 사전 확인 가능한 없음은 `notFound`.
+pub fn worktree_file_fault(request_id: &RequestId, error: WorktreeFileError) -> WorkbenchFault {
+    match &error {
+        WorktreeFileError::Required(_) | WorktreeFileError::NotUtf8 => {
+            WorkbenchFault::invalid_argument(
+                request_id.clone(),
+                error.to_string(),
+                error.field_path(),
+            )
+        }
+        WorktreeFileError::OutsideWorktree => {
+            WorkbenchFault::new(FaultCode::Forbidden, request_id.clone(), error.to_string())
+        }
+        WorktreeFileError::NotADirectory
+        | WorktreeFileError::NotRegularFile
+        | WorktreeFileError::NotFound(_) => {
+            WorkbenchFault::new(FaultCode::NotFound, request_id.clone(), error.to_string())
+        }
+        WorktreeFileError::Io(_) => WorkbenchFault::internal(request_id.clone(), error.to_string()),
+    }
+}
+
 pub fn ledger_fault(request_id: &RequestId, error: LedgerError) -> WorkbenchFault {
     match &error {
         LedgerError::Storage(_) | LedgerError::UnsupportedSchema { .. } => {
@@ -147,6 +197,50 @@ pub(crate) fn complete<T: Serialize>(output: T) -> CallReply {
     )
 }
 
+/// 저장 단위가 없는 조회(Git·파일시스템)의 공통 handler: input 역직렬화 → blocking pool에서 `run` → output
+/// 직렬화. lock을 잡지 않는다.
+struct QueryHandler<I, O, E> {
+    run: Arc<dyn Fn(I) -> Result<O, E> + Send + Sync>,
+    fault: fn(&RequestId, E) -> WorkbenchFault,
+    _input: PhantomData<fn() -> I>,
+}
+
+#[async_trait]
+impl<I, O, E> OperationHandler for QueryHandler<I, O, E>
+where
+    I: DeserializeOwned + Send + 'static,
+    O: Serialize + Send + 'static,
+    E: Send + 'static,
+{
+    async fn handle(
+        &self,
+        ctx: &CallContext,
+        input: serde_json::Value,
+    ) -> Result<CallReply, WorkbenchFault> {
+        let input: I = decode_input(&ctx.request_id, &input)?;
+        let run = Arc::clone(&self.run);
+        let output = blocking(&ctx.request_id, self.fault, move || run(input)).await?;
+        Ok(complete(output))
+    }
+}
+
+pub(crate) fn query_handler<I, O, E, F>(
+    fault: fn(&RequestId, E) -> WorkbenchFault,
+    run: F,
+) -> Arc<dyn OperationHandler>
+where
+    I: DeserializeOwned + Send + 'static,
+    O: Serialize + Send + 'static,
+    E: Send + 'static,
+    F: Fn(I) -> Result<O, E> + Send + Sync + 'static,
+{
+    Arc::new(QueryHandler {
+        run: Arc::new(run),
+        fault,
+        _input: PhantomData,
+    })
+}
+
 /// handler와 reconciler를 함께 조립한다. 둘은 같은 operation 목록을 공유해야 하므로 한곳에서 등록한다.
 pub fn build_registry(
     ledger: Arc<SqliteOperationLedger>,
@@ -166,6 +260,8 @@ pub fn build_registry(
     saved_prompt::register(&mut registry, &mut reconcilers, &coordinator, &runner);
     goal::register(&mut registry, &mut reconcilers, &coordinator, &runner);
     agent_run_settings::register(&mut registry, &coordinator, &runner);
+    git::register(&mut registry, &mut reconcilers, &runner);
+    worktree::register(&mut registry);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler),

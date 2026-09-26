@@ -4,14 +4,19 @@ import type {
   AgentRunSettings,
   CallReply,
   DescribeOutput,
+  GitCommitHistory,
+  GitRemote,
+  GitWorktree,
   Goal,
   OperationId,
   OperationMap,
   Project,
   SavedPrompt,
+  WorktreeFileEntry,
+  WorktreeTextFile,
 } from "./operation-map";
 
-test("operation ids are exactly the registered operations (037 + 038 US1)", () => {
+test("operation ids are exactly the registered operations (037 + 038 US1·US2)", () => {
   expectTypeOf<OperationId>().toEqualTypeOf<
     | "project.list"
     | "project.create"
@@ -28,6 +33,20 @@ test("operation ids are exactly the registered operations (037 + 038 US1)", () =
     | "goal.recordProgress"
     | "agentRunSettings.get"
     | "agentRunSettings.save"
+    | "git.listRemotes"
+    | "git.listBranches"
+    | "git.listWorktrees"
+    | "git.createWorktree"
+    | "git.deleteWorktree"
+    | "worktree.listChanges"
+    | "worktree.getChanges"
+    | "worktree.getFileDiff"
+    | "worktree.listFiles"
+    | "worktree.readTextFile"
+    | "worktree.listHistory"
+    | "worktree.getGraph"
+    | "worktree.getCommitDetail"
+    | "worktree.getCommitFileDiff"
     | "system.describe"
   >();
 });
@@ -70,6 +89,26 @@ test("agentRunSettings.save takes the whole settings object under `settings`", (
   expectTypeOf<OperationMap["agentRunSettings.get"]["output"]>().toEqualTypeOf<AgentRunSettings | null>();
 });
 
+test("git queries return lists and git changes return null", () => {
+  expectTypeOf<OperationMap["git.listRemotes"]["output"]>().toEqualTypeOf<GitRemote[]>();
+  expectTypeOf<OperationMap["git.listWorktrees"]["output"]>().toEqualTypeOf<GitWorktree[]>();
+  expectTypeOf<OperationMap["git.listWorktrees"]["input"]>().toHaveProperty("includeStatus");
+  expectTypeOf<OperationMap["git.createWorktree"]["input"]>().toHaveProperty("path");
+  expectTypeOf<OperationMap["git.createWorktree"]["output"]>().toEqualTypeOf<null>();
+  expectTypeOf<OperationMap["git.deleteWorktree"]["output"]>().toEqualTypeOf<null>();
+});
+
+test("worktree queries: optional scope, text preview, history page", () => {
+  type ListFilesInput = OperationMap["worktree.listFiles"]["input"];
+  // scope는 생략 가능하다(생략 = 전체 트리).
+  const withoutScope: ListFilesInput = { workingDirectory: "/repo" };
+  void withoutScope;
+  expectTypeOf<OperationMap["worktree.listFiles"]["output"]>().toEqualTypeOf<WorktreeFileEntry[]>();
+  expectTypeOf<OperationMap["worktree.readTextFile"]["output"]>().toEqualTypeOf<WorktreeTextFile>();
+  expectTypeOf<OperationMap["worktree.listHistory"]["output"]>().toEqualTypeOf<GitCommitHistory>();
+  expectTypeOf<OperationMap["worktree.listHistory"]["input"]>().toHaveProperty("cursor");
+});
+
 test("system.describe returns DescribeOutput", () => {
   expectTypeOf<OperationMap["system.describe"]["output"]>().toEqualTypeOf<DescribeOutput>();
 });
@@ -81,9 +120,12 @@ test("mismatched output types are compile errors", () => {
   const alsoWrong: OperationMap["project.list"]["output"] = {} as Project;
   // @ts-expect-error goal.get의 output은 Goal | null이며 SavedPrompt가 아니다
   const crossDomain: OperationMap["goal.get"]["output"] = {} as SavedPrompt;
+  // @ts-expect-error git.createWorktree의 output은 null이며 GitWorktree가 아니다
+  const gitChange: OperationMap["git.createWorktree"]["output"] = {} as GitWorktree;
   void wrong;
   void alsoWrong;
   void crossDomain;
+  void gitChange;
 });
 
 test("generic CallReply output is unconstrained JSON and Accepted uses camelCase", () => {

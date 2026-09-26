@@ -1,0 +1,62 @@
+{
+  "name": "git-list-branches-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          },
+          "branch": "feature/a"
+        }
+      ],
+      "branches": [
+        "release"
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.listBranches",
+    "requestId": "r-us2-4",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "name": "feature/a",
+          "isCurrent": true,
+          "isRemote": false
+        },
+        {
+          "name": "main",
+          "isCurrent": false,
+          "isRemote": false
+        },
+        {
+          "name": "release",
+          "isCurrent": false,
+          "isRemote": false
+        }
+      ]
+    }
+  }
+}

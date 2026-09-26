@@ -223,6 +223,118 @@ export interface components {
             /** @enum {string} */
             kind: "complete";
             /** @enum {string} */
+            operation: "git.listRemotes";
+            output: components["schemas"]["GitRemoteDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "git.listBranches";
+            output: components["schemas"]["GitBranchDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "git.listWorktrees";
+            output: components["schemas"]["GitWorktreeDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "git.createWorktree";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "git.deleteWorktree";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.listChanges";
+            output: components["schemas"]["WorktreeChangeDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.getChanges";
+            output: components["schemas"]["GitWorktreeChangesDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.getFileDiff";
+            output: components["schemas"]["GitWorktreeFileDiffDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.listFiles";
+            output: components["schemas"]["WorktreeFileEntryDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.readTextFile";
+            output: components["schemas"]["WorktreeTextFileDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.listHistory";
+            output: components["schemas"]["GitCommitHistoryDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.getGraph";
+            output: components["schemas"]["GitCommitGraphDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.getCommitDetail";
+            output: components["schemas"]["GitCommitDetailDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "worktree.getCommitFileDiff";
+            output: components["schemas"]["GitFileDiffDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
             operation: "system.describe";
             output: components["schemas"]["DescribeOutput"];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
@@ -412,6 +524,174 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "git.listRemotes";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GitListRemotesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "git.listBranches";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GitListBranchesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "git.listWorktrees";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GitListWorktreesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "git.createWorktree";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GitCreateWorktreeInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "git.deleteWorktree";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GitDeleteWorktreeInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.listChanges";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeListChangesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.getChanges";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeGetChangesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.getFileDiff";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeGetFileDiffInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.listFiles";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeListFilesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.readTextFile";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeReadTextFileInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.listHistory";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeListHistoryInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.getGraph";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeGetGraphInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.getCommitDetail";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeGetCommitDetailInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "worktree.getCommitFileDiff";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["WorktreeGetCommitFileDiffInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "system.describe";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["SystemDescribeInput"];
@@ -448,6 +728,148 @@ export interface components {
          * @enum {string}
          */
         FaultCode: "invalidArgument" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "interactionRequired" | "preconditionFailed" | "unsupportedProtocol" | "unsupportedSchema" | "rateLimited" | "draining" | "unavailable" | "deadlineExceeded" | "internal";
+        GitBranchDto: {
+            name: string;
+            isCurrent: boolean;
+            isRemote: boolean;
+        };
+        GitChangedFileDto: {
+            path: string;
+            oldPath?: string | null;
+            stagedStatus?: string | null;
+            unstagedStatus?: string | null;
+            group: components["schemas"]["GitChangedFileGroup"];
+        };
+        /** @enum {string} */
+        GitChangedFileGroup: "staged" | "unstaged" | "untracked" | "conflicted";
+        GitCommitDetailDto: {
+            hash: string;
+            message: string;
+            author: string;
+            date: string;
+            files: components["schemas"]["GitCommitFileChangeDto"][];
+        };
+        GitCommitFileChangeDto: {
+            path: string;
+            status: string;
+        };
+        GitCommitGraphDto: {
+            commits: components["schemas"]["GitGraphCommitDto"][];
+            refs: components["schemas"]["GitGraphRefDto"][];
+            page: components["schemas"]["GitCommitPageDto"];
+            layoutHints: components["schemas"]["GitGraphLayoutHintsDto"];
+        };
+        GitCommitHistoryDto: {
+            commits: components["schemas"]["GitCommitSummaryDto"][];
+            page: components["schemas"]["GitCommitPageDto"];
+        };
+        GitCommitPageDto: {
+            /** Format: int64 */
+            offset: number;
+            /** Format: int64 */
+            limit: number;
+            /**
+             * Format: int64
+             * @description 첫 페이지에서만 계산된다.
+             */
+            totalCount?: number | null;
+            hasMore: boolean;
+            cursorInvalidated?: boolean | null;
+        };
+        GitCommitSummaryDto: {
+            hash: string;
+            message: string;
+            author: string;
+            date: string;
+        };
+        /**
+         * @description `path`가 빈 문자열이면 서버가 `<parent>/worktrees/<repoName>/<branch>`를, `branch`가 없으면
+         *     `worktree-{nanos:x}`를 채운다. 채운 뒤의 경로가 변경 기록에 남는다(FR-005).
+         */
+        GitCreateWorktreeInput: {
+            workingDirectory: string;
+            path: string;
+            branch?: string | null;
+            reference?: string | null;
+        };
+        GitDeleteWorktreeInput: {
+            workingDirectory: string;
+            path: string;
+        };
+        GitFileDiffDto: {
+            commitHash: string;
+            path: string;
+            content: string;
+            isBinary: boolean;
+            isTruncated: boolean;
+        };
+        GitGraphCommitDto: {
+            hash: string;
+            shortHash: string;
+            parents: string[];
+            message: string;
+            author: string;
+            date: string;
+            isHead: boolean;
+            isMerge: boolean;
+        };
+        GitGraphLayoutHintsDto: {
+            /** Format: int32 */
+            rowHeight: number;
+            /** Format: int32 */
+            maxInitialLanes: number;
+        };
+        GitGraphRefDto: {
+            name: string;
+            target: string;
+            kind: components["schemas"]["GitGraphRefKind"];
+        };
+        /** @enum {string} */
+        GitGraphRefKind: "localBranch" | "remoteBranch" | "tag";
+        GitListBranchesInput: {
+            workingDirectory: string;
+        };
+        GitListRemotesInput: {
+            workingDirectory: string;
+        };
+        GitListWorktreesInput: {
+            workingDirectory: string;
+            /** @description 생략하면 `true`(worktree별 clean/dirty 계산). 오늘의 데스크톱 기본값과 같다. */
+            includeStatus?: boolean | null;
+        };
+        GitRemoteDto: {
+            name: string;
+            fetchUrl?: string | null;
+            pushUrl?: string | null;
+        };
+        GitWorktreeChangesDto: {
+            workingDirectory: string;
+            files: components["schemas"]["GitChangedFileDto"][];
+            /** Format: int64 */
+            stagedCount: number;
+            /** Format: int64 */
+            unstagedCount: number;
+            /** Format: int64 */
+            untrackedCount: number;
+            /** Format: int64 */
+            conflictedCount: number;
+        };
+        GitWorktreeDto: {
+            path: string;
+            head?: string | null;
+            branch?: string | null;
+            status: components["schemas"]["GitWorktreeStatus"];
+            pruneReason?: string | null;
+            canDelete: boolean;
+        };
+        GitWorktreeFileDiffDto: {
+            path: string;
+            content: string;
+            isBinary: boolean;
+            isTruncated: boolean;
+        };
+        /** @enum {string} */
+        GitWorktreeStatus: "clean" | "prunable" | "dirty" | "unknown";
         GoalClearInput: {
             workingDirectory: string;
         };
@@ -592,6 +1014,93 @@ export interface components {
             outcome: components["schemas"]["Outcome"];
             requestId: components["schemas"]["RequestId"];
             details?: Record<string, never> | null;
+        };
+        WorktreeChangeDto: {
+            path: string;
+            oldPath?: string | null;
+            changeType: components["schemas"]["WorktreeChangeType"];
+            binary: boolean;
+            diff?: string | null;
+            content?: string | null;
+            truncated: boolean;
+        };
+        /** @enum {string} */
+        WorktreeChangeType: "added" | "modified" | "deleted" | "renamed" | "untracked";
+        WorktreeFileEntryDto: {
+            name: string;
+            path: string;
+            relativePath: string;
+            isDir: boolean;
+            /** Format: int64 */
+            size: number;
+            /** Format: int64 */
+            modifiedMs?: number | null;
+        };
+        /** @enum {string} */
+        WorktreeFileListKind: "all" | "markdown";
+        /** @description 조회 범위. 기본값(전체 트리)은 범위를 생략한 호출과 같다. 중첩 객체라 unknown 필드를 거절하지 않는다(R2). */
+        WorktreeFileListScopeDto: {
+            kind?: components["schemas"]["WorktreeFileListKind"];
+            /** @description 조회 시작 상대 경로. worktree 밖이면 `forbidden`. */
+            dir?: string | null;
+            /**
+             * Format: int64
+             * @description 1이면 해당 디렉터리 직계만. 없으면 무제한.
+             */
+            depth?: number | null;
+        };
+        WorktreeGetChangesInput: {
+            workingDirectory: string;
+        };
+        WorktreeGetCommitDetailInput: {
+            workingDirectory: string;
+            commitHash: string;
+        };
+        WorktreeGetCommitFileDiffInput: {
+            workingDirectory: string;
+            commitHash: string;
+            path: string;
+        };
+        WorktreeGetFileDiffInput: {
+            workingDirectory: string;
+            path: string;
+        };
+        WorktreeGetGraphInput: {
+            workingDirectory: string;
+            /** Format: int64 */
+            maxCount?: number | null;
+            /** Format: int64 */
+            offset?: number | null;
+            cursor?: string | null;
+        };
+        WorktreeListChangesInput: {
+            workingDirectory: string;
+        };
+        WorktreeListFilesInput: {
+            workingDirectory: string;
+            scope?: null | components["schemas"]["WorktreeFileListScopeDto"];
+        };
+        /** @description `maxCount` 기본 100(이력)·300(그래프), 상한 500(초과 시 clamp). */
+        WorktreeListHistoryInput: {
+            workingDirectory: string;
+            /** Format: int64 */
+            maxCount?: number | null;
+            /** Format: int64 */
+            offset?: number | null;
+            /** @description 마지막으로 받은 commit hash. 이력이 재작성됐으면 `page.cursorInvalidated: true`. */
+            cursor?: string | null;
+        };
+        WorktreeReadTextFileInput: {
+            workingDirectory: string;
+            path: string;
+        };
+        WorktreeTextFileDto: {
+            path: string;
+            relativePath: string;
+            content: string;
+            /** Format: int64 */
+            size: number;
+            truncated: boolean;
         };
     };
     responses: never;
