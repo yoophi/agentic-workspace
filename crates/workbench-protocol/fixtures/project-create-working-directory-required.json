@@ -1,0 +1,13 @@
+{
+  "name": "project-create-working-directory-required",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "request": {
+    "protocolVersion": 1, "operation": "project.create", "requestId": "r-create-dir", "idempotencyKey": "k-create-dir",
+    "input": { "name": "AW", "workingDirectory": "" }
+  },
+  "expect": {
+    "fault": { "code": "invalidArgument", "message": "Working directory is required.", "outcome": "notApplied", "details": { "path": "/workingDirectory" } }
+  },
+  "expectAfter": { "projectsLen": 0, "ledgerApplied": 0 }
+}

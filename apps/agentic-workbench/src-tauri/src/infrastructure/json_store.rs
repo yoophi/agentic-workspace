@@ -1,3 +1,6 @@
+// 038 이관 메모: `load_json`이 읽기 경로에서 `.bak`을 `fs::copy`로 복구한다. 프로젝트 저장소는 037에서
+// `crates/workbench-core/src/infrastructure/json_store.rs`(읽기 전용 load + lock 안 recover)로 옮겼고,
+// 나머지 저장소를 옮길 때 이 파일은 삭제한다.
 use std::{
     fs::{self, File},
     io::Write,

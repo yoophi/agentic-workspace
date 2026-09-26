@@ -1,0 +1,17 @@
+{
+  "name": "project-create-stale-revision",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "requests": [
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-stale-1", "idempotencyKey": "k-stale-1",
+      "input": { "name": "First", "workingDirectory": "/tmp/first" } },
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-stale-2", "idempotencyKey": "k-stale-2", "expectedRevision": 0,
+      "input": { "name": "Second", "workingDirectory": "/tmp/second" } }
+  ],
+  "expects": [
+    { "reply": { "kind": "complete", "output": { "name": "First" }, "revision": 1 } },
+    { "fault": { "code": "preconditionFailed", "outcome": "notApplied", "details": { "expectedRevision": 0, "currentRevision": 1 } } }
+  ],
+  "ignoreFields": ["id"],
+  "expectAfter": { "projectsLen": 1, "ledgerApplied": 1 }
+}

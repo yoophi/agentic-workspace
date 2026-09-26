@@ -36,7 +36,6 @@ pub mod json_agent_run_settings_repository;
 pub mod json_appearance_preferences_repository;
 pub mod json_goal_repository;
 pub mod json_orchestration_repository;
-pub mod json_project_repository;
 pub mod json_saved_prompt_repository;
 pub mod json_session_window_state_repository;
 pub mod json_store;

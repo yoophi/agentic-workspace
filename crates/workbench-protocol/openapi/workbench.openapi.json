@@ -1,0 +1,639 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Agentic Workbench — Workbench API",
+    "description": "Agentic Workbench 서버-클라이언트 Seam의 v1 계약. `POST /v1/calls` 하나로 모든 operation을 호출한다. 이 문서는 `crates/workbench-protocol`의 registry에서 생성된다(수정 금지).",
+    "license": {
+      "name": ""
+    },
+    "version": "1"
+  },
+  "paths": {
+    "/v1/calls": {
+      "post": {
+        "summary": "Workbench.call",
+        "description": "단일 operation을 호출한다. operation·input·output의 상관관계는 components.schemas.CallRequest / CallReplyByOperation의 oneOf variant로 표현된다.",
+        "operationId": "callWorkbench",
+        "requestBody": {
+          "description": "CallRequest — operation별 variant 중 하나",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CallRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "CallReply",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallReply"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "WorkbenchFault (RFC 9457 problem+json). HTTP status는 FaultCode에 따른다.",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkbenchFault"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "CallReply": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "output",
+              "kind"
+            ],
+            "properties": {
+              "output": {},
+              "revision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "executionId",
+              "kind"
+            ],
+            "properties": {
+              "executionId": {
+                "type": "string"
+              },
+              "revision": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "format": "int64",
+                "minimum": 0
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "accepted"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "호출 응답. 037의 모든 operation은 동기 완료라 `Complete`만 발생한다.\n\n`output`은 generic 봉투에서는 임의 JSON이다(`project.list`는 배열을 돌려준다). operation별 typed 결과는\n`CallReplyByOperation`(openapi.rs)에 있다. 필드 표기는 variant 단위 `rename_all`을 쓴다 — serde의\n`rename_all_fields`는 utoipa derive가 인식하지 않아 스키마가 `execution_id`로 새기 때문이다."
+      },
+      "CallReplyByOperation": {
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "CallReply_project_list",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "project.list"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProjectDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_project_create",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "project.create"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/ProjectDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_system_describe",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "system.describe"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/DescribeOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          }
+        ]
+      },
+      "CallRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "CallRequest_project_list",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "project.list"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ProjectListInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_project_create",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "project.create"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ProjectCreateInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_system_describe",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "system.describe"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/SystemDescribeInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          }
+        ]
+      },
+      "DescribeOutput": {
+        "type": "object",
+        "description": "`system.describe` 출력. 호출자에게 허용된 operation만 담는다.",
+        "required": [
+          "protocolVersion",
+          "operations"
+        ],
+        "properties": {
+          "protocolVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "operations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationDescriptor"
+            }
+          }
+        }
+      },
+      "Effect": {
+        "type": "string",
+        "enum": [
+          "read",
+          "modify"
+        ]
+      },
+      "EventEnvelope": {
+        "type": "object",
+        "description": "공통 이벤트 봉투. 2단계에서 채운다.",
+        "required": [
+          "eventId",
+          "streamId",
+          "epoch",
+          "sequence",
+          "schema",
+          "occurredAt",
+          "body"
+        ],
+        "properties": {
+          "eventId": {
+            "type": "string"
+          },
+          "streamId": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "schema": {
+            "type": "string"
+          },
+          "occurredAt": {
+            "type": "string"
+          },
+          "correlationId": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RequestId"
+              }
+            ]
+          },
+          "body": {}
+        }
+      },
+      "FaultCode": {
+        "type": "string",
+        "description": "안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.",
+        "enum": [
+          "invalidArgument",
+          "unauthenticated",
+          "forbidden",
+          "notFound",
+          "conflict",
+          "interactionRequired",
+          "preconditionFailed",
+          "unsupportedProtocol",
+          "unsupportedSchema",
+          "rateLimited",
+          "draining",
+          "unavailable",
+          "deadlineExceeded",
+          "internal"
+        ]
+      },
+      "IdempotencyKey": {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+      },
+      "OperationDescriptor": {
+        "type": "object",
+        "description": "operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다.",
+        "required": [
+          "id",
+          "kind",
+          "effect",
+          "idempotent",
+          "requiredScopes",
+          "inputSchema",
+          "outputSchema"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "예: `project.list`"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OperationKind"
+          },
+          "effect": {
+            "$ref": "#/components/schemas/Effect"
+          },
+          "idempotent": {
+            "type": "boolean",
+            "description": "command면 멱등성 키가 필수라는 뜻. query는 항상 false."
+          },
+          "requiredScopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "inputSchema": {
+            "type": "object"
+          },
+          "outputSchema": {
+            "type": "object"
+          },
+          "cliExposure": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "CLI command projection. 037은 항상 None."
+          },
+          "mcpExposure": {
+            "type": "boolean",
+            "description": "MCP tool 노출 opt-in. 037은 항상 false."
+          }
+        }
+      },
+      "OperationKind": {
+        "type": "string",
+        "enum": [
+          "query",
+          "command"
+        ]
+      },
+      "Outcome": {
+        "type": "string",
+        "description": "mutation의 적용 여부. timeout·단절 뒤 같은 멱등성 키로 재확인할지 판단하는 근거다.",
+        "enum": [
+          "notApplied",
+          "applied",
+          "unknown"
+        ]
+      },
+      "ProjectCreateInput": {
+        "type": "object",
+        "description": "`project.create` input. 정규화(trim 등)는 core의 `project_service`가 한다.",
+        "required": [
+          "name",
+          "workingDirectory"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ProjectDto": {
+        "type": "object",
+        "description": "프론트 `entities/project/model/types.ts`의 `Project`와 필드·표기가 같아야 한다.",
+        "required": [
+          "id",
+          "name",
+          "workingDirectory"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ProjectListInput": {
+        "type": "object",
+        "description": "`project.list` input. 필드가 없고 추가 필드는 거절한다.",
+        "additionalProperties": false
+      },
+      "RequestId": {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1
+      },
+      "Scope": {
+        "type": "string",
+        "description": "권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.",
+        "enum": [
+          "project:read",
+          "project:write",
+          "system:describe"
+        ]
+      },
+      "StreamCursor": {
+        "type": "object",
+        "description": "stream별 재연결 cursor. 정본 §WebSocket, replay 계약. 037은 시그니처만 둔다.",
+        "required": [
+          "streamId",
+          "epoch",
+          "afterSequence"
+        ],
+        "properties": {
+          "streamId": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "string"
+          },
+          "afterSequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "Subscription": {
+        "type": "object",
+        "description": "이벤트 구독 요청. 037은 `events`가 항상 `unsupportedSchema`를 돌려준다.",
+        "properties": {
+          "cursors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StreamCursor"
+            }
+          }
+        }
+      },
+      "SystemDescribeInput": {
+        "type": "object",
+        "description": "`system.describe` input. 필드가 없고 추가 필드는 거절한다.",
+        "additionalProperties": false
+      },
+      "WorkbenchFault": {
+        "type": "object",
+        "description": "호출 실패. `message`는 사람이 읽는 한 문장이며 코드나 스택을 담지 않는다.",
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "outcome",
+          "requestId"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/FaultCode"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/Outcome"
+          },
+          "requestId": {
+            "$ref": "#/components/schemas/RequestId"
+          },
+          "details": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

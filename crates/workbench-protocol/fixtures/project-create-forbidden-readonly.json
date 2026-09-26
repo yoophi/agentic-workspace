@@ -1,0 +1,11 @@
+{
+  "name": "project-create-forbidden-readonly",
+  "principal": "readonly",
+  "seed": { "projects": [] },
+  "request": {
+    "protocolVersion": 1, "operation": "project.create", "requestId": "r-forbidden", "idempotencyKey": "k-forbidden",
+    "input": { "name": "Nope", "workingDirectory": "/tmp/nope" }
+  },
+  "expect": { "fault": { "code": "forbidden", "outcome": "notApplied", "retryable": false } },
+  "expectAfter": { "projectsLen": 0, "ledgerApplied": 0 }
+}

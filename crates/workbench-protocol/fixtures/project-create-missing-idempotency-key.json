@@ -1,0 +1,13 @@
+{
+  "name": "project-create-missing-idempotency-key",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "request": {
+    "protocolVersion": 1, "operation": "project.create", "requestId": "r-create-nokey",
+    "input": { "name": "AW", "workingDirectory": "/tmp/aw" }
+  },
+  "expect": {
+    "fault": { "code": "invalidArgument", "message": "idempotencyKey is required for project.create.", "outcome": "notApplied", "details": { "path": "/idempotencyKey" } }
+  },
+  "expectAfter": { "projectsLen": 0, "ledgerApplied": 0 }
+}

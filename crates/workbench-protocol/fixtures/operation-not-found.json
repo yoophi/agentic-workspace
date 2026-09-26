@@ -1,0 +1,6 @@
+{
+  "name": "operation-not-found",
+  "principal": "desktop",
+  "request": { "protocolVersion": 1, "operation": "project.rename", "requestId": "r-not-found", "input": {} },
+  "expect": { "fault": { "code": "notFound", "outcome": "notApplied", "retryable": false } }
+}

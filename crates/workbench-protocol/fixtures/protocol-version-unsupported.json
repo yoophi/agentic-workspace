@@ -1,0 +1,6 @@
+{
+  "name": "protocol-version-unsupported",
+  "principal": "desktop",
+  "request": { "protocolVersion": 2, "operation": "project.list", "requestId": "r-proto-2", "input": {} },
+  "expect": { "fault": { "code": "unsupportedProtocol", "outcome": "notApplied", "details": { "supportedProtocolRevisions": [1] } } }
+}

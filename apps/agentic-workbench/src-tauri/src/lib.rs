@@ -40,11 +40,15 @@ use infrastructure::{
     tauri_orchestration_event_sink::TauriOrchestrationEventSink,
 };
 use ports::agent_workspace_registry::AgentWorkspaceRegistry;
+use std::sync::Arc;
 use tauri::{
     Manager, WindowEvent,
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use workbench_core::{
+    application::workbench_runtime::WorkbenchRuntime, infrastructure::data_paths::DataPaths,
+};
 
 const ABOUT_MENU_ID: &str = "about-agentic-workbench";
 const PREFERENCES_MENU_ID: &str = "preferences-agentic-workbench";
@@ -78,6 +82,16 @@ pub fn run() {
             }
         })
         .setup(|_app| {
+            // 037: 서버 런타임(Workbench)을 먼저 조립한다. 프로젝트 저장소는 이 런타임이 유일한 쓰기 주체다.
+            let app_data_dir = _app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+            let workbench_runtime: Arc<WorkbenchRuntime> =
+                WorkbenchRuntime::bootstrap(DataPaths::new(app_data_dir))
+                    .map_err(|error| error.to_string())?;
+            _app.manage(workbench_runtime);
+
             let appearance_repository =
                 JsonAppearancePreferencesRepository::from_app(_app.handle())?;
             let appearance_service =

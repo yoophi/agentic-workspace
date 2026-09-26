@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@yoophi/workbench-client": ["./src/index.ts"]
+    }
+  },
+  "include": ["src", "vitest.config.ts"]
+}

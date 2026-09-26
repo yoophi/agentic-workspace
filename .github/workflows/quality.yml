@@ -16,6 +16,7 @@ concurrency:
 jobs:
   validate:
     runs-on: macos-15
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -33,6 +34,11 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Check contract drift
+        run: |
+          pnpm run generate:contracts
+          git diff --exit-code -- crates/workbench-protocol/openapi packages/workbench-client/src/generated
 
       - name: Check TypeScript
         run: pnpm run check-types
