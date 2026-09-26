@@ -6,9 +6,11 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use workbench_protocol::{
-    AuthenticatedPrincipal, CallReply, CallRequest, EventStream, Subscription, Workbench,
-    WorkbenchFault, PROTOCOL_VERSION,
+    operations::spec_for, AuthenticatedPrincipal, CallReply, CallRequest, EventStream,
+    OperationKind, Subscription, Workbench, WorkbenchFault, PROTOCOL_VERSION,
 };
+
+pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for command operations.";
 
 use crate::{
     application::{
@@ -19,9 +21,8 @@ use crate::{
     domain::project_error::ProjectError,
     infrastructure::{
         data_paths::DataPaths,
-        json_project_repository::JsonProjectRepository,
         sqlite_ledger::SqliteOperationLedger,
-        storage_coordinator::{StorageCoordinator, PROJECTS_AGGREGATE, STORE_AGGREGATES},
+        storage_coordinator::{Repositories, StorageCoordinator, STORE_AGGREGATES},
     },
     ports::operation_ledger::{LedgerError, OperationLedger},
 };
@@ -116,11 +117,7 @@ impl WorkbenchRuntime {
         ledger.migrate()?;
         ledger.gc_expired(Utc::now())?;
 
-        let repository = Arc::new(JsonProjectRepository::new(&paths));
-        let coordinator = Arc::new(StorageCoordinator::new(
-            repository,
-            ledger.current_revision(PROJECTS_AGGREGATE)?,
-        ));
+        let coordinator = Arc::new(StorageCoordinator::new(Repositories::json(&paths)));
         for aggregate in STORE_AGGREGATES {
             coordinator.set_revision_of(aggregate, ledger.current_revision(aggregate)?);
         }
@@ -200,6 +197,17 @@ impl Workbench for WorkbenchRuntime {
 
         let operation =
             authorization::resolve_operation(&request.request_id, &principal, &request.operation)?;
+        // 조회에 멱등성 키를 실어 보내는 것은 계약 위반이다(contracts §1 규칙 1). 조용히 무시하면 호출자가
+        // 재시도 중복 제거가 되는 줄 오해한다.
+        if matches!(spec_for(operation).kind, OperationKind::Query)
+            && request.idempotency_key.is_some()
+        {
+            return Err(WorkbenchFault::invalid_argument(
+                request.request_id,
+                MESSAGE_KEY_ON_QUERY,
+                Some("/idempotencyKey"),
+            ));
+        }
         let handler = self.registry.handler_for(operation).ok_or_else(|| {
             WorkbenchFault::internal(
                 request.request_id.clone(),

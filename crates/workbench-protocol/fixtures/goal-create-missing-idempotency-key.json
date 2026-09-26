@@ -1,0 +1,26 @@
+{
+  "name": "goal-create-missing-idempotency-key",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.create",
+    "requestId": "r-gc-mk",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "objective": "Ship"
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "idempotencyKey is required for goal.create."
+    }
+  },
+  "expectAfter": {
+    "goalsLen": 0
+  }
+}

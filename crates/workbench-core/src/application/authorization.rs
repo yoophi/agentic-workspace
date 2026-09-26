@@ -59,10 +59,16 @@ mod tests {
         let readonly = AuthenticatedPrincipal::test_readonly();
         let fault = resolve_operation(&rid(), &readonly, "project.create").unwrap_err();
         assert_eq!(fault.code, FaultCode::Forbidden);
-        assert_eq!(
-            visible_operations(&readonly),
-            vec![OperationId::ProjectList, OperationId::SystemDescribe]
-        );
+        let visible = visible_operations(&readonly);
+        assert!(visible.contains(&OperationId::ProjectList));
+        assert!(visible.contains(&OperationId::SystemDescribe));
+        assert!(!visible.contains(&OperationId::ProjectCreate));
+        // 조회만 보인다: 표의 Query 수와 같다.
+        let queries = OPERATIONS
+            .iter()
+            .filter(|spec| spec.kind == workbench_protocol::OperationKind::Query)
+            .count();
+        assert_eq!(visible.len(), queries);
     }
 
     #[test]

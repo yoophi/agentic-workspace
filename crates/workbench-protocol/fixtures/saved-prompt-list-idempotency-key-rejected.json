@@ -1,0 +1,27 @@
+{
+  "name": "saved-prompt-list-idempotency-key-rejected",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": [
+      {
+        "id": "saved-prompt-1",
+        "label": "Continue",
+        "prompt": "keep going"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.list",
+    "requestId": "r-spl-k",
+    "input": {},
+    "idempotencyKey": "k-spl"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "idempotencyKey is only accepted for command operations."
+    }
+  }
+}

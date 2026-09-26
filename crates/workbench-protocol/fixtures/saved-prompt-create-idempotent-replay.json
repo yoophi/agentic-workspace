@@ -1,0 +1,58 @@
+{
+  "name": "saved-prompt-create-idempotent-replay",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.create",
+      "requestId": "r-spc-r1",
+      "input": {
+        "label": "A",
+        "prompt": "a"
+      },
+      "idempotencyKey": "k-spc-r"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.create",
+      "requestId": "r-spc-r2",
+      "input": {
+        "label": "A",
+        "prompt": "a"
+      },
+      "idempotencyKey": "k-spc-r"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "label": "A",
+          "prompt": "a"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "label": "A",
+          "prompt": "a"
+        },
+        "revision": 1
+      }
+    }
+  ],
+  "ignoreFields": [
+    "id"
+  ],
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 1
+  }
+}

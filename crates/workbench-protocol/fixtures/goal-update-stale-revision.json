@@ -1,0 +1,68 @@
+{
+  "name": "goal-update-stale-revision",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "goal.update",
+      "requestId": "r-gu-s1",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "objective": "A"
+      },
+      "idempotencyKey": "k-gu-s1"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "goal.update",
+      "requestId": "r-gu-s2",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "objective": "B"
+      },
+      "idempotencyKey": "k-gu-s2",
+      "expectedRevision": 0
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "objective": "A"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "fault": {
+        "code": "preconditionFailed",
+        "outcome": "notApplied",
+        "details": {
+          "expectedRevision": 0,
+          "currentRevision": 1
+        }
+      }
+    }
+  ],
+  "expectAfter": {
+    "ledgerApplied": 1
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ]
+}

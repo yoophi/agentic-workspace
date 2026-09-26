@@ -47,22 +47,40 @@ fn observable(result: &Result<CallReply, WorkbenchFault>, ignore: &[String]) -> 
     }
 }
 
+fn store_len(path: &std::path::Path) -> usize {
+    if !path.exists() {
+        return 0;
+    }
+    serde_json::from_str::<Vec<Value>>(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .len()
+}
+
 fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
     let Some(after) = &fixture.expect_after else {
         return;
     };
-    if let Some(expected_len) = after.projects_len {
-        let projects: Vec<Value> = if runtime.paths.projects_file().exists() {
-            serde_json::from_str(&fs::read_to_string(runtime.paths.projects_file()).unwrap())
-                .unwrap()
-        } else {
-            Vec::new()
-        };
-        assert_eq!(
-            projects.len(),
-            expected_len,
-            "{label}: projects.json length"
-        );
+    for (name, expected, path) in [
+        (
+            "projects.json",
+            after.projects_len,
+            runtime.paths.projects_file(),
+        ),
+        (
+            "saved-prompts.json",
+            after.saved_prompts_len,
+            runtime.paths.saved_prompts_file(),
+        ),
+        ("goals.json", after.goals_len, runtime.paths.goals_file()),
+        (
+            "agent-run-settings.json",
+            after.agent_run_settings_len,
+            runtime.paths.agent_run_settings_file(),
+        ),
+    ] {
+        if let Some(expected_len) = expected {
+            assert_eq!(store_len(&path), expected_len, "{label}: {name} length");
+        }
     }
     if let Some(expected_applied) = after.ledger_applied {
         let applied = runtime

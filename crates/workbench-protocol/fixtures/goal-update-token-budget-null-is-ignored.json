@@ -1,0 +1,43 @@
+{
+  "name": "goal-update-token-budget-null-is-ignored",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.update",
+    "requestId": "r-gu-tb",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "tokenBudget": null
+    },
+    "idempotencyKey": "k-gu-tb"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "tokenBudget": 100
+      },
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 1
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ]
+}

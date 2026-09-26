@@ -28,6 +28,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AgentCommandOverridesDto: {
+            globalCommand?: string | null;
+            agentCommands?: {
+                [key: string]: string;
+            };
+            globalEnv?: {
+                [key: string]: string;
+            };
+            profiles?: components["schemas"]["AgentProfileDto"][];
+        };
+        AgentProfileDto: {
+            id: string;
+            name?: string;
+            agentType: string;
+            command?: string | null;
+            env?: {
+                [key: string]: string;
+            };
+            enabled?: boolean;
+            builtIn?: boolean;
+        };
+        /** @enum {string} */
+        AgentRunSessionMode: "new" | "reuse";
+        AgentRunSettingsDto: {
+            workingDirectory: string;
+            agentId?: string;
+            permissionMode?: components["schemas"]["PermissionMode"];
+            modelId?: string;
+            effortId?: string;
+            contextSize?: components["schemas"]["ContextSizePreset"];
+            sessionMode?: components["schemas"]["AgentRunSessionMode"];
+            ralphLoop?: components["schemas"]["AgentRunSettingsRalphLoopDto"];
+            commandOverrides?: components["schemas"]["AgentCommandOverridesDto"];
+        };
+        AgentRunSettingsGetInput: {
+            workingDirectory: string;
+        };
+        AgentRunSettingsRalphLoopDto: {
+            enabled: boolean;
+            /** Format: int64 */
+            maxIterations: number;
+            /** Format: int64 */
+            delayMs: number;
+            stopOnPermission?: boolean;
+            stopOnError: boolean;
+            promptTemplate: string;
+        };
+        /** @description `agentRunSettings.save` input. AW `save_agent_run_settings(settings)`의 파라미터를 `settings` 아래에 둔다. */
+        AgentRunSettingsSaveInput: {
+            settings: components["schemas"]["AgentRunSettingsDto"];
+        };
         /**
          * @description 호출 응답. 037의 모든 operation은 동기 완료라 `Complete`만 발생한다.
          *
@@ -68,6 +119,110 @@ export interface components {
             /** @enum {string} */
             kind: "complete";
             /** @enum {string} */
+            operation: "project.update";
+            output: components["schemas"]["ProjectDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "project.delete";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "savedPrompt.list";
+            output: components["schemas"]["SavedPromptDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "savedPrompt.create";
+            output: components["schemas"]["SavedPromptDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "savedPrompt.update";
+            output: components["schemas"]["SavedPromptDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "savedPrompt.delete";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "goal.get";
+            output: components["schemas"]["GoalDto"] | null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "goal.create";
+            output: components["schemas"]["GoalDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "goal.update";
+            output: components["schemas"]["GoalDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "goal.clear";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "goal.recordProgress";
+            output: components["schemas"]["GoalDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "agentRunSettings.get";
+            output: components["schemas"]["AgentRunSettingsDto"] | null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "agentRunSettings.save";
+            output: components["schemas"]["AgentRunSettingsDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
             operation: "system.describe";
             output: components["schemas"]["DescribeOutput"];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
@@ -101,6 +256,162 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "project.update";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ProjectUpdateInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "project.delete";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ProjectDeleteInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "savedPrompt.list";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["SavedPromptListInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "savedPrompt.create";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["SavedPromptCreateInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "savedPrompt.update";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["SavedPromptUpdateInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "savedPrompt.delete";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["SavedPromptDeleteInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "goal.get";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GoalGetInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "goal.create";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GoalCreateInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "goal.update";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GoalUpdateInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "goal.clear";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GoalClearInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "goal.recordProgress";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["GoalRecordProgressInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "agentRunSettings.get";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentRunSettingsGetInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "agentRunSettings.save";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentRunSettingsSaveInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "system.describe";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["SystemDescribeInput"];
@@ -110,6 +421,8 @@ export interface components {
             /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
             timeoutMs?: number;
         };
+        /** @enum {string} */
+        ContextSizePreset: "default" | "medium" | "large" | "xLarge";
         /** @description `system.describe` 출력. 호출자에게 허용된 operation만 담는다. */
         DescribeOutput: {
             /** Format: int32 */
@@ -135,6 +448,52 @@ export interface components {
          * @enum {string}
          */
         FaultCode: "invalidArgument" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "interactionRequired" | "preconditionFailed" | "unsupportedProtocol" | "unsupportedSchema" | "rateLimited" | "draining" | "unavailable" | "deadlineExceeded" | "internal";
+        GoalClearInput: {
+            workingDirectory: string;
+        };
+        GoalCreateInput: {
+            workingDirectory: string;
+            objective: string;
+            /** Format: int64 */
+            tokenBudget?: number | null;
+        };
+        /** @description 프론트 `entities/agent-run/model`의 `ThreadGoal`과 필드·표기가 같다. */
+        GoalDto: {
+            workingDirectory: string;
+            objective: string;
+            status: components["schemas"]["GoalStatus"];
+            /** Format: int64 */
+            tokenBudget?: number | null;
+            /** Format: int64 */
+            tokensUsed: number;
+            /** Format: int64 */
+            timeUsedSeconds: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+        GoalGetInput: {
+            workingDirectory: string;
+        };
+        GoalRecordProgressInput: {
+            workingDirectory: string;
+            /** Format: int64 */
+            tokensUsed: number;
+            /** Format: int64 */
+            timeUsedSeconds: number;
+        };
+        /** @enum {string} */
+        GoalStatus: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+        /**
+         * @description `goal.update` input. `tokenBudget`는 AW `GoalUpdateInput`과 같은 serde 규칙(`Option<Option<_>>`)을 유지한다:
+         *     필드 생략과 `null` 모두 "변경 없음"이다. (오늘의 wire로는 예산을 `null`로 지울 수 없고, 038은 동작을 바꾸지 않는다.)
+         */
+        GoalUpdateInput: {
+            workingDirectory: string;
+            objective?: string | null;
+            status?: null | components["schemas"]["GoalStatus"];
+            /** Format: int64 */
+            tokenBudget?: number | null;
+        };
         IdempotencyKey: string;
         /** @description operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다. */
         OperationDescriptor: {
@@ -159,11 +518,17 @@ export interface components {
          * @enum {string}
          */
         Outcome: "notApplied" | "applied" | "unknown";
+        /** @enum {string} */
+        PermissionMode: "default" | "auto" | "readOnly" | "plan" | "acceptEdits" | "dangerouslySkipAllPermissions";
         /** @description `project.create` input. 정규화(trim 등)는 core의 `project_service`가 한다. */
         ProjectCreateInput: {
             name: string;
             workingDirectory: string;
             description?: string | null;
+        };
+        /** @description `project.delete` input. 출력은 `null`. */
+        ProjectDeleteInput: {
+            id: string;
         };
         /** @description 프론트 `entities/project/model/types.ts`의 `Project`와 필드·표기가 같아야 한다. */
         ProjectDto: {
@@ -174,7 +539,33 @@ export interface components {
         };
         /** @description `project.list` input. 필드가 없고 추가 필드는 거절한다. */
         ProjectListInput: Record<string, never>;
+        /** @description `project.update` input. AW `update_project(id, input)`의 두 파라미터를 하나로 합쳤다. */
+        ProjectUpdateInput: {
+            id: string;
+            name: string;
+            workingDirectory: string;
+            description?: string | null;
+        };
         RequestId: string;
+        SavedPromptCreateInput: {
+            label: string;
+            prompt: string;
+        };
+        SavedPromptDeleteInput: {
+            id: string;
+        };
+        /** @description 프론트 `entities/saved-prompt`의 `SavedPrompt`와 필드·표기가 같다. */
+        SavedPromptDto: {
+            id: string;
+            label: string;
+            prompt: string;
+        };
+        SavedPromptListInput: Record<string, never>;
+        SavedPromptUpdateInput: {
+            id: string;
+            label: string;
+            prompt: string;
+        };
         /**
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}

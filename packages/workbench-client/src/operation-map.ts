@@ -14,10 +14,16 @@ export type CallReply = Schemas["CallReply"];
 export type WorkbenchFault = Schemas["WorkbenchFault"];
 export type FaultCode = Schemas["FaultCode"];
 export type Outcome = Schemas["Outcome"];
-export type Project = Schemas["ProjectDto"];
-export type ProjectCreateInput = Schemas["ProjectCreateInput"];
 export type DescribeOutput = Schemas["DescribeOutput"];
 export type OperationDescriptor = Schemas["OperationDescriptor"];
+
+// 도메인 DTO alias (038 US1). 프론트 entities의 타입과 필드·표기가 같다.
+export type Project = Schemas["ProjectDto"];
+export type ProjectCreateInput = Schemas["ProjectCreateInput"];
+export type SavedPrompt = Schemas["SavedPromptDto"];
+export type Goal = Schemas["GoalDto"];
+export type GoalStatus = Schemas["GoalStatus"];
+export type AgentRunSettings = Schemas["AgentRunSettingsDto"];
 
 export type OperationId = CallRequest["operation"];
 

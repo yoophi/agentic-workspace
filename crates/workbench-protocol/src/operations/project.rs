@@ -43,6 +43,24 @@ pub struct ProjectCreateInput {
 
 pub type ProjectCreateOutput = ProjectDto;
 
+/// `project.update` input. AW `update_project(id, input)`의 두 파라미터를 하나로 합쳤다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectUpdateInput {
+    pub id: String,
+    pub name: String,
+    pub working_directory: String,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// `project.delete` input. 출력은 `null`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectDeleteInput {
+    pub id: String,
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;

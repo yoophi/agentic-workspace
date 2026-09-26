@@ -1,0 +1,26 @@
+{
+  "name": "saved-prompt-create-missing-idempotency-key",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.create",
+    "requestId": "r-spc-mk",
+    "input": {
+      "label": "A",
+      "prompt": "a"
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "idempotencyKey is required for savedPrompt.create."
+    }
+  },
+  "expectAfter": {
+    "savedPromptsLen": 0
+  }
+}

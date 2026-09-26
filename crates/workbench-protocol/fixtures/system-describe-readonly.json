@@ -1,15 +1,53 @@
 {
   "name": "system-describe-readonly",
   "principal": "readonly",
-  "request": { "protocolVersion": 1, "operation": "system.describe", "requestId": "r-describe-readonly", "input": {} },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "system.describe",
+    "requestId": "r-system-describe-readonly",
+    "input": {}
+  },
   "expect": {
     "reply": {
       "kind": "complete",
       "output": {
         "protocolVersion": 1,
         "operations": [
-          { "id": "project.list", "kind": "query", "requiredScopes": ["project:read"] },
-          { "id": "system.describe", "kind": "query", "requiredScopes": ["system:describe"] }
+          {
+            "id": "project.list",
+            "kind": "query",
+            "requiredScopes": [
+              "project:read"
+            ]
+          },
+          {
+            "id": "savedPrompt.list",
+            "kind": "query",
+            "requiredScopes": [
+              "savedPrompt:read"
+            ]
+          },
+          {
+            "id": "goal.get",
+            "kind": "query",
+            "requiredScopes": [
+              "goal:read"
+            ]
+          },
+          {
+            "id": "agentRunSettings.get",
+            "kind": "query",
+            "requiredScopes": [
+              "agentRunSettings:read"
+            ]
+          },
+          {
+            "id": "system.describe",
+            "kind": "query",
+            "requiredScopes": [
+              "system:describe"
+            ]
+          }
         ]
       }
     },

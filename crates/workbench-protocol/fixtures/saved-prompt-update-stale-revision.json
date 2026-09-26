@@ -1,0 +1,59 @@
+{
+  "name": "saved-prompt-update-stale-revision",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.create",
+      "requestId": "r-spu-s1",
+      "input": {
+        "label": "A",
+        "prompt": "a"
+      },
+      "idempotencyKey": "k-spu-s1"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.update",
+      "requestId": "r-spu-s2",
+      "input": {
+        "id": "any",
+        "label": "B",
+        "prompt": "b"
+      },
+      "idempotencyKey": "k-spu-s2",
+      "expectedRevision": 0
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "label": "A"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "fault": {
+        "code": "preconditionFailed",
+        "outcome": "notApplied",
+        "details": {
+          "expectedRevision": 0,
+          "currentRevision": 1
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "id"
+  ],
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 1
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "name": "goal-create-idempotent-replay",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "goal.create",
+      "requestId": "r-gc-r1",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "objective": "Ship"
+      },
+      "idempotencyKey": "k-gc-r"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "goal.create",
+      "requestId": "r-gc-r2",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "objective": "Ship"
+      },
+      "idempotencyKey": "k-gc-r"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "objective": "Ship"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "objective": "Ship"
+        },
+        "revision": 1
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ],
+  "expectAfter": {
+    "goalsLen": 1,
+    "ledgerApplied": 1
+  }
+}

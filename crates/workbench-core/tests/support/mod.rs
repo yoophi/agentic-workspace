@@ -85,3 +85,42 @@ pub fn create_request(key: &str, name: &str, working_directory: &str) -> CallReq
 pub fn list_request() -> CallRequest {
     CallRequest::query(OperationId::ProjectList, json!({}))
 }
+
+/// 038: 임의 operation의 변경 요청. 키는 호출자가 정한다(재시도·충돌 시나리오용).
+pub fn command_request(operation: OperationId, key: &str, input: Value) -> CallRequest {
+    CallRequest {
+        protocol_version: PROTOCOL_VERSION,
+        operation: operation.as_str().to_owned(),
+        request_id: RequestId::random(),
+        input,
+        idempotency_key: Some(IdempotencyKey::new(key).expect("key")),
+        expected_revision: None,
+        timeout_ms: None,
+    }
+}
+
+pub fn query_request(operation: OperationId, input: Value) -> CallRequest {
+    CallRequest::query(operation, input)
+}
+
+/// 저장 파일 하나를 JSON 배열로 읽는다. 없으면 빈 벡터.
+pub fn read_store(path: &std::path::Path) -> Vec<Value> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    serde_json::from_str(&fs::read_to_string(path).expect("read store")).expect("parse store")
+}
+
+impl TestRuntime {
+    pub fn saved_prompts(&self) -> Vec<Value> {
+        read_store(&self.paths.saved_prompts_file())
+    }
+
+    pub fn goals(&self) -> Vec<Value> {
+        read_store(&self.paths.goals_file())
+    }
+
+    pub fn agent_run_settings(&self) -> Vec<Value> {
+        read_store(&self.paths.agent_run_settings_file())
+    }
+}

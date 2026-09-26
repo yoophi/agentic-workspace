@@ -1,0 +1,34 @@
+{
+  "name": "saved-prompt-update-not-found",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": [
+      {
+        "id": "saved-prompt-1",
+        "label": "Continue",
+        "prompt": "keep going"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.update",
+    "requestId": "r-spu-nf",
+    "input": {
+      "id": "nope",
+      "label": "x",
+      "prompt": "y"
+    },
+    "idempotencyKey": "k-spu-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Saved prompt not found."
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 0
+  }
+}

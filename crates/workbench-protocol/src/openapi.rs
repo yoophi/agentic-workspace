@@ -10,7 +10,7 @@ use utoipa::{
         self,
         path::{HttpMethod, OperationBuilder, PathItem},
         request_body::RequestBodyBuilder,
-        schema::{ArrayBuilder, ObjectBuilder, OneOfBuilder, Schema, Type},
+        schema::{ObjectBuilder, OneOfBuilder, Schema, Type},
         Content, Ref, RefOr, Required, ResponseBuilder, ResponsesBuilder,
     },
     OpenApi,
@@ -44,6 +44,29 @@ use crate::{
         crate::operations::project::ProjectDto,
         crate::operations::project::ProjectListInput,
         crate::operations::project::ProjectCreateInput,
+        crate::operations::project::ProjectUpdateInput,
+        crate::operations::project::ProjectDeleteInput,
+        crate::operations::saved_prompt::SavedPromptDto,
+        crate::operations::saved_prompt::SavedPromptListInput,
+        crate::operations::saved_prompt::SavedPromptCreateInput,
+        crate::operations::saved_prompt::SavedPromptUpdateInput,
+        crate::operations::saved_prompt::SavedPromptDeleteInput,
+        crate::operations::goal::GoalStatus,
+        crate::operations::goal::GoalDto,
+        crate::operations::goal::GoalGetInput,
+        crate::operations::goal::GoalCreateInput,
+        crate::operations::goal::GoalUpdateInput,
+        crate::operations::goal::GoalClearInput,
+        crate::operations::goal::GoalRecordProgressInput,
+        crate::operations::agent_run_settings::PermissionMode,
+        crate::operations::agent_run_settings::ContextSizePreset,
+        crate::operations::agent_run_settings::AgentRunSessionMode,
+        crate::operations::agent_run_settings::AgentRunSettingsDto,
+        crate::operations::agent_run_settings::AgentCommandOverridesDto,
+        crate::operations::agent_run_settings::AgentProfileDto,
+        crate::operations::agent_run_settings::AgentRunSettingsRalphLoopDto,
+        crate::operations::agent_run_settings::AgentRunSettingsGetInput,
+        crate::operations::agent_run_settings::AgentRunSettingsSaveInput,
         crate::operations::system::SystemDescribeInput,
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
@@ -60,19 +83,45 @@ fn input_schema_name(id: OperationId) -> &'static str {
     match id {
         OperationId::ProjectList => "ProjectListInput",
         OperationId::ProjectCreate => "ProjectCreateInput",
+        OperationId::ProjectUpdate => "ProjectUpdateInput",
+        OperationId::ProjectDelete => "ProjectDeleteInput",
+        OperationId::SavedPromptList => "SavedPromptListInput",
+        OperationId::SavedPromptCreate => "SavedPromptCreateInput",
+        OperationId::SavedPromptUpdate => "SavedPromptUpdateInput",
+        OperationId::SavedPromptDelete => "SavedPromptDeleteInput",
+        OperationId::GoalGet => "GoalGetInput",
+        OperationId::GoalCreate => "GoalCreateInput",
+        OperationId::GoalUpdate => "GoalUpdateInput",
+        OperationId::GoalClear => "GoalClearInput",
+        OperationId::GoalRecordProgress => "GoalRecordProgressInput",
+        OperationId::AgentRunSettingsGet => "AgentRunSettingsGetInput",
+        OperationId::AgentRunSettingsSave => "AgentRunSettingsSaveInput",
         OperationId::SystemDescribe => "SystemDescribeInput",
     }
 }
 
+fn dto(name: &str) -> RefOr<Schema> {
+    Ref::from_schema_name(name).into()
+}
+
 fn output_schema(id: OperationId) -> RefOr<Schema> {
+    use crate::operations::common::{array_schema, null_schema, nullable_schema};
+
     match id {
-        OperationId::ProjectList => RefOr::T(Schema::Array(
-            ArrayBuilder::new()
-                .items(Ref::from_schema_name("ProjectDto"))
-                .build(),
-        )),
-        OperationId::ProjectCreate => Ref::from_schema_name("ProjectDto").into(),
-        OperationId::SystemDescribe => Ref::from_schema_name("DescribeOutput").into(),
+        OperationId::ProjectList => array_schema(dto("ProjectDto")),
+        OperationId::ProjectCreate | OperationId::ProjectUpdate => dto("ProjectDto"),
+        OperationId::ProjectDelete | OperationId::SavedPromptDelete | OperationId::GoalClear => {
+            null_schema()
+        }
+        OperationId::SavedPromptList => array_schema(dto("SavedPromptDto")),
+        OperationId::SavedPromptCreate | OperationId::SavedPromptUpdate => dto("SavedPromptDto"),
+        OperationId::GoalGet => nullable_schema(dto("GoalDto")),
+        OperationId::GoalCreate | OperationId::GoalUpdate | OperationId::GoalRecordProgress => {
+            dto("GoalDto")
+        }
+        OperationId::AgentRunSettingsGet => nullable_schema(dto("AgentRunSettingsDto")),
+        OperationId::AgentRunSettingsSave => dto("AgentRunSettingsDto"),
+        OperationId::SystemDescribe => dto("DescribeOutput"),
     }
 }
 
@@ -303,14 +352,30 @@ mod tests {
             .as_array()
             .expect("oneOf");
         assert_eq!(variants.len(), OPERATIONS.len());
-        assert_eq!(variants[0]["properties"]["output"]["type"], "array");
+        let output_of = |operation: &str| -> serde_json::Value {
+            variants
+                .iter()
+                .find(|variant| variant["properties"]["operation"]["enum"][0] == operation)
+                .unwrap_or_else(|| panic!("variant for {operation}"))["properties"]["output"]
+                .clone()
+        };
+        assert_eq!(output_of("project.list")["type"], "array");
         assert_eq!(
-            variants[1]["properties"]["output"]["$ref"],
+            output_of("project.create")["$ref"],
             "#/components/schemas/ProjectDto"
         );
         assert_eq!(
-            variants[2]["properties"]["output"]["$ref"],
+            output_of("system.describe")["$ref"],
             "#/components/schemas/DescribeOutput"
+        );
+        // 038: null 출력과 nullable 출력
+        assert_eq!(output_of("project.delete")["type"], "null");
+        let nullable = output_of("goal.get");
+        assert_eq!(nullable["oneOf"][0]["$ref"], "#/components/schemas/GoalDto");
+        assert_eq!(nullable["oneOf"][1]["type"], "null");
+        assert_eq!(
+            output_of("savedPrompt.list")["items"]["$ref"],
+            "#/components/schemas/SavedPromptDto"
         );
     }
 

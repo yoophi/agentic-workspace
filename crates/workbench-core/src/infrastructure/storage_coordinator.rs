@@ -11,8 +11,20 @@ use std::{
 };
 
 use crate::{
-    domain::project_error::ProjectError,
-    ports::{aggregate_lock::AggregateLock, project_repository::ProjectRepository},
+    domain::{
+        errors::{AgentRunSettingsError, GoalError, SavedPromptError},
+        project_error::ProjectError,
+    },
+    infrastructure::{
+        data_paths::DataPaths, json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
+        json_goal_repository::JsonGoalRepository, json_project_repository::JsonProjectRepository,
+        json_saved_prompt_repository::JsonSavedPromptRepository,
+    },
+    ports::{
+        agent_run_settings_repository::AgentRunSettingsRepository, aggregate_lock::AggregateLock,
+        goal_repository::GoalRepository, project_repository::ProjectRepository,
+        saved_prompt_repository::SavedPromptRepository,
+    },
 };
 
 pub const PROJECTS_AGGREGATE: &str = "projects";
@@ -35,25 +47,45 @@ pub fn git_worktrees_aggregate(repo_root: &Path) -> String {
     format!("git-worktrees:{}", canonical.display())
 }
 
+/// 저장 단위 4개의 저장소. coordinator가 소유하고 handler·reconciler가 lock 안에서만 쓴다.
+#[derive(Clone)]
+pub struct Repositories {
+    pub projects: Arc<dyn ProjectRepository>,
+    pub saved_prompts: Arc<dyn SavedPromptRepository>,
+    pub goals: Arc<dyn GoalRepository>,
+    pub agent_run_settings: Arc<dyn AgentRunSettingsRepository>,
+}
+
+impl Repositories {
+    /// 앱 데이터 디렉터리의 JSON 파일 4개(형식·위치는 AW 시절 그대로).
+    pub fn json(paths: &DataPaths) -> Self {
+        Self {
+            projects: Arc::new(JsonProjectRepository::new(paths)),
+            saved_prompts: Arc::new(JsonSavedPromptRepository::new(paths)),
+            goals: Arc::new(JsonGoalRepository::new(paths)),
+            agent_run_settings: Arc::new(JsonAgentRunSettingsRepository::new(paths)),
+        }
+    }
+}
+
 pub struct StorageCoordinator {
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     revisions: Mutex<HashMap<String, u64>>,
-    projects: Arc<dyn ProjectRepository>,
+    repositories: Repositories,
     #[cfg(feature = "test-hooks")]
     recovery_delay: Mutex<Option<std::time::Duration>>,
 }
 
 impl StorageCoordinator {
-    pub fn new(projects: Arc<dyn ProjectRepository>, initial_projects_revision: u64) -> Self {
-        let coordinator = Self {
+    /// revision은 전부 0에서 시작한다. `bootstrap`이 ledger의 `aggregate_revision`으로 맞춘다.
+    pub fn new(repositories: Repositories) -> Self {
+        Self {
             locks: Mutex::new(HashMap::new()),
             revisions: Mutex::new(HashMap::new()),
-            projects,
+            repositories,
             #[cfg(feature = "test-hooks")]
             recovery_delay: Mutex::new(None),
-        };
-        coordinator.set_revision_of(PROJECTS_AGGREGATE, initial_projects_revision);
-        coordinator
+        }
     }
 
     /// `projects` aggregate의 revision. 037 호출자 호환.
@@ -96,7 +128,19 @@ impl StorageCoordinator {
     }
 
     pub fn projects_repository(&self) -> &Arc<dyn ProjectRepository> {
-        &self.projects
+        &self.repositories.projects
+    }
+
+    pub fn saved_prompts_repository(&self) -> &Arc<dyn SavedPromptRepository> {
+        &self.repositories.saved_prompts
+    }
+
+    pub fn goals_repository(&self) -> &Arc<dyn GoalRepository> {
+        &self.repositories.goals
+    }
+
+    pub fn agent_run_settings_repository(&self) -> &Arc<dyn AgentRunSettingsRepository> {
+        &self.repositories.agent_run_settings
     }
 
     /// 복구 직전에 잠깐 멈춰 인터리빙을 강제한다. 테스트 전용.
@@ -143,11 +187,51 @@ impl StorageCoordinator {
         &self,
         mut f: impl FnMut(&dyn ProjectRepository) -> Result<R, ProjectError>,
     ) -> Result<R, ProjectError> {
+        let repository = &self.repositories.projects;
         self.with_aggregate(
             PROJECTS_AGGREGATE,
-            || f(self.projects.as_ref()),
+            || f(repository.as_ref()),
             |error| matches!(error, ProjectError::StoreCorrupt(_)),
-            || self.projects.recover_from_backup(),
+            || repository.recover_from_backup(),
+        )
+    }
+
+    pub fn with_saved_prompts<R>(
+        &self,
+        mut f: impl FnMut(&dyn SavedPromptRepository) -> Result<R, SavedPromptError>,
+    ) -> Result<R, SavedPromptError> {
+        let repository = &self.repositories.saved_prompts;
+        self.with_aggregate(
+            SAVED_PROMPTS_AGGREGATE,
+            || f(repository.as_ref()),
+            |error| matches!(error, SavedPromptError::StoreCorrupt(_)),
+            || repository.recover_from_backup(),
+        )
+    }
+
+    pub fn with_goals<R>(
+        &self,
+        mut f: impl FnMut(&dyn GoalRepository) -> Result<R, GoalError>,
+    ) -> Result<R, GoalError> {
+        let repository = &self.repositories.goals;
+        self.with_aggregate(
+            GOALS_AGGREGATE,
+            || f(repository.as_ref()),
+            |error| matches!(error, GoalError::StoreCorrupt(_)),
+            || repository.recover_from_backup(),
+        )
+    }
+
+    pub fn with_agent_run_settings<R>(
+        &self,
+        mut f: impl FnMut(&dyn AgentRunSettingsRepository) -> Result<R, AgentRunSettingsError>,
+    ) -> Result<R, AgentRunSettingsError> {
+        let repository = &self.repositories.agent_run_settings;
+        self.with_aggregate(
+            AGENT_RUN_SETTINGS_AGGREGATE,
+            || f(repository.as_ref()),
+            |error| matches!(error, AgentRunSettingsError::StoreCorrupt(_)),
+            || repository.recover_from_backup(),
         )
     }
 }
@@ -173,13 +257,14 @@ mod tests {
     use crate::{
         application::project_service,
         domain::project::{Project, ProjectDraft},
-        infrastructure::{data_paths::DataPaths, json_project_repository::JsonProjectRepository},
     };
 
     fn coordinator(dir: &tempfile::TempDir) -> (DataPaths, Arc<StorageCoordinator>) {
         let paths = DataPaths::new(dir.path());
-        let repository = Arc::new(JsonProjectRepository::new(&paths));
-        (paths, Arc::new(StorageCoordinator::new(repository, 0)))
+        (
+            paths.clone(),
+            Arc::new(StorageCoordinator::new(Repositories::json(&paths))),
+        )
     }
 
     fn project(id: &str) -> Project {

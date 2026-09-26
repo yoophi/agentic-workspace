@@ -1,0 +1,47 @@
+{
+  "name": "agent-run-settings-save-nested-unknown-field-ok",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agentRunSettings.save",
+    "requestId": "r-ass-nu",
+    "input": {
+      "settings": {
+        "workingDirectory": " /repo/wt ",
+        "agentId": " codex ",
+        "permissionMode": "plan",
+        "modelId": " gpt-5 ",
+        "effortId": "",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": true,
+          "maxIterations": 999,
+          "delayMs": 999999,
+          "stopOnPermission": true,
+          "stopOnError": true,
+          "promptTemplate": " continue "
+        },
+        "commandOverrides": {},
+        "futureField": 1
+      }
+    },
+    "idempotencyKey": "k-ass-nu"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "/repo/wt"
+      },
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "agentRunSettingsLen": 1,
+    "ledgerApplied": 1
+  }
+}

@@ -22,14 +22,54 @@ pub enum OperationId {
     ProjectList,
     #[serde(rename = "project.create")]
     ProjectCreate,
+    #[serde(rename = "project.update")]
+    ProjectUpdate,
+    #[serde(rename = "project.delete")]
+    ProjectDelete,
+    #[serde(rename = "savedPrompt.list")]
+    SavedPromptList,
+    #[serde(rename = "savedPrompt.create")]
+    SavedPromptCreate,
+    #[serde(rename = "savedPrompt.update")]
+    SavedPromptUpdate,
+    #[serde(rename = "savedPrompt.delete")]
+    SavedPromptDelete,
+    #[serde(rename = "goal.get")]
+    GoalGet,
+    #[serde(rename = "goal.create")]
+    GoalCreate,
+    #[serde(rename = "goal.update")]
+    GoalUpdate,
+    #[serde(rename = "goal.clear")]
+    GoalClear,
+    #[serde(rename = "goal.recordProgress")]
+    GoalRecordProgress,
+    #[serde(rename = "agentRunSettings.get")]
+    AgentRunSettingsGet,
+    #[serde(rename = "agentRunSettings.save")]
+    AgentRunSettingsSave,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
-    pub const ALL: [OperationId; 3] = [
+    /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
+    pub const ALL: [OperationId; 16] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
+        OperationId::ProjectUpdate,
+        OperationId::ProjectDelete,
+        OperationId::SavedPromptList,
+        OperationId::SavedPromptCreate,
+        OperationId::SavedPromptUpdate,
+        OperationId::SavedPromptDelete,
+        OperationId::GoalGet,
+        OperationId::GoalCreate,
+        OperationId::GoalUpdate,
+        OperationId::GoalClear,
+        OperationId::GoalRecordProgress,
+        OperationId::AgentRunSettingsGet,
+        OperationId::AgentRunSettingsSave,
         OperationId::SystemDescribe,
     ];
 
@@ -37,6 +77,19 @@ impl OperationId {
         match self {
             OperationId::ProjectList => "project.list",
             OperationId::ProjectCreate => "project.create",
+            OperationId::ProjectUpdate => "project.update",
+            OperationId::ProjectDelete => "project.delete",
+            OperationId::SavedPromptList => "savedPrompt.list",
+            OperationId::SavedPromptCreate => "savedPrompt.create",
+            OperationId::SavedPromptUpdate => "savedPrompt.update",
+            OperationId::SavedPromptDelete => "savedPrompt.delete",
+            OperationId::GoalGet => "goal.get",
+            OperationId::GoalCreate => "goal.create",
+            OperationId::GoalUpdate => "goal.update",
+            OperationId::GoalClear => "goal.clear",
+            OperationId::GoalRecordProgress => "goal.recordProgress",
+            OperationId::AgentRunSettingsGet => "agentRunSettings.get",
+            OperationId::AgentRunSettingsSave => "agentRunSettings.save",
             OperationId::SystemDescribe => "system.describe",
         }
     }

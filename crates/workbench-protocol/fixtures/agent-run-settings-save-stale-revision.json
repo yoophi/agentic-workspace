@@ -1,0 +1,86 @@
+{
+  "name": "agent-run-settings-save-stale-revision",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": []
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "agentRunSettings.save",
+      "requestId": "r-ass-s1",
+      "input": {
+        "settings": {
+          "workingDirectory": " /repo/wt ",
+          "agentId": " codex ",
+          "permissionMode": "plan",
+          "modelId": " gpt-5 ",
+          "effortId": "",
+          "contextSize": "large",
+          "sessionMode": "reuse",
+          "ralphLoop": {
+            "enabled": true,
+            "maxIterations": 999,
+            "delayMs": 999999,
+            "stopOnPermission": true,
+            "stopOnError": true,
+            "promptTemplate": " continue "
+          },
+          "commandOverrides": {}
+        }
+      },
+      "idempotencyKey": "k-ass-s1"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "agentRunSettings.save",
+      "requestId": "r-ass-s2",
+      "input": {
+        "settings": {
+          "workingDirectory": " /repo/wt ",
+          "agentId": " codex ",
+          "permissionMode": "plan",
+          "modelId": " gpt-5 ",
+          "effortId": "",
+          "contextSize": "large",
+          "sessionMode": "reuse",
+          "ralphLoop": {
+            "enabled": true,
+            "maxIterations": 999,
+            "delayMs": 999999,
+            "stopOnPermission": true,
+            "stopOnError": true,
+            "promptTemplate": " continue "
+          },
+          "commandOverrides": {}
+        }
+      },
+      "idempotencyKey": "k-ass-s2",
+      "expectedRevision": 0
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "workingDirectory": "/repo/wt"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "fault": {
+        "code": "preconditionFailed",
+        "outcome": "notApplied",
+        "details": {
+          "expectedRevision": 0,
+          "currentRevision": 1
+        }
+      }
+    }
+  ],
+  "expectAfter": {
+    "ledgerApplied": 1
+  }
+}

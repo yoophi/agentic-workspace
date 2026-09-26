@@ -1,0 +1,38 @@
+{
+  "name": "goal-clear-ok",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.clear",
+    "requestId": "r-gcl-ok",
+    "input": {
+      "workingDirectory": "/repo/wt"
+    },
+    "idempotencyKey": "k-gcl-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": null,
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "goalsLen": 0,
+    "ledgerApplied": 1
+  }
+}

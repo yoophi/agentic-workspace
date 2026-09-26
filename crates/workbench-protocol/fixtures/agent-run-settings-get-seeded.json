@@ -1,0 +1,67 @@
+{
+  "name": "agent-run-settings-get-seeded",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": [
+      {
+        "workingDirectory": "/repo/wt",
+        "agentId": "codex",
+        "permissionMode": "plan",
+        "modelId": "gpt-5",
+        "effortId": "high",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": false,
+          "maxIterations": 5,
+          "delayMs": 0,
+          "stopOnPermission": false,
+          "stopOnError": true,
+          "promptTemplate": ""
+        },
+        "commandOverrides": {
+          "globalCommand": null,
+          "agentCommands": {},
+          "globalEnv": {},
+          "profiles": []
+        }
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agentRunSettings.get",
+    "requestId": "r-asg-s",
+    "input": {
+      "workingDirectory": "/repo/wt"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "/repo/wt",
+        "agentId": "codex",
+        "permissionMode": "plan",
+        "modelId": "gpt-5",
+        "effortId": "high",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": false,
+          "maxIterations": 5,
+          "delayMs": 0,
+          "stopOnPermission": false,
+          "stopOnError": true,
+          "promptTemplate": ""
+        },
+        "commandOverrides": {
+          "globalCommand": null,
+          "agentCommands": {},
+          "globalEnv": {},
+          "profiles": []
+        }
+      }
+    }
+  }
+}

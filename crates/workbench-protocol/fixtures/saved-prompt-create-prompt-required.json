@@ -1,0 +1,27 @@
+{
+  "name": "saved-prompt-create-prompt-required",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.create",
+    "requestId": "r-spc-pr",
+    "input": {
+      "label": "x",
+      "prompt": "  "
+    },
+    "idempotencyKey": "k-spc-pr"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Prompt is required."
+    }
+  },
+  "expectAfter": {
+    "savedPromptsLen": 0
+  }
+}

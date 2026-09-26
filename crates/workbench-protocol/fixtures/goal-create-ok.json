@@ -1,0 +1,40 @@
+{
+  "name": "goal-create-ok",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.create",
+    "requestId": "r-gc-ok",
+    "input": {
+      "workingDirectory": " /repo/wt ",
+      "objective": " Ship ",
+      "tokenBudget": 100
+    },
+    "idempotencyKey": "k-gc-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "/repo/wt",
+        "objective": "Ship",
+        "status": "active",
+        "tokenBudget": 100,
+        "tokensUsed": 0,
+        "timeUsedSeconds": 0
+      },
+      "revision": 1
+    }
+  },
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ],
+  "expectAfter": {
+    "goalsLen": 1,
+    "ledgerApplied": 1
+  }
+}

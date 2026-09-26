@@ -1,0 +1,27 @@
+{
+  "name": "saved-prompt-create-label-required",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.create",
+    "requestId": "r-spc-lr",
+    "input": {
+      "label": " ",
+      "prompt": "x"
+    },
+    "idempotencyKey": "k-spc-lr"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Button label is required."
+    }
+  },
+  "expectAfter": {
+    "savedPromptsLen": 0
+  }
+}

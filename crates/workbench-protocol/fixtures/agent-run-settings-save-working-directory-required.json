@@ -1,0 +1,43 @@
+{
+  "name": "agent-run-settings-save-working-directory-required",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agentRunSettings.save",
+    "requestId": "r-ass-wr",
+    "input": {
+      "settings": {
+        "workingDirectory": " ",
+        "agentId": " codex ",
+        "permissionMode": "plan",
+        "modelId": " gpt-5 ",
+        "effortId": "",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": true,
+          "maxIterations": 999,
+          "delayMs": 999999,
+          "stopOnPermission": true,
+          "stopOnError": true,
+          "promptTemplate": " continue "
+        },
+        "commandOverrides": {}
+      }
+    },
+    "idempotencyKey": "k-ass-wr"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Working directory is required."
+    }
+  },
+  "expectAfter": {
+    "agentRunSettingsLen": 0
+  }
+}

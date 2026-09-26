@@ -1,0 +1,61 @@
+{
+  "name": "project-update-idempotent-replay",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "project.update",
+      "requestId": "r-pu-r1",
+      "input": {
+        "id": "project-1",
+        "name": "R",
+        "workingDirectory": "/tmp/r"
+      },
+      "idempotencyKey": "k-pu-r"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "project.update",
+      "requestId": "r-pu-r2",
+      "input": {
+        "id": "project-1",
+        "name": "R",
+        "workingDirectory": "/tmp/r"
+      },
+      "idempotencyKey": "k-pu-r"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "name": "R"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "name": "R"
+        },
+        "revision": 1
+      }
+    }
+  ],
+  "expectAfter": {
+    "ledgerApplied": 1
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "agent-run-settings-save-missing-idempotency-key",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agentRunSettings.save",
+    "requestId": "r-ass-mk",
+    "input": {
+      "settings": {
+        "workingDirectory": " /repo/wt ",
+        "agentId": " codex ",
+        "permissionMode": "plan",
+        "modelId": " gpt-5 ",
+        "effortId": "",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": true,
+          "maxIterations": 999,
+          "delayMs": 999999,
+          "stopOnPermission": true,
+          "stopOnError": true,
+          "promptTemplate": " continue "
+        },
+        "commandOverrides": {}
+      }
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "idempotencyKey is required for agentRunSettings.save."
+    }
+  },
+  "expectAfter": {
+    "agentRunSettingsLen": 0
+  }
+}

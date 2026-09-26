@@ -1,0 +1,50 @@
+{
+  "name": "goal-create-replaces-existing",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.create",
+    "requestId": "r-gc-re",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "objective": "New"
+    },
+    "idempotencyKey": "k-gc-re"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "/repo/wt",
+        "objective": "New",
+        "status": "active",
+        "tokenBudget": null,
+        "tokensUsed": 0,
+        "timeUsedSeconds": 0
+      },
+      "revision": 1
+    }
+  },
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ],
+  "expectAfter": {
+    "goalsLen": 1,
+    "ledgerApplied": 1
+  }
+}

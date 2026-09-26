@@ -1,0 +1,49 @@
+{
+  "name": "goal-update-ok",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.update",
+    "requestId": "r-gu-ok",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "objective": " Revised ",
+      "status": "active"
+    },
+    "idempotencyKey": "k-gu-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "/repo/wt",
+        "objective": "Revised",
+        "status": "active",
+        "tokenBudget": 100,
+        "tokensUsed": 50
+      },
+      "revision": 1
+    }
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ],
+  "expectAfter": {
+    "goalsLen": 1,
+    "ledgerApplied": 1
+  }
+}

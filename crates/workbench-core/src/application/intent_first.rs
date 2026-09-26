@@ -381,8 +381,8 @@ mod tests {
 
     use super::*;
     use crate::infrastructure::{
-        data_paths::DataPaths, json_project_repository::JsonProjectRepository,
-        storage_coordinator::GOALS_AGGREGATE,
+        data_paths::DataPaths,
+        storage_coordinator::{Repositories, GOALS_AGGREGATE},
     };
 
     fn runtime_parts() -> (
@@ -396,10 +396,7 @@ mod tests {
         paths.ensure_dirs().unwrap();
         let ledger = Arc::new(SqliteOperationLedger::open(&paths).unwrap());
         ledger.migrate().unwrap();
-        let coordinator = Arc::new(StorageCoordinator::new(
-            Arc::new(JsonProjectRepository::new(&paths)),
-            0,
-        ));
+        let coordinator = Arc::new(StorageCoordinator::new(Repositories::json(&paths)));
         (dir, ledger, coordinator, Arc::new(TestHooks::default()))
     }
 

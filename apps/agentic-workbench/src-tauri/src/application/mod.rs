@@ -4,7 +4,6 @@ pub use acp_agent_core::application::{
 };
 
 pub mod agent_exchange_service;
-pub mod agent_run_settings_service;
 pub mod agent_tool_candidate_service;
 pub mod appearance_preferences_service;
 pub mod coordinator_notification_dispatcher;
@@ -12,14 +11,12 @@ pub mod git_branch_service;
 pub mod git_remote_service;
 pub mod git_worktree_changes_service;
 pub mod git_worktree_service;
-pub mod goal_service;
 pub mod list_provider_sessions;
 pub mod mcp_title_control_service;
 pub mod orchestration_command_service;
 pub mod orchestration_event_projector;
 pub mod orchestration_scheduler;
 pub mod orchestration_service;
-pub mod saved_prompt_service;
 pub mod session_window_state_service;
 pub mod window_menu_service;
 pub mod worktree_changes_service;
