@@ -33,7 +33,7 @@
 | `get_worktree_git_graph` | 같음 | `GitCommitGraph` | `worktree.getGraph` |
 | `get_worktree_commit_detail` | `working_directory, commit_hash` | `GitCommitDetail` | `worktree.getCommitDetail` |
 | `get_worktree_commit_file_diff` | `working_directory, commit_hash, path` | `GitFileDiff` | `worktree.getCommitFileDiff` |
-| `list_agents` | — | `Vec<AgentDescriptor>` (오늘은 infallible; 어댑터는 `Result` 실패 시 빈 목록이 아니라 `Err(message)` — 실제로는 발생하지 않음) | `agent.list` |
+| `list_agents` | — | `Vec<AgentDescriptor>` (반환 타입 유지. 호출 실패 시 빈 목록을 돌려주고 오류는 perf 로그 `log_async_command_error`에 남긴다 — 실제로는 발생하지 않음) | `agent.list` |
 | `list_provider_sessions` | `agent_id, cwd: Option<String>` | `Vec<ProviderSession>` | `agent.listProviderSessions` |
 
 반환 타입은 core로 이동한 도메인 타입(AW `domain/mod.rs`가 `pub use workbench_core::domain::*`로 재노출) 또는 git-core 타입이며, 어댑터는 `CallReply.output`(DTO JSON)을 그 타입으로 역직렬화한다. DTO와 도메인 타입의 JSON이 같음은 wire 동일성 테스트가 보장한다(R1).
@@ -41,7 +41,9 @@
 ## 변환 규칙
 
 - `*Input` → `serde_json::Value`: 필드명 camelCase, `Option::None`은 필드 생략(현재 프론트가 보내는 형태 유지).
-- `list_git_worktrees(include_status: None)` → `includeStatus` 생략(서버 기본 false).
+- `list_git_worktrees(include_status: None)` → `includeStatus` 생략(서버 기본 **true** — 오늘 command의 `unwrap_or(true)`와 같다).
+- `list_provider_sessions(cwd: None)` → `cwd` 생략. 공백 `cwd`는 그대로 보내고 서버가 전체 범위로 해석한다.
+- 이력·그래프의 `max_count`·`offset`·`cursor`가 `None`이면 각각 생략(서버 기본 100/300·0·없음).
 - `list_worktree_files(scope: None)` → `scope` 생략.
 - `save_agent_run_settings(settings)` → `{ "settings": <AgentRunSettings JSON> }`.
 - 변경 command는 호출마다 `IdempotencyKey::random()`, `expectedRevision: None`.

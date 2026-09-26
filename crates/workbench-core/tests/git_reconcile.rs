@@ -82,6 +82,22 @@ async fn create_pending_with_registered_path_is_applied() {
     assert_eq!(git_repo::worktree_count(&repo.root), 2);
 }
 
+/// 세 번째 중단 지점(확정 직전)도 git 명령 뒤이므로 applied다(SC-003).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn create_crash_before_applied_is_applied_without_duplicate() {
+    let rt = TestRuntime::new();
+    let repo = build_repo(&rt, json!([]));
+    rt.runtime
+        .hooks()
+        .set_crash_point(Some(CrashPoint::BeforeApplied));
+    rt.call(create("k1", &repo, "wt-new")).await.unwrap_err();
+
+    let rt = rt.restart();
+    assert_eq!(count(&rt, LedgerState::Applied), 1);
+    rt.call(create("k1", &repo, "wt-new")).await.unwrap();
+    assert_eq!(git_repo::worktree_count(&repo.root), 2, "중복 생성 없음");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn create_pending_without_path_is_unknown() {
     let rt = TestRuntime::new();

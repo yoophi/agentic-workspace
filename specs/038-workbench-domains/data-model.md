@@ -91,7 +91,7 @@
 
 | 모듈 | 타입 | 규칙(서비스 이동 시 유지) |
 |---|---|---|
-| `saved_prompt` | `SavedPrompt`, `SavedPromptDraft` | `label`·`prompt` trim 후 필수("Button label is required." / "Prompt is required."), id `prompt-{nanos}` |
+| `saved_prompt` | `SavedPrompt`, `SavedPromptDraft` | `label`·`prompt` trim 후 필수("Button label is required." / "Prompt is required."), id `saved-prompt-{nanos}`(기존 형식) |
 | `goal` | `ThreadGoal`, `GoalStatus`, `GoalDraft`, `GoalUpdate`, `GoalProgressUpdate` | `workingDirectory`·`objective` 필수, 진행 기록은 saturating add, 예산 초과 시 상태 전이(기존 로직) |
 | `agent_run_settings` | `AgentRunSettings`, `AgentCommandOverrides`, `AgentProfile`, `AgentRunSettingsRalphLoop`, `AgentRunSessionMode`, `AgentCommandSource`, `CommandResolutionResult` | built-in 프로필 최소 1개 활성, ralph loop 상한(`MAX_RALPH_*`) |
 | `git_remote`, `git_branch`, `git_worktree` | `GitRemote`, `GitBranch`, `GitWorktree`, `GitWorktreeStatus`, `GitWorktreeCreateDraft` | `Working directory is required.` / `Worktree path is required.`; branch 기본 `worktree-{nanos:x}`, path 기본 `<parent>/<repoName>-worktrees/<branch>`(기존 `default_worktree_path`) |
@@ -101,7 +101,7 @@
 
 ### 오류 enum (R7)
 
-`SavedPromptError { Required(&'static str), NotFound, Storage(String), StoreCorrupt(String), Clock(String) }`, `GoalError { Required, NotFound, Storage, StoreCorrupt }`, `AgentRunSettingsError { Required, NoBuiltInProfile, Storage, StoreCorrupt }`, `GitError { Required(&'static str), GitNotFound, CommandFailed(String), WorktreeHasChanges, StatusUnresolved, Clock(String) }`, `WorktreeFileError { Required, NotADirectory, OutsideWorktree, NotRegularFile, NotFound(String), Io(String) }`, `ProviderSessionError { Required, Storage(String) }`. 각 `Display`는 §2 규칙 열의 문구. 각 enum에 `fault(&RequestId) -> WorkbenchFault` 매핑 함수(코드 표는 research R7).
+`SavedPromptError { Required(&'static str), NotFound, Storage(String), StoreCorrupt(String), Clock(String) }`, `GoalError { Required, NotFound, Storage, StoreCorrupt }`, `AgentRunSettingsError { Required, NoBuiltInProfile, Storage, StoreCorrupt }`, `GitError { Required(&'static str), GitNotFound(String), CommandFailed(String), Io(String), WorktreeNotFound, WorktreeHasChanges, StatusUnresolved, Unresolvable(&'static str), Clock(String) }`, `WorktreeFileError { Required, NotADirectory, OutsideWorktree, NotRegularFile, NotUtf8, NotFound(String), Io(String) }`, `ProviderSessionError { Storage(String) }` (구현 기준 2026-09-27 — `GitNotFound`는 오늘 문구를 싣고, 빈 `agentId`는 오류가 아니라 빈 목록이다). 각 `Display`는 §2 규칙 열의 문구. 각 enum에 `fault(&RequestId) -> WorkbenchFault` 매핑 함수(코드 표는 research R7).
 
 ## 3. 포트 — `workbench-core/ports`
 
@@ -124,7 +124,7 @@
 
 새 컬럼 없음. `aggregate` 값에 위 4개와 동적 `git-worktrees:<canonical repo root>`가 들어간다.
 
-**예약(`reserved_resource_id`)**: 서버가 새 id를 만드는 생성(`project.create` → `project-*`, `savedPrompt.create` → `prompt-*`)과 `git.createWorktree`(해석된 worktree 절대 경로)만 값을 가진다. upsert(`goal.create`·`agentRunSettings.save`)·수정·삭제는 `NULL`. 예약은 **`pending` 동안만 배타**이고 종료 상태에서 해제된다(값은 증거로 남는다).
+**예약(`reserved_resource_id`)** (구현 기준 2026-09-27): 서버가 새 id를 만드는 생성(`project.create` → `project-*`, `savedPrompt.create` → `saved-prompt-*`), **삭제**(`project.delete`·`savedPrompt.delete`는 대상 id, `goal.clear`는 `workingDirectory`), 그리고 `git.createWorktree`·**`git.deleteWorktree`**(해석된 worktree 절대 경로 — 상대 경로는 `workingDirectory` 기준으로 절대화)가 값을 가진다. 삭제의 예약은 재시작 판정(대상 부재 = applied)의 증거이자 진행 중 같은 대상 변경과의 배제다. upsert(`goal.create`·`agentRunSettings.save`)·수정은 `NULL`. 예약은 **`pending` 동안만 배타**이고 종료 상태에서 해제된다(값은 증거로 남는다).
 
 ```sql
 -- MIGRATION_V2 (v1 파일은 첫 기동에서 자동 승격)
@@ -140,7 +140,7 @@ INSERT INTO schema_version (version, applied_at) VALUES (2, <now>);
 | `begin` → `pending` | 잡음. 같은 (aggregate, 자원)에 `pending`이 있으면 `DuplicateReservation` |
 | → `applied` / `failed` / `unknown` | 해제(index 조건에서 빠짐). 같은 자원의 다음 변경은 새 실행 |
 
-`DuplicateReservation`: 서버 생성 id는 새 id로 3회 재시도, 호출자가 준 worktree 경로는 `conflict` outcome `unknown` retryable.
+`DuplicateReservation`: 서버 생성 id는 새 id로 3회 재시도, 호출자가 준 자원(삭제 대상 id·worktree 경로)은 `conflict` outcome `unknown` retryable.
 
 ### 재시작 판정 규칙 (R6)
 
@@ -149,7 +149,7 @@ INSERT INTO schema_version (version, applied_at) VALUES (2, <now>);
 | `project.create`·`savedPrompt.create` | 예약 id가 파일에 있음(이 실행만 만들 수 있는 id) | 저장된 항목 DTO |
 | `project.delete`·`savedPrompt.delete`·`goal.clear` | 대상이 파일에 없음 | `null` |
 | `git.createWorktree` | 경로가 `git worktree list --porcelain`에 있음 | `null` |
-| `git.deleteWorktree` | 경로가 목록에 없음 | `null` |
+| `git.deleteWorktree` | 경로가 목록에 없음(목록을 읽을 수 없거나 비면 `unknown`) | `null` |
 | upsert 2개(`goal.create`는 같은 worktree의 기존 목표를 교체, `agentRunSettings.save`)·수정 4개 | — 관찰로 구별 불가 | 항상 `unknown` |
 
 ## 5. 실행 모델 — `workbench-core/application`
@@ -198,7 +198,7 @@ flowchart TD
 | 52–55 | `sync_agent_workspace`, `send_agent_exchange`, `acknowledge_agent_exchange`, `list_agent_exchanges` | 2단계로 이연 | 창 label 기반 workspace registry, 이벤트 발행 |
 | 56–73 | orchestration 18개 (`bootstrap_orchestration_workspace` … `recover_orchestration_workspace`) | 2단계로 이연 | 창 label·MCP 상태·메모리 journal 결합. 조회 2개(`list_recoverable_orchestration_workspaces`, `replay_orchestration_runtime_events`)도 도메인을 쪼개지 않기 위해 함께 이연 |
 
-(연번은 `lib.rs` 등록 순서 기준. 합계: 이관됨 31 = 037 2 + 038 29, 이연 32, 유지 8.)
+(합계: 이관됨 31 = 037 2 + 038 29, 이연 32, 유지 8. 위 초안의 묶음 연번은 정확하지 않다 — `lib.rs` 등록 순서 그대로 펼친 71행 정본은 [docs/workbench-seam.md](../../docs/workbench-seam.md#command-인벤토리-71).)
 
 ## 7. Tauri compat 매핑 (029 command)
 

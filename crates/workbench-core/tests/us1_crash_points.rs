@@ -232,3 +232,49 @@ async fn agent_run_settings_save_ledger_complete_failure_is_unknown_and_stays_pe
     assert_eq!(reply.revision(), Some(1));
     assert_eq!(rt.agent_run_settings().len(), 1, "같은 worktree는 교체");
 }
+
+/// SC-003 완결: upsert·수정(`goal.recordProgress`·`agentRunSettings.save`)은 세 지점 모두에서 `unknown`으로 닫히고
+/// 자동 재실행이 없다(항목 수 불변 = 중복 0).
+async fn upsert_or_update_is_unknown_at(point: CrashPoint, request: fn(&str) -> CallRequest) {
+    let rt = TestRuntime::new();
+    rt.call(goal_create("g0", "Ship")).await.unwrap();
+    rt.runtime.hooks().set_crash_point(Some(point));
+    let fault = rt.call(request("k1")).await.unwrap_err();
+    assert!(
+        fault.message.contains("crash injected"),
+        "{point:?}: {fault}"
+    );
+    let goals_before = rt.goals().len();
+    let settings_before = rt.agent_run_settings().len();
+
+    let rt = rt.restart();
+    assert_eq!(count(&rt, LedgerState::Pending), 0, "{point:?}");
+    assert_eq!(count(&rt, LedgerState::Unknown), 1, "{point:?}");
+    assert_eq!(rt.goals().len(), goals_before, "{point:?}: 재실행 없음");
+    assert_eq!(rt.agent_run_settings().len(), settings_before, "{point:?}");
+    let fault = rt.call(request("k1")).await.unwrap_err();
+    assert_eq!(fault.code, FaultCode::Conflict, "{point:?}");
+    assert_eq!(fault.outcome, Outcome::Unknown, "{point:?}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn goal_record_progress_is_unknown_at_every_crash_point() {
+    for point in [
+        CrashPoint::AfterPending,
+        CrashPoint::AfterJsonSave,
+        CrashPoint::BeforeApplied,
+    ] {
+        upsert_or_update_is_unknown_at(point, |key| goal_progress(key, 40)).await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn agent_run_settings_save_is_unknown_at_every_crash_point() {
+    for point in [
+        CrashPoint::AfterPending,
+        CrashPoint::AfterJsonSave,
+        CrashPoint::BeforeApplied,
+    ] {
+        upsert_or_update_is_unknown_at(point, settings_save).await;
+    }
+}

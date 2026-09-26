@@ -7,7 +7,7 @@
 1. **조회 17개**는 `idempotencyKey`·`expectedRevision`을 무시하지 않고 **거절**한다: 037과 같이 조회에 키가 오면 `invalidArgument`("idempotencyKey is only accepted for command operations.").
 2. **변경 12개**는 키 필수. 없으면 `invalidArgument`("idempotencyKey is required for `<operation>`.").
 3. **Git 변경 2개**는 `expectedRevision`을 받지 않는다 → `invalidArgument`("expectedRevision is not supported for git operations."). 저장 단위 변경 10개는 037 규칙(불일치 → `preconditionFailed`, outcome `notApplied`).
-4. **응답 `revision`**: 저장 단위 변경은 새 aggregate revision, Git 변경은 `null`, 조회는 `null`.
+4. **응답 `revision`**: 저장 단위 변경은 새 aggregate revision, Git 변경과 조회는 필드 없음. Git 변경은 같은 키 재생 응답에도 `revision`이 없다(구현 확인 2026-09-27).
 5. **`null` 출력**: `project.delete`·`savedPrompt.delete`·`goal.clear`·`git.createWorktree`·`git.deleteWorktree`는 `output: null`.
 6. **오류 message**는 기존 데스크톱 문구 그대로(§3). Git 비정상 종료는 stderr 본문 그대로.
 7. **경로 입력**은 서버가 `trim` 후 검증한다. 빈 값 → `invalidArgument`(`"<Label> is required."`, `details.fieldPath`).
@@ -41,7 +41,7 @@
 | `goal.get` | `goal:read` | query | `invalidArgument`("Working directory is required.") — 없으면 `output: null` |
 | `goal.create` | `goal:write` | command | `invalidArgument`(workingDirectory·objective 필수), `conflict`. **upsert**: 같은 worktree의 기존 목표(진행 포함)를 교체(오늘과 같음). 예약 없음, 재시작 판정 `불명` |
 | `goal.update` | `goal:write` | command | `invalidArgument`(objective가 주어졌는데 빈 값), `notFound`("Goal not found.") |
-| `goal.clear` | `goal:write` | command | `invalidArgument`; 대상 없음은 **성공**(`null`, 오늘과 같음) |
+| `goal.clear` | `goal:write` | command | `invalidArgument`, `notFound`("Goal not found." — 오늘 서비스와 같음. 초안의 "대상 없음은 성공"은 오기였다) |
 | `goal.recordProgress` | `goal:write` | command | `invalidArgument`, `notFound` |
 
 ### agentRunSettings
@@ -55,18 +55,18 @@
 
 | operation | scope | kind | 실패 |
 |---|---|---|---|
-| `git.listRemotes` / `git.listBranches` | `git:read` | query | `invalidArgument`, `notFound`(디렉터리 없음), `unavailable`(git 없음), `internal`(git 실패, stderr) |
-| `git.listWorktrees` | `git:read` | query | 같음. `includeStatus` 기본 false |
-| `git.createWorktree` | `git:write` | command | `invalidArgument`, `notFound`, `unavailable`, `internal`(예: 경로 이미 존재 — git stderr), `conflict`(같은 키 다른 내용 / 같은 경로 생성이 **진행 중** → 재시도 없이 `conflict` outcome `unknown` retryable, 규칙 8) |
-| `git.deleteWorktree` | `git:write` | command | 위 + `preconditionFailed`("Worktree has changes and cannot be deleted." / "Worktree status is not resolved yet and cannot be deleted.") outcome `notApplied` |
+| `git.listRemotes` / `git.listBranches` | `git:read` | query | `invalidArgument`, `unavailable`(git 없음). 저장소가 아니거나 디렉터리가 없어 git이 실패하면 **빈 목록**(오늘과 같음 — 초안의 `notFound`는 동작 변경이라 채택하지 않음) |
+| `git.listWorktrees` | `git:read` | query | 같음. `includeStatus` 생략 시 **true**(오늘 command 기본값과 같음 — 초안의 false는 오기) |
+| `git.createWorktree` | `git:write` | command | `invalidArgument`(필수 입력, 기본 경로를 만들 수 없음 — "Failed to resolve project directory name." 등), `unavailable`, `internal`(예: 경로 이미 존재·잘못된 reference — "Failed to create git worktree: <git stderr>"), `conflict`(같은 키 다른 내용 / 같은 경로 생성이 **진행 중** → 재시도 없이 `conflict` outcome `unknown` retryable, 규칙 8) |
+| `git.deleteWorktree` | `git:write` | command | `invalidArgument`("Worktree path is required."), `notFound`("Git worktree not found." — 목록에 없는 경로), `preconditionFailed`("Worktree has changes and cannot be deleted." / "Worktree status is not resolved yet and cannot be deleted.") outcome `notApplied`, `unavailable`, `internal`, `conflict`(규칙 8 — 삭제도 대상 경로를 `pending` 동안 예약) |
 
 ### worktree (체크아웃 디렉터리 단위)
 
 | operation | scope | kind | 실패 |
 |---|---|---|---|
-| `worktree.listChanges` / `worktree.getChanges` / `worktree.getFileDiff` | `worktree:read` | query | Git 조회 공통 |
+| `worktree.listChanges` / `worktree.getChanges` / `worktree.getFileDiff` | `worktree:read` | query | Git 조회 공통. git-core reader를 거치는 조회(`getChanges`·`getFileDiff`·이력·그래프·커밋)는 실패가 전부 `internal`이다(git-core가 `String` 오류를 돌려주고, git-core는 바꾸지 않는다) |
 | `worktree.listFiles` | `worktree:read` | query | `invalidArgument`, `notFound`("Working directory must be a directory."), `forbidden`("File path must stay inside the worktree." — `scope.dir` 탈출) |
-| `worktree.readTextFile` | `worktree:read` | query | `invalidArgument`("File path is required."), `forbidden`(탈출), `notFound`("Only regular files can be previewed." / 없음). 512KB 초과는 성공 + `truncated: true`, UTF-8 아님은 오늘의 처리 유지 |
+| `worktree.readTextFile` | `worktree:read` | query | `invalidArgument`("File path is required."), `forbidden`(탈출), `notFound`("Only regular files can be previewed." / 없음). 512KB 초과는 성공 + `truncated: true`. UTF-8 아님은 오늘처럼 오류 "Only UTF-8 text files can be previewed." → `invalidArgument`(`/path`) |
 | `worktree.listHistory` / `worktree.getGraph` | `worktree:read` | query | Git 조회 공통. `maxCount` 상한 500(초과 시 clamp, 오늘과 같음) |
 | `worktree.getCommitDetail` / `worktree.getCommitFileDiff` | `worktree:read` | query | Git 조회 공통. 없는 커밋은 git stderr → `internal`(stderr 해석 안 함, grill Q5) |
 
@@ -75,7 +75,7 @@
 | operation | scope | kind | 실패 |
 |---|---|---|---|
 | `agent.list` | `agent:read` | query | 없음(환경 설정 오류는 빈 목록·기본값, 오늘과 같음) |
-| `agent.listProviderSessions` | `agent:read` | query | `invalidArgument`(agentId 빈 값). 미지원 provider는 빈 목록. 손상 항목은 건너뜀 |
+| `agent.listProviderSessions` | `agent:read` | query | `invalidArgument`(`agentId` 누락 — 입력 형식), `internal`(목록 전체를 만들 수 없음, 예: HOME 없음). 빈 `agentId`·미지원 provider는 빈 목록(오늘과 같음 — 초안의 "빈 값 → invalidArgument"는 동작 변경이라 채택하지 않음). 손상 항목은 건너뜀 |
 
 ## 3. 보존 문구(골든)
 
@@ -112,7 +112,7 @@
 
 `tests/contract_suite.rs`가 전 fixture를 in-memory와 HTTP로 실행해 서로 비교(037 그대로). Tauri 경로는 `workbench_compat.rs` 유닛 테스트가 같은 fixture의 request를 `*Input`→`CallRequest` 변환 결과와 대조하고, `reply`→`Result<_, String>` 변환에서 message만 남는지 확인한다.
 
-## 6. 재시작 판정 시나리오 (`tests/ledger_crash_points.rs` 확장)
+## 6. 재시작 판정 시나리오 (037 `ledger_crash_points.rs`는 수정하지 않고 `us1_crash_points.rs`·`git_reconcile.rs`·`reservation_lifecycle.rs`에 추가)
 
 | 시나리오 | 중단 지점 | 기대 |
 |---|---|---|

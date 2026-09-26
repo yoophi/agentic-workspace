@@ -226,11 +226,11 @@ description: "Task list for migrating the remaining server-owned domains behind 
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T061 [P] `crates/workbench-core/tests/list_latency.rs`에 `saved_prompt_list`·`goal_record_progress`·`worktree_list_files`(작은 seed repo) 100회 p95 측정 추가(#[ignore]); `cargo test -p workbench-core --test list_latency -- --ignored --nocapture` 결과를 Notes에 기록(SC-001)
-- [ ] T062 [P] drift 검출 실증: `crates/workbench-protocol/src/operations/goal.rs` 필드명 하나 변경 → `pnpm run generate:contracts && git diff --exit-code -- crates/workbench-protocol/openapi packages/workbench-client/src/generated` 실패 확인 → 복원 → 통과. 결과 Notes
-- [ ] T063 전체 게이트: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p workbench-core --lib -- -D warnings`, `cargo test --workspace --all-targets`(통과 수 Notes), `pnpm run check-types`, `pnpm run test`, `pnpm run generate:contracts && git status --short`(변경 없음)
-- [ ] T064 앱 스모크(quickstart §4): `pnpm --filter agentic-workbench tauri dev` 기동 → 기존 v1 `ledger.sqlite`가 `schema_version` 2로 승격됐는지, `saved-prompts.json`·`goals.json`·`agent-run-settings.json` 해시가 기동만으로 바뀌지 않는지, 수동 항목 1–11 중 자동화되지 않은 것을 표로 Notes에 기록(수행 여부 정직하게). 037처럼 UI 조작 항목은 리뷰어 수동 항목으로 남길 수 있음
-- [ ] T065 SC 증거 매핑을 Notes에 작성(SC-001~SC-008 각각 테스트/명령/문서), spec 대비 어긋난 점 기록(예: `git.deleteWorktree`도 예약을 잡기로 한 T046 결정 → data-model §4 갱신), 커밋 메시지·PR 본문 초안 작성(push·PR은 사용자 지시 후). 커밋(`docs(aw): record 038 inventory and migration status`)
+- [X] T061 [P] `crates/workbench-core/tests/list_latency.rs`에 `saved_prompt_list`·`goal_record_progress`·`worktree_list_files`(작은 seed repo) 100회 p95 측정 추가(#[ignore]); `cargo test -p workbench-core --test list_latency -- --ignored --nocapture` 결과를 Notes에 기록(SC-001)
+- [X] T062 [P] drift 검출 실증: `crates/workbench-protocol/src/operations/goal.rs` 필드명 하나 변경 → `pnpm run generate:contracts && git diff --exit-code -- crates/workbench-protocol/openapi packages/workbench-client/src/generated` 실패 확인 → 복원 → 통과. 결과 Notes
+- [X] T063 전체 게이트: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p workbench-core --lib -- -D warnings`, `cargo test --workspace --all-targets`(통과 수 Notes), `pnpm run check-types`, `pnpm run test`, `pnpm run generate:contracts && git status --short`(변경 없음)
+- [X] T064 앱 스모크(quickstart §4): `pnpm --filter agentic-workbench tauri dev` 기동 → 기존 v1 `ledger.sqlite`가 `schema_version` 2로 승격됐는지, `saved-prompts.json`·`goals.json`·`agent-run-settings.json` 해시가 기동만으로 바뀌지 않는지, 수동 항목 1–11 중 자동화되지 않은 것을 표로 Notes에 기록(수행 여부 정직하게). 037처럼 UI 조작 항목은 리뷰어 수동 항목으로 남길 수 있음
+- [X] T065 SC 증거 매핑을 Notes에 작성(SC-001~SC-008 각각 테스트/명령/문서), spec 대비 어긋난 점 기록(예: `git.deleteWorktree`도 예약을 잡기로 한 T046 결정 → data-model §4 갱신), 커밋 메시지·PR 본문 초안 작성(push·PR은 사용자 지시 후). 커밋(`docs(aw): record 038 inventory and migration status`)
 
 ---
 
@@ -322,3 +322,32 @@ T036 "git-* fixture"  T037 "worktree-* fixture"  T038 "git/worktree wire parity"
   - (T016) `TestRuntime::with_adapters`는 주입점(`RuntimeAdapters`)이 생기는 T055에서 함께 만든다. Phase 2에서는 `apply_seed → SeedContext`와 `steps_with(ctx)` 치환, `git_repo` 빌더까지.
   - (US1, 2026-09-27) 구현 중 결정: handler는 op별 파일 대신 **도메인별 모듈**(`handlers/{project,saved_prompt,goal,agent_run_settings,system}/`, project만 op별 파일)로 두었다. crash point·동시성·revision·복구 테스트는 037 파일을 손대지 않고 `tests/us1_crash_points.rs`(7)·`tests/us1_stores.rs`(4, 저장 단위 4개 매개화)에 추가. `goal.clear`는 대상 없음이 오늘도 `Goal not found.`(contracts §2 "성공" 표기는 오기 → T065에서 정정). `goal.update`의 `tokenBudget`은 AW `Option<Option<_>>` serde 규칙 그대로(`null` = 변경 없음; 3상태는 오늘 wire로 표현 불가 — spec 표기 정정 대상). 삭제 3개(`project.delete`·`savedPrompt.delete`·`goal.clear`)는 대상 id를 `Reservation::CallerProvided`로 잡아 reconciler가 종료 상태를 판정. 조회에 `idempotencyKey`가 오면 runtime이 `invalidArgument`로 거절(contracts 규칙 1, `MESSAGE_KEY_ON_QUERY`). `start_agent_run`(2단계 대상)의 설정 읽기는 `coordinator.with_agent_run_settings`로 옮겨 lock 안에서 읽는다. 037 유닛 테스트 중 `authorization::readonly_is_forbidden…`은 표가 커져 "Query 수와 같다"로 일반화(행위 동일). compat 변환 테스트 `us1_inputs_match_fixture_shapes`는 fixture 29종 이상을 AW `*Input`으로 왕복.
   - (Phase 2 게이트, 2026-09-27) `cargo test -p workbench-protocol -p workbench-core -p agentic-workbench` 343 passed / 0 failed(protocol 골든은 계약 재생성 뒤 통과). AW compat generic 6개·perf_log 2개는 US1까지 dead_code 경고(의도).
+  - (T061, 2026-09-27) 지연(SC-001, in-memory, 100회 p95; `cargo test -p workbench-core --test list_latency -- --ignored --nocapture`). 기준선은 같은 서비스·어댑터를 직접 부른 값(이전 command 경로에 해당):
+
+    | operation | Workbench 경유 p95 | 직접 p95 | 증가 |
+    |---|---|---|---|
+    | `savedPrompt.list`(50개) | 0.42ms | 0.19ms | 0.23ms |
+    | `goal.recordProgress` | 16.6ms | 16.3ms | 0.24ms |
+    | `worktree.listFiles`(파일 200) | 3.0ms | 1.9ms | 1.1ms |
+    | `project.list`(50개, 037) | 0.45ms | — | — |
+
+    `goal.recordProgress`의 16ms는 JSON atomic save(fsync)이며 직접 경로와 같다. 50ms 예산 대비 여유가 크다.
+  - (T062) drift 실증: `operations/goal.rs`의 `objective` → `objective_text` 변경 뒤 `pnpm run generate:contracts && git diff --exit-code -- crates/workbench-protocol/openapi packages/workbench-client/src/generated` **exit 1**(openapi 8줄·ts 4줄 변경), 복원 뒤 **exit 0**.
+  - (T063) 전체 게이트: `cargo fmt --all -- --check` 통과, `cargo clippy --workspace --all-targets -- -D warnings` 통과, `cargo clippy -p workbench-core --lib -- -D warnings` 통과, `cargo test --workspace --all-targets` **566 passed / 0 failed / 5 ignored**(기준선 467 대비 +99; ignored는 latency 4 + app_data_smoke 1 — SC-003 보강 테스트 3개 추가 뒤 재실행), `pnpm run check-types` 13/13, `pnpm run test` 12/12, 재생성 뒤 `git status` 변경 없음.
+  - (T064) 앱 스모크 — 실제 앱 데이터는 건드리지 않았다(기동하면 ledger가 영구 승격되므로). 대신 `~/Library/Application Support/com.yoophi.agentic-workbench`의 저장 파일과 `ledger.sqlite`(sqlite `.backup`, 읽기 전용)를 scratchpad에 복사해 `tests/app_data_smoke.rs`(`WORKBENCH_SMOKE_DIR`, #[ignore])로 기동했다: 037이 만든 **v1 → schema 2 승격**, 예약 index가 `operation_ledger_reserved_pending`으로 교체, 저장 파일 4개가 기동·조회 뒤 **바이트 동일**, 기존 데이터 조회 정상(project 18·saved prompt 5), `system.describe` 32. **수행하지 않은 것**: `tauri dev` UI 조작(quickstart §4 1–8·11) — 리뷰어 수동 항목으로 남긴다. 자동 테스트가 대신하는 범위는 아래 SC 표.
+    - **롤백 주의**: 038 빌드를 한 번 실행해 ledger가 v2가 되면 037 빌드는 `UnsupportedSchema`로 기동에 실패한다(037 `migrate`는 버전 1만 허용). 되돌릴 때는 `<app data>/workbench/ledger.sqlite*`를 지워야 한다(24h 멱등 기록과 revision 카운터만 사라지고 저장 파일은 무관). PR 본문에 적는다.
+  - (T065) SC 증거:
+
+    | SC | 증거 |
+    |---|---|
+    | SC-001 | 037·AW 기존 테스트 무수정 통과(이동한 유닛 테스트는 core에서 그대로 통과), T061 지연 표 |
+    | SC-002 | `contract_suite`(fixture 128개 × in-memory·HTTP, 경로 정규화 후 결과 동일 단언), AW `inputs_match_fixture_shapes`(US1–US3 fixture 입력 74건 이상 대조) |
+    | SC-003 | 저장 단위: `ledger_crash_points`(projects, 037), `us1_crash_points`(saved prompt 3지점, goal·settings 3지점 unknown, 삭제 applied, upsert unknown, 확정 실패), worktree: `git_reconcile`(AfterPending unknown·AfterSideEffect applied·BeforeApplied applied, 삭제 2종, 부분 디렉터리, 저장소 읽기 불가) |
+    | SC-004 | `concurrency`(037), `us1_stores`(saved prompt 20건·goal 진행 20건), `reservation_lifecycle::concurrent_creates_on_different_paths_all_apply` |
+    | SC-005 | fixture: `worktree-list-files-outside-forbidden`·`-not-a-directory`, `worktree-read-text-file-{outside-forbidden,path-required,truncated,non-utf8,directory-not-regular,missing-not-found}`, `git-list-remotes-not-a-repository-empty`, `worktree-get-commit-detail-unknown-hash-internal`; 이동한 어댑터 유닛 테스트 |
+    | SC-006 | `system-describe-desktop`(32)·`-readonly`(19), `*-forbidden-readonly` fixture, openapi 골든 + drift 실증(T062), `operation-map.test-d.ts`(32키, `@ts-expect-error` 4) |
+    | SC-007 | quickstart §8 grep 결과(T060 노트), 프론트 diff 0, git-core·acp-agent-core diff 0 |
+    | SC-008 | `docs/workbench-seam.md` 인벤토리 71행, 스크립트로 `lib.rs` 순서·합계(31/32/8) 대조 |
+
+    spec·contract와 어긋난 점(전부 동작 보존 쪽으로 결정, 문서 정정 완료): `goal.clear` 대상 없음은 `notFound`; `includeStatus` 기본 true; 저장소 아닌 디렉터리의 Git 목록은 빈 목록; 빈 `agentId`는 빈 목록; UTF-8 아님은 `invalidArgument`; 삭제 3종과 `git.deleteWorktree`도 대상을 예약; Git 변경 재생 응답에 revision 없음; `system-describe-readonly`는 US2 시점 17(최종 19). 문서 반영: contracts/workbench-operations.md §1·§2·§6, contracts/tauri-compat-commands.md, data-model.md §2·§4·§6.
+
