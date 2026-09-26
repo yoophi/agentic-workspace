@@ -1,0 +1,39 @@
+{
+  "name": "agent-list-unknown-field",
+  "principal": "desktop",
+  "seed": {
+    "agents": [
+      {
+        "id": "codex",
+        "label": "Codex",
+        "command": "codex-acp",
+        "models": [
+          {
+            "id": "gpt-5",
+            "label": "GPT-5"
+          }
+        ]
+      },
+      {
+        "id": "claude-code",
+        "label": "Claude Code",
+        "command": "claude-code-acp",
+        "runtimeVersion": "1.0.0"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agent.list",
+    "requestId": "r-us3-4",
+    "input": {
+      "extra": 1
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied"
+    }
+  }
+}

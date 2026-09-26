@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// 우리가 지원하는 ACP provider가 로컬에 남기는 네이티브 세션의 종류.
 /// agent 카탈로그의 `agent_id`와 매핑된다.
@@ -26,7 +26,7 @@ pub fn provider_kind_for(agent_id: &str) -> Option<ProviderKind> {
 
 /// provider가 디스크에 저장한 세션 하나를 요약한 메타데이터.
 /// 프론트로 그대로 직렬화되므로 camelCase를 사용한다.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderSession {
     pub agent_id: String,

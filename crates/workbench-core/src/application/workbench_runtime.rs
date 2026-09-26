@@ -24,8 +24,33 @@ use crate::{
         sqlite_ledger::SqliteOperationLedger,
         storage_coordinator::{Repositories, StorageCoordinator, STORE_AGGREGATES},
     },
-    ports::operation_ledger::{LedgerError, OperationLedger},
+    ports::{
+        agent_catalog_reader::AgentCatalogReader,
+        operation_ledger::{LedgerError, OperationLedger},
+        provider_session_repository::ProviderSessionRepository,
+    },
 };
+
+/// 실행 환경을 읽는 어댑터(038 US3). 운영은 `production()`, 테스트는 stub을 넣는다.
+#[derive(Clone)]
+pub struct RuntimeAdapters {
+    pub agent_catalog: Arc<dyn AgentCatalogReader>,
+    pub provider_sessions: Arc<dyn ProviderSessionRepository>,
+}
+
+impl RuntimeAdapters {
+    /// 환경 변수 기반 agent catalog와 provider 로컬 세션 파일(오늘 command가 쓰던 구현).
+    pub fn production() -> Self {
+        Self {
+            agent_catalog: Arc::new(
+                acp_agent_core::infrastructure::agent_catalog::ConfigurableAgentCatalog::from_env(),
+            ),
+            provider_sessions: Arc::new(
+                crate::infrastructure::fs::provider_session_repository::FsProviderSessionRepository::new(),
+            ),
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum BootstrapError {
@@ -116,6 +141,13 @@ pub struct WorkbenchRuntime {
 
 impl WorkbenchRuntime {
     pub fn bootstrap(paths: DataPaths) -> Result<Arc<Self>, BootstrapError> {
+        Self::bootstrap_with(paths, RuntimeAdapters::production())
+    }
+
+    pub fn bootstrap_with(
+        paths: DataPaths,
+        adapters: RuntimeAdapters,
+    ) -> Result<Arc<Self>, BootstrapError> {
         paths.ensure_dirs()?;
 
         let ledger = Arc::new(SqliteOperationLedger::open(&paths)?);
@@ -132,6 +164,7 @@ impl WorkbenchRuntime {
             Arc::clone(&ledger),
             Arc::clone(&coordinator),
             Arc::clone(&hooks),
+            &adapters,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).

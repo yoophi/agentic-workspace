@@ -4,11 +4,13 @@
 pub mod agent_run_settings_error;
 pub mod git_error;
 pub mod goal_error;
+pub mod provider_session_error;
 pub mod saved_prompt_error;
 pub mod worktree_file_error;
 
 pub use agent_run_settings_error::AgentRunSettingsError;
 pub use git_error::GitError;
 pub use goal_error::GoalError;
+pub use provider_session_error::ProviderSessionError;
 pub use saved_prompt_error::SavedPromptError;
 pub use worktree_file_error::WorktreeFileError;

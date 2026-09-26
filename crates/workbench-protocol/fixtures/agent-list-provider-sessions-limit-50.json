@@ -1,0 +1,773 @@
+{
+  "name": "agent-list-provider-sessions-limit-50",
+  "principal": "desktop",
+  "seed": {
+    "providerSessions": [
+      {
+        "agentId": "codex",
+        "id": "s0",
+        "cwd": "/repo/a",
+        "title": "t0",
+        "file": "/sessions/s0.jsonl",
+        "messageCount": 0,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s1",
+        "cwd": "/repo/a",
+        "title": "t1",
+        "file": "/sessions/s1.jsonl",
+        "messageCount": 1,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:01:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s2",
+        "cwd": "/repo/a",
+        "title": "t2",
+        "file": "/sessions/s2.jsonl",
+        "messageCount": 2,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:02:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s3",
+        "cwd": "/repo/a",
+        "title": "t3",
+        "file": "/sessions/s3.jsonl",
+        "messageCount": 3,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:03:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s4",
+        "cwd": "/repo/a",
+        "title": "t4",
+        "file": "/sessions/s4.jsonl",
+        "messageCount": 4,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:04:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s5",
+        "cwd": "/repo/a",
+        "title": "t5",
+        "file": "/sessions/s5.jsonl",
+        "messageCount": 5,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:05:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s6",
+        "cwd": "/repo/a",
+        "title": "t6",
+        "file": "/sessions/s6.jsonl",
+        "messageCount": 6,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:06:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s7",
+        "cwd": "/repo/a",
+        "title": "t7",
+        "file": "/sessions/s7.jsonl",
+        "messageCount": 7,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:07:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s8",
+        "cwd": "/repo/a",
+        "title": "t8",
+        "file": "/sessions/s8.jsonl",
+        "messageCount": 8,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:08:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s9",
+        "cwd": "/repo/a",
+        "title": "t9",
+        "file": "/sessions/s9.jsonl",
+        "messageCount": 9,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:09:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s10",
+        "cwd": "/repo/a",
+        "title": "t10",
+        "file": "/sessions/s10.jsonl",
+        "messageCount": 10,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:10:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s11",
+        "cwd": "/repo/a",
+        "title": "t11",
+        "file": "/sessions/s11.jsonl",
+        "messageCount": 11,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:11:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s12",
+        "cwd": "/repo/a",
+        "title": "t12",
+        "file": "/sessions/s12.jsonl",
+        "messageCount": 12,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:12:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s13",
+        "cwd": "/repo/a",
+        "title": "t13",
+        "file": "/sessions/s13.jsonl",
+        "messageCount": 13,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:13:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s14",
+        "cwd": "/repo/a",
+        "title": "t14",
+        "file": "/sessions/s14.jsonl",
+        "messageCount": 14,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:14:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s15",
+        "cwd": "/repo/a",
+        "title": "t15",
+        "file": "/sessions/s15.jsonl",
+        "messageCount": 15,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:15:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s16",
+        "cwd": "/repo/a",
+        "title": "t16",
+        "file": "/sessions/s16.jsonl",
+        "messageCount": 16,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:16:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s17",
+        "cwd": "/repo/a",
+        "title": "t17",
+        "file": "/sessions/s17.jsonl",
+        "messageCount": 17,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:17:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s18",
+        "cwd": "/repo/a",
+        "title": "t18",
+        "file": "/sessions/s18.jsonl",
+        "messageCount": 18,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:18:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s19",
+        "cwd": "/repo/a",
+        "title": "t19",
+        "file": "/sessions/s19.jsonl",
+        "messageCount": 19,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:19:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s20",
+        "cwd": "/repo/a",
+        "title": "t20",
+        "file": "/sessions/s20.jsonl",
+        "messageCount": 20,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:20:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s21",
+        "cwd": "/repo/a",
+        "title": "t21",
+        "file": "/sessions/s21.jsonl",
+        "messageCount": 21,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:21:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s22",
+        "cwd": "/repo/a",
+        "title": "t22",
+        "file": "/sessions/s22.jsonl",
+        "messageCount": 22,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:22:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s23",
+        "cwd": "/repo/a",
+        "title": "t23",
+        "file": "/sessions/s23.jsonl",
+        "messageCount": 23,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:23:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s24",
+        "cwd": "/repo/a",
+        "title": "t24",
+        "file": "/sessions/s24.jsonl",
+        "messageCount": 24,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:24:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s25",
+        "cwd": "/repo/a",
+        "title": "t25",
+        "file": "/sessions/s25.jsonl",
+        "messageCount": 25,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:25:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s26",
+        "cwd": "/repo/a",
+        "title": "t26",
+        "file": "/sessions/s26.jsonl",
+        "messageCount": 26,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:26:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s27",
+        "cwd": "/repo/a",
+        "title": "t27",
+        "file": "/sessions/s27.jsonl",
+        "messageCount": 27,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:27:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s28",
+        "cwd": "/repo/a",
+        "title": "t28",
+        "file": "/sessions/s28.jsonl",
+        "messageCount": 28,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:28:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s29",
+        "cwd": "/repo/a",
+        "title": "t29",
+        "file": "/sessions/s29.jsonl",
+        "messageCount": 29,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:29:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s30",
+        "cwd": "/repo/a",
+        "title": "t30",
+        "file": "/sessions/s30.jsonl",
+        "messageCount": 30,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:30:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s31",
+        "cwd": "/repo/a",
+        "title": "t31",
+        "file": "/sessions/s31.jsonl",
+        "messageCount": 31,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:31:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s32",
+        "cwd": "/repo/a",
+        "title": "t32",
+        "file": "/sessions/s32.jsonl",
+        "messageCount": 32,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:32:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s33",
+        "cwd": "/repo/a",
+        "title": "t33",
+        "file": "/sessions/s33.jsonl",
+        "messageCount": 33,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:33:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s34",
+        "cwd": "/repo/a",
+        "title": "t34",
+        "file": "/sessions/s34.jsonl",
+        "messageCount": 34,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:34:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s35",
+        "cwd": "/repo/a",
+        "title": "t35",
+        "file": "/sessions/s35.jsonl",
+        "messageCount": 35,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:35:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s36",
+        "cwd": "/repo/a",
+        "title": "t36",
+        "file": "/sessions/s36.jsonl",
+        "messageCount": 36,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:36:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s37",
+        "cwd": "/repo/a",
+        "title": "t37",
+        "file": "/sessions/s37.jsonl",
+        "messageCount": 37,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:37:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s38",
+        "cwd": "/repo/a",
+        "title": "t38",
+        "file": "/sessions/s38.jsonl",
+        "messageCount": 38,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:38:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s39",
+        "cwd": "/repo/a",
+        "title": "t39",
+        "file": "/sessions/s39.jsonl",
+        "messageCount": 39,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:39:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s40",
+        "cwd": "/repo/a",
+        "title": "t40",
+        "file": "/sessions/s40.jsonl",
+        "messageCount": 40,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:40:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s41",
+        "cwd": "/repo/a",
+        "title": "t41",
+        "file": "/sessions/s41.jsonl",
+        "messageCount": 41,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:41:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s42",
+        "cwd": "/repo/a",
+        "title": "t42",
+        "file": "/sessions/s42.jsonl",
+        "messageCount": 42,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:42:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s43",
+        "cwd": "/repo/a",
+        "title": "t43",
+        "file": "/sessions/s43.jsonl",
+        "messageCount": 43,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:43:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s44",
+        "cwd": "/repo/a",
+        "title": "t44",
+        "file": "/sessions/s44.jsonl",
+        "messageCount": 44,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:44:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s45",
+        "cwd": "/repo/a",
+        "title": "t45",
+        "file": "/sessions/s45.jsonl",
+        "messageCount": 45,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:45:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s46",
+        "cwd": "/repo/a",
+        "title": "t46",
+        "file": "/sessions/s46.jsonl",
+        "messageCount": 46,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:46:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s47",
+        "cwd": "/repo/a",
+        "title": "t47",
+        "file": "/sessions/s47.jsonl",
+        "messageCount": 47,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:47:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s48",
+        "cwd": "/repo/a",
+        "title": "t48",
+        "file": "/sessions/s48.jsonl",
+        "messageCount": 48,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:48:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s49",
+        "cwd": "/repo/a",
+        "title": "t49",
+        "file": "/sessions/s49.jsonl",
+        "messageCount": 49,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:49:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s50",
+        "cwd": "/repo/a",
+        "title": "t50",
+        "file": "/sessions/s50.jsonl",
+        "messageCount": 50,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:50:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s51",
+        "cwd": "/repo/a",
+        "title": "t51",
+        "file": "/sessions/s51.jsonl",
+        "messageCount": 51,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:51:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s52",
+        "cwd": "/repo/a",
+        "title": "t52",
+        "file": "/sessions/s52.jsonl",
+        "messageCount": 52,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:52:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s53",
+        "cwd": "/repo/a",
+        "title": "t53",
+        "file": "/sessions/s53.jsonl",
+        "messageCount": 53,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:53:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s54",
+        "cwd": "/repo/a",
+        "title": "t54",
+        "file": "/sessions/s54.jsonl",
+        "messageCount": 54,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:54:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s55",
+        "cwd": "/repo/a",
+        "title": "t55",
+        "file": "/sessions/s55.jsonl",
+        "messageCount": 55,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:55:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s56",
+        "cwd": "/repo/a",
+        "title": "t56",
+        "file": "/sessions/s56.jsonl",
+        "messageCount": 56,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:56:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s57",
+        "cwd": "/repo/a",
+        "title": "t57",
+        "file": "/sessions/s57.jsonl",
+        "messageCount": 57,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:57:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s58",
+        "cwd": "/repo/a",
+        "title": "t58",
+        "file": "/sessions/s58.jsonl",
+        "messageCount": 58,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:58:00Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s59",
+        "cwd": "/repo/a",
+        "title": "t59",
+        "file": "/sessions/s59.jsonl",
+        "messageCount": 59,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:59:00Z"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agent.listProviderSessions",
+    "requestId": "r-us3-11",
+    "input": {
+      "agentId": "codex"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "id": "s59"
+        },
+        {
+          "id": "s58"
+        },
+        {
+          "id": "s57"
+        },
+        {
+          "id": "s56"
+        },
+        {
+          "id": "s55"
+        },
+        {
+          "id": "s54"
+        },
+        {
+          "id": "s53"
+        },
+        {
+          "id": "s52"
+        },
+        {
+          "id": "s51"
+        },
+        {
+          "id": "s50"
+        },
+        {
+          "id": "s49"
+        },
+        {
+          "id": "s48"
+        },
+        {
+          "id": "s47"
+        },
+        {
+          "id": "s46"
+        },
+        {
+          "id": "s45"
+        },
+        {
+          "id": "s44"
+        },
+        {
+          "id": "s43"
+        },
+        {
+          "id": "s42"
+        },
+        {
+          "id": "s41"
+        },
+        {
+          "id": "s40"
+        },
+        {
+          "id": "s39"
+        },
+        {
+          "id": "s38"
+        },
+        {
+          "id": "s37"
+        },
+        {
+          "id": "s36"
+        },
+        {
+          "id": "s35"
+        },
+        {
+          "id": "s34"
+        },
+        {
+          "id": "s33"
+        },
+        {
+          "id": "s32"
+        },
+        {
+          "id": "s31"
+        },
+        {
+          "id": "s30"
+        },
+        {
+          "id": "s29"
+        },
+        {
+          "id": "s28"
+        },
+        {
+          "id": "s27"
+        },
+        {
+          "id": "s26"
+        },
+        {
+          "id": "s25"
+        },
+        {
+          "id": "s24"
+        },
+        {
+          "id": "s23"
+        },
+        {
+          "id": "s22"
+        },
+        {
+          "id": "s21"
+        },
+        {
+          "id": "s20"
+        },
+        {
+          "id": "s19"
+        },
+        {
+          "id": "s18"
+        },
+        {
+          "id": "s17"
+        },
+        {
+          "id": "s16"
+        },
+        {
+          "id": "s15"
+        },
+        {
+          "id": "s14"
+        },
+        {
+          "id": "s13"
+        },
+        {
+          "id": "s12"
+        },
+        {
+          "id": "s11"
+        },
+        {
+          "id": "s10"
+        }
+      ]
+    }
+  }
+}

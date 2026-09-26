@@ -1,0 +1,39 @@
+{
+  "name": "agent-list-idempotency-key-rejected",
+  "principal": "desktop",
+  "seed": {
+    "agents": [
+      {
+        "id": "codex",
+        "label": "Codex",
+        "command": "codex-acp",
+        "models": [
+          {
+            "id": "gpt-5",
+            "label": "GPT-5"
+          }
+        ]
+      },
+      {
+        "id": "claude-code",
+        "label": "Claude Code",
+        "command": "claude-code-acp",
+        "runtimeVersion": "1.0.0"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agent.list",
+    "requestId": "r-us3-3",
+    "input": {},
+    "idempotencyKey": "k-al"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "idempotencyKey is only accepted for command operations.",
+      "outcome": "notApplied"
+    }
+  }
+}

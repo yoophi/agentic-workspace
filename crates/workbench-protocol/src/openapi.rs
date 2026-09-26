@@ -106,6 +106,11 @@ use crate::{
         crate::operations::worktree::WorktreeGetGraphInput,
         crate::operations::worktree::WorktreeGetCommitDetailInput,
         crate::operations::worktree::WorktreeGetCommitFileDiffInput,
+        crate::operations::agent::AgentOptionDescriptorDto,
+        crate::operations::agent::AgentDescriptorDto,
+        crate::operations::agent::ProviderSessionDto,
+        crate::operations::agent::AgentListInput,
+        crate::operations::agent::AgentListProviderSessionsInput,
         crate::operations::system::SystemDescribeInput,
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
@@ -149,6 +154,8 @@ fn input_schema_name(id: OperationId) -> &'static str {
         OperationId::WorktreeGetGraph => "WorktreeGetGraphInput",
         OperationId::WorktreeGetCommitDetail => "WorktreeGetCommitDetailInput",
         OperationId::WorktreeGetCommitFileDiff => "WorktreeGetCommitFileDiffInput",
+        OperationId::AgentList => "AgentListInput",
+        OperationId::AgentListProviderSessions => "AgentListProviderSessionsInput",
         OperationId::SystemDescribe => "SystemDescribeInput",
     }
 }
@@ -188,6 +195,8 @@ fn output_schema(id: OperationId) -> RefOr<Schema> {
         OperationId::WorktreeGetGraph => dto("GitCommitGraphDto"),
         OperationId::WorktreeGetCommitDetail => dto("GitCommitDetailDto"),
         OperationId::WorktreeGetCommitFileDiff => dto("GitFileDiffDto"),
+        OperationId::AgentList => array_schema(dto("AgentDescriptorDto")),
+        OperationId::AgentListProviderSessions => array_schema(dto("ProviderSessionDto")),
         OperationId::SystemDescribe => dto("DescribeOutput"),
     }
 }

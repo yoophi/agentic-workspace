@@ -1,0 +1,19 @@
+{
+  "name": "agent-list-empty",
+  "principal": "desktop",
+  "seed": {
+    "agents": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agent.list",
+    "requestId": "r-us3-2",
+    "input": {}
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": []
+    }
+  }
+}

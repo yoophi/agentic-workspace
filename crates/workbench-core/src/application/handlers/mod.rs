@@ -1,6 +1,7 @@
 //! operation handler 모음과 registry 조립. 도메인별 하위 모듈에 handler가 있고, 여기서는 공통 helper·오류 매핑과
 //! handler + reconciler 등록을 한다.
 
+pub mod agent;
 pub mod agent_run_settings;
 pub mod git;
 pub mod goal;
@@ -23,7 +24,7 @@ use crate::{
             JsonCreateReconciler, JsonDeleteReconciler, LoadCollection, ReconcilerRegistry,
         },
         registry::{decode_input, CallContext, OperationHandler, Registry},
-        workbench_runtime::TestHooks,
+        workbench_runtime::{RuntimeAdapters, TestHooks},
     },
     domain::{
         errors::{AgentRunSettingsError, GitError, GoalError, SavedPromptError, WorktreeFileError},
@@ -246,6 +247,7 @@ pub fn build_registry(
     ledger: Arc<SqliteOperationLedger>,
     coordinator: Arc<StorageCoordinator>,
     hooks: Arc<TestHooks>,
+    adapters: &RuntimeAdapters,
 ) -> (Registry, ReconcilerRegistry) {
     let runner = Arc::new(IntentFirst::new(
         Arc::clone(&ledger),
@@ -262,6 +264,11 @@ pub fn build_registry(
     agent_run_settings::register(&mut registry, &coordinator, &runner);
     git::register(&mut registry, &mut reconcilers, &runner);
     worktree::register(&mut registry);
+    agent::register(
+        &mut registry,
+        &adapters.agent_catalog,
+        &adapters.provider_sessions,
+    );
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler),

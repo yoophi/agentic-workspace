@@ -98,7 +98,6 @@ dependencies = [
  "tokio",
  "tower-http 0.5.2",
  "uuid",
- "walkdir",
  "workbench-core",
  "workbench-protocol",
 ]

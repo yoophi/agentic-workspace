@@ -266,6 +266,21 @@ pub fn worktree_commit_file_input(
     serde_json::json!({ "workingDirectory": working_directory, "commitHash": commit_hash, "path": path })
 }
 
+// ---- 038 US3: agent catalog·provider 세션 ----
+
+pub fn agent_list_input() -> Value {
+    serde_json::json!({})
+}
+
+/// `cwd: None`은 필드를 생략한다. 공백 `cwd`는 그대로 보낸다 — 서버가 오늘처럼 전체 범위로 해석한다.
+pub fn agent_list_provider_sessions_input(agent_id: String, cwd: Option<String>) -> Value {
+    let mut value = serde_json::json!({ "agentId": agent_id });
+    if let Some(cwd) = cwd {
+        value["cwd"] = serde_json::json!(cwd);
+    }
+    value
+}
+
 pub fn list_projects_request(request_id: RequestId) -> CallRequest {
     CallRequest {
         protocol_version: PROTOCOL_VERSION,
@@ -590,6 +605,14 @@ mod tests {
                         text(&input, "commitHash"),
                         text(&input, "path"),
                     ),
+                    "agent.list" => agent_list_input(),
+                    "agent.listProviderSessions" => match input.get("agentId") {
+                        Some(agent_id) => agent_list_provider_sessions_input(
+                            agent_id.as_str().unwrap().to_owned(),
+                            input.get("cwd").and_then(Value::as_str).map(str::to_owned),
+                        ),
+                        None => continue, // agentId 누락 fixture: Tauri 인자는 필수라 이 형태가 생기지 않는다
+                    },
                     _ => continue,
                 };
                 // `null`은 AW 타입이 None으로 읽어 생략하고, 도메인 타입의 serde default가 채운 필드는 fixture에 없을 수

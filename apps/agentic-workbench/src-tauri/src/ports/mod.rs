@@ -9,5 +9,4 @@ pub mod appearance_preferences_repository;
 pub mod coordinator_notification;
 pub mod orchestration_event_sink;
 pub mod orchestration_repository;
-pub mod provider_session_repository;
 pub mod runtime_event_journal;

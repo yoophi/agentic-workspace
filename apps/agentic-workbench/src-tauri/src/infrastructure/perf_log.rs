@@ -30,6 +30,13 @@ pub fn log_async_command_run(name: &str, run: Duration) {
     }
 }
 
+/// 시그니처상 오류를 돌려줄 수 없는 command(`list_agents`)가 삼킨 오류를 남긴다.
+pub fn log_async_command_error(name: &str, error: &str) {
+    if perf_log_enabled() {
+        eprintln!("perf kind=command name={name} error={error:?}");
+    }
+}
+
 /// `Workbench.call`을 거치는 command를 감싸 `run_ms`를 perf 로그로 남긴다.
 pub async fn log_async_command<T>(
     name: &'static str,

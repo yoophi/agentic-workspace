@@ -1,6 +1,7 @@
 import { expectTypeOf, test } from "vitest";
 
 import type {
+  AgentDescriptor,
   AgentRunSettings,
   CallReply,
   DescribeOutput,
@@ -11,12 +12,13 @@ import type {
   OperationId,
   OperationMap,
   Project,
+  ProviderSession,
   SavedPrompt,
   WorktreeFileEntry,
   WorktreeTextFile,
 } from "./operation-map";
 
-test("operation ids are exactly the registered operations (037 + 038 US1·US2)", () => {
+test("operation ids are exactly the registered 32 operations (037 + 038)", () => {
   expectTypeOf<OperationId>().toEqualTypeOf<
     | "project.list"
     | "project.create"
@@ -47,6 +49,8 @@ test("operation ids are exactly the registered operations (037 + 038 US1·US2)",
     | "worktree.getGraph"
     | "worktree.getCommitDetail"
     | "worktree.getCommitFileDiff"
+    | "agent.list"
+    | "agent.listProviderSessions"
     | "system.describe"
   >();
 });
@@ -107,6 +111,13 @@ test("worktree queries: optional scope, text preview, history page", () => {
   expectTypeOf<OperationMap["worktree.readTextFile"]["output"]>().toEqualTypeOf<WorktreeTextFile>();
   expectTypeOf<OperationMap["worktree.listHistory"]["output"]>().toEqualTypeOf<GitCommitHistory>();
   expectTypeOf<OperationMap["worktree.listHistory"]["input"]>().toHaveProperty("cursor");
+});
+
+test("agent queries: catalog list and provider sessions with optional cwd", () => {
+  expectTypeOf<OperationMap["agent.list"]["output"]>().toEqualTypeOf<AgentDescriptor[]>();
+  expectTypeOf<OperationMap["agent.listProviderSessions"]["output"]>().toEqualTypeOf<ProviderSession[]>();
+  const withoutCwd: OperationMap["agent.listProviderSessions"]["input"] = { agentId: "codex" };
+  void withoutCwd;
 });
 
 test("system.describe returns DescribeOutput", () => {

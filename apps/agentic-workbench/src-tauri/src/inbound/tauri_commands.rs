@@ -20,7 +20,6 @@ use crate::{
         cancel_agent_run::CancelAgentRunUseCase,
         cancel_prompt_and_send::CancelPromptAndSendUseCase,
         coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
-        list_provider_sessions::ListProviderSessionsUseCase,
         orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
         orchestration_service::{
             BindMainRunRequest, CoordinatorHandoffRequest, DelegateGoalOutcome,
@@ -54,7 +53,7 @@ use crate::{
         git_worktree_changes::{GitWorktreeChanges, GitWorktreeFileDiff},
         goal::{GoalStatus, ThreadGoal},
         project::Project,
-        provider_session::{ProviderSession, SessionScope},
+        provider_session::ProviderSession,
         run::{AgentRun, AgentRunRequest, PermissionMode},
         saved_prompt::SavedPrompt,
         worktree_change::WorktreeChange,
@@ -70,7 +69,6 @@ use crate::{
         acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
-        fs_provider_session_repository::FsProviderSessionRepository,
         fs_worktree_watcher::{WorktreeWatchHandle, watch_worktree},
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
@@ -81,7 +79,7 @@ use crate::{
         json_orchestration_repository::JsonOrchestrationRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
         mcp::{McpServerState, capability_registry::CapabilityPrincipal, title_tool},
-        perf_log::{log_async_command, run_blocking_command},
+        perf_log::{log_async_command, log_async_command_error, run_blocking_command},
         tauri_orchestration_event_sink::TauriOrchestrationEventSink,
         tauri_run_event_sink::TauriRunEventSink,
         window_manager,
@@ -1655,24 +1653,43 @@ pub async fn get_worktree_commit_file_diff(
 }
 
 #[tauri::command]
-pub fn list_agents() -> Vec<AgentDescriptor> {
-    ConfigurableAgentCatalog::from_env().list_agents()
+pub async fn list_agents(app: AppHandle) -> Vec<AgentDescriptor> {
+    let runtime = workbench_runtime(&app);
+    // 오늘 command는 실패하지 않는 `Vec`를 돌려줬다(catalog 오류는 기본값). 시그니처를 유지하기 위해
+    // 호출이 실패하면 빈 목록을 돌려주고 오류는 perf 로그에 남긴다.
+    let result: Result<Vec<AgentDescriptor>, String> = log_async_command(
+        "list_agents",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::AgentList,
+            workbench_compat::agent_list_input(),
+        ),
+    )
+    .await;
+    result.unwrap_or_else(|error| {
+        log_async_command_error("list_agents", &error);
+        Vec::new()
+    })
 }
 
 /// 선택한 provider(`agent_id`)가 로컬에 남긴 네이티브 세션을 조회한다.
 /// `cwd`가 주어지면 해당 작업 디렉터리의 세션만, 없으면 전체를 돌려준다.
 #[tauri::command]
-pub fn list_provider_sessions(
+pub async fn list_provider_sessions(
+    app: AppHandle,
     agent_id: String,
     cwd: Option<String>,
 ) -> Result<Vec<ProviderSession>, String> {
-    let scope = match cwd {
-        Some(path) if !path.trim().is_empty() => SessionScope::Path(path.into()),
-        _ => SessionScope::All,
-    };
-    ListProviderSessionsUseCase::new(FsProviderSessionRepository::new())
-        .execute(&agent_id, &scope, Some(50))
-        .map_err(|error| error.to_string())
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_provider_sessions",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::AgentListProviderSessions,
+            workbench_compat::agent_list_provider_sessions_input(agent_id, cwd),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]

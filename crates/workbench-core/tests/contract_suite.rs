@@ -126,7 +126,7 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
         let principal = fixture.principal();
 
         // in-memory: runtime.call을 직접 호출
-        let mem = TestRuntime::new();
+        let mem = TestRuntime::with_adapters(fixture.seed.adapters());
         let mem_seed = fixtures::apply_seed(&mem.paths, &fixture.seed);
         let steps = fixture.steps_with(&mem_seed);
         let mut mem_results = Vec::new();
@@ -148,7 +148,7 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
         );
 
         // HTTP: 실제 loopback 왕복 (별도 seed → 별도 저장소 경로이므로 steps도 다시 치환)
-        let http = TestRuntime::new();
+        let http = TestRuntime::with_adapters(fixture.seed.adapters());
         let http_seed = fixtures::apply_seed(&http.paths, &fixture.seed);
         let steps = fixture.steps_with(&http_seed);
         let workbench: Arc<dyn Workbench> = http.runtime.clone();

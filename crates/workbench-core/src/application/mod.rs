@@ -1,3 +1,4 @@
+pub mod agent_dto;
 pub mod agent_run_settings_service;
 pub mod authorization;
 pub mod dto;
@@ -9,6 +10,7 @@ pub mod handlers;
 pub mod idempotency;
 pub mod intent_first;
 pub mod project_service;
+pub mod provider_session_service;
 pub mod reconcilers;
 pub mod registry;
 pub mod saved_prompt_service;

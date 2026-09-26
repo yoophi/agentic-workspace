@@ -2,6 +2,7 @@
 // HTTP/WebSocket Adapter는 4단계(Desktop 전환)에서 추가된다.
 export type * from "./generated/workbench";
 export type {
+  AgentDescriptor,
   AgentRunSettings,
   Call,
   CallReply,
@@ -25,6 +26,7 @@ export type {
   Outcome,
   Project,
   ProjectCreateInput,
+  ProviderSession,
   SavedPrompt,
   Schemas,
   WorkbenchFault,

@@ -1,0 +1,62 @@
+{
+  "name": "agent-list-provider-sessions-unsupported-agent-empty",
+  "principal": "desktop",
+  "seed": {
+    "providerSessions": [
+      {
+        "agentId": "codex",
+        "id": "s1",
+        "cwd": "/repo/a",
+        "title": "t1",
+        "file": "/sessions/s1.jsonl",
+        "messageCount": 1,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:01Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s2",
+        "cwd": "/repo/b",
+        "title": "t2",
+        "file": "/sessions/s2.jsonl",
+        "messageCount": 2,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:02Z"
+      },
+      {
+        "agentId": "codex",
+        "id": "s3",
+        "cwd": "/repo/a",
+        "title": "t3",
+        "file": "/sessions/s3.jsonl",
+        "messageCount": 3,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:03Z"
+      },
+      {
+        "agentId": "opencode",
+        "id": "s9",
+        "cwd": "/repo/a",
+        "title": "t9",
+        "file": "/sessions/s9.jsonl",
+        "messageCount": 9,
+        "createdAt": "2026-01-01T00:00:00Z",
+        "updatedAt": "2026-01-01T00:00:09Z"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agent.listProviderSessions",
+    "requestId": "r-us3-8",
+    "input": {
+      "agentId": "opencode"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": []
+    }
+  }
+}

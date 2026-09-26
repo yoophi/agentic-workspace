@@ -1,5 +1,6 @@
 //! operation registry의 정적 표. `system.describe`, OpenAPI `oneOf`, authorization이 모두 이 표를 읽는다.
 
+pub mod agent;
 pub mod agent_run_settings;
 pub mod common;
 pub mod git;
@@ -48,7 +49,7 @@ const fn command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 30] = [
+pub const OPERATIONS: [OperationSpec; 32] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -87,6 +88,8 @@ pub const OPERATIONS: [OperationSpec; 30] = [
         OperationId::WorktreeGetCommitFileDiff,
         &[Scope::WorktreeRead],
     ),
+    query(OperationId::AgentList, &[Scope::AgentRead]),
+    query(OperationId::AgentListProviderSessions, &[Scope::AgentRead]),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
 
@@ -202,6 +205,14 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::WorktreeGetCommitFileDiff => (
             worktree::WorktreeGetCommitFileDiffInput::schema(),
             worktree::GitFileDiffDto::schema(),
+        ),
+        OperationId::AgentList => (
+            agent::AgentListInput::schema(),
+            common::array_schema(agent::AgentDescriptorDto::schema()),
+        ),
+        OperationId::AgentListProviderSessions => (
+            agent::AgentListProviderSessionsInput::schema(),
+            common::array_schema(agent::ProviderSessionDto::schema()),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

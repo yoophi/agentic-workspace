@@ -126,6 +126,20 @@
             ]
           },
           {
+            "id": "agent.list",
+            "kind": "query",
+            "requiredScopes": [
+              "agent:read"
+            ]
+          },
+          {
+            "id": "agent.listProviderSessions",
+            "kind": "query",
+            "requiredScopes": [
+              "agent:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

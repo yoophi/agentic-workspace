@@ -1,5 +1,6 @@
-//! 파일시스템 어댑터(038 US2: AW `fs_worktree_file_provider.rs`에서 이동).
+//! 파일시스템 어댑터(038 US2·US3: AW `fs_worktree_file_provider.rs`·`fs_provider_session_repository.rs`에서 이동).
 
+pub mod provider_session_repository;
 pub mod worktree_file_provider;
 
 /// 파일 목록 스캔(`worktree_file_provider`)과 AW worktree watcher가 공유하는 제외 디렉터리 목록.

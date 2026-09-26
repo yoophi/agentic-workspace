@@ -11,7 +11,6 @@ pub mod acp_agent_launch_factory;
 pub mod acp_agent_worker_adapter;
 #[cfg(debug_assertions)]
 pub mod devtools;
-pub mod fs_provider_session_repository;
 pub mod fs_worktree_watcher;
 pub mod in_memory_agent_workspace_registry;
 pub mod in_memory_runtime_event_journal;

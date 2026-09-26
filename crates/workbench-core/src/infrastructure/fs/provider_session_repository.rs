@@ -4,15 +4,18 @@ use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::domain::provider_session::{
-    ProviderKind, ProviderSession, SessionScope, provider_kind_for,
+use crate::{
+    domain::{
+        errors::ProviderSessionError,
+        provider_session::{provider_kind_for, ProviderKind, ProviderSession, SessionScope},
+    },
+    ports::provider_session_repository::ProviderSessionRepository,
 };
-use crate::ports::provider_session_repository::ProviderSessionRepository;
 
 /// Kiro 대화 로그에서 읽을 최대 줄 수. 실측 최대 세션이 1255줄(5.3MB)이라
 /// 전부 읽으면 목록 조회가 느려진다. 다른 provider와 같은 상한을 쓰며, 그
@@ -82,8 +85,20 @@ impl FsProviderSessionRepository {
     }
 }
 
+/// 내부는 `anyhow`로 진행하고 포트 경계에서만 `ProviderSessionError::Storage`(문구 그대로)로 바꾼다.
 impl ProviderSessionRepository for FsProviderSessionRepository {
-    fn list(&self, agent_id: &str, scope: &SessionScope) -> Result<Vec<ProviderSession>> {
+    fn list(
+        &self,
+        agent_id: &str,
+        scope: &SessionScope,
+    ) -> std::result::Result<Vec<ProviderSession>, ProviderSessionError> {
+        self.list_sessions(agent_id, scope)
+            .map_err(|error| ProviderSessionError::Storage(error.to_string()))
+    }
+}
+
+impl FsProviderSessionRepository {
+    fn list_sessions(&self, agent_id: &str, scope: &SessionScope) -> Result<Vec<ProviderSession>> {
         let Some(kind) = provider_kind_for(agent_id) else {
             return Ok(Vec::new());
         };
@@ -120,10 +135,10 @@ fn scan_agent(
         .filter(|entry| entry.file_type().is_file())
         .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "jsonl"))
     {
-        if let Some(session) = parser(agent_id, entry.path())?
-            && matches_scope(&session, scope)
-        {
-            sessions.push(session);
+        if let Some(session) = parser(agent_id, entry.path())? {
+            if matches_scope(&session, scope) {
+                sessions.push(session);
+            }
         }
     }
 
@@ -237,27 +252,27 @@ fn parse_codex(agent_id: &str, path: &Path) -> Result<Option<ProviderSession>> {
             apply_timestamp(&mut created_at, &mut updated_at, timestamp);
         }
 
-        if value.get("type").and_then(Value::as_str) == Some("session_meta")
-            && let Some(payload) = value.get("payload")
-        {
-            if let Some(meta_id) = payload.get("id").and_then(Value::as_str) {
-                id = meta_id.to_string();
-            }
-            cwd = payload
-                .get("cwd")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            source = payload
-                .get("source")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            branch = payload
-                .get("git")
-                .and_then(|git| git.get("branch"))
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned);
-            if let Some(timestamp) = payload.get("timestamp").and_then(Value::as_str) {
-                apply_timestamp(&mut created_at, &mut updated_at, timestamp);
+        if value.get("type").and_then(Value::as_str) == Some("session_meta") {
+            if let Some(payload) = value.get("payload") {
+                if let Some(meta_id) = payload.get("id").and_then(Value::as_str) {
+                    id = meta_id.to_string();
+                }
+                cwd = payload
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                source = payload
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                branch = payload
+                    .get("git")
+                    .and_then(|git| git.get("branch"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned);
+                if let Some(timestamp) = payload.get("timestamp").and_then(Value::as_str) {
+                    apply_timestamp(&mut created_at, &mut updated_at, timestamp);
+                }
             }
         }
 

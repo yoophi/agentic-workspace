@@ -76,13 +76,17 @@ pub enum OperationId {
     WorktreeGetCommitDetail,
     #[serde(rename = "worktree.getCommitFileDiff")]
     WorktreeGetCommitFileDiff,
+    #[serde(rename = "agent.list")]
+    AgentList,
+    #[serde(rename = "agent.listProviderSessions")]
+    AgentListProviderSessions,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 30] = [
+    pub const ALL: [OperationId; 32] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -112,6 +116,8 @@ impl OperationId {
         OperationId::WorktreeGetGraph,
         OperationId::WorktreeGetCommitDetail,
         OperationId::WorktreeGetCommitFileDiff,
+        OperationId::AgentList,
+        OperationId::AgentListProviderSessions,
         OperationId::SystemDescribe,
     ];
 
@@ -146,6 +152,8 @@ impl OperationId {
             OperationId::WorktreeGetGraph => "worktree.getGraph",
             OperationId::WorktreeGetCommitDetail => "worktree.getCommitDetail",
             OperationId::WorktreeGetCommitFileDiff => "worktree.getCommitFileDiff",
+            OperationId::AgentList => "agent.list",
+            OperationId::AgentListProviderSessions => "agent.listProviderSessions",
             OperationId::SystemDescribe => "system.describe",
         }
     }

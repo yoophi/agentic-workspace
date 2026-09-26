@@ -36,6 +36,9 @@ export type GitCommitHistory = Schemas["GitCommitHistoryDto"];
 export type GitCommitGraph = Schemas["GitCommitGraphDto"];
 export type GitCommitDetail = Schemas["GitCommitDetailDto"];
 export type GitFileDiff = Schemas["GitFileDiffDto"];
+// 038 US3: 새 run 화면의 agent 목록과 이어 붙일 provider 세션.
+export type AgentDescriptor = Schemas["AgentDescriptorDto"];
+export type ProviderSession = Schemas["ProviderSessionDto"];
 
 export type OperationId = CallRequest["operation"];
 

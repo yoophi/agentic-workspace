@@ -167,6 +167,23 @@ fn normalize(value: &mut Value, pairs: &[(&String, &str)]) {
     }
 }
 
+impl Seed {
+    /// `seed.agents`·`seed.providerSessions`로 stub 어댑터를 만든다(038 US3).
+    pub fn adapters(&self) -> workbench_core::application::workbench_runtime::RuntimeAdapters {
+        let agents = self
+            .agents
+            .iter()
+            .map(|agent| serde_json::from_value(agent.clone()).expect("seed agent"))
+            .collect();
+        let sessions = self
+            .provider_sessions
+            .iter()
+            .map(|session| serde_json::from_value(session.clone()).expect("seed provider session"))
+            .collect();
+        super::stub_adapters(agents, sessions)
+    }
+}
+
 impl Fixture {
     pub fn principal(&self) -> AuthenticatedPrincipal {
         match self.principal.as_str() {

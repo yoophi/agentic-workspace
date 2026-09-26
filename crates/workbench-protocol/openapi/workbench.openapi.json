@@ -87,6 +87,87 @@
           }
         }
       },
+      "AgentDescriptorDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "command"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "command": {
+            "type": "string"
+          },
+          "runtimeVersion": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "models": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptorDto"
+            }
+          },
+          "efforts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptorDto"
+            }
+          },
+          "contextSizes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentOptionDescriptorDto"
+            }
+          }
+        }
+      },
+      "AgentListInput": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "AgentListProviderSessionsInput": {
+        "type": "object",
+        "description": "`cwd`가 없거나 공백이면 전체 범위. 결과는 최신순 최대 50개. 네이티브 세션 조회를 지원하지 않는 agent는 빈 목록.",
+        "required": [
+          "agentId"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "AgentOptionDescriptorDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "label"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
       "AgentProfileDto": {
         "type": "object",
         "required": [
@@ -1182,6 +1263,72 @@
               },
               "output": {
                 "$ref": "#/components/schemas/GitFileDiffDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_agent_list",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "agent.list"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentDescriptorDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_agent_listProviderSessions",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "agent.listProviderSessions"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProviderSessionDto"
+                }
               },
               "revision": {
                 "type": "integer",
@@ -2369,6 +2516,84 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_agent_list",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "agent.list"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/AgentListInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_agent_listProviderSessions",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "agent.listProviderSessions"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/AgentListProviderSessionsInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_system_describe",
             "required": [
               "protocolVersion",
@@ -3407,6 +3632,74 @@
           }
         },
         "additionalProperties": false
+      },
+      "ProviderSessionDto": {
+        "type": "object",
+        "description": "provider가 로컬에 남긴 네이티브 세션 하나의 요약. 시각은 RFC3339.",
+        "required": [
+          "agentId",
+          "id",
+          "file",
+          "messageCount"
+        ],
+        "properties": {
+          "agentId": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "messageCount": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "RequestId": {
         "type": "string",

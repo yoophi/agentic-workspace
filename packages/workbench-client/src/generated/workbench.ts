@@ -38,6 +38,25 @@ export interface components {
             };
             profiles?: components["schemas"]["AgentProfileDto"][];
         };
+        AgentDescriptorDto: {
+            id: string;
+            label: string;
+            command: string;
+            runtimeVersion?: string | null;
+            models?: components["schemas"]["AgentOptionDescriptorDto"][];
+            efforts?: components["schemas"]["AgentOptionDescriptorDto"][];
+            contextSizes?: components["schemas"]["AgentOptionDescriptorDto"][];
+        };
+        AgentListInput: Record<string, never>;
+        /** @description `cwd`가 없거나 공백이면 전체 범위. 결과는 최신순 최대 50개. 네이티브 세션 조회를 지원하지 않는 agent는 빈 목록. */
+        AgentListProviderSessionsInput: {
+            agentId: string;
+            cwd?: string | null;
+        };
+        AgentOptionDescriptorDto: {
+            id: string;
+            label: string;
+        };
         AgentProfileDto: {
             id: string;
             name?: string;
@@ -329,6 +348,22 @@ export interface components {
             /** @enum {string} */
             operation: "worktree.getCommitFileDiff";
             output: components["schemas"]["GitFileDiffDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "agent.list";
+            output: components["schemas"]["AgentDescriptorDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "agent.listProviderSessions";
+            output: components["schemas"]["ProviderSessionDto"][];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
             revision?: number;
         } | {
@@ -692,6 +727,30 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "agent.list";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentListInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "agent.listProviderSessions";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentListProviderSessionsInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "system.describe";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["SystemDescribeInput"];
@@ -967,6 +1026,21 @@ export interface components {
             name: string;
             workingDirectory: string;
             description?: string | null;
+        };
+        /** @description provider가 로컬에 남긴 네이티브 세션 하나의 요약. 시각은 RFC3339. */
+        ProviderSessionDto: {
+            agentId: string;
+            id: string;
+            cwd?: string | null;
+            title?: string | null;
+            file: string;
+            /** Format: int64 */
+            messageCount: number;
+            createdAt?: string | null;
+            updatedAt?: string | null;
+            model?: string | null;
+            branch?: string | null;
+            source?: string | null;
         };
         RequestId: string;
         SavedPromptCreateInput: {
