@@ -1,0 +1,17 @@
+{
+  "name": "project-create-whitespace-same-fingerprint",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "requests": [
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-ws-1", "idempotencyKey": "k-ws",
+      "input": { "name": "AW", "workingDirectory": "/tmp/aw", "description": "" } },
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-ws-2", "idempotencyKey": "k-ws",
+      "input": { "name": "  AW ", "workingDirectory": " /tmp/aw", "description": null } }
+  ],
+  "expects": [
+    { "reply": { "kind": "complete", "output": { "name": "AW", "workingDirectory": "/tmp/aw", "description": null }, "revision": 1 } },
+    { "reply": { "kind": "complete", "output": { "name": "AW", "workingDirectory": "/tmp/aw", "description": null }, "revision": 1 } }
+  ],
+  "ignoreFields": ["id"],
+  "expectAfter": { "projectsLen": 1, "ledgerApplied": 1 }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@yoophi/workbench-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Generated Workbench v1 contract types and the typed OperationMap for Agentic Workbench clients (037: types only; HTTP/WS adapter arrives in stage 4)",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "generate": "cargo run -q -p workbench-protocol --bin export_openapi > ../../crates/workbench-protocol/openapi/workbench.openapi.json && openapi-typescript ../../crates/workbench-protocol/openapi/workbench.openapi.json -o src/generated/workbench.ts",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^7.13.0",
+    "typescript": "^5",
+    "vitest": "^4.1.9"
+  }
+}

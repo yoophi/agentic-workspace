@@ -32,6 +32,8 @@ tower-http = "0.5"
 uuid = { version = "1.18", features = ["v4"] }
 git-core = { path = "../../../crates/git-core" }
 acp-agent-core = { path = "../../../crates/acp-agent-core" }
+workbench-core = { path = "../../../crates/workbench-core" }
+workbench-protocol = { path = "../../../crates/workbench-protocol" }
 
 [dev-dependencies]
 tempfile = "3"

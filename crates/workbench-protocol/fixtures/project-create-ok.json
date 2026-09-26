@@ -1,0 +1,14 @@
+{
+  "name": "project-create-ok",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "request": {
+    "protocolVersion": 1, "operation": "project.create", "requestId": "r-create-ok", "idempotencyKey": "k-create-ok",
+    "input": { "name": " AW ", "workingDirectory": "/tmp/aw ", "description": " desc " }
+  },
+  "expect": {
+    "reply": { "kind": "complete", "output": { "name": "AW", "workingDirectory": "/tmp/aw", "description": "desc" }, "revision": 1 }
+  },
+  "ignoreFields": ["id"],
+  "expectAfter": { "projectsLen": 1, "ledgerApplied": 1 }
+}

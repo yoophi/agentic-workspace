@@ -15,8 +15,8 @@ pub mod git_worktree_provider;
 pub mod goal;
 pub mod goal_repository;
 pub mod mcp_title_control;
-pub mod project;
-pub mod project_repository;
+// 프로젝트 도메인은 037에서 `workbench-core`로 이동했다. 기존 import 경로를 유지하기 위해 재노출한다.
+pub use workbench_core::domain::project;
 pub mod provider_session;
 pub mod saved_prompt;
 pub mod saved_prompt_repository;

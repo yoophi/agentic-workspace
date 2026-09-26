@@ -1,0 +1,28 @@
+[package]
+name = "workbench-core"
+version = "0.1.0"
+edition = "2021"
+description = "Workbench implementation for Agentic Workbench: operation registry, storage coordination, SQLite operation ledger, project domain"
+
+[features]
+# integration test가 crash point·복구 지연을 주입할 때만 켠다. 운영 빌드에는 포함되지 않는다.
+test-hooks = []
+
+[dependencies]
+workbench-protocol = { path = "../workbench-protocol" }
+async-trait = "0.1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+workbench-core = { path = ".", features = ["test-hooks"] }
+axum = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net"] }

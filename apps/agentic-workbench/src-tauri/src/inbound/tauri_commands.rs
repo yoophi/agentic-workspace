@@ -5,7 +5,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
+use workbench_core::application::{project_service, workbench_runtime::WorkbenchRuntime};
 
+use crate::inbound::workbench_compat;
 use crate::{
     application::{
         agent_exchange_service::AgentExchangeService,
@@ -24,7 +26,7 @@ use crate::{
             DelegateGoalRequest, DispatchPromptRequest, OrchestrationService,
             SetPresentationRequest, TaskActionRequest,
         },
-        project_service, saved_prompt_service,
+        saved_prompt_service,
         send_prompt::SendPromptUseCase,
         set_permission_mode::SetPermissionModeUseCase,
         start_agent_run::StartAgentRunUseCase,
@@ -86,7 +88,6 @@ use crate::{
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_goal_repository::JsonGoalRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
-        json_project_repository::JsonProjectRepository,
         json_saved_prompt_repository::JsonSavedPromptRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
         mcp::{McpServerState, capability_registry::CapabilityPrincipal, title_tool},
@@ -1083,9 +1084,9 @@ impl WorktreeWatcherState {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectInput {
-    name: String,
-    working_directory: String,
-    description: Option<String>,
+    pub(crate) name: String,
+    pub(crate) working_directory: String,
+    pub(crate) description: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1166,28 +1167,57 @@ impl From<GoalProgressInput> for GoalProgressUpdate {
     }
 }
 
+fn workbench_runtime(app: &AppHandle) -> Arc<WorkbenchRuntime> {
+    app.state::<Arc<WorkbenchRuntime>>().inner().clone()
+}
+
+// 037: 프로젝트 목록·생성은 `Workbench.call`을 거치는 호환 어댑터다. 시그니처·직렬화·오류 문구는
+// 이전과 같다(specs/037-workbench-seam/contracts/tauri-compat-commands.md).
 #[tauri::command]
-pub fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
-    let repository = JsonProjectRepository::from_app(&app)?;
-    project_service::list_projects(&repository)
+pub async fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
+    let runtime = workbench_runtime(&app);
+    workbench_compat::call_list_projects(&runtime).await
 }
 
 #[tauri::command]
-pub fn create_project(app: AppHandle, input: ProjectInput) -> Result<Project, String> {
-    let repository = JsonProjectRepository::from_app(&app)?;
-    project_service::create_project(&repository, input.into())
+pub async fn create_project(app: AppHandle, input: ProjectInput) -> Result<Project, String> {
+    let runtime = workbench_runtime(&app);
+    workbench_compat::call_create_project(&runtime, input).await
+}
+
+// update/delete는 038에서 operation이 된다. 037에서는 서버 런타임이 소유한 같은 repository·lock을
+// 거치도록 배선만 바꿔 lock 밖의 JSON 쓰기를 없앴다(research R4).
+#[tauri::command]
+pub async fn update_project(
+    app: AppHandle,
+    id: String,
+    input: ProjectInput,
+) -> Result<Project, String> {
+    let runtime = workbench_runtime(&app);
+    let draft: ProjectDraft = input.into();
+    tokio::task::spawn_blocking(move || {
+        runtime
+            .coordinator()
+            .with_projects(|repository| {
+                project_service::update_project(repository, id.clone(), draft.clone())
+            })
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn update_project(app: AppHandle, id: String, input: ProjectInput) -> Result<Project, String> {
-    let repository = JsonProjectRepository::from_app(&app)?;
-    project_service::update_project(&repository, id, input.into())
-}
-
-#[tauri::command]
-pub fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
-    let repository = JsonProjectRepository::from_app(&app)?;
-    project_service::delete_project(&repository, id)
+pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
+    let runtime = workbench_runtime(&app);
+    tokio::task::spawn_blocking(move || {
+        runtime
+            .coordinator()
+            .with_projects(|repository| project_service::delete_project(repository, id.clone()))
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

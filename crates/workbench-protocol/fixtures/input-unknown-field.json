@@ -1,0 +1,6 @@
+{
+  "name": "input-unknown-field",
+  "principal": "desktop",
+  "request": { "protocolVersion": 1, "operation": "project.list", "requestId": "r-unknown-field", "input": { "foo": 1 } },
+  "expect": { "fault": { "code": "invalidArgument", "outcome": "notApplied" } }
+}

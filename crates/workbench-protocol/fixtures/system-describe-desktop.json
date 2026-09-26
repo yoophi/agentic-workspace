@@ -1,0 +1,19 @@
+{
+  "name": "system-describe-desktop",
+  "principal": "desktop",
+  "request": { "protocolVersion": 1, "operation": "system.describe", "requestId": "r-describe-desktop", "input": {} },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "protocolVersion": 1,
+        "operations": [
+          { "id": "project.list", "kind": "query", "effect": "read", "idempotent": false, "requiredScopes": ["project:read"], "mcpExposure": false },
+          { "id": "project.create", "kind": "command", "effect": "modify", "idempotent": true, "requiredScopes": ["project:write"], "mcpExposure": false },
+          { "id": "system.describe", "kind": "query", "effect": "read", "idempotent": false, "requiredScopes": ["system:describe"], "mcpExposure": false }
+        ]
+      }
+    },
+    "schemaPresent": true
+  }
+}

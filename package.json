@@ -14,6 +14,7 @@
     "build:annotator": "turbo run build --filter=@yoophi/markdown-annotator",
     "build": "turbo run build",
     "check-types": "turbo run check-types",
+    "generate:contracts": "pnpm --filter @yoophi/workbench-client generate",
     "test": "turbo run test",
     "preview": "turbo run preview --filter=@yoophi/agentic-workbench",
     "preview:workbench": "turbo run preview --filter=@yoophi/agentic-workbench",

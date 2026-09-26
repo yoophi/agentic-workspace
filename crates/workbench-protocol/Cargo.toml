@@ -1,0 +1,13 @@
+[package]
+name = "workbench-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "Wire contract for the Agentic Workbench server-client seam: call/reply/fault types, operation descriptors, OpenAPI generation"
+
+[dependencies]
+async-trait = "0.1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+utoipa = { version = "5", features = ["preserve_order"] }
+uuid = { version = "1", features = ["v4"] }

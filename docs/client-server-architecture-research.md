@@ -3,6 +3,8 @@
 > 조사 기준일: 2026-08-18
 > 범위: Agentic Workbench(AW)의 Tauri 기반 단일 데스크톱 앱 구조를 독립 서버 + 데스크톱/TUI/CLI 클라이언트 구조로 전환하고, 에이전트가 호출할 수 있는 CLI 및 MCP Interface를 제공하는 방안
 > 재점검: 같은 날짜의 공식 Tauri·MCP·OpenAPI 자료와 현재 저장소를 다시 대조하고 독립 비판 검토를 거쳐 daemon 생명주기, 저장 내구성, event race, process containment, agent 권한, 업데이트·배포, loopback 보안, 계약 생성의 누락을 보완했다.
+>
+> 진행 상태(2026-09-26): 1단계의 첫 세로 slice(1a)가 [Workbench Seam](workbench-seam.md)·`specs/037-workbench-seam`으로 완료됐다. `crates/workbench-protocol`·`crates/workbench-core`가 생겼고 `project.list`·`project.create`·`system.describe`가 `Workbench.call`을 통과하며, SQLite operation ledger(intent-first)와 계약 생성·drift 검사가 동작한다. 구현 중 확정된 두 가지 보완 — revision은 만료되지 않는 `aggregate_revision` 테이블에 별도 보존하고, 저장 파일 `.bak` 복구는 aggregate lock 안에서만 수행한다 — 는 이 문서의 §멱등성과 durability boundary·§저장 동시성 규칙을 구현 수준에서 구체화한 것이다. 나머지 Tauri command 이관은 038이다.
 
 ## 결론
 

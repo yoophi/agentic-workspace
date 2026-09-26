@@ -1,0 +1,22 @@
+{
+  "name": "project-list-seeded",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      { "id": "project-1", "name": "Alpha", "workingDirectory": "/tmp/alpha", "description": null },
+      { "id": "project-2", "name": "Beta", "workingDirectory": "/tmp/beta", "description": "second" },
+      { "id": "project-3", "name": "Gamma", "workingDirectory": "/tmp/gamma", "description": null }
+    ]
+  },
+  "request": { "protocolVersion": 1, "operation": "project.list", "requestId": "r-list-seeded", "input": {} },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        { "id": "project-1", "name": "Alpha", "workingDirectory": "/tmp/alpha", "description": null },
+        { "id": "project-2", "name": "Beta", "workingDirectory": "/tmp/beta", "description": "second" },
+        { "id": "project-3", "name": "Gamma", "workingDirectory": "/tmp/gamma", "description": null }
+      ]
+    }
+  }
+}

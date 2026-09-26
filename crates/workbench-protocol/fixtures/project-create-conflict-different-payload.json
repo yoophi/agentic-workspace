@@ -1,0 +1,17 @@
+{
+  "name": "project-create-conflict-different-payload",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "requests": [
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-conf-1", "idempotencyKey": "k-conf",
+      "input": { "name": "One", "workingDirectory": "/tmp/one" } },
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-conf-2", "idempotencyKey": "k-conf",
+      "input": { "name": "Two", "workingDirectory": "/tmp/one" } }
+  ],
+  "expects": [
+    { "reply": { "kind": "complete", "output": { "name": "One" }, "revision": 1 } },
+    { "fault": { "code": "conflict", "outcome": "applied", "retryable": false } }
+  ],
+  "ignoreFields": ["id"],
+  "expectAfter": { "projectsLen": 1, "ledgerApplied": 1 }
+}

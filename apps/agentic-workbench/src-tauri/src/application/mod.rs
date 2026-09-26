@@ -19,7 +19,6 @@ pub mod orchestration_command_service;
 pub mod orchestration_event_projector;
 pub mod orchestration_scheduler;
 pub mod orchestration_service;
-pub mod project_service;
 pub mod saved_prompt_service;
 pub mod session_window_state_service;
 pub mod window_menu_service;

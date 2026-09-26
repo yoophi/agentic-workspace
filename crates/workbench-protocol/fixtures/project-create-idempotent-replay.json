@@ -1,0 +1,17 @@
+{
+  "name": "project-create-idempotent-replay",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "requests": [
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-replay-1", "idempotencyKey": "k-replay",
+      "input": { "name": "Replay", "workingDirectory": "/tmp/replay" } },
+    { "protocolVersion": 1, "operation": "project.create", "requestId": "r-replay-2", "idempotencyKey": "k-replay",
+      "input": { "name": "Replay", "workingDirectory": "/tmp/replay" } }
+  ],
+  "expects": [
+    { "reply": { "kind": "complete", "output": { "name": "Replay", "workingDirectory": "/tmp/replay", "description": null }, "revision": 1 } },
+    { "reply": { "kind": "complete", "output": { "name": "Replay", "workingDirectory": "/tmp/replay", "description": null }, "revision": 1 } }
+  ],
+  "ignoreFields": ["id"],
+  "expectAfter": { "projectsLen": 1, "ledgerApplied": 1 }
+}

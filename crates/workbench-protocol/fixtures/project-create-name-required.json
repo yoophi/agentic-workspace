@@ -1,0 +1,13 @@
+{
+  "name": "project-create-name-required",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "request": {
+    "protocolVersion": 1, "operation": "project.create", "requestId": "r-create-name", "idempotencyKey": "k-create-name",
+    "input": { "name": "   ", "workingDirectory": "/tmp/x" }
+  },
+  "expect": {
+    "fault": { "code": "invalidArgument", "message": "Project name is required.", "outcome": "notApplied", "details": { "path": "/name" } }
+  },
+  "expectAfter": { "projectsLen": 0, "ledgerApplied": 0 }
+}

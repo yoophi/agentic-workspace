@@ -1,0 +1,7 @@
+{
+  "name": "project-list-empty",
+  "principal": "desktop",
+  "seed": { "projects": [] },
+  "request": { "protocolVersion": 1, "operation": "project.list", "requestId": "r-list-empty", "input": {} },
+  "expect": { "reply": { "kind": "complete", "output": [] } }
+}
