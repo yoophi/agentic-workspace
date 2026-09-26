@@ -6,6 +6,8 @@
 
 use std::sync::Arc;
 
+use serde::de::DeserializeOwned;
+use serde_json::Value;
 use workbench_core::{application::workbench_runtime::WorkbenchRuntime, domain::project::Project};
 use workbench_protocol::{
     AuthenticatedPrincipal, CallReply, CallRequest, IdempotencyKey, OperationId, PROTOCOL_VERSION,
@@ -17,6 +19,69 @@ use super::tauri_commands::ProjectInput;
 /// 데스크톱 앱이 쓰는 고정 호출자. 3단계에서 토큰 기반으로 바뀐다.
 pub fn desktop_principal() -> AuthenticatedPrincipal {
     AuthenticatedPrincipal::desktop()
+}
+
+/// 조회 요청 봉투. 멱등성 키 없음.
+pub fn query_request(operation: OperationId, input: Value) -> CallRequest {
+    CallRequest {
+        protocol_version: PROTOCOL_VERSION,
+        operation: operation.as_str().to_owned(),
+        request_id: RequestId::random(),
+        input,
+        idempotency_key: None,
+        expected_revision: None,
+        timeout_ms: None,
+    }
+}
+
+/// 변경 요청 봉투. Tauri 경로에는 재시도 개념이 없어 멱등성 키를 호출마다 새로 만든다.
+pub fn command_request(operation: OperationId, input: Value) -> CallRequest {
+    CallRequest {
+        protocol_version: PROTOCOL_VERSION,
+        operation: operation.as_str().to_owned(),
+        request_id: RequestId::random(),
+        input,
+        idempotency_key: Some(IdempotencyKey::random()),
+        expected_revision: None,
+        timeout_ms: None,
+    }
+}
+
+/// `CallReply.output`을 command 반환 타입으로 푼다. `()`는 `null`을 받는다.
+pub fn decode_output<Out: DeserializeOwned>(reply: CallReply) -> Result<Out, String> {
+    let output = reply
+        .output()
+        .cloned()
+        .ok_or_else(|| "Unexpected asynchronous reply.".to_owned())?;
+    serde_json::from_value(output).map_err(|error| format!("Failed to decode reply: {error}"))
+}
+
+async fn dispatch<Out: DeserializeOwned>(
+    runtime: &Arc<WorkbenchRuntime>,
+    request: CallRequest,
+) -> Result<Out, String> {
+    match runtime.call(desktop_principal(), request).await {
+        Ok(reply) => decode_output(reply),
+        Err(fault) => Err(fault_to_string(&fault)),
+    }
+}
+
+/// 조회 command 공통 경로: `*Input → Value` 변환은 호출자가 한다.
+pub async fn call_query<Out: DeserializeOwned>(
+    runtime: &Arc<WorkbenchRuntime>,
+    operation: OperationId,
+    input: Value,
+) -> Result<Out, String> {
+    dispatch(runtime, query_request(operation, input)).await
+}
+
+/// 변경 command 공통 경로.
+pub async fn call_command<Out: DeserializeOwned>(
+    runtime: &Arc<WorkbenchRuntime>,
+    operation: OperationId,
+    input: Value,
+) -> Result<Out, String> {
+    dispatch(runtime, command_request(operation, input)).await
 }
 
 pub fn list_projects_request(request_id: RequestId) -> CallRequest {
@@ -80,7 +145,6 @@ pub async fn call_list_projects(runtime: &Arc<WorkbenchRuntime>) -> Result<Vec<P
     }
 }
 
-/// Tauri 경로에는 재시도 개념이 없어 멱등성 키를 호출마다 새로 만든다.
 pub async fn call_create_project(
     runtime: &Arc<WorkbenchRuntime>,
     input: ProjectInput,

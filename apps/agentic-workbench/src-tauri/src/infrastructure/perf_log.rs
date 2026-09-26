@@ -21,6 +21,25 @@ pub fn log_command(name: &str, wait: Duration, run: Duration) {
     }
 }
 
+/// `Workbench.call` 경유 command용. blocking pool 대기(wait_ms)는 handler 안 `spawn_blocking`으로 옮겨져
+/// 여기서 측정할 대상이 없으므로 `run_ms`만 남긴다(038 research R10).
+pub fn log_async_command_run(name: &str, run: Duration) {
+    if perf_log_enabled() {
+        eprintln!("perf kind=command name={name} run_ms={}", run.as_millis());
+    }
+}
+
+/// `Workbench.call`을 거치는 command를 감싸 `run_ms`를 perf 로그로 남긴다.
+pub async fn log_async_command<T>(
+    name: &'static str,
+    task: impl std::future::Future<Output = T>,
+) -> T {
+    let started_at = Instant::now();
+    let result = task.await;
+    log_async_command_run(name, started_at.elapsed());
+    result
+}
+
 pub fn log_git(name: &str, run: Duration) {
     if perf_log_enabled() {
         eprintln!("perf kind=git name={name} run_ms={}", run.as_millis());

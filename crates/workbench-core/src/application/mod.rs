@@ -1,6 +1,9 @@
 pub mod authorization;
+pub mod dto;
 pub mod handlers;
 pub mod idempotency;
+pub mod intent_first;
 pub mod project_service;
+pub mod reconcilers;
 pub mod registry;
 pub mod workbench_runtime;

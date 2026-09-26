@@ -179,7 +179,7 @@ export interface components {
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}
          */
-        Scope: "project:read" | "project:write" | "system:describe";
+        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "system:describe";
         /** @description stream별 재연결 cursor. 정본 §WebSocket, replay 계약. 037은 시그니처만 둔다. */
         StreamCursor: {
             streamId: string;

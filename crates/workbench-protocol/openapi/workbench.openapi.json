@@ -558,6 +558,16 @@
         "enum": [
           "project:read",
           "project:write",
+          "savedPrompt:read",
+          "savedPrompt:write",
+          "goal:read",
+          "goal:write",
+          "agentRunSettings:read",
+          "agentRunSettings:write",
+          "git:read",
+          "git:write",
+          "worktree:read",
+          "agent:read",
           "system:describe"
         ]
       },

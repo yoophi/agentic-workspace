@@ -1,5 +1,6 @@
 //! operation registry의 정적 표. `system.describe`, OpenAPI `oneOf`, authorization이 모두 이 표를 읽는다.
 
+pub mod common;
 pub mod project;
 pub mod system;
 

@@ -3,6 +3,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod fixtures;
+pub mod git_repo;
 pub mod http_harness;
 
 use std::{fs, sync::Arc};

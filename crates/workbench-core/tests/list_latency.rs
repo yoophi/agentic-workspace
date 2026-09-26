@@ -24,6 +24,7 @@ async fn project_list_p95_under_5ms_with_50_projects() {
                 })
             })
             .collect(),
+        ..Default::default()
     };
     support::fixtures::apply_seed(&runtime.paths, &seed);
 

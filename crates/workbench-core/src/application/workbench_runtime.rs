@@ -13,7 +13,7 @@ use workbench_protocol::{
 use crate::{
     application::{
         authorization,
-        handlers::to_dto,
+        reconcilers::ReconcilerRegistry,
         registry::{CallContext, Registry},
     },
     domain::project_error::ProjectError,
@@ -21,7 +21,7 @@ use crate::{
         data_paths::DataPaths,
         json_project_repository::JsonProjectRepository,
         sqlite_ledger::SqliteOperationLedger,
-        storage_coordinator::{StorageCoordinator, PROJECTS_AGGREGATE},
+        storage_coordinator::{StorageCoordinator, PROJECTS_AGGREGATE, STORE_AGGREGATES},
     },
     ports::operation_ledger::{LedgerError, OperationLedger},
 };
@@ -104,6 +104,7 @@ pub struct WorkbenchRuntime {
     ledger: Arc<SqliteOperationLedger>,
     coordinator: Arc<StorageCoordinator>,
     registry: Registry,
+    reconcilers: ReconcilerRegistry,
     hooks: Arc<TestHooks>,
 }
 
@@ -120,37 +121,36 @@ impl WorkbenchRuntime {
             repository,
             ledger.current_revision(PROJECTS_AGGREGATE)?,
         ));
-
-        // 중단된 변경의 적용 여부를 판정한다. 자동 재실행은 하지 않는다(FR-009).
-        {
-            let coordinator = Arc::clone(&coordinator);
-            ledger.reconcile_pending(&mut |record| {
-                let reserved = record.reserved_resource_id.as_deref()?;
-                let projects = coordinator
-                    .with_projects(|repo| repo.load_projects())
-                    .ok()?;
-                projects
-                    .iter()
-                    .find(|project| project.id == reserved)
-                    .map(|project| serde_json::to_value(to_dto(project)).expect("dto serializes"))
-            })?;
+        for aggregate in STORE_AGGREGATES {
+            coordinator.set_revision_of(aggregate, ledger.current_revision(aggregate)?);
         }
-        coordinator.set_revision(ledger.current_revision(PROJECTS_AGGREGATE)?);
 
         let hooks = Arc::new(TestHooks::default());
-        let registry = crate::application::handlers::build_registry(
+        let (registry, reconcilers) = crate::application::handlers::build_registry(
             Arc::clone(&ledger),
             Arc::clone(&coordinator),
             Arc::clone(&hooks),
         );
+
+        // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
+        // 등록되지 않은 operation(upsert·수정)은 unknown이다(research R6).
+        ledger.reconcile_pending(&mut |record| reconcilers.resolve(record))?;
+        for aggregate in STORE_AGGREGATES {
+            coordinator.set_revision_of(aggregate, ledger.current_revision(aggregate)?);
+        }
 
         Ok(Arc::new(Self {
             paths,
             ledger,
             coordinator,
             registry,
+            reconcilers,
             hooks,
         }))
+    }
+
+    pub fn reconcilers(&self) -> &ReconcilerRegistry {
+        &self.reconcilers
     }
 
     pub fn paths(&self) -> &DataPaths {

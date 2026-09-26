@@ -26,6 +26,21 @@ impl DataPaths {
         self.app_data_dir.join("projects.json")
     }
 
+    /// AW `JsonSavedPromptRepository::from_app`이 쓰던 파일 그대로.
+    pub fn saved_prompts_file(&self) -> PathBuf {
+        self.app_data_dir.join("saved-prompts.json")
+    }
+
+    /// AW `JsonGoalRepository::from_app`이 쓰던 파일 그대로.
+    pub fn goals_file(&self) -> PathBuf {
+        self.app_data_dir.join("goals.json")
+    }
+
+    /// AW `JsonAgentRunSettingsRepository::from_app`이 쓰던 파일 그대로.
+    pub fn agent_run_settings_file(&self) -> PathBuf {
+        self.app_data_dir.join("agent-run-settings.json")
+    }
+
     /// 서버 소유 변경 기록. 사용자 프로젝트 디렉터리에는 절대 쓰지 않는다.
     pub fn ledger_file(&self) -> PathBuf {
         self.app_data_dir.join("workbench").join("ledger.sqlite")
@@ -54,6 +69,15 @@ mod tests {
         assert_eq!(
             paths.ledger_file(),
             PathBuf::from("/tmp/aw-data/workbench/ledger.sqlite")
+        );
+        assert_eq!(
+            paths.saved_prompts_file(),
+            PathBuf::from("/tmp/aw-data/saved-prompts.json")
+        );
+        assert_eq!(paths.goals_file(), PathBuf::from("/tmp/aw-data/goals.json"));
+        assert_eq!(
+            paths.agent_run_settings_file(),
+            PathBuf::from("/tmp/aw-data/agent-run-settings.json")
         );
     }
 

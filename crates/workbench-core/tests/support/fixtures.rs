@@ -1,12 +1,15 @@
-//! contract fixture 로더·매처. 파일 형식은 `specs/037-workbench-seam/contracts/workbench-call.md` §5.
+//! contract fixture 로더·매처. 파일 형식은 `specs/037-workbench-seam/contracts/workbench-call.md` §5와
+//! `specs/038-workbench-domains/contracts/workbench-operations.md` §4(seed 확장·`{{repo}}` 치환).
 //! `expect`는 **부분 일치**다: 기대값에 적힌 키만 실제값과 비교하고, `ignoreFields`의 키는 실제값에서 제거한다.
 
-use std::{fs, path::PathBuf};
+use std::{collections::BTreeMap, fs, path::PathBuf};
 
 use serde::Deserialize;
 use serde_json::Value;
 use workbench_core::infrastructure::data_paths::DataPaths;
 use workbench_protocol::{AuthenticatedPrincipal, CallReply, CallRequest, WorkbenchFault};
+
+use super::git_repo::{self, BuiltRepo, GitRepoSeed};
 
 #[derive(Debug, Deserialize)]
 pub struct Fixture {
@@ -34,9 +37,24 @@ fn default_principal() -> String {
 }
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Seed {
     #[serde(default)]
     pub projects: Vec<Value>,
+    #[serde(default)]
+    pub saved_prompts: Vec<Value>,
+    #[serde(default)]
+    pub goals: Vec<Value>,
+    #[serde(default)]
+    pub agent_run_settings: Vec<Value>,
+    #[serde(default)]
+    pub git_repo: Option<GitRepoSeed>,
+    /// US3: stub agent catalog.
+    #[serde(default)]
+    pub agents: Vec<Value>,
+    /// US3: stub provider 세션 목록.
+    #[serde(default)]
+    pub provider_sessions: Vec<Value>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -51,11 +69,73 @@ pub struct Expect {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ExpectAfter {
-    #[serde(default, rename = "projectsLen")]
+    #[serde(default)]
     pub projects_len: Option<usize>,
-    #[serde(default, rename = "ledgerApplied")]
+    #[serde(default)]
+    pub saved_prompts_len: Option<usize>,
+    #[serde(default)]
+    pub goals_len: Option<usize>,
+    #[serde(default)]
+    pub agent_run_settings_len: Option<usize>,
+    #[serde(default)]
     pub ledger_applied: Option<usize>,
+    /// `git worktree list`의 항목 수(main 포함).
+    #[serde(default)]
+    pub git_worktrees: Option<usize>,
+}
+
+/// seed 적용 결과. 요청·기대의 `{{...}}` 자리표시자를 채운다.
+#[derive(Debug, Default)]
+pub struct SeedContext {
+    pub repo: Option<BuiltRepo>,
+    substitutions: BTreeMap<String, String>,
+}
+
+impl SeedContext {
+    fn from_repo(repo: Option<BuiltRepo>) -> Self {
+        let mut substitutions = BTreeMap::new();
+        if let Some(repo) = &repo {
+            substitutions.insert(
+                "{{repo}}".to_owned(),
+                git_repo::canonical_string(&repo.root),
+            );
+            substitutions.insert("{{repoName}}".to_owned(), repo.name.clone());
+            substitutions.insert(
+                "{{repoParent}}".to_owned(),
+                git_repo::canonical_string(repo.parent()),
+            );
+            substitutions.insert("{{headHash}}".to_owned(), repo.head().to_owned());
+            for (index, hash) in repo.commits.iter().enumerate() {
+                substitutions.insert(format!("{{{{commit:{index}}}}}"), hash.clone());
+            }
+        }
+        Self {
+            repo,
+            substitutions,
+        }
+    }
+
+    pub fn substitute(&self, value: &mut Value) {
+        if self.substitutions.is_empty() {
+            return;
+        }
+        match value {
+            Value::String(text) => {
+                if text.contains("{{") {
+                    let mut out = text.clone();
+                    for (from, to) in &self.substitutions {
+                        out = out.replace(from, to);
+                    }
+                    *text = out;
+                }
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| self.substitute(item)),
+            Value::Object(map) => map.values_mut().for_each(|item| self.substitute(item)),
+            _ => {}
+        }
+    }
 }
 
 impl Fixture {
@@ -67,8 +147,13 @@ impl Fixture {
         }
     }
 
-    /// (요청, 기대) 순서쌍. 단일 `request`/`expect` 또는 `requests`/`expects` 시퀀스.
+    /// (요청, 기대) 순서쌍. 치환 없음(037 호환).
     pub fn steps(&self) -> Vec<(CallRequest, Expect)> {
+        self.steps_with(&SeedContext::default())
+    }
+
+    /// (요청, 기대) 순서쌍. `{{repo}}` 등 자리표시자를 seed 결과로 치환한다.
+    pub fn steps_with(&self, ctx: &SeedContext) -> Vec<(CallRequest, Expect)> {
         let requests: Vec<Value> = match (&self.request, self.requests.is_empty()) {
             (Some(single), true) => vec![single.clone()],
             (None, false) => self.requests.clone(),
@@ -88,7 +173,14 @@ impl Fixture {
         requests
             .into_iter()
             .zip(expects)
-            .map(|(request, expect)| {
+            .map(|(mut request, mut expect)| {
+                ctx.substitute(&mut request);
+                if let Some(reply) = &mut expect.reply {
+                    ctx.substitute(reply);
+                }
+                if let Some(fault) = &mut expect.fault {
+                    ctx.substitute(fault);
+                }
                 let request: CallRequest = serde_json::from_value(request)
                     .unwrap_or_else(|error| panic!("fixture {}: bad request: {error}", self.name));
                 (request, expect)
@@ -133,17 +225,27 @@ pub fn load_by_prefix(prefix: &str) -> Vec<Fixture> {
         .collect()
 }
 
-pub fn apply_seed(paths: &DataPaths, seed: &Seed) {
-    paths.ensure_dirs().expect("dirs");
-    if seed.projects.is_empty() {
-        let _ = fs::remove_file(paths.projects_file());
+fn write_or_remove(path: PathBuf, items: &[Value]) {
+    if items.is_empty() {
+        let _ = fs::remove_file(path);
         return;
     }
-    fs::write(
-        paths.projects_file(),
-        serde_json::to_vec_pretty(&seed.projects).expect("seed json"),
-    )
-    .expect("write seed");
+    fs::write(path, serde_json::to_vec_pretty(items).expect("seed json")).expect("write seed");
+}
+
+/// seed를 데이터 디렉터리와(있으면) Git 저장소로 만든다. Git 저장소는 `<app_data_dir>/repos/` 아래에 생긴다.
+pub fn apply_seed(paths: &DataPaths, seed: &Seed) -> SeedContext {
+    paths.ensure_dirs().expect("dirs");
+    write_or_remove(paths.projects_file(), &seed.projects);
+    write_or_remove(paths.saved_prompts_file(), &seed.saved_prompts);
+    write_or_remove(paths.goals_file(), &seed.goals);
+    write_or_remove(paths.agent_run_settings_file(), &seed.agent_run_settings);
+    let repo = seed.git_repo.as_ref().map(|git_seed| {
+        let parent = paths.app_data_dir().join("repos");
+        fs::create_dir_all(&parent).expect("repos dir");
+        git_repo::build(git_seed, &parent)
+    });
+    SeedContext::from_repo(repo)
 }
 
 fn strip_ignored(value: &mut Value, ignore: &[String]) {
