@@ -1,0 +1,10 @@
+[package]
+name = "workbench-host"
+version = "0.1.0"
+edition = "2024"
+description = "Workbench 조립·생명주기(044): 런타임 + HTTP/WS 어댑터 + MCP + 단일 writer·비우기·정지. 독립 서버와 AW embedded 모드가 함께 쓴다."
+
+[dependencies]
+workbench-core = { path = "../workbench-core" }
+workbench-protocol = { path = "../workbench-protocol" }
+workbench-server = { path = "../workbench-server" }

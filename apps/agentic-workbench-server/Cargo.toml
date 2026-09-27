@@ -1,0 +1,12 @@
+[package]
+name = "agentic-workbench-server"
+version = "0.1.0"
+edition = "2024"
+description = "독립 Workbench 서버(044, 5단계): 데스크톱과 무관한 composition root."
+
+[[bin]]
+name = "agentic-workbench-server"
+path = "src/main.rs"
+
+[dependencies]
+workbench-host = { path = "../../crates/workbench-host" }

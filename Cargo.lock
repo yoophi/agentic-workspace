@@ -106,6 +106,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "agentic-workbench-server"
+version = "0.1.0"
+dependencies = [
+ "workbench-host",
+]
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5625,6 +5632,15 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "walkdir",
+ "workbench-core",
+ "workbench-protocol",
+ "workbench-server",
+]
+
+[[package]]
+name = "workbench-host"
+version = "0.1.0"
+dependencies = [
  "workbench-core",
  "workbench-protocol",
  "workbench-server",
