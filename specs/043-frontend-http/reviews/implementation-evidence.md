@@ -36,3 +36,12 @@ tasks.md에는 경로가 `crates/workbench-server/tests/`로 적혀 있다. 실�
 - 폐기 뒤 호출은 401, 표 발급은 `unauthenticated`이고, 폐기 전에 받은 표는 upgrade가 거절된다.
 - 다른 창 토큰은 계속 OK다. 같은 label의 새 incarnation 토큰은 OK지만, 이전 작업대 닫기는 `Forbidden`이다.
 - 이미 열린 WebSocket 구독은 폐기 대상이 아니다. 창이 Destroyed되면 WebView와 함께 연결이 닫히고, 이어지는 작업대 닫기가 작업대 스트림에 `evicted` gap을 보낸다. 창 수명 순서는 T050에서 확인한다.
+
+## T006 보관 한도 재구독 (`crates/workbench-core/tests/retention_resubscribe.rs`) · T009
+
+- **성격**: 새 동작을 만드는 시험이 아니다. 클라이언트 복구 절차(R8: live 먼저 → 버퍼 → 스냅샷 병합)가 기대는 **기존** 042 hub 동작을 고정하는 특성 시험이다. 그래서 red 단계가 없다. 이 시험이 실패하면 클라이언트 설계의 전제가 깨진 것이다.
+- 명령: `cargo test -p workbench-core --features test-hooks --test retention_resubscribe`, 종료 코드 0, 1 passed.
+- 조건: 실제 `EventHub`에 run·교환·orchestration journal 한도를 4로 두고 11건을 발행한다.
+  - (a) `after = 0`: `RetentionExceeded`이고 `first = 8`, `last = 11`이다. 한 건을 더 발행해도 구독이 `None`으로 **끝난다**. 등록된 수신자가 없어 송신자가 모두 사라지므로, 시간 대기 없이 결정적으로 단정된다.
+  - (b) `after = lastSequence(11)`: 12(이미 발행됨)와 13(live)을 연속으로 받는다.
+- T009: hub 한도는 이미 `RuntimeAdapters.event_limits`와 `EventHub::new(epoch, EventHubLimits)`로 주입할 수 있다. **코드 변경 없음**이다. 시험 host(T016)도 이 경로를 쓴다.
