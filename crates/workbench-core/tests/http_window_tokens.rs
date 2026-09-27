@@ -116,7 +116,7 @@ impl Env {
     fn cursor(&self, stream: &str) -> StreamCursor {
         StreamCursor {
             stream_id: stream.into(),
-            epoch: self.epoch.clone().into(),
+            epoch: self.epoch.clone(),
             after_sequence: 0,
         }
     }
