@@ -133,7 +133,8 @@ macro_rules! app_invoke_handler {
             get_workbench_connection,
             ensure_window_bench,
             declare_network_delivery,
-            infrastructure::http_probe::report_http_probe
+            infrastructure::http_probe::report_http_probe,
+            infrastructure::http_probe::report_app_probe
         ]
     };
 }

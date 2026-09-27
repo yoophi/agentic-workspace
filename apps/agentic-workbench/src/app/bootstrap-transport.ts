@@ -11,7 +11,7 @@ import {
   type ConnectionInfo,
 } from "@yoophi/workbench-client";
 
-import { compatTransport, setTransport } from "@/shared/api/transport";
+import { compatTransport, getTransport, setTransport } from "@/shared/api/transport";
 import { setConnectionStatus } from "@/shared/api/transport/connection-status";
 import { createHttpTransport } from "@/shared/api/transport/http-transport";
 import { createNetworkEvents } from "@/shared/api/transport/network-events";
@@ -63,6 +63,7 @@ export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapD
     connection.close();
     setTransport(compatTransport);
     log(`[workbench-client] using compat path: ${reason(error)}`);
+    exposeDebugProbe(undefined, undefined);
     return { kind: "compat" };
   }
   const client = createWorkbenchClient({ connection, fetch: deps.fetch });
@@ -88,5 +89,22 @@ export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapD
   setTransport(
     createHttpTransport({ client, ensureWindowBench: deps.ensureWindowBench, windowLabel: deps.windowLabel(), events }),
   );
+  exposeDebugProbe(connection, eventClient);
   return { kind: "http", connection };
+}
+
+/** 앱 스모크(043 T053) 전용 진단 핸들. 빌드 플래그 `VITE_AW_DEBUG_PROBE=1`일 때만 존재한다 — 운영 빌드에서는 분기가
+ *  정적으로 제거된다. 앱 자신의 transport로 호출·구독하고, 이벤트 소켓을 강제로 끊어 재연결을 확인하는 데 쓴다. */
+function exposeDebugProbe(connection: Connection | undefined, events: { debugDropSockets(): number } | undefined) {
+  if (import.meta.env.VITE_AW_DEBUG_PROBE !== "1") {
+    return;
+  }
+  (window as unknown as { __awDebug?: unknown }).__awDebug = {
+    transportKind: () => getTransport().kind,
+    invoke: (command: string, args?: Record<string, unknown>) => getTransport().invoke(command, args),
+    listen: (event: string, callback: (payload: unknown) => void) => getTransport().listen(event, callback),
+    dropEventSockets: () => events?.debugDropSockets() ?? 0,
+    connectionState: () => connection?.state() ?? "compat",
+    epoch: () => connection?.epoch(),
+  };
 }

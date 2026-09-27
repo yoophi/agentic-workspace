@@ -314,3 +314,7 @@ T027 범위를 정직하게 적는다:
 - T050: `window_lifecycle::teardown`을 `Teardown` trait 주입으로 뽑아 Tauri 없이 순서를 고정했다. 운영은 `AppTeardown`이다.
 - 토큰 폐기 자체(폐기 뒤 401, 폐기 전 표 거절)는 T005(core `http_window_tokens`)가 운영 발급기로 확인한다.
 AW Rust 합계: 124 passed, 0 failed
+
+## T053 · T054(부분) 앱 스모크
+
+자세한 내용은 `reviews/app-smoke.md`. 개발 출처와 배포 출처(`tauri://localhost`) 모두 네트워크 경로에서 SC-005 흐름이 확인됐다: 프로젝트 조회, run 시작·출력(에코) 수신, 이벤트 소켓 강제 종료, 자동 재연결, 끊긴 뒤 prompt 출력의 이어 받기, 중복·빈 순번 없음. 끝점 기동 실패 주입에서는 호환 경로로 부팅하고 조회가 동작했다. **SC-004d 새로고침 시나리오는 아직 미검증이라 T054는 완료로 표시하지 않는다.**

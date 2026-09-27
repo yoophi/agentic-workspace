@@ -69,6 +69,8 @@ export interface EventClient {
   close(): void;
   /** 시험용: 스트림의 재연결 cursor(수신자 반영 완료 최솟값). */
   debugCursor(streamId: string): number | undefined;
+  /** 진단용: 열린 소켓을 모두 닫는다 — 연결 끊김과 같은 재연결 경로를 탄다. */
+  debugDropSockets(): number;
 }
 
 const INITIAL_BACKOFF_MS = 250;
@@ -528,6 +530,16 @@ export function createEventClient(options: EventClientOptions): EventClient {
     },
     debugCursor(streamId) {
       return streams.get(streamId)?.cursor();
+    },
+    debugDropSockets() {
+      let dropped = 0;
+      for (const stream of streams.values()) {
+        if (stream.socket) {
+          stream.socket.close(); // onclose 처리기가 남아 있어 재연결한다
+          dropped += 1;
+        }
+      }
+      return dropped;
     },
   };
 }

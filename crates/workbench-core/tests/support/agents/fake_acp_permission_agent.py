@@ -14,6 +14,8 @@ import json
 import sys
 
 LOG = sys.argv[sys.argv.index("--log") + 1] if "--log" in sys.argv else None
+# 043 앱 스모크: `--echo`면 받은 prompt 본문을 `echo:<본문>` agent 메시지로 먼저 돌려보낸다(앱이 그 출력을 받는지 확인).
+ECHO = "--echo" in sys.argv
 pending_prompt = None
 prompt_for_permission = {}
 permission_seq = 0
@@ -90,6 +92,15 @@ for line in sys.stdin:
         blocks = (message.get("params") or {}).get("prompt") or []
         text = " ".join(block.get("text", "") for block in blocks if isinstance(block, dict))
         log(f"prompt-text:{pending_prompt}:{json.dumps(text)}")
+        if ECHO:
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "fake-session",
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"echo:{text}"}},
+                },
+            })
         ask_permission(pending_prompt)
     elif method == "$/cancel_request":
         if pending_prompt is not None and message.get("params", {}).get("requestId") == pending_prompt:
