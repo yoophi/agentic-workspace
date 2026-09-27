@@ -126,7 +126,7 @@
 - [X] T038 AW debug 전용 진단·probe(R12, 설계 리뷰 D3): `AW_HTTP_DIAGNOSTIC_FILE`(0600, 운영 발급기로 Origin 없는 진단 토큰), `AW_HTTP_WEBVIEW_PROBE_FILE`(메인 창 로드 뒤 `window.eval` probe → `invoke('get_workbench_connection')` → fetch handshake·`project.list`·표·WS `hello`·표 재사용 거절·무토큰 401 → `report_http_probe`), `invoke_handler`를 debug/release 두 벌로 조립. 결과에 토큰·표 문자열 없음
 - [X] T039 release 유출 확인: `cargo build --release`(AW) 뒤 `strings`로 `AW_HTTP_DIAGNOSTIC_FILE`·`AW_HTTP_WEBVIEW_PROBE_FILE`·`report_http_probe` 0건, 결과 Notes
 - [X] T040 앱 스모크(quickstart §3, 격리 identifier): (a) 끝점 진단, (b) WebView probe — **보고 때 (a)는 "끝점", (b)는 "데스크톱 연결"로 구분**, 재기동 뒤 반복, 캡처한 `origin`으로 허용 목록 확인. 스모크 뒤 격리 디렉터리·파일 삭제
-- [ ] T041 [P] docs: `docs/workbench-seam.md` 네트워크 어댑터 절(경로·인증·출처·표·실행 수명, Mermaid), `docs/client-server-architecture-research.md` 진행 각주, `crates/workbench-server/docs/adr/0001-…`·`0002-…`, `crates/workbench-server/CONTEXT.md` 필요 시(용어는 core CONTEXT 참조)
+- [X] T041 [P] docs: `docs/workbench-seam.md` 네트워크 어댑터 절(경로·인증·출처·표·실행 수명, Mermaid), `docs/client-server-architecture-research.md` 진행 각주, `crates/workbench-server/docs/adr/0001-…`·`0002-…`, `crates/workbench-server/CONTEXT.md` 필요 시(용어는 core CONTEXT 참조)
 - [ ] T042 전체 게이트(quickstart §1·§2) 한 번 실행·종료 코드 기록, SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad) — 미검증 범위(배포 Origin 실측, 화면 경로 전환은 4단계) 명시, 커밋 `docs(aw): record 042 HTTP adapter status`
 
 ---
@@ -206,3 +206,4 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
   - **종료 경로에서 찾은 결함(수정)**: macOS 정상 종료(`NSRunningApplication.terminate` = 앱 메뉴 Quit과 같은 quit 이벤트, PID로 지정해 설치된 AW는 건드리지 않음)에서 `RunEvent::ExitRequested`가 오지 않아 drain 로그가 없었다(2회차). `RunEvent::Exit`에서도 drain을 기다리게 하고(`block_on`, drain은 tokio 작업자에서 진행), `shutdown`을 여러 경로가 함께 기다릴 수 있게 `served`를 watch 채널로 바꿨다(시험: 두 번째 종료 경로도 조기 반환하지 않음). 3회차 로그: `exit (event loop ending): closing new calls and draining accepted calls` → `exit: accepted calls drained`, 1초 안에 종료
   - **미검증**: 실제 앱에서 진행 중 호출이 있는 상태의 종료(agent 없이 오래 걸리는 호출을 만들 수 없음 — drain 대기 의미는 단위 시험 `exit_waits_for_accepted_http_and_mcp_calls`가 잰다), 배포 Origin(`tauri://localhost`) 실측(설계 리뷰 D4 — 4단계 전 release 번들 스모크로), Windows `http://tauri.localhost`
   - 정리: 격리 데이터 디렉터리·토큰 든 진단 파일 삭제(토큰 없는 probe·진단 결과만 scratchpad에 남김)
+- **T041**: `docs/workbench-seam.md` 네트워크 어댑터 절(인증·출처·표·MCP 재시도 식별·데스크톱 조립·종료, Mermaid), 연구 문서 042 진행 각주, `crates/workbench-server/docs/adr/0001`(protocol만 의존)·`0002`(연결보다 오래 사는 호출). server CONTEXT.md는 새 용어가 core CONTEXT와 겹쳐 만들지 않았다

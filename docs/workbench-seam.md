@@ -204,6 +204,11 @@ flowchart LR
 - **실행 수명**: 받아들인 호출은 연결과 무관하게 끝까지 실행된다. 종료 신호 뒤 새 호출은 `503`, `serve`는 받아들인 호출이 모두 끝난 뒤에만 반환한다(상한 없음, 경고 간격마다 기록).
 - **공개 범위**: `ExposurePolicy::network_default()` = 전체. operation별 중단·재시작·단절 근거는 [`reviews/exposure-evidence.md`](../specs/042-workbench-http/reviews/exposure-evidence.md).
 - **진행 중 재시도**: 세대 범위 command는 끝날 때까지 기다리고, ledger 경로(`run.start` 등)는 retryable `conflict` → 같은 키로 다시 시도한다.
+- **인증·출처**: 모든 경로 bearer(`/health/live` 제외). 데스크톱 WebView는 `get_workbench_connection`의 15분 토큰(호출 창 출처에 묶임), agent는 MCP 실행 토큰(→ `agent:<run>`, 폐기 즉시 무효, Origin 있으면 거절). Host는 `127.0.0.1:<port>`·`localhost:<port>`, Origin은 `http://localhost:1420`·`tauri://localhost`·`http://tauri.localhost` 정확 일치(`null` 거절). CORS는 이 목록만, credentials 없음. 본문 1 MiB. 기록에는 요청 id·operation·주체 종류·상태·지연만.
+- **구독 표**: `POST /v1/event-tickets`는 형식과 고정 상한(cursor 1,024)만 보고 30초 1회용 표를 준다. 연결 때 표를 원자적으로 꺼내 서버가 그 cursor로 구독한다 — 권한·cursor 0개·hub 상한은 `fault` 프레임.
+- **MCP 도구 재시도 식별**: 멱등성 키는 도구 인자 `requestId` → 유효한 JSON-RPC id(+인자) → 무작위 순. [contracts §7](../specs/042-workbench-http/contracts/workbench-http.md).
+- **데스크톱 조립**: AW는 기동 때 같은 런타임을 루프백 임의 포트로 연다(실패는 기록하고 계속). 화면은 아직 Tauri 호환 command를 쓴다(4단계에서 전환). 종료는 `ExitRequested`(미루고 drain 뒤 재종료)와 `Exit`(macOS Quit, 그 자리에서 drain) 두 경로.
+- **결정**: [server ADR 0001](../crates/workbench-server/docs/adr/0001-network-adapter-depends-only-on-the-protocol.md)(protocol만 의존), [server ADR 0002](../crates/workbench-server/docs/adr/0002-accepted-calls-outlive-their-connection.md)(분리 실행·상한 없는 drain·증거 기반 공개).
 
 ## 호출 규칙
 
