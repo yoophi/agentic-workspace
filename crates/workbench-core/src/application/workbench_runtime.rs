@@ -371,6 +371,8 @@ impl WorkbenchRuntime {
             Arc::clone(&work_gate),
             epoch.clone(),
             Arc::clone(&benches),
+            Arc::clone(&ledger),
+            Arc::clone(&orchestration),
         ));
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
@@ -604,6 +606,21 @@ impl WorkbenchRuntime {
     }
 }
 
+/// 호출 처리 동안 C-call 예약을 잡는가. 조회와 서버 관리 호출(정지·임대·창 토큰 발급)은 잡지 않는다 — 정지 요청이 자기
+/// 호출을 활동 작업으로 세지 않게.
+fn holds_call_reservation(operation: workbench_protocol::OperationId) -> bool {
+    use workbench_protocol::OperationId;
+    !matches!(spec_for(operation).kind, OperationKind::Query)
+        && !matches!(
+            operation,
+            OperationId::ServerStop
+                | OperationId::LeaseAcquire
+                | OperationId::LeaseRenew
+                | OperationId::LeaseRelease
+                | OperationId::DesktopIssueWindowToken
+        )
+}
+
 #[async_trait]
 impl Workbench for WorkbenchRuntime {
     async fn call(
@@ -667,6 +684,24 @@ impl Workbench for WorkbenchRuntime {
             )
         })?;
 
+        // C-call 예약(R14): 조회·서버 관리 호출이 아니면 처리 끝까지 관문에 예약한다. 정지 판정이 진행 중인 호출과 그 호출이
+        // 만드는 파생 상태(저장된 알림·확인된 교환)를 놓치지 않는다. 입구 판정 뒤 `stopping`으로 넘어갔으면 여기서 거절한다.
+        let _call = if holds_call_reservation(operation) {
+            match self
+                .work_gate
+                .reserve(crate::application::work_gate::ReservationKind::Call, None)
+            {
+                Ok(reservation) => Some(reservation),
+                Err(_) => {
+                    return Err(WorkbenchFault::unavailable(
+                        request.request_id,
+                        MESSAGE_STOPPING,
+                    ))
+                }
+            }
+        } else {
+            None
+        };
         let ctx = CallContext {
             principal,
             request_id: request.request_id,

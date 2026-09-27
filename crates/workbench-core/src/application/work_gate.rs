@@ -153,6 +153,9 @@ struct Inner {
     state: Option<GateState>,
     /// 서빙에서 비우기로 넘어간 시각. 대기 task 배정(K)은 이보다 먼저 만든 task만 이어 가기로 받는다. 서빙으로 돌아가면 지운다.
     drain_started_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 예약이 풀릴 때마다 는다. 정지 판정은 G 밖에서 파생 값을 읽으므로, 그 사이 끝난 작업(예약 해제)이 파생 값을 바꿨을 수
+    /// 있다 — 판정은 읽기 전 세대와 같을 때만 전이한다(`try_stop_at`).
+    generation: u64,
     next_id: u64,
     reservations: HashMap<u64, (ReservationKind, Option<String>)>,
     busy: BTreeMap<String, usize>,
@@ -195,6 +198,7 @@ impl Inner {
         let Some((kind, run)) = self.reservations.remove(&id) else {
             return;
         };
+        self.generation += 1;
         self.notify_attempts.remove(&id);
         let run_busy_after = if kind == ReservationKind::Turn {
             let key = run_id_key(run.as_deref());
@@ -450,6 +454,26 @@ impl WorkGate {
             return true;
         }
         if !inner.reservations.is_empty() || derived_active() != 0 {
+            return false;
+        }
+        inner.state = Some(GateState::Stopping);
+        true
+    }
+
+    /// 활동 세대(예약 해제 수). [`WorkGate::try_stop_at`]과 짝.
+    pub fn activity_generation(&self) -> u64 {
+        self.lock().generation
+    }
+
+    /// 파생 값을 읽기 **전에** 얻은 세대로 하는 정지 판정: 그 뒤 예약이 하나라도 풀렸으면(파생 값이 낡았을 수 있음) 전이하지
+    /// 않는다. 나머지는 [`WorkGate::try_stop`]과 같다.
+    pub fn try_stop_at(&self, generation: u64, derived_active: impl FnOnce() -> u64) -> bool {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return true;
+        }
+        if inner.generation != generation || !inner.reservations.is_empty() || derived_active() != 0
+        {
             return false;
         }
         inner.state = Some(GateState::Stopping);

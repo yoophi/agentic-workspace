@@ -255,10 +255,10 @@ async fn leases_are_acquired_renewed_and_released_by_the_owner() {
     assert_eq!(h.rt.runtime.server_control().leases().count(), 0);
 }
 
-/// T026 응답 모양 고정: 아직 파생하지 않는 필드는 0이 아니라 `null`(부재)이고 `notYetDerived`에 올라 있다. 정지 판정은
-/// 모르는 값을 활동 작업으로 본다 — 알려진 수가 모두 0이어도 `blocks_stop`이 참이다.
+/// T026 응답 모양 고정(T041에서 갱신): 모든 필드를 파생한다 — `notYetDerived`는 빈 배열이고, 파생 수는 `null`이 아니라
+/// 실제 값이다. 쉬는 세션(idle run)은 활동 작업이 아니므로 알려진 수가 모두 0이면 `blocks_stop`이 거짓이다.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn server_status_reports_underived_fields_as_unknown_not_zero() {
+async fn server_status_derives_every_field() {
     let h = BenchHarness::new(RunScript::default());
     let owner = AuthenticatedPrincipal::owner();
     let bench = window_bench_with_run(&h, "a", "r1").await;
@@ -281,29 +281,23 @@ async fn server_status_reports_underived_fields_as_unknown_not_zero() {
     assert!(status["activeWork"]["acceptedCalls"].is_u64());
     assert!(status["activeWork"]["reservations"].is_u64());
 
-    let expected = [
-        "activeWork.orchestrationTasks",
-        "activeWork.queuedTasks",
-        "activeWork.pendingExchanges",
-        "activeWork.pendingNotifications",
-        "activeWork.pendingOperations",
-        "unresolvedOperations",
-        "undeliverableExchanges",
-        "failedExchangeDeliveries",
-        "idleSince",
-    ];
-    assert_eq!(status["notYetDerived"], json!(expected));
-    for path in expected {
-        let (parent, field) = match path.split_once('.') {
-            Some((parent, field)) => (&status[parent], field),
-            None => (&status, path),
-        };
-        let value = parent.get(field);
-        assert!(
-            value.is_none_or(Value::is_null),
-            "{path} must be null or absent, not {value:?}"
-        );
+    assert_eq!(status["notYetDerived"], json!([]), "{status}");
+    for field in [
+        "orchestrationTasks",
+        "queuedTasks",
+        "pendingExchanges",
+        "pendingNotifications",
+        "pendingOperations",
+    ] {
+        assert_eq!(status["activeWork"][field], 0, "{field}: {status}");
     }
+    assert_eq!(status["unresolvedOperations"], 0, "{status}");
+    assert_eq!(status["undeliverableExchanges"], json!([]), "{status}");
+    assert_eq!(status["failedExchangeDeliveries"], json!([]), "{status}");
+    assert!(
+        status.get("idleSince").is_none(),
+        "a lease is held, so the server is not idle: {status}"
+    );
 
     // 살아 있는 run은 bench.list와 같은 상태로 idleRuns에 들어간다.
     let listed = h
@@ -323,7 +317,8 @@ async fn server_status_reports_underived_fields_as_unknown_not_zero() {
     let typed: workbench_protocol::operations::server::ServerStatusOutput =
         serde_json::from_value(status).expect("status deserializes");
     assert!(
-        typed.active_work.blocks_stop(),
-        "unknown active-work counts must block a stop"
+        !typed.active_work.blocks_stop(),
+        "an idle session is not active work: {:?}",
+        typed.active_work
     );
 }

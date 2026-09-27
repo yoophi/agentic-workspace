@@ -203,8 +203,7 @@ impl SqliteOperationLedger {
         })
     }
 
-    /// 테스트·진단용: 상태별 건수.
-    #[cfg(any(test, feature = "test-hooks"))]
+    /// 상태별 건수. `server.status`가 `pendingOperations`(`pending`)·`unresolvedOperations`(`unknown`)를 파생한다(044).
     pub fn count_by_state(&self, state: LedgerState) -> LedgerResult<usize> {
         self.with_connection(|conn| {
             conn.query_row(

@@ -14,7 +14,6 @@ pub const LEASE_TTL: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Clone)]
 struct Lease {
-    #[allow(dead_code)]
     client_kind: LeaseClientKindDto,
     #[allow(dead_code)]
     client_id: String,
@@ -88,6 +87,16 @@ impl LeaseTable {
     /// 이 호출이 임대를 풀었으면 true.
     pub fn release(&self, lease_id: &str) -> bool {
         lock(&self.leases).remove(lease_id).is_some()
+    }
+
+    /// 이 종류의 유효 임대 수. 미소비 교환은 데스크톱 임대가 있을 때만 활동으로 센다(R7).
+    pub fn count_kind(&self, kind: LeaseClientKindDto) -> usize {
+        let mut leases = lock(&self.leases);
+        Self::prune(&mut leases, Instant::now());
+        leases
+            .values()
+            .filter(|lease| lease.client_kind == kind)
+            .count()
     }
 
     /// 유효 임대 수(만료된 것은 거둔다).
