@@ -105,7 +105,7 @@
 
 ## R13. 변경 operation의 네트워크 공개 조건 (사용자 점검 반영)
 
-**Decision**: 정상 경로 parity는 crash 안전성 근거가 아니다. 변경 operation을 네트워크에 여는 조건은 **그 operation의 중단·재시작 판정 증거**다. 네트워크는 in-process와 같은 멱등 기록을 쓰므로 새 중단 지점을 만들지는 않는다. 하지만 클라이언트가 응답을 잃고 **재시작 뒤 같은 키로 재시도**할 수 있게 되므로, 그 재시도가 다시 적용되지 않는다는 증거가 필요하다. 증거가 없는 operation은 042에서 테스트를 추가하고, 추가 전까지는 네트워크에 열지 않는다(router의 operation 허용 집합에서 뺀다 — 기본은 전부 공개가 목표이므로 태스크는 보강을 먼저 한다).
+**Decision**: 정상 경로 parity는 crash 안전성 근거가 아니다. 변경 operation을 네트워크에 여는 조건은 **그 operation의 중단·재시작 판정 증거**와 **요청 취소(연결 단절) 판정 증거**(R17)다. 네트워크는 두 가지 새 상황을 만든다: (a) 응답을 잃은 클라이언트가 **서버 재시작 뒤** 같은 키로 재시도, (b) 서버·작업대는 그대로인데 **연결만 끊겨** 요청 future가 취소된 뒤 같은 키로 재시도(설계 리뷰 Codex C1 — 처음 설계는 "네트워크는 새 중단 지점을 만들지 않는다"고 가정해 (b)를 빠뜨렸다). 두 재시도 모두 다시 적용되지 않는다는 증거가 필요하다. 증거가 없는 operation은 042에서 테스트를 추가하고, 추가 전까지는 네트워크에 열지 않는다(router의 operation 허용 집합에서 뺀다 — 기본은 전부 공개가 목표이므로 태스크는 보강을 먼저 한다).
 
 | 분류 | operation | 기존 증거 | 042 보강 |
 |---|---|---|---|
@@ -124,6 +124,18 @@
 - 증거 테스트는 in-process 런타임으로 쓴다(중단 주입이 런타임 내부에 있다). 네트워크 경로는 "같은 키 재시도" 단계만 HTTP로 한 번 더 보내 같은 결과인지 확인한다.
 
 **Alternatives**: 정본대로 opt-in 목록만 공개 — 보강이 끝나면 전부 공개와 같아지므로, 보강을 이번 범위에 넣고 목표(전부 공개)를 유지한다.
+
+## R17. 요청 취소와 실행 수명 (설계 리뷰 Codex C1 반영)
+
+**문제(코드 확인)**: `EpochIdempotency::run`(`application/epoch_idempotency.rs:126`)은 `run().await`가 성공해야 결과를 기록하고, future가 대기·실행 중 취소되면 `InFlightSlot`의 drop이 진행 중 표를 정리한다. 한편 저장 작업은 `spawn_blocking`(예: `OrchestrationRuntime::blocking`, `run.start` apply의 `block_on`)으로 넘어가 호출 future가 사라져도 끝까지 진행된다. HTTP handler는 연결이 끊기면 axum이 future를 drop한다. 그러면 **효과는 반영됐지만 멱등 기록은 없는** 상태가 되고, 같은 키 재시도가 다시 실행된다. 영속(ledger) 경로는 `pending`이 남아 재실행되지는 않지만, 결과가 기록되지 않아 재시도가 "처리 중/unknown"으로 남을 수 있다. 같은 결함이 오늘 HTTP로 도는 AW MCP 서버(`POST /mcp` → agent operation)에도 잠재한다.
+
+**Decision**: **수락한 호출의 실행 수명을 연결에서 분리한다.** 네트워크 어댑터(`workbench-server` router)와 AW MCP 서버는 `Workbench.call`을 **서버가 소유한 분리 task**(`tokio::spawn`)에서 끝까지 실행하고, 연결 쪽 future는 그 `JoinHandle`을 기다리기만 한다. 연결이 끊겨 handler future가 drop돼도 task는 실행과 멱등 결과 기록(세대 범위 결과 표·ledger `applied`)까지 마친다. 같은 키 재시도가 그 사이 도착하면 진행 중 슬롯(`InFlightSlot`)에서 기다렸다가 저장된 결과를 받는다. 조회도 같은 경로를 쓴다(구분 없이 단순하게). 분리 task는 서버 종료 신호(R10)를 받으면 새 호출을 받지 않고, 진행 중 task는 끝까지 둔다.
+
+**Rationale**: 멱등 규칙을 "호출자가 끝까지 기다린다"는 가정에서 떼어 낸다. core의 멱등 표·ledger 의미는 바꾸지 않고 어댑터가 실행을 끝까지 보장하므로, 5단계 독립 서버·CLI도 같은 router를 쓰면 같은 보장을 얻는다. in-process Tauri command는 future를 취소하지 않으므로 이번 범위에서 바꾸지 않는다(기록).
+
+**Alternatives**: core `EpochIdempotency`가 취소 시 "판정 불가(unknown)" 표식을 남겨 재실행을 막음 — 재시도가 결과를 받지 못해 사용자 경험이 나쁘고, 모든 operation에 unknown 판정 규칙이 필요하다(거절). 요청 단위 시간 제한 — 취소를 늘릴 뿐 해결하지 않는다(거절).
+
+**공개 게이트(시험)**: 저장·효과 단계에서 지연을 주입한 변경을 HTTP로 보내고 **효과 진행 중 연결을 끊는다** → 서버·작업대는 유지 → 같은 키로 재시도 → 저장된 결과를 받고 **효과는 한 번**(카운터·저장 상태로 확인). 대표 세 경로를 덮는다: 세대 범위(`run.sendPrompt` — 가짜 엔진 prompt 지연, 효과 = prompt 수), 세대 범위 + 파일 영속(`orchestration.setPresentation` 또는 `delegateGoal` — 저장 지연 주입, 효과 = revision 1회 증가), 영속 ledger(`run.start` — 가짜 엔진 기동 지연, 효과 = run 수). MCP 서버는 agent 도구 하나로 같은 시험을 한다. 분리 task를 빼면(연결 future에서 직접 실행) 이 시험이 실패함을 변이로 확인한다.
 
 ## R14. 계약 suite의 운영 router 전환
 

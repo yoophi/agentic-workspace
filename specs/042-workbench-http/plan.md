@@ -48,7 +48,7 @@
 ```text
 specs/042-workbench-http/
 ├── plan.md
-├── research.md          # R1–R16 (R13 변경 공개 조건·중단 증거 표)
+├── research.md          # R1–R17 (R13 변경 공개 조건·중단 증거 표, R17 요청 취소와 실행 수명)
 ├── data-model.md
 ├── quickstart.md
 ├── contracts/
@@ -81,6 +81,7 @@ crates/workbench-core/tests/
 crates/workbench-server/tests/
 ├── security.rs                          # Host·Origin·토큰·표·본문 상한·기록 비노출
 ├── ws_boundary_race.rs                  # 표 구독 경계 경합 1,000회
+├── disconnect_retry.rs                  # 효과 진행 중 연결 단절 → 같은 키 재시도 효과 1회(R17)
 └── mixed_paths.rs                       # in-process + HTTP 동시 변경 손실 0
 
 apps/agentic-workbench/src-tauri/src/
@@ -96,9 +97,9 @@ apps/agentic-workbench/src-tauri/src/
 
 1. **Setup**: 크레이트 생성·workspace 등록, 기준선 게이트 기록.
 2. **Foundational**: 포트(`CredentialResolver`·`ServerInfo`), `OriginPolicy`, `DesktopTokenIssuer`, `EventTicketStore`, 기록 sink, router 골격(`/health/live`), problem 응답.
-3. **US1(P1)**: `/v1/calls`·handshake·protocol 헤더, core harness를 운영 router로 교체 → 계약 suite parity, 경로 혼합 동시 변경. **R13 증거 테스트를 공개 전에**: 영속 5개 중단 판정, 세대 범위·orchestration 재시작 뒤 재시도.
+3. **US1(P1)**: `/v1/calls`·handshake·protocol 헤더, **호출 실행을 서버 소유 분리 task로(R17)**, core harness를 운영 router로 교체 → 계약 suite parity, 경로 혼합 동시 변경. **R13·R17 증거 테스트를 공개 전에**: 영속 5개 중단 판정, 세대 범위·orchestration 재시작 뒤 재시도, **연결 단절 뒤 같은 서버·작업대에서 같은 키 재시도 효과 1회**(세대·파일 영속·ledger 세 경로, 변이 확인).
 4. **US2(P2)**: 표 발급·WS(hello→구독→프레임), 이벤트 suite parity, 경계 경합 1,000회, 재연결.
-5. **US3(P3)**: Host·Origin·CORS·본문 상한 보안 테스트, MCP `origin_allowed` 교체.
+5. **US3(P3)**: Host·Origin·CORS·본문 상한 보안 테스트, MCP `origin_allowed` 교체, **MCP 도구 호출 실행도 분리 task로(R17) + 연결 단절 재시도 시험**.
 6. **US4(P4)**: AW 조립(합성 resolver, MCP 토큰 → agent, 폐기 즉시 반영), `get_workbench_connection`, 기동 실패 허용·종료 정리.
 7. **US5(P5)**: `/health/ready`·`/openapi.json`(커밋 파일과 같음).
 8. **Polish**: 진단·WebView probe(debug 전용), 앱 스모크 두 증거, docs·ADR, 게이트, SC 증거, PR 초안.

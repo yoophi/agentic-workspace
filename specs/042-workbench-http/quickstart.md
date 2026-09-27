@@ -19,6 +19,7 @@ pnpm run test
 - WebSocket 경계 경합: 표로 구독하는 순간에 발행을 주입하는 시험 1,000회 이상에서 빠짐·중복 0.
 - 경로 혼합 동시 변경: in-process와 HTTP로 같은 대상에 100회 이상 → 손실 0.
 - 중단·재시작 증거(research R13): 보강한 영속 5개(`project.update`·`project.delete`·`savedPrompt.update`·`goal.update`·`goal.clear`)의 세 중단 지점 판정, 세대 범위·orchestration 변경의 재시작 뒤 같은 키 재시도 → 재적용 없음. 각 재시도는 HTTP로도 한 번 보낸다.
+- **연결 단절 재시도(공개 게이트, research R17)**: 효과 진행 중 연결을 끊고 서버·작업대를 유지한 채 같은 키로 재시도 → 저장된 결과, 효과 1회. `run.sendPrompt`(prompt 수)·orchestration 파일 영속 변경(revision 1회)·`run.start`(run 수)·MCP agent 도구 하나. 분리 실행을 빼면 실패함을 변이로 확인.
 - 기록 수집 sink에 토큰·표 문자열 0건.
 - MCP `origin_allowed`: `http://127.0.0.1.evil.example`·`http://localhost.evil.example`·`null` 거절, 허용 목록 통과.
 

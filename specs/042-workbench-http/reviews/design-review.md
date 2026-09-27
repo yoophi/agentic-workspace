@@ -18,3 +18,11 @@
 - 데스크톱 WebView(`http://localhost:1420`)에서 `http://127.0.0.1:<port>`로의 fetch는 교차 출처라 preflight가 필요하다 — contracts §5가 `authorization, content-type`을 허용한다. `tauri.conf.json`에 CSP가 없어 연결이 막히지 않는다(4단계에서 CSP를 넣을 때 `connect-src`에 루프백 포함 필요 — 기록).
 - 세대 멱등 기록은 principal 주체 범위라 in-process와 HTTP가 공유한다(`epoch.rs` scope 계산).
 - harness 교체: 기존 API(`Harness::spawn`·`call`·`subscribe`·`token_for`)를 유지하고 WS만 표 발급 → 연결로 바꾸면 fixture 기대값은 그대로다(D1 반영 조건).
+
+## 리뷰 2 — Codex adversarial review
+
+- 실행: 사용자가 `/codex:adversarial-review --wait …`를 직접 호출(Skill 도구의 codex 호출은 `disable-model-invocation`으로 막혀 있음). 대상: 브랜치 diff vs main(설계 문서 9파일). 판정 needs-attention.
+
+| # | 등급 | 내용 | 처리 |
+|---|---|---|---|
+| C1 | High | R13은 "네트워크는 새 중단 지점을 만들지 않는다"고 가정하고 재시작 뒤 재시도만 검증했다. 그러나 `EpochIdempotency::run`은 성공 뒤에만 결과를 기록하고 취소 시 진행 중 표를 정리하며, `spawn_blocking` 저장은 호출 future가 사라져도 진행된다. HTTP 연결 단절로 handler가 취소되면 효과는 반영되고 멱등 기록은 없어 같은 키가 다시 실행된다. 재시작 시험은 작업대가 사라져 `notFound`라 이를 잡지 못한다 | **코드로 확인**(`epoch_idempotency.rs:126–144`, `OrchestrationRuntime::blocking`). research R17 신설: 어댑터(router·AW MCP 서버)가 `Workbench.call`을 **서버 소유 분리 task**에서 끝까지 실행하고 연결 future는 결과만 기다린다 — 연결이 끊겨도 실행·멱등 기록 완료, 재시도는 진행 중 슬롯에서 기다렸다가 저장 결과. R13 공개 조건에 "요청 취소 판정 증거" 추가. 공개 게이트 시험: 효과 진행 중 연결 단절 → 같은 서버·작업대 유지 → 같은 키 재시도 → 효과 1회(세대 범위 `run.sendPrompt`, 파일 영속 orchestration 변경, ledger `run.start`, MCP agent 도구), 분리 실행 제거 변이로 실패 확인. contracts §3·quickstart §1·plan 단계 3·5 갱신. 같은 결함이 오늘 MCP 서버에도 잠재함을 기록 |
