@@ -350,27 +350,50 @@ pub fn run() {
         .run(on_run_event);
 }
 
-/// 042 T033: 종료 요청은 받아들인 HTTP·MCP 호출이 끝날 때까지 미룬다 — 신호만 보내고 곧바로 끝내면 분리 실행한
-/// 호출의 결과 기록이 프로세스와 함께 사라진다. drain이 끝나면 같은 종료 코드로 다시 종료한다.
+/// 042 T033: 종료는 받아들인 HTTP·MCP 호출이 끝날 때까지 미룬다 — 신호만 보내고 곧바로 끝내면 분리 실행한 호출의
+/// 결과 기록이 프로세스와 함께 사라진다. 두 경로가 있다:
+/// - `ExitRequested`(창을 모두 닫음 등): 종료를 미루고 비동기로 drain한 뒤 같은 코드로 다시 종료한다.
+/// - `Exit`(macOS 앱 메뉴 Quit·terminate는 `ExitRequested` 없이 이것만 온다 — 042 스모크에서 확인): 이벤트 루프가
+///   끝나기 전에 그 자리에서 drain을 기다린다. drain은 tokio 작업자에서 돌므로 메인 스레드를 막아도 진행된다.
 fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
-    let tauri::RunEvent::ExitRequested { api, code, .. } = event else {
-        return;
-    };
-    let http = app.state::<workbench_http::WorkbenchHttp>();
-    match http.exit.on_exit_requested() {
-        workbench_http::ExitDecision::Exit => {}
-        workbench_http::ExitDecision::KeepWaiting => api.prevent_exit(),
-        workbench_http::ExitDecision::StartDrain => {
-            api.prevent_exit();
-            let app = app.clone();
+    match event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
+            let http = app.state::<workbench_http::WorkbenchHttp>();
+            match http.exit.on_exit_requested() {
+                workbench_http::ExitDecision::Exit => {}
+                workbench_http::ExitDecision::KeepWaiting => api.prevent_exit(),
+                workbench_http::ExitDecision::StartDrain => {
+                    api.prevent_exit();
+                    let app = app.clone();
+                    let state = http.state.clone();
+                    let mcp_calls = app.state::<McpServerState>().detached_calls();
+                    eprintln!(
+                        "[workbench-http] exit requested: closing new calls and draining accepted calls"
+                    );
+                    tauri::async_runtime::spawn(async move {
+                        workbench_http::drain_for_exit(state, mcp_calls).await;
+                        eprintln!("[workbench-http] exit: accepted calls drained");
+                        app.state::<workbench_http::WorkbenchHttp>().exit.drained();
+                        app.exit(code.unwrap_or(0));
+                    });
+                }
+            }
+        }
+        tauri::RunEvent::Exit => {
+            let http = app.state::<workbench_http::WorkbenchHttp>();
+            if http.exit.is_drained() {
+                return;
+            }
+            eprintln!(
+                "[workbench-http] exit (event loop ending): closing new calls and draining accepted calls"
+            );
             let state = http.state.clone();
             let mcp_calls = app.state::<McpServerState>().detached_calls();
-            tauri::async_runtime::spawn(async move {
-                workbench_http::drain_for_exit(state, mcp_calls).await;
-                app.state::<workbench_http::WorkbenchHttp>().exit.drained();
-                app.exit(code.unwrap_or(0));
-            });
+            tauri::async_runtime::block_on(workbench_http::drain_for_exit(state, mcp_calls));
+            http.exit.drained();
+            eprintln!("[workbench-http] exit: accepted calls drained");
         }
+        _ => {}
     }
 }
 

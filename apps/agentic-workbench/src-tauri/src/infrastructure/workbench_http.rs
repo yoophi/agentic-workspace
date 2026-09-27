@@ -91,7 +91,8 @@ pub struct WorkbenchHttpState {
     base_url: String,
     issuer: Arc<DesktopTokenIssuer>,
     shutdown: std::sync::Mutex<Option<oneshot::Sender<()>>>,
-    served: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
+    /// `serve`가 끝나면 `true`. 여러 종료 경로가 함께 기다릴 수 있다.
+    served: tokio::sync::watch::Receiver<bool>,
     /// 받아들인 HTTP 호출 추적기 — 종료 시작 때 곧바로 닫는다.
     http_calls: Arc<DetachedCalls>,
     drain_warn_after: Duration,
@@ -134,7 +135,7 @@ impl WorkbenchHttpState {
         let server = workbench_server::build_router(assembly.workbench, config, address.port());
         let http_calls = Arc::clone(&server.calls);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
-        let (served_tx, served_rx) = oneshot::channel::<()>();
+        let (served_tx, served_rx) = tokio::sync::watch::channel(false);
         tauri::async_runtime::spawn(async move {
             match tokio::net::TcpListener::from_std(std_listener) {
                 Ok(listener) => {
@@ -148,13 +149,13 @@ impl WorkbenchHttpState {
                 }
                 Err(error) => eprintln!("[workbench-http] failed to create listener: {error}"),
             }
-            let _ = served_tx.send(());
+            let _ = served_tx.send(true);
         });
         Ok(Self {
             base_url: format!("http://{address}"),
             issuer,
             shutdown: std::sync::Mutex::new(Some(shutdown_tx)),
-            served: tokio::sync::Mutex::new(Some(served_rx)),
+            served: served_rx,
             http_calls,
             drain_warn_after: assembly.drain_warn_after,
         })
@@ -206,8 +207,11 @@ impl WorkbenchHttpState {
         {
             let _ = tx.send(());
         }
-        if let Some(served) = self.served.lock().await.take() {
-            let _ = served.await;
+        let mut served = self.served.clone();
+        while !*served.borrow_and_update() {
+            if served.changed().await.is_err() {
+                break;
+            }
         }
         drain_mcp(mcp_calls, self.drain_warn_after).await;
     }
@@ -290,6 +294,10 @@ impl ExitGate {
             Err(EXIT_DONE) => ExitDecision::Exit,
             Err(_) => ExitDecision::KeepWaiting,
         }
+    }
+
+    pub fn is_drained(&self) -> bool {
+        self.phase.load(std::sync::atomic::Ordering::Acquire) == EXIT_DONE
     }
 
     pub fn drained(&self) {
@@ -492,8 +500,14 @@ mod tests {
             }));
         }
 
+        let state = Arc::new(state);
         let exiting = {
-            let (state, mcp_calls) = (Arc::new(state), mcp_calls.clone());
+            let (state, mcp_calls) = (state.clone(), mcp_calls.clone());
+            tokio::spawn(async move { state.shutdown(&mcp_calls).await })
+        };
+        // 두 번째 종료 경로(macOS `RunEvent::Exit`)가 겹쳐도 같은 끝을 기다린다.
+        let exiting_again = {
+            let (state, mcp_calls) = (state.clone(), mcp_calls.clone());
             tokio::spawn(async move { state.shutdown(&mcp_calls).await })
         };
         tokio::time::sleep(Duration::from_millis(150)).await;
@@ -512,7 +526,12 @@ mod tests {
             "the earlier MCP call ran to completion"
         );
         assert!(!exiting.is_finished(), "HTTP call (700ms) still draining");
+        assert!(
+            !exiting_again.is_finished(),
+            "a second exit path returned early"
+        );
         exiting.await.unwrap();
+        exiting_again.await.unwrap();
         assert!(
             finished.load(Ordering::Acquire),
             "the disconnected HTTP call finished"
