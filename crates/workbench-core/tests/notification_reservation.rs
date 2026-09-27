@@ -179,17 +179,15 @@ where
 }
 
 async fn wait_status(f: &Fixture, report_id: &str, status: &str) -> Value {
-    let mut last = Value::Null;
     let deadline = tokio::time::Instant::now() + WAIT;
     loop {
         let current = notification(f, report_id).await;
         if current["status"] == status {
             return current;
         }
-        last = current;
         assert!(
             tokio::time::Instant::now() < deadline,
-            "notification never {status}: {last}"
+            "notification never {status}: {current}"
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }

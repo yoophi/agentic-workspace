@@ -472,3 +472,14 @@ green·최종:
   - `t039-mut-2.log` 종료 101: 보고 도구가 첫 N-notify를 넘기지 않게 하면 F2가 실패. 두 경우 모두 원본 복원 확인.
 - 회귀: `cargo test -p workbench-core --features test-hooks` (`t039-core-full-1.log`) 종료 0, 57 target, 470 passed, 0 failed, 모든 target filtered out 0. `cargo test -p workbench-protocol` (`t039-protocol-1.log`) 종료 0, 45 passed, filtered out 0.
 - 남은 것: 비우기 진입 때 서버가 알림 한 바퀴를 도는 연결은 비우기 상태 기계(T041)에서 `spawn_notification_pass`를 부르면 된다 — 이번에는 넣지 않았다.
+
+## 최종 실행 (T037–T039 fork)
+
+- `cargo clippy -p workbench-core -p workbench-protocol -p workbench-host -p acp-agent-core --features workbench-core/test-hooks --all-targets -D warnings`:
+  - 첫 실행 `f3739-clippy-1.log` 종료 101: `notification_reservation.rs`의 쓰지 않는 대입(`last`).
+  - 시험 helper를 고친 뒤 `f3739-clippy-2.log` 종료 0.
+- lint 수정 뒤 workbench-core 전체 재실행 `cargo test -p workbench-core --features test-hooks` (`f3739-core-1.log`) 종료 0: 57 target, 470 passed, 0 failed, 모든 target filtered out 0.
+- `cargo test -p acp-agent-core` (`f3739-acp-1.log`) 종료 0: 2 target, 97 passed, filtered out 0. 이번 fork는 acp-agent-core를 바꾸지 않았다(ask-code·hushline 재검증 대상 아님).
+- `cargo test -p workbench-host` (`f3739-host-1.log`) 종료 0: 7 target, 57 passed, filtered out 0.
+- AW src-tauri `cargo test` (`f3739-aw-1.log`) 종료 0: 4 target, 102 passed, filtered out 0. `cargo clippy --all-targets -D warnings` (`f3739-aw-clippy-1.log`) 종료 0.
+- 끝난 뒤 가짜 ACP agent·서버 잔여 프로세스 없음.
