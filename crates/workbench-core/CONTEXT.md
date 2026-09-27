@@ -99,7 +99,7 @@ _Avoid_: diagnostic event, ephemeral event
 _Avoid_: crashed, failed, disconnected
 
 **Client Instance**:
-이벤트 구독을 여는 주체 하나(데스크톱 창 하나, HTTP 연결 하나). 이벤트를 누구에게 보낼지만 정하며 run이나 Worktree를 소유하지 않는다.
+이벤트 구독을 여는 주체 하나(데스크톱 창 하나, HTTP 연결 하나). 이벤트를 누구에게 보낼지만 정하며 run이나 Worktree를 소유하지 않는다. 소유는 작업대(Bench)의 일이다.
 _Avoid_: window, client, session(Provider Session과 혼동)
 
 ### 도메인
@@ -123,6 +123,10 @@ _Avoid_: run config, preferences(외관 설정과 혼동)
 **Worktree**:
 세션이 작업하는 체크아웃 디렉터리. 저장소 루트일 수도, Git worktree일 수도 있다. 이를 가리키는 절대 경로 입력 필드 이름은 `workingDirectory`다.
 _Avoid_: workspace, working directory(개념 이름으로는)
+
+**작업대 (Bench)**:
+호출자 하나가 Worktree 하나를 대상으로 연 작업 단위. run과 교환 작업 영역을 소유하고, 명시적으로 끝낼 때까지 유지된다. 한 Worktree에 여러 개를 동시에 열 수 있다. 데스크톱에서는 세션 창 하나가 작업대 하나를 연다.
+_Avoid_: window, session, workspace, owner(일반 명사로는)
 
 **Git Worktree**:
 `git worktree add`로 저장소에 붙인 추가 체크아웃. Worktree의 한 종류다.

@@ -1,4 +1,4 @@
-# Specification Quality Checklist: 창 정체 분해와 run·exchange·orchestration 이관 (040, 2b)
+# Specification Quality Checklist: 작업대(Bench) 도입과 run·교환 이관 (040, 2b-1)
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-09-27
@@ -32,4 +32,4 @@
 ## Notes
 
 - 037–039와 같이 이 시리즈는 계약·경로 이름(`Workbench.call`, 스트림 이름 등)을 요구사항 수준의 고정 용어로 쓴다. 구현 언어·라이브러리는 등장하지 않는다.
-- grill에서 확정할 결정(가정으로 둔 것): 소유 단위의 이름, PR 분할 여부, 창 닫힘 표현(명시적 종료), exchange·orchestration 데스크톱 전달 방식, 쓰기 scope 이름.
+- grill(2026-09-27) Q1–Q10 반영: 범위를 run·교환으로 줄이고(orchestration은 041), 작업대 용어·scope·MCP agent principal·표현 요청·멱등 규칙을 확정. 재검증 결과 전 항목 통과.
