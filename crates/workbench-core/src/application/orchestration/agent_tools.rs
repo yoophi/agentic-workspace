@@ -558,15 +558,10 @@ pub async fn handle_tool(
             let next_task_id = (report.report_type == TaskReportType::Result)
                 .then(|| runtime.scheduler().release(&report.task_id).ok().flatten())
                 .flatten();
-            let dispatcher = runtime.dispatcher();
-            let dispatch_runtime = Arc::clone(runtime);
-            let dispatch_bench = bench.clone();
-            tokio::spawn(async move {
-                let _ = dispatcher.dispatch_pending(&dispatch_bench).await;
-                dispatch_runtime
-                    .emit_runtime_update_for(&dispatch_bench, "notificationDelivery")
-                    .await;
-            });
+            // R14 표 6': 보고 호출이 돌아가기 전에 N-notify를 잡아 전달기로 넘긴다 — 전달기가 처음 돌기 전에 보고
+            // 호출과 자식 turn이 끝나도 활동이 0이 되지 않는다.
+            let first = runtime.begin_notify_attempt();
+            runtime.spawn_notification_pass_with(&bench, "notificationDelivery", first);
             Ok(json!({
                 "report": report,
                 "notifications": notifications,

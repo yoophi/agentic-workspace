@@ -102,6 +102,10 @@ impl From<OrchestrationError> for OrchestrationFailure {
 
 pub type OrchestrationResult<T> = Result<T, OrchestrationFailure>;
 
+/// 알림 재전달 backoff(첫 대기와 상한).
+const NOTIFICATION_RETRY_BASE: std::time::Duration = std::time::Duration::from_millis(50);
+const NOTIFICATION_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// 자식 기동의 시작 장벽 지점(044 research R14, 시험용 관측 지점). 운영에서는 probe가 없어 아무것도 하지 않는다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchPoint {
@@ -133,6 +137,13 @@ pub struct OrchestrationRuntime {
     /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
     launching: std::sync::Mutex<std::collections::HashMap<String, (String, String, String)>>,
     launch_probe: std::sync::Mutex<Option<LaunchProbe>>,
+    dispatch_probe: std::sync::Mutex<Option<super::notification_dispatcher::DispatchProbe>>,
+    /// 마지막으로 띄운 알림 전달 한 바퀴(시험이 abort한다).
+    last_notification_pass: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
+    /// 작업대별 알림 재전달 상태(연속 재시도 수, 예약됨). 재시도 가능 실패 뒤 서버가 backoff로 다시 돈다(R14 표 6').
+    notification_retries: std::sync::Mutex<std::collections::HashMap<String, (u32, bool)>>,
+    /// 전달 한 바퀴의 서버 알림(회수·재전달)이 이 런타임을 부르기 위한 약한 참조.
+    weak_self: std::sync::OnceLock<std::sync::Weak<Self>>,
     /// 기동 중인 task → (기동 토큰, 예정 run id). 같은 task의 기동을 하나로 묶고(단일 비행), 취소가 토큰으로 기동을
     /// 막을 수 있게 한다(044 R14 표 4·5). 메모리 상태 — 토큰은 이 프로세스의 작업 관문에서만 뜻이 있다.
     launch_tokens: std::sync::Mutex<std::collections::HashMap<String, (u64, String)>>,
@@ -158,6 +169,10 @@ impl OrchestrationRuntime {
             guards,
             launching: std::sync::Mutex::default(),
             launch_probe: std::sync::Mutex::default(),
+            dispatch_probe: std::sync::Mutex::default(),
+            last_notification_pass: std::sync::Mutex::default(),
+            notification_retries: std::sync::Mutex::default(),
+            weak_self: std::sync::OnceLock::new(),
             launch_tokens: std::sync::Mutex::default(),
             fallback_gate: std::sync::OnceLock::new(),
         }
@@ -226,6 +241,169 @@ impl OrchestrationRuntime {
             .launch_probe
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    /// 시험: 알림 전달 한 바퀴의 지점 probe를 건다.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_dispatch_probe(&self, probe: Option<super::notification_dispatcher::DispatchProbe>) {
+        *self
+            .dispatch_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    /// 시험: 마지막으로 띄운 알림 전달 한 바퀴.
+    #[cfg(feature = "test-hooks")]
+    pub fn last_notification_pass(&self) -> Option<tokio::task::AbortHandle> {
+        self.last_notification_pass
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 조립이 `Arc`로 감싼 직후 한 번 부른다(전달 한 바퀴의 서버 알림이 이 런타임을 부른다).
+    pub fn attach_self(self: &std::sync::Arc<Self>) {
+        let _ = self.weak_self.set(std::sync::Arc::downgrade(self));
+    }
+
+    /// 알림 전달 시도 하나를 시작한다(보고 호출이 C-call을 놓기 전에 N-notify를 잡아 전달기로 넘긴다, R14 표 6').
+    pub(crate) fn begin_notify_attempt(
+        &self,
+    ) -> Option<super::notification_dispatcher::NotifyAttempt> {
+        super::notification_dispatcher::NotifyAttempt::begin(Some(self.work_gate()))
+    }
+
+    /// 알림 전달 한 바퀴를 뒤에서 띄운다.
+    pub(crate) fn spawn_notification_pass(
+        self: &std::sync::Arc<Self>,
+        bench_id: &str,
+        reason: &'static str,
+    ) {
+        self.spawn_notification_pass_with(bench_id, reason, None);
+    }
+
+    pub(crate) fn spawn_notification_pass_with(
+        self: &std::sync::Arc<Self>,
+        bench_id: &str,
+        reason: &'static str,
+        first: Option<super::notification_dispatcher::NotifyAttempt>,
+    ) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let dispatcher = self.dispatcher();
+        let runtime = std::sync::Arc::clone(self);
+        let bench = bench_id.to_owned();
+        let task = handle.spawn(async move {
+            let _ = dispatcher.dispatch_pending_with(&bench, first).await;
+            runtime.emit_runtime_update_for(&bench, reason).await;
+        });
+        *self
+            .last_notification_pass
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task.abort_handle());
+    }
+
+    /// 회수 한 바퀴: 살아 있는 시도가 없는 `Dispatching{attemptId}` 알림을 `Failed(retryable)`로 되돌린다(R14 표 6'').
+    pub async fn reclaim_notifications(&self, bench_id: &str) -> OrchestrationResult<usize> {
+        let dispatcher = self.dispatcher();
+        let bench = bench_id.to_owned();
+        Ok(
+            tokio::task::spawn_blocking(move || dispatcher.reclaim_orphaned(&bench))
+                .await
+                .map_err(|error| OrchestrationFailure::Plain(error.to_string()))??,
+        )
+    }
+
+    fn dispatch_events(&self) -> Option<super::notification_dispatcher::DispatchEvents> {
+        use super::notification_dispatcher::DispatchEvent;
+        let weak = self.weak_self.get()?.clone();
+        Some(std::sync::Arc::new(move |bench: &str, event| {
+            let Some(runtime) = weak.upgrade() else {
+                return;
+            };
+            match event {
+                // 결과를 저장하지 못한 시도: 새 한 바퀴가 시작할 때 회수하고 다시 전달한다.
+                DispatchEvent::Orphaned => {
+                    runtime.spawn_notification_pass(bench, "notificationRecovery")
+                }
+                DispatchEvent::RetryableFailures => runtime.schedule_notification_retry(bench),
+                DispatchEvent::Settled => runtime.settle_notification_retry(bench),
+            }
+        }))
+    }
+
+    /// 재시도 가능 실패 뒤 backoff로 다시 전달한다. 대상 coordinator run이 살아 있을 때만 돈다(R14: 미전달 알림은
+    /// coordinator run이 살아 있을 때만 활동이다). 이미 예약돼 있으면 더 예약하지 않는다.
+    fn schedule_notification_retry(self: &std::sync::Arc<Self>, bench_id: &str) {
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let delay = {
+            let mut retries = self
+                .notification_retries
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let entry = retries.entry(bench_id.to_owned()).or_default();
+            if entry.1 {
+                return;
+            }
+            entry.1 = true;
+            let delay = NOTIFICATION_RETRY_BASE
+                .saturating_mul(1 << entry.0.min(7))
+                .min(NOTIFICATION_RETRY_MAX);
+            entry.0 = entry.0.saturating_add(1);
+            delay
+        };
+        let runtime = std::sync::Arc::clone(self);
+        let bench = bench_id.to_owned();
+        handle.spawn(async move {
+            tokio::time::sleep(delay).await;
+            if let Some(entry) = runtime
+                .notification_retries
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .get_mut(&bench)
+            {
+                entry.1 = false;
+            }
+            if runtime.coordinator_alive(&bench).await {
+                runtime.spawn_notification_pass(&bench, "notificationRetry");
+            } else {
+                runtime.settle_notification_retry(&bench);
+            }
+        });
+    }
+
+    fn settle_notification_retry(&self, bench_id: &str) {
+        if let Some(entry) = self
+            .notification_retries
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get_mut(bench_id)
+        {
+            entry.0 = 0;
+        }
+    }
+
+    async fn coordinator_alive(&self, bench_id: &str) -> bool {
+        let Ok(Some(session)) = self.get(bench_id).await else {
+            return false;
+        };
+        let Some(run_id) = session
+            .nodes
+            .iter()
+            .find(|node| node.id == crate::domain::agent_orchestration::MAIN_AGENT_NODE_ID)
+            .and_then(|node| node.current_run_id.clone())
+        else {
+            return false;
+        };
+        self.benches
+            .engine
+            .active_owner_of(&run_id)
+            .await
+            .as_deref()
+            == Some(bench_id)
     }
 
     pub(crate) async fn launch_probe(&self, point: LaunchPoint) {
@@ -297,7 +475,18 @@ impl OrchestrationRuntime {
     }
 
     pub fn dispatcher(&self) -> CoordinatorNotificationDispatcher<Repository, EngineAgentWorker> {
-        CoordinatorNotificationDispatcher::new(self.repository.clone(), self.worker.clone())
+        let dispatcher =
+            CoordinatorNotificationDispatcher::new(self.repository.clone(), self.worker.clone());
+        let dispatcher = match self.dispatch_events() {
+            Some(events) => dispatcher.with_server(std::sync::Arc::clone(self.work_gate()), events),
+            None => dispatcher,
+        };
+        dispatcher.with_probe(
+            self.dispatch_probe
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+        )
     }
 
     pub fn worker(&self) -> &EngineAgentWorker {
@@ -992,14 +1181,8 @@ impl OrchestrationRuntime {
         tokio::task::spawn_blocking(move || recovering.recover_interrupted(&bench))
             .await
             .map_err(|error| OrchestrationFailure::Plain(error.to_string()))??;
-        let runtime = Arc::clone(self);
-        let bench = bench_id.to_owned();
-        tokio::spawn(async move {
-            let _ = dispatcher.dispatch_pending(&bench).await;
-            runtime
-                .emit_runtime_update_for(&bench, "notificationRecovery")
-                .await;
-        });
+        drop(dispatcher);
+        self.spawn_notification_pass(bench_id, "notificationRecovery");
         self.snapshot_for(bench_id, MESSAGE_NOT_BOOTSTRAPPED).await
     }
 

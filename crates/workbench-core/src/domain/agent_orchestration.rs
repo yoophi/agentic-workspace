@@ -646,6 +646,10 @@ pub struct CoordinatorNotification {
     pub failure: Option<CommandFailure>,
     #[serde(default)]
     pub collected_at: Option<String>,
+    /// 마지막 전달 시도의 id(044 R14 표 6'·6''). `Dispatching`이면 그 시도가 소유한다 — 시도의 N-notify 예약이 없으면
+    /// 같은 id일 때만 회수한다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -1075,6 +1079,7 @@ mod tests {
             attempt_count: 0,
             failure: None,
             collected_at: None,
+            attempt_id: None,
             created_at: now.clone(),
             updated_at: now,
         };

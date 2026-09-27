@@ -158,6 +158,8 @@ struct Inner {
     consumed_exchanges: HashSet<String>,
     /// 소비했지만 엔진 대기열 등록에 실패한 교환(대상 run이 없음). `server.status`의 `failedExchangeDeliveries`.
     failed_deliveries: HashSet<String>,
+    /// N-notify 예약 → 그 전달 시도 id(R14 표 6'·6'').
+    notify_attempts: HashMap<u64, String>,
     /// task 기동 토큰 표.
     launches: HashMap<u64, LaunchState>,
     next_launch: u64,
@@ -191,6 +193,7 @@ impl Inner {
         let Some((kind, run)) = self.reservations.remove(&id) else {
             return;
         };
+        self.notify_attempts.remove(&id);
         let run_busy_after = if kind == ReservationKind::Turn {
             let key = run_id_key(run.as_deref());
             let remaining = self.busy.get(&key).copied().unwrap_or(1).saturating_sub(1);
@@ -320,6 +323,29 @@ impl WorkGate {
             gate: Arc::clone(self),
             id: turn,
         })
+    }
+
+    /// 알림 전달 시도(R14 표 6'): 시도 id를 가진 N-notify 예약을 만든다. `stopping`이면 실패한다. 예약은 그 시도의
+    /// 결과 저장 commit까지 쥔다(A-turn과 별개).
+    pub fn reserve_notify(self: &Arc<Self>, attempt_id: &str) -> Result<Reservation, GateClosed> {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return Err(GateClosed);
+        }
+        let id = inner.insert(ReservationKind::Notify, None);
+        inner.notify_attempts.insert(id, attempt_id.to_owned());
+        Ok(Reservation {
+            gate: Arc::clone(self),
+            id,
+        })
+    }
+
+    /// 이 전달 시도의 N-notify 예약이 살아 있는가(회수 판정, R14 표 6'').
+    pub fn notify_attempt_live(&self, attempt_id: &str) -> bool {
+        self.lock()
+            .notify_attempts
+            .values()
+            .any(|held| held == attempt_id)
     }
 
     /// task 취소(R14 표 5).

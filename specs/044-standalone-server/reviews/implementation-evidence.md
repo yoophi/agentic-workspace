@@ -447,3 +447,28 @@ green·최종:
 - mutation `t038-mut-1.log` 종료 101: `prevent_task_launch`가 항상 `Unknown`을 돌려주게 하면 `BeforeReserve` 지점에서 실행 표지가 생겨 실패(원본 복원 확인).
 - 회귀: `cargo test -p workbench-core --features test-hooks` (`t038-core-full-1.log`) 종료 0, 56 target, 463 passed, 0 failed, 모든 target filtered out 0.
 - 이탈·설명: 기동 토큰은 저장소에 쓰지 않고 메모리 표에 둔다(토큰은 이 프로세스의 작업 관문에서만 뜻이 있고, 저장소에는 노드 `Starting` + 예정 run이 남는다). 스크립트 엔진의 `active_owner_of`는 장벽 전 준비 run도 소유자로 본다(운영은 세션이 붙어야 active) — 기존 시험의 타이밍 의존을 늘리지 않기 위함.
+
+## T039 알림 전달 예약·회수 (F2·G1·G2) — fork
+
+- 시험 `crates/workbench-core/tests/notification_reservation.rs` 6개(+ support 1):
+  - F2: 전달기 첫 poll(`FirstPoll`)을 막은 채 보고 호출이 돌아가고 자식 turn도 없음 → `active_work().notifications == 1`, `try_stop(|| 0)` 거절 → 풀면 `delivered`(시도 1, coordinator prompt 1) → 예약 0 → `try_stop` 통과.
+  - 재시도 가능 실패(스크립트 엔진 `send_and_wait` 1회 실패) → 외부 호출 없이 서버가 backoff로 재전달 → `delivered`, 시도 2.
+  - G1: `Dispatching{attemptId}` 저장 직후(`AfterDispatchingSaved`) 전달 future abort → 회수·재전달, 시도 2, attemptId 바뀜, coordinator prompt 1.
+  - G1: 결과 저장 실패 주입(`BeforeResultSave` → `FailResultSave`) → 회수·재전달, 시도 2, prompt 2.
+  - G2: 결과 transaction 직전에 회수 한 바퀴 → 회수 0, 알림 변경 0 → 풀면 같은 attemptId로 `delivered`, prompt 1(재전달 0).
+  - G2: 같은 지점 abort → 회수되어 재전달 1회(prompt 2), 예약 0.
+  - "wait-stop이 끝나지 않음"은 `WorkGate::try_stop`(파생 활동 0으로 넘김)과 `active_work`로 단정했다. host 정지 상태 기계와 저장소 파생 활동(미전달 알림 수)은 T041이다.
+- red 1 `t039-red-1.log` 종료 101: **컴파일 red**(probe·회수·실패 주입 API 없음).
+- red 2 `t039-red-2.log` 종료 101: 관측 지점만 추가(예약·회수 없음)한 뒤 **행동 red** 5 failed / 2 passed — N-notify 없음, attemptId 없음, 재시도 실패가 `failed`로 남음, abort·저장 실패 뒤 `dispatching`으로 남음. G2 "살아 있는 시도 비회수" 시험은 회수 stub(0)으로 통과(red 아님, 구현 뒤 의미 있는 단정).
+- 구현:
+  - 도메인 `CoordinatorNotification.attempt_id`(serde default·None이면 직렬화 생략), 프로토콜 DTO `attemptId`(선택), `workbench.openapi.json`·`packages/workbench-client/src/generated/workbench.ts` 재생성(`pnpm run generate`, `t039-generate-1.log` 종료 0; `check-types` `t039-client-types-1.log` 종료 0).
+  - `WorkGate::reserve_notify(attemptId)`(N-notify, `stopping`이면 실패)·`notify_attempt_live`.
+  - `CoordinatorNotificationDispatcher::dispatch_pending_with(bench, first)`: 시작 때 회수 한 바퀴, 전달마다 시도 id + N-notify(`NotifyAttempt`) → `Dispatching{attemptId}` 저장 → 전달 → 결과는 이 시도가 소유한 `Dispatching`일 때만 저장 → **commit 뒤에만** 예약 해제. 시도 guard가 결과 저장 없이 drop되면 예약을 먼저 놓고 `Orphaned`를 알린다. 한 바퀴 끝에 재시도 가능 실패가 남으면 `RetryableFailures`.
+  - `reclaim_orphaned`: 저장소에서 `Dispatching{attemptId}` 후보를 읽고(경계 밖에서) 예약 없는 시도만 같은 id일 때 `Failed(retryable, runtimeLost)`로 되돌린다(관문 G를 저장소 경계 안에서 잡지 않아 잠금 순서 역전 없음).
+  - `OrchestrationRuntime`: 보고 도구가 C-call을 놓기 전에 첫 시도(N-notify)를 잡아 전달기로 넘김, `Orphaned` → 새 한 바퀴(시작 때 회수), `RetryableFailures` → backoff(50ms부터 두 배, 상한 5초) 재전달(대상 coordinator run이 살아 있을 때만, 작업대당 하나), 재시작 복구 경로도 같은 전달 함수를 쓴다. 시험용 `set_dispatch_probe`·`last_notification_pass`(`test-hooks`), `reclaim_notifications`.
+- green `t039-green-1.log` 종료 0: 7 passed, 0 failed, 0 filtered out.
+- mutation:
+  - `t039-mut-1.log` 종료 101: 전달이 돌아오자마자 N-notify를 놓게 하면(A-turn 인계와 같은 구간 생김) G2 "살아 있는 시도 비회수"가 실패.
+  - `t039-mut-2.log` 종료 101: 보고 도구가 첫 N-notify를 넘기지 않게 하면 F2가 실패. 두 경우 모두 원본 복원 확인.
+- 회귀: `cargo test -p workbench-core --features test-hooks` (`t039-core-full-1.log`) 종료 0, 57 target, 470 passed, 0 failed, 모든 target filtered out 0. `cargo test -p workbench-protocol` (`t039-protocol-1.log`) 종료 0, 45 passed, filtered out 0.
+- 남은 것: 비우기 진입 때 서버가 알림 한 바퀴를 도는 연결은 비우기 상태 기계(T041)에서 `spawn_notification_pass`를 부르면 된다 — 이번에는 넣지 않았다.

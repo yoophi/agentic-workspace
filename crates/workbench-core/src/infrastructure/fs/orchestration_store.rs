@@ -247,6 +247,7 @@ mod tests {
                 attempt_count: 1,
                 failure: None,
                 collected_at: None,
+                attempt_id: None,
                 created_at: "now".into(),
                 updated_at: "now".into(),
             });

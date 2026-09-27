@@ -349,6 +349,7 @@ impl WorkbenchRuntime {
             Arc::new(WorktreeGuards::default()),
             adapters.orchestration.clone(),
         ));
+        orchestration.attach_self();
         orchestration_hook.attach(&orchestration);
         {
             // 작업대 닫기 → 묶인 작업 영역 복구 가능 전환(research R3). 동기 파일 입출력이라 blocking pool에서.

@@ -2289,6 +2289,8 @@ export interface components {
             attemptCount: number;
             failure?: null | components["schemas"]["CommandFailureDto"];
             collectedAt?: string | null;
+            /** @description 마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다. */
+            attemptId?: string | null;
             createdAt: string;
             updatedAt: string;
         };

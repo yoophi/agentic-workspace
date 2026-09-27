@@ -69,6 +69,8 @@ pub struct ScriptedRunEngine {
     /// 실제 실행(launcher) 수. 시작 장벽이 열리지 않은 준비는 세지 않는다(044 R14).
     pub launches: Arc<AtomicUsize>,
     pub prompts: AtomicUsize,
+    /// 0보다 크면 `send_and_wait`가 하나 줄이고 재시도 가능 오류로 실패한다(044 T039 재전달 시험).
+    pub fail_send_and_wait: AtomicUsize,
     pub turn_hook: Mutex<Option<TurnHook>>,
     /// `start`가 슬롯을 만든 뒤·돌아가기 전에 실행한다(자식 첫 턴이 바인딩 전에 도구를 부르는 경우).
     pub start_hook: Mutex<Option<TurnHook>>,
@@ -437,6 +439,18 @@ impl RunEngine for ScriptedRunEngine {
     ) -> Result<(), RunEngineError> {
         // turn 전체(효과 + 턴 안 도구 호출)를 하나의 A-turn으로 센다.
         let _guard = self.reserve_turn(run_id)?;
+        if self
+            .fail_send_and_wait
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(RunEngineError::new(
+                RunErrorKind::Internal,
+                "injected coordinator delivery failure",
+            ));
+        }
         self.queue_prompt(run_id, prompt, sink).await?;
         let hook = self.turn_hook.lock().unwrap().clone();
         if let Some(hook) = hook {

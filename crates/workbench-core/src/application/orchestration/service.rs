@@ -1090,6 +1090,7 @@ where
                     attempt_count: 0,
                     failure: None,
                     collected_at: None,
+                    attempt_id: None,
                     created_at: now.clone(),
                     updated_at: now.clone(),
                 });

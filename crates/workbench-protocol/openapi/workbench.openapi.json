@@ -8072,6 +8072,13 @@
               "null"
             ]
           },
+          "attemptId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다."
+          },
           "createdAt": {
             "type": "string"
           },
