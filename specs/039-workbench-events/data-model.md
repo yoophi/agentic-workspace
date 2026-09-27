@@ -50,12 +50,14 @@ StreamState
 
 | 동작 | 규칙 |
 |---|---|
-| `publish_run(run_id, event, terminal, deliver)` | 스트림 lock 안에서 sequence+1, journal push(512 초과 시 앞 삭제), 구독자 `try_send`(실패 → 그 구독자에 overflow 표시·제거), **`deliver(&envelope)` 호출(데스크톱 전달, 막히지 않음·hub 재호출 금지)**, unlock. terminal이면 `terminal_order`에 추가 후 보관 run 수 > 256이면 앞에서부터 스트림 제거 + `evicted`에 run id 기록 |
+| `publish_run(run_id, event, terminal, deliver)` | `evicted`에 있는 run이면 버림(진단 로그). 아니면 스트림 lock 안에서 sequence+1, journal push(512 초과 시 앞 삭제), 구독자 `try_send`(실패 → 그 구독자에 overflow 표시·제거), **`deliver(&envelope)` 호출(데스크톱 전달, 막히지 않음·hub 재호출 금지)**, unlock. **unlock 뒤** terminal이면 `terminal_order`에 추가하고 보관 run 수 > 256이면 앞에서부터 스트림 제거(`streams` → 대상 스트림 lock 순, 그 스트림 구독자에게 `Gap(evicted)`) + `evicted`에 run id 기록 |
 | `publish_notification(stream, schema, body)` | journal 없이 sequence+1과 전달만 |
 | `subscribe(principal, cursors)` | 권한(kind→scope) → 동시 구독 수 확인 → 스트림별 lock에서 등록+high-water+cursor 판정(research R2 표) → `EventStream` 반환 |
 | `replay_run(run_id, after)` | 오늘 `RuntimeEventSnapshot`과 같은 형태(호환 command용). 제거된 run이면 `{events: [], lastSequence: 0, terminal: true, gapDetected: true}` |
 | 구독 시 run 스트림 판정 | 스트림 있음 → cursor 규칙 / `evicted`에 있음 → `Gap(evicted)`(cursor 0 포함) / 둘 다 없음 → cursor 0이면 live 대기, >0이면 `Gap(unknownStream)` |
 | worktree 첫 구독 / 마지막 해지 | `watch_worktree` 시작 / handle drop |
+
+**lock 순서**: `streams` → 개별 스트림 → `terminal_order`·`evicted`. 스트림 lock을 쥔 채 `streams`를 잡지 않고, 두 스트림 lock을 동시에 쥐지 않는다(research R2). 이 규칙은 hub 모듈 주석과 교착 회귀 테스트(발행·구독·정리를 여러 thread에서 동시에 반복)로 고정한다.
 
 `EventStream` 소비 순서: replay 목록 → 대기열 중 `sequence > high-water` → overflow 표시가 있으면 `Gap(subscriberLagged)` 후 종료.
 

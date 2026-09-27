@@ -31,6 +31,11 @@
 
 한 lock 안에서 등록과 capture가 일어나므로 capture와 등록 사이에 발행이 끼어들 수 없다. 정본 Ordering 3의 "수신자 먼저 → high-water → replay → drain"을 그대로 따르되, 중복 제거 필터는 방어적으로 유지한다.
 
+**lock 순서(교착 방지)**: hub의 lock은 `streams`(스트림 map) → 개별 스트림 → `terminal_order`·`evicted` 순으로만 잡는다. 스트림 lock을 쥔 채 `streams`를 잡지 않는다. 따라서
+- `publish_run`은 스트림 lock 안에서 순번·journal·구독자·`deliver`만 처리하고, **run 정리(보관 run 수 초과 시 스트림 제거)는 스트림 lock을 푼 뒤** `streams` → 대상 스트림 순으로 잡아 수행한다.
+- `subscribe`는 cursor마다 `streams`에서 스트림을 찾거나 만든 뒤 `streams`를 풀고 그 스트림 lock을 잡는다. 두 스트림 lock을 동시에 쥐지 않는다(cursor 여러 개도 하나씩).
+- `EventStream` drop은 자기가 등록된 스트림 lock만 잡아 구독자를 뺀다.
+
 **Cursor 판정**(상태 복원용 스트림):
 
 | 조건 | 결과 |
@@ -67,6 +72,10 @@
 |---|---|---|
 | `Workbench.events` | cursor와 무관하게 `Gap(reason=evicted)` | cursor 0 → live 대기, >0 → `Gap(unknownStream)` |
 | 호환 replay command | `{events: [], lastSequence: 0, terminal: true, gapDetected: true}` → 화면이 `gap` 표시 | 오늘과 같음(cursor 0 → 빈 snapshot, >0 → `gapDetected`) |
+
+**제거되는 스트림의 구독자**: 스트림을 제거할 때 그 스트림에 등록된 구독자에게는 `Gap(reason=evicted)`를 보내고 그 스트림에서 해제한다(구독의 다른 스트림은 유지). 조용히 끊기지 않는다.
+
+**제거된 run에 다시 발행**: terminal 뒤 오래 지나 같은 run id로 발행이 오면(예: 끝난 run에 대한 늦은 cancel 이벤트) 스트림을 새로 만들지 않고 버린다(hub·구독자·데스크톱 모두 전달 안 함, 진단 로그만). 새로 만들면 순번이 1부터 다시 시작해 이전 cursor가 "미래"가 되기 때문이다.
 
 표식 4,096개를 넘으면 가장 오래된 표식부터 버린다. 그보다 오래된 run은 다시 "알 수 없는 run"이 된다(보관 run 256 + 표식 4,096 = 한 세대 안에서 4,352개 run까지 구별). 표식은 run id 문자열만 담으므로 수백 KB 이내다.
 
