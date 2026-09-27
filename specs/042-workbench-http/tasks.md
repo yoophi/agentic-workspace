@@ -1,0 +1,167 @@
+# Tasks: Workbench HTTP/WebSocket 어댑터 (042, 3단계)
+
+**Input**: `specs/042-workbench-http/` — spec.md, plan.md, research.md(R1–R17, 설계 리뷰 OCR D1–D5·Codex C1 반영), data-model.md, contracts/workbench-http.md, quickstart.md, reviews/design-review.md
+
+**Tests**: TDD. 보안 거절·연결 단절 재시도(R17)·중단 증거(R13)·WS 경계 경합 시험을 해당 구현보다 먼저 작성해 실패를 확인한다. **R13·R17 증거가 통과하기 전에는 해당 변경 operation을 네트워크에 공개하지 않는다**(router의 공개 집합 `ExposurePolicy`로 막는다).
+
+**Organization**: 사용자 스토리별(US1 P1 … US5 P5). 검증 명령은 한 번 실행해 로그를 남기고 원 명령 종료 코드를 기록한다.
+
+**테스트 위치**: 실제 런타임(`WorkbenchRuntime`·가짜 엔진)이 필요한 HTTP 시험은 `crates/workbench-core/tests/http_*.rs`에 둔다(core가 server를 dev-의존으로 쓴다 — server가 core를 dev-의존하면 순환). server 크레이트에는 순수 단위 시험만.
+
+## Format: `[ID] [P?] [Story] Description`
+
+- **[P]**: 다른 파일, 미완료 의존 없음 → 병렬 가능
+- **[Story]**: US1–US5
+
+## Path Conventions
+
+- 새 크레이트: `crates/workbench-server/`
+- core 테스트: `crates/workbench-core/tests/`
+- AW: `apps/agentic-workbench/src-tauri/src/`
+
+---
+
+## Phase 1: Setup
+
+- [ ] T001 기준선 기록: `cargo test --workspace --all-targets --no-fail-fast`·`cargo clippy --workspace --all-targets -D warnings`·`pnpm run check-types`·`pnpm run test`를 한 번씩 실행해 종료 코드·통과 수를 이 파일 Notes에 적는다
+- [ ] T002 `crates/workbench-server/Cargo.toml` 신설(workbench-protocol, axum 0.7 `ws`, tower-http 0.5 `cors`·`limit`, tokio, sha2, uuid, serde, serde_json, base64 — lock에 있는 버전만), 루트 `Cargo.toml` workspace members 등록, `src/lib.rs` 빈 모듈 골격, `cargo check -p workbench-server` 통과
+
+---
+
+## Phase 2: Foundational (모든 스토리의 선행)
+
+- [ ] T003 [P] `crates/workbench-server/src/origin.rs`: `OriginPolicy`(허용 출처 목록 정확 일치, `null` 거절, Origin 없음 = 통과 판정 분리), `HostPolicy`(`127.0.0.1:<port>`·`localhost:<port>` 정확 일치). 단위 테스트: 접두사·접미사·대소문자·포트 차이·`null`·빈 값
+- [ ] T004 [P] `crates/workbench-server/src/auth.rs`: 포트 `CredentialResolver { fn resolve(&self, bearer: &str, origin: Option<&str>) -> Option<AuthenticatedPrincipal> }`, `DesktopTokenIssuer`(256비트 무작위 URL-safe base64, SHA-256 해시 키 저장, 출처·클라이언트 인스턴스 묶음, TTL 15분·진단 10분, 상한 256, 발급 때 만료 정리), 합성 resolver(`ChainResolver`). 단위 테스트: 만료, 다른 Origin, Origin 없는 데스크톱 토큰 거절, 진단 토큰은 Origin 있으면 거절, 원문 미보관
+- [ ] T005 [P] `crates/workbench-server/src/tickets.rs`: `EventTicketStore`(256비트, TTL 30초, 1회용 원자적 `take`, principal·cursor·Origin 묶음, 상한 1,024, 고정 cursor 상한 1,024 — 설계 리뷰 D1). 단위 테스트: 재사용·만료·Origin 불일치·동시 take 두 번 중 하나만 성공
+- [ ] T006 [P] `crates/workbench-server/src/access_log.rs`: `AccessLog` sink trait(`requestId, operation, principalKind, status, latencyMs`), stderr 구현, 테스트용 수집 구현. URI query·헤더·본문 비기록
+- [ ] T007 `crates/workbench-server/src/lib.rs`: `ServerConfig{resolver, server_info, origins, access_log, exposure}`, `build_router(workbench, config)`, `serve(listener, router, shutdown)`, problem 응답(오늘 harness 형식, `AW-Protocol-Version` 헤더), Host·Origin 미들웨어, `DefaultBodyLimit` 1 MiB, `GET /health/live`. `ExposurePolicy`(공개 operation 집합; 공개 안 된 operation은 `403` `"operation is not exposed over the network."`) — 시작 값은 **조회 32개만**
+- [ ] T008 `crates/workbench-server/src/handshake.rs`: 포트 `ServerInfo{server_version, server_epoch(), storage_schema_version}`, 협상(교집합 없음 `409` `"protocol version is not supported."` + details), `contractHash` = OpenAPI JSON SHA-256, `instanceId`(프로세스 uuid)
+
+---
+
+## Phase 3: User Story 1 — 인증된 로컬 클라이언트가 네트워크로 서버 계약을 부른다 (P1) 🎯 MVP
+
+**Goal**: 운영 router로 모든 operation을 in-process와 같은 결과로 부른다. 변경은 중단·재시작·연결 단절 증거가 있을 때만 공개한다.
+
+**Independent Test**: 계약 suite가 운영 router로 통과. R13·R17 증거 시험 통과 뒤에만 변경 operation을 `ExposurePolicy`에 넣는다.
+
+### Tests for User Story 1 (먼저 작성, 실패 확인)
+
+- [ ] T009 [P] [US1] **연결 단절 재시도(R17 공개 게이트)** `crates/workbench-core/tests/http_disconnect_retry.rs`: 효과 진행 중 클라이언트 연결을 끊고(요청 전송 뒤 응답 전에 소켓 drop) 서버·작업대를 유지한 채 같은 키로 재시도 → 저장된 결과, 효과 1회. 세 경로: `run.sendPrompt`(가짜 엔진 prompt 지연 → prompt 수), orchestration 파일 영속 변경(`delegateGoal` 또는 `setPresentation` — 저장 지연 주입 → revision 1회), `run.start`(가짜 엔진 기동 지연 → run 수). 필요한 지연 주입을 `crates/workbench-core/tests/support/scripted_run_engine.rs`(`prompt_delay_ms`)와 test-hooks(저장 지연)에 추가
+- [ ] T010 [P] [US1] **중단 증거(R13) 영속 5개** `crates/workbench-core/tests/us1_crash_points.rs`(또는 새 `crash_points_updates.rs`): `project.update`·`project.delete`·`savedPrompt.update`·`goal.update`·`goal.clear` × 세 중단 지점(`AfterPending`·`AfterJsonSave`·`BeforeApplied`) → 재시작 판정(reconciler 있으면 applied/unknown 규칙, 없으면 unknown), 자동 재실행 없음, 같은 키 재요청 계약 응답
+- [ ] T011 [P] [US1] **재시작 뒤 재시도(R13)** `crates/workbench-core/tests/restart_retry.rs`: 세대 범위(`bench.close`·`run.sendPrompt`·`exchange.send`)·orchestration 변경(`bootstrap`·`bindCoordinator`·`delegateGoal`)을 적용 → `TestRuntime::restart` → 같은 키 재시도 → `notFound`(작업대 없음), orchestration 파일은 변경 한 번만 반영. `bench.open`은 새 작업대 id·이전 id `notFound`(설계 리뷰 D2). 각 재시도를 HTTP로도 한 번 보내 같은 결과
+- [ ] T012 [P] [US1] `crates/workbench-core/tests/http_mixed_paths.rs`: in-process와 HTTP로 같은 대상(프로젝트 목록·orchestration 작업 영역)에 동시 변경 100회 이상 → 손실 0(SC-004)
+- [ ] T013 [P] [US1] `crates/workbench-core/tests/http_handshake.rs`: 협상 성공·비호환 409, 모든 응답 `AW-Protocol-Version`, 인증 없음 401
+
+### Implementation for User Story 1
+
+- [ ] T014 [US1] `crates/workbench-server/src/routes/calls.rs`: `POST /v1/calls` — 인증 → `ExposurePolicy` → **`Workbench.call`을 `tokio::spawn`한 분리 task에서 실행하고 `JoinHandle`만 기다린다**(R17), problem 응답, 접근 기록. 종료 신호 뒤 새 호출 거절(`503 unavailable`)
+- [ ] T015 [US1] `crates/workbench-server/src/routes/handshake.rs` + `/v1/system/handshake` 등록
+- [ ] T016 [US1] `crates/workbench-core/tests/support/http_harness.rs`를 운영 router 래퍼로 교체: 고정 토큰 resolver(`test-desktop`·`test-readonly`·`test-noscope`·`test-desktop2`·`test-agent:<run>`), 허용 Origin 없음, 수집 기록, `ExposurePolicy::all()`(테스트는 전체), 기존 API(`spawn`·`call`·`token_for`) 유지. core `Cargo.toml` dev-dependency에 workbench-server
+- [ ] T017 [US1] 계약 suite가 운영 router로 통과(`contract_suite.rs` 변경 없음이 목표), 결과 Notes
+- [ ] T018 [US1] T009–T011 통과 확인 뒤 `ExposurePolicy::all()`을 운영 기본값으로(변경 53개 공개), **분리 실행 제거 변이**(T014의 spawn을 직접 await로)로 T009가 실패함을 확인해 Notes에 기록
+- [ ] T019 [US1] 커밋 `feat(workbench-server): network calls with detached execution and crash/disconnect evidence (042 US1)`
+
+---
+
+## Phase 4: User Story 2 — 이벤트를 네트워크로 구독하고 끊겼다 이어도 빠짐이 없다 (P2)
+
+**Goal**: 1회용 표로 WebSocket 구독, 기록→실시간 빠짐 없음, 재연결.
+
+**Independent Test**: 이벤트 suite가 표 흐름으로 통과, 경계 경합 1,000회, 표 1회성·만료·주체.
+
+### Tests for User Story 2
+
+- [ ] T020 [P] [US2] `crates/workbench-core/tests/http_ws_boundary_race.rs`: 표로 구독하는 순간에 발행을 주입 1,000회 이상 → 빠짐·중복 0(SC-003)
+- [ ] T021 [P] [US2] `crates/workbench-core/tests/http_tickets_http.rs`: 표 재사용 401, 만료 401(짧은 TTL 설정), 다른 Origin 403, 다른 주체 표로는 그 주체 권한만, 재연결(새 표 + 마지막 cursor) 이어 받기, 권한 없는 스트림은 연결 뒤 `fault` 프레임(오늘 문구)
+
+### Implementation for User Story 2
+
+- [ ] T022 [US2] `crates/workbench-server/src/routes/events.rs`: `POST /v1/event-tickets`(형식·고정 상한만), `GET /v1/events?ticket=`(Host·Origin → 표 take → upgrade → `hello` → `Workbench.events` → 프레임, `fault` 후 close, 수신 상한 64 KiB, 표 비기록)
+- [ ] T023 [US2] `crates/workbench-core/tests/support/http_harness.rs` WS 경로를 표 발급 → 연결로, `crates/workbench-core/tests/support/event_fixtures.rs` WS 실행기 적응(발급 fault는 경로 결과로), 이벤트 suite 통과(fixture 기대값 변경 없음)
+- [ ] T024 [US2] 039 contracts §6 대체 문서화(`specs/042-workbench-http/contracts/workbench-http.md` §4가 정본, `docs/workbench-seam.md` 이벤트 절 갱신), 커밋 `feat(workbench-server): ticketed WebSocket event subscriptions (042 US2)`
+
+---
+
+## Phase 5: User Story 3 — 원격 웹페이지·다른 주체로부터 보호 (P3)
+
+### Tests for User Story 3
+
+- [ ] T025 [P] [US3] `crates/workbench-core/tests/http_security.rs`: 허용 안 된 Host, 허용 안 된·접두사만 같은·`null` Origin(호출·표 발급·WS 각각), 토큰 없음·잘못됨·만료, 데스크톱 토큰을 다른 Origin·Origin 없이, 1 MiB 초과 413, preflight 허용 출처만(credentials 없음) → 모두 거절, 뒤이은 조회로 상태 불변(SC-002). 수집 기록에 토큰·표 문자열 0건(SC-007)
+- [ ] T026 [P] [US3] AW `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/title_tool.rs` 테스트: `http://127.0.0.1.evil.example`·`http://localhost.evil.example`·`null` 거절, 허용 목록 통과, Origin 없음 허용
+- [ ] T027 [P] [US3] AW MCP **연결 단절 재시도(R17)** 테스트: agent 도구 호출 중 연결 단절 → 같은 요청 재시도 → 효과 1회(`apps/agentic-workbench/src-tauri/src/infrastructure/mcp/mod.rs` 테스트 또는 core 쪽 동등 시험)
+
+### Implementation for User Story 3
+
+- [ ] T028 [US3] `crates/workbench-server`: CORS(`AllowOrigin::list`, `GET, POST`, `authorization, content-type`, 노출 `AW-Protocol-Version`, credentials 없음, max-age 600), 보안 테스트 통과
+- [ ] T029 [US3] AW MCP 서버: `origin_allowed` → `workbench_server::origin::OriginPolicy`(정확 일치, WebView 출처 목록), 도구 호출(`handle_tool_call`)을 분리 task로 실행(R17), T026·T027 통과
+- [ ] T030 [US3] 커밋 `feat(workbench-server): exact host/origin, CORS, body limits; fix MCP origin prefix check (042 US3)`
+
+---
+
+## Phase 6: User Story 4 — 데스크톱과 agent가 짧은 자격 증명으로 연결 (P4)
+
+### Tests for User Story 4
+
+- [ ] T031 [P] [US4] AW 단위: 합성 resolver — 데스크톱 토큰(출처 묶음), MCP 토큰 → `agent:<run>`, 폐기된 MCP 토큰 거절, 다른 run 거절(`apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs` 테스트)
+
+### Implementation for User Story 4
+
+- [ ] T032 [US4] `apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs`: 합성 resolver(`DesktopTokenIssuer` + `CapabilityRegistry`), `ServerInfo`(APP_VERSION, 런타임 epoch, ledger `SCHEMA_VERSION`), 허용 출처(`http://localhost:1420`, `tauri://localhost`, `http://tauri.localhost`), 접근 기록 stderr
+- [ ] T033 [US4] AW `lib.rs`: 런타임 조립 뒤 `127.0.0.1:0` bind → `serve`(Tauri async), 실패는 기록하고 계속(FR-016), `RunEvent::Exit`에서 종료 신호(FR-017), `WorkbenchHttpState` 관리
+- [ ] T034 [US4] AW `inbound/tauri_commands.rs`: `get_workbench_connection()` → `{baseUrl, token, expiresAt}`(호출 창 WebView URL 출처로 묶음), 핸들러 등록
+- [ ] T035 [US4] 커밋 `feat(aw): serve the Workbench over loopback HTTP from the desktop runtime (042 US4)`
+
+---
+
+## Phase 7: User Story 5 — 상태 확인과 계약 문서 (P5)
+
+- [ ] T036 [P] [US5] `crates/workbench-core/tests/http_health_openapi.rs`: live 무인증·정보 없음, ready·openapi 무인증 401, 인증 뒤 openapi == 커밋된 `crates/workbench-protocol/openapi/workbench.openapi.json`
+- [ ] T037 [US5] `routes/health.rs`·`routes/openapi.rs` 구현·등록, 커밋 `feat(workbench-server): readiness and OpenAPI endpoints (042 US5)`
+
+---
+
+## Phase 8: Polish & Cross-Cutting
+
+- [ ] T038 AW debug 전용 진단·probe(R12, 설계 리뷰 D3): `AW_HTTP_DIAGNOSTIC_FILE`(0600, 운영 발급기로 Origin 없는 진단 토큰), `AW_HTTP_WEBVIEW_PROBE_FILE`(메인 창 로드 뒤 `window.eval` probe → `invoke('get_workbench_connection')` → fetch handshake·`project.list`·표·WS `hello`·표 재사용 거절·무토큰 401 → `report_http_probe`), `invoke_handler`를 debug/release 두 벌로 조립. 결과에 토큰·표 문자열 없음
+- [ ] T039 release 유출 확인: `cargo build --release`(AW) 뒤 `strings`로 `AW_HTTP_DIAGNOSTIC_FILE`·`AW_HTTP_WEBVIEW_PROBE_FILE`·`report_http_probe` 0건, 결과 Notes
+- [ ] T040 앱 스모크(quickstart §3, 격리 identifier): (a) 끝점 진단, (b) WebView probe — **보고 때 (a)는 "끝점", (b)는 "데스크톱 연결"로 구분**, 재기동 뒤 반복, 캡처한 `origin`으로 허용 목록 확인. 스모크 뒤 격리 디렉터리·파일 삭제
+- [ ] T041 [P] docs: `docs/workbench-seam.md` 네트워크 어댑터 절(경로·인증·출처·표·실행 수명, Mermaid), `docs/client-server-architecture-research.md` 진행 각주, `crates/workbench-server/docs/adr/0001-…`·`0002-…`, `crates/workbench-server/CONTEXT.md` 필요 시(용어는 core CONTEXT 참조)
+- [ ] T042 전체 게이트(quickstart §1·§2) 한 번 실행·종료 코드 기록, SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad) — 미검증 범위(배포 Origin 실측, 화면 경로 전환은 4단계) 명시, 커밋 `docs(aw): record 042 HTTP adapter status`
+
+---
+
+## Dependencies & Execution Order
+
+```mermaid
+graph TD
+    S[Phase 1 Setup] --> F[Phase 2 Foundational]
+    F --> U1[US1 calls + 증거 게이트]
+    U1 --> U2[US2 WS 표]
+    U1 --> U3[US3 보안 + MCP]
+    U1 --> U4[US4 AW 조립]
+    U3 --> U4
+    U1 --> U5[US5 health/openapi]
+    U2 --> P[Polish 스모크]
+    U4 --> P
+    U5 --> P
+```
+
+- US1의 T018(변경 공개)은 T009–T011 통과 뒤에만.
+- US4는 US3의 `OriginPolicy`·MCP 분리 실행에 기댄다.
+- 병렬: Foundational T003 ∥ T004 ∥ T005 ∥ T006, US1 시험 T009–T013, US3 시험 T025–T027.
+
+## Parallel Example: User Story 1
+
+```text
+T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시작 뒤 재시도 ∥ T012 경로 혼합 ∥ T013 handshake
+```
+
+## Implementation Strategy
+
+- MVP = US1(운영 router로 계약 호출 + 증거 게이트). 이 시점에 네트워크 경로가 in-process와 같고 중단·단절에도 안전하다.
+- 이어서 US2(이벤트) → US3(보안·MCP) → US4(앱 조립) → US5 → Polish(스모크 두 증거).
+
+## Notes
+
+- [P] = 다른 파일, 미완료 의존 없음
