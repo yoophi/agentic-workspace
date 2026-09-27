@@ -62,3 +62,51 @@
 | red | 101 | 컴파일 red(`application::drain` 없음) |
 | green | 0 | 1 passed |
 | 변이(`run.cancel`을 N으로) | 101 | `run.cancel: class column vs drain_class` — 시험이 공허하지 않음(변이 복원 확인) |
+
+## T010–T013 작업 관문·엔진 실행 수명 계약·acp-agent-core 선택 인자
+
+로그: `scratchpad/044/`(파일마다 끝줄에 원 명령의 `exit=`). 모든 판정은 그 로그의 원 명령 종료 코드와 `test result` 줄로 했다.
+
+- T011 `application/work_gate.rs`: 잠금 G 하나 아래 상태(`Serving`·`Draining{Idle|Wait}`·`Stopping`), 예약 표(Turn·Deliver·TaskStart·Notify·Call, drop 해제 guard), 교환 소비 표, task 기동 토큰 표(`Pending→Registered{run}`/`Cancelled`/`Failed`, `register_launch`가 T-start를 A-turn으로 같은 G 아래에서 인계), 정지 판정 `try_stop`(G 아래), `active_work()`(예약 파생분). `WorkbenchRuntime`: `work_gate()`·`server_state()`·`active_work()`, 조립에서 `engine.attach_work_gate`.
+- T012 엔진: `AcpRunEngine`의 `start`(초기 순서 guard를 runner로)·`send_prompt`(검사·오류 문구는 `SendPromptUseCase`와 같고, 세션 future를 직접 spawn해 guard를 그 future에 묶음)·`queue_prompt`(spawn 전에 예약)·`send_and_wait`·`steer_prompt`·`cancel_current_prompt_and_send`에 동기 A-turn 예약. 정지 중이면 `RunErrorKind::Unavailable`("server is stopping") → `FaultCode::Unavailable`. `ScriptedRunEngine` 같은 계약(권한 대기 중 초기 turn 유지, 마지막 응답에서 해제).
+- T013 acp-agent-core: `AcpAgentRunner::with_initial_turn_guard`(초기 prompt 순서·Ralph 반복을 `run_prompt_sequence` 끝까지 덮고 `child.wait()` 전에 놓음), `StartAgentRunUseCase::execute_gated(.., start_gate)`(`execute`는 `None`으로 위임 — 다른 소비자 변화 없음).
+
+| 단계 | 명령 | 종료 | 결과 |
+|---|---|---|---|
+| T010 red(컴파일) | `cargo test -p workbench-core --test work_gate` | 101 | `unresolved import workbench_core::application::work_gate`, `no method named work_gate` |
+| T010 red(동작, 관문 핵심만 있고 엔진 미연결) | 같음(`t010-red-behavior.log`) | 101 | 2 passed; 3 failed — rpc 오류·대기열·Ralph 순서가 "the run was never reserved"/바쁨 단정 실패. (iii) 정지·예약 교차 1000회는 관문 자체 시험이라 이때 이미 green |
+| T010 green | 같음 + `--features test-hooks`(`t010-green-1.log`) | 0 | 5 passed |
+| 기동 토큰·`active_work` red(컴파일) | 같음(`t011-token-red-compile.log`) | 101 | `LaunchCancel`·`LaunchState`·`issue_launch`·`active_work`·`server_state` 없음 |
+| (무효) | `--test work_gate --lib work_gate`(`t011-token-green-1.log`) | 0 | **이름 필터 때문에 통합 시험 7개가 걸러졌다(단위 3개만 실행). 기동 토큰 완료 근거로 쓰지 않는다** |
+| 기동 토큰 green | `cargo test -p workbench-core --features test-hooks --test work_gate`(`-2`) / 필터 없는 `cargo test -p workbench-core --test work_gate`(`t011-token-green-3-nofilter.log`) | 0 / 0 | 7 passed / 7 passed(기동 토큰·`active_work` 포함) |
+| start_gate 시험(구현 뒤 추가한 회귀 시험 — TDD red 없음) | `cargo test -p acp-agent-core`(`t013-acp-gate-1.log`) | 0 | 97 passed(`a_gated_start_launches_only_after_the_gate_opens`, `a_dropped_start_gate_never_launches_and_finishes_the_run`) |
+
+### 전체 실행 중 실패: `exchange_delivery_acp` x-2 미전송(043 시험의 기존 경합)
+
+- 관찰: `t013-final-wc-1.log` 종료 101. `the_same_exchange_delivery_key_reaches_the_acp_agent_process_once`에서 agent 기록이 `first`·x-1 뒤 멈추고 x-2가 오지 않았다. 직전 전체 실행(`t013-wc-all-2.log`)은 종료 0이었다.
+- 원인: 가짜 agent는 `end_turn:<id>`를 **응답을 보내기 전에** 기록한다. `AcpSession::send_prompt`는 `in_flight.try_lock()`이라, 시험이 기록만 보고 다음 `send_prompt`를 보내면 세션이 아직 이전 응답을 처리 중일 때 "agent is still responding to the previous prompt"로 거절된다. 이 오류는 spawn된 task의 `RunEvent::Error`로만 나가고 prompt는 버려진다. `SendPromptUseCase`도 같은 try-lock 의미라 T012의 직접 spawn이 바꾼 것이 아니다.
+- 결정적 재현: 가짜 agent에 `--respond-gate <path> --respond-gate-text <text>`(기록 뒤 문 파일이 생길 때까지 응답 보류)를 더하고, 시험이 x-1 응답을 보류한 채 원래 순서로 x-2를 보내게 했다.
+  - `race-repro-red-1.log`: 종료 101, 원래 실패와 같은 기록 `[… "prompt-text:3:\"peer message x-1\"", "end_turn:3"]`.
+  - `race-repro-base-red-1.log`: 이번 T011/T012 소스 변경을 stash한 기준에서도 종료 101로 같다 → 기존 경합임을 확인(그 뒤 stash pop).
+- 수정(시험 동기화, 기대 완화 아님): 다음 전송을 agent 기록이 아니라 **엔진의 실행 종료**(A-turn 해제 = 세션 `in_flight` 해제 뒤, `work_gate().busy_run_count(run) == 0`)를 보고 보낸다. x-1 응답 보류 문은 남겨 그 구간을 매번 결정적으로 연다. 같은 경합이 있던 `tests/work_gate.rs`의 두 곳("first" 기록 뒤 곧바로 `run.sendPrompt`)도 같은 방식으로 고쳤다.
+  - `race-fix-green-1.log`: 종료 0, 2 passed.
+- 반복 실행 10회(`flake-mine-*.log`, 0/10 실패)는 결정적 근거로 쓰지 않았다.
+
+### 최종 검증(수정 뒤 1회씩, `*-3.log`)
+
+| 명령 | 종료 | 결과 |
+|---|---|---|
+| `cargo test -p workbench-core --features test-hooks` | 0 | 53 결과 줄, 441 passed, 0 failed |
+| `cargo test -p workbench-core --test work_gate --test exchange_delivery_acp` | 0 | 9 passed |
+| `cargo test -p acp-agent-core` | 0 | 97 passed |
+| `apps/agentic-workbench/src-tauri`: `cargo test` | 0 | 125 passed |
+| `apps/ask-code/src-tauri`: `cargo test && cargo check` | 0 | 시험 0개(빌드·check 통과) |
+| `apps/hushline/src-tauri`: `cargo test && cargo check` | 0 | 7 passed |
+| `cargo fmt -p workbench-core -p acp-agent-core -- --check` | 1 | 남은 차이는 `tests/bench_close_idempotency.rs`(#207 부모 작업 파일, 이 범위 밖)뿐. 이 작업 파일은 rustfmt 적용 |
+
+### 설계와 다른 점
+
+- `RunErrorKind::Unavailable` 추가(정지 중 예약 거절을 `unavailable`로 돌려주려고). `run_service::engine_fault`에서 `FaultCode::Unavailable`로 대응.
+- `AcpRunEngine::start`는 run id가 없으면 엔진에서 uuid를 정한다(초기 순서 예약을 run으로 세기 위해. 유스케이스의 `build_run`과 같은 형식).
+- `active_work()`는 관문 예약 파생분만 돌려준다(`GateActiveWork`). 저장소·ledger 파생 수(`orchestrationTasks`·`queuedTasks`·`pendingExchanges`·`pendingOperations`)는 `server.status` 조립(T026 이후)이 채운다 — 이 범위에서는 미완.
+- 가짜 agent 선택 인자 추가: `--end-turn-gate`, `--rpc-error-text`, `--respond-gate`/`--respond-gate-text`.

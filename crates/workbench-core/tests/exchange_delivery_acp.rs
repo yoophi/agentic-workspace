@@ -6,6 +6,9 @@
 //! 같은 키로 두 번 보낸 뒤, 다른 키(x-2)로 세 번째를 보내고 **x-2 본문의 prompt**가 agent에서 끝나기를 기다린다(agent가
 //! `prompt-text:<id>:<본문>`과 `end_turn:<id>`를 남긴다). 한 세션의 prompt는 차례로 처리되므로 x-2가 끝났으면 앞선 전송은
 //! 모두 처리된 뒤다 — 그때 x-1 본문을 받은 횟수가 1이어야 한다. 시간 대기로 "나중에도 안 온다"를 추정하지 않는다.
+//!
+//! 044: 다음 전송은 agent 기록이 아니라 엔진의 실행 종료(A-turn 해제)를 보고 보낸다. x-1은 응답 보류 문으로 "기록은
+//! 보였지만 엔진은 아직 응답을 받지 못한" 구간을 결정적으로 연다(예전에는 이 구간에 x-2가 거절돼 간헐 실패했다).
 
 use std::time::Duration;
 
@@ -16,10 +19,16 @@ use workbench_protocol::{AuthenticatedPrincipal, OperationId, Workbench};
 
 mod support;
 
-fn agent_command(log: &std::path::Path) -> String {
+/// x-1의 응답은 `respond_gate` 파일이 생길 때까지 보류된다(agent 기록 `end_turn`과 엔진의 응답 수신 사이 구간을 시험이 연다).
+fn agent_command(log: &std::path::Path, respond_gate: &std::path::Path) -> String {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/support/agents/fake_acp_permission_agent.py");
-    format!("python3 {} --log {}", script.display(), log.display())
+    format!(
+        "python3 {} --log {} --respond-gate {} --respond-gate-text x-1",
+        script.display(),
+        log.display(),
+        respond_gate.display()
+    )
 }
 
 fn agent_log(path: &std::path::Path) -> Vec<String> {
@@ -59,6 +68,19 @@ async fn wait_until_finished(path: &std::path::Path, needle: &str) -> Vec<String
     );
 }
 
+/// 엔진이 run의 prompt 실행을 실제로 끝낼 때까지(044 A-turn 해제 = 세션 `in_flight` 해제 뒤). agent 기록의 `end_turn`은
+/// 응답을 보내기 **전**이라, 그것만 보고 다음 `send_prompt`를 보내면 세션이 아직 이전 응답을 처리 중이어서 거절된다
+/// ("agent is still responding to the previous prompt", 오류 이벤트로만 나가고 prompt는 버려진다).
+async fn wait_until_engine_idle(rt: &TestRuntime, run: &str) {
+    for _ in 0..500 {
+        if rt.runtime.work_gate().busy_run_count(run) == 0 {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the engine did not finish the prompt of {run}");
+}
+
 async fn call(rt: &TestRuntime, operation: OperationId, key: &str, input: Value) -> Value {
     rt.runtime
         .call(
@@ -76,6 +98,7 @@ async fn call(rt: &TestRuntime, operation: OperationId, key: &str, input: Value)
 async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
     let rt = TestRuntime::with_adapters(RuntimeAdapters::production());
     let log = rt.dir.path().join("agent.log");
+    let respond_gate = rt.dir.path().join("respond-x-1");
     let work = rt.dir.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
     let work = std::fs::canonicalize(work)
@@ -97,11 +120,12 @@ async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
         OperationId::RunStart,
         &uuid_key(),
         json!({ "benchId": bench, "request": {
-            "goal": "first", "agentId": "fake-acp", "agentCommand": agent_command(&log),
+            "goal": "first", "agentId": "fake-acp", "agentCommand": agent_command(&log, &respond_gate),
             "cwd": work, "runId": "r1", "autoAllow": true } }),
     )
     .await;
     wait_until_finished(&log, "first").await; // 시작 목표 prompt
+    wait_until_engine_idle(&rt, "r1").await;
 
     let exchange = json!({ "benchId": bench, "runId": "r1", "prompt": "peer message x-1" });
     call(
@@ -112,6 +136,9 @@ async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
     )
     .await;
     wait_until_finished(&log, "peer message x-1").await;
+    // agent는 x-1을 끝냈다고 기록했지만 응답은 아직 보내지 않았다. 응답을 보낸다.
+    std::fs::write(&respond_gate, b"").unwrap();
+    wait_until_engine_idle(&rt, "r1").await;
     // 새로고침 뒤 원장 없이 다시 라우팅된 같은 교환: 같은 키.
     call(
         &rt,
