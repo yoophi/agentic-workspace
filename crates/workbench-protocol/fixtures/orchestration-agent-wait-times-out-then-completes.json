@@ -196,6 +196,26 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-10",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.waitChildTasks",
         "requestId": "r-9",
         "input": {
@@ -235,7 +255,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

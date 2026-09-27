@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-25",
+        "requestId": "r-26",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-25"
+        "idempotencyKey": "k-26"
       },
       "expect": {
         "reply": {
@@ -172,7 +172,27 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-26",
+        "requestId": "r-29",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-27",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -196,7 +216,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.retryTask",
-        "requestId": "r-27",
+        "requestId": "r-28",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -205,7 +225,7 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-27"
+        "idempotencyKey": "k-28"
       },
       "expect": {
         "reply": {
@@ -232,7 +252,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

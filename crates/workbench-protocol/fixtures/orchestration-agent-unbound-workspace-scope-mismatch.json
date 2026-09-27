@@ -151,11 +151,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "bench.close",
-        "requestId": "r-41",
+        "requestId": "r-51",
         "input": {
           "benchId": "{{bench}}"
         },
-        "idempotencyKey": "k-41"
+        "idempotencyKey": "k-51"
       },
       "expect": {
         "reply": {
@@ -170,7 +170,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.getOwnTask",
-        "requestId": "r-42",
+        "requestId": "r-52",
         "input": {
           "runId": "{{child}}",
           "arguments": {}

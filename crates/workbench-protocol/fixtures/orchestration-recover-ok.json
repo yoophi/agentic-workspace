@@ -118,11 +118,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.recover",
-        "requestId": "r-36",
+        "requestId": "r-39",
         "input": {
           "benchId": "{{bench}}"
         },
-        "idempotencyKey": "k-36"
+        "idempotencyKey": "k-39"
       },
       "expect": {
         "reply": {

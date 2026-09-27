@@ -118,7 +118,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-31",
+        "requestId": "r-34",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -136,7 +136,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.handoffCoordinator",
-        "requestId": "r-32",
+        "requestId": "r-35",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -147,7 +147,7 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-32"
+        "idempotencyKey": "k-35"
       },
       "expect": {
         "reply": {
@@ -159,7 +159,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "run.start",
-        "requestId": "r-33",
+        "requestId": "r-36",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "main-agent-run",
@@ -169,7 +169,7 @@
             "runId": "coord-2"
           }
         },
-        "idempotencyKey": "k-33"
+        "idempotencyKey": "k-36"
       },
       "expect": {
         "reply": {

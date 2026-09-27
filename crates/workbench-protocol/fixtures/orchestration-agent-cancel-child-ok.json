@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.cancelChildTask",
-        "requestId": "r-14",
+        "requestId": "r-16",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -159,7 +159,7 @@
             "taskId": "{{task}}"
           }
         },
-        "idempotencyKey": "k-14"
+        "idempotencyKey": "k-16"
       },
       "expect": {
         "reply": {
@@ -172,7 +172,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-15",
+        "requestId": "r-17",
         "input": {
           "benchId": "{{bench}}"
         }

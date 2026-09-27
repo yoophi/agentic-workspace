@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-13",
+        "requestId": "r-15",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-13"
+        "idempotencyKey": "k-15"
       },
       "expect": {
         "reply": {
@@ -171,14 +171,34 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-24",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.adoptManualChild",
-        "requestId": "r-18",
+        "requestId": "r-21",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "extra-agent-run-7",
           "title": "Spare"
         },
-        "idempotencyKey": "k-18"
+        "idempotencyKey": "k-21"
       },
       "expect": {
         "reply": {
@@ -190,7 +210,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reassignChildTask",
-        "requestId": "r-19",
+        "requestId": "r-22",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -199,7 +219,7 @@
             "targetNodeId": "extra-agent-run-7"
           }
         },
-        "idempotencyKey": "k-19"
+        "idempotencyKey": "k-22"
       },
       "expect": {
         "reply": {
@@ -212,7 +232,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-20",
+        "requestId": "r-23",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -242,7 +262,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

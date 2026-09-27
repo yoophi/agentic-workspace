@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.interruptChildTask",
-        "requestId": "r-12",
+        "requestId": "r-14",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -160,7 +160,7 @@
             "message": "stop"
           }
         },
-        "idempotencyKey": "k-12"
+        "idempotencyKey": "k-14"
       },
       "expect": {
         "reply": {

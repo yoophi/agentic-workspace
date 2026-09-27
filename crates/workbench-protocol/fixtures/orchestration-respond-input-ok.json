@@ -173,6 +173,26 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
+        "requestId": "r-21",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
         "requestId": "r-19",
         "input": {
           "benchId": "{{bench}}"
@@ -230,7 +250,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

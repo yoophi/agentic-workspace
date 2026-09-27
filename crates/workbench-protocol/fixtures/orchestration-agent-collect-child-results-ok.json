@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportResult",
-        "requestId": "r-10",
+        "requestId": "r-11",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "done"
           }
         },
-        "idempotencyKey": "k-10"
+        "idempotencyKey": "k-11"
       },
       "expect": {
         "reply": {
@@ -171,8 +171,28 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-13",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.collectChildResults",
-        "requestId": "r-11",
+        "requestId": "r-12",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -181,7 +201,7 @@
             ]
           }
         },
-        "idempotencyKey": "k-11"
+        "idempotencyKey": "k-12"
       },
       "expect": {
         "reply": {
@@ -216,7 +236,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

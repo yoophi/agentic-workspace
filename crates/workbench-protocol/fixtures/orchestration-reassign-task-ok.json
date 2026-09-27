@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-25",
+        "requestId": "r-26",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-25"
+        "idempotencyKey": "k-26"
       },
       "expect": {
         "reply": {
@@ -171,14 +171,34 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-33",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.adoptManualChild",
-        "requestId": "r-28",
+        "requestId": "r-30",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "extra-agent-run-7",
           "title": "Spare"
         },
-        "idempotencyKey": "k-28"
+        "idempotencyKey": "k-30"
       },
       "expect": {
         "reply": {
@@ -190,7 +210,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-29",
+        "requestId": "r-31",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -214,7 +234,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reassignTask",
-        "requestId": "r-30",
+        "requestId": "r-32",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -224,7 +244,7 @@
             "targetNodeId": "extra-agent-run-7"
           }
         },
-        "idempotencyKey": "k-30"
+        "idempotencyKey": "k-32"
       },
       "expect": {
         "reply": {
@@ -251,7 +271,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

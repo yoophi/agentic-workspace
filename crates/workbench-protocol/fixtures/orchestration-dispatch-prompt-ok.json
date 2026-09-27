@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-34",
+        "requestId": "r-37",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -169,7 +169,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.dispatchPrompt",
-        "requestId": "r-35",
+        "requestId": "r-38",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -184,7 +184,7 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-35"
+        "idempotencyKey": "k-38"
       },
       "expect": {
         "reply": {

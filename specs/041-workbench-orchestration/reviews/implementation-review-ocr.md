@@ -50,3 +50,11 @@ orchestration fixture 53개의 단계별 기대(결과·오류 코드·문구·d
 - **보강**: 거절은 문구와 `toolError{code, message, retryable}` 전체(`"The authenticated agent role cannot call this tool."`, `"This run is not bound to an orchestration workspace."`, `"The requested run does not match the authenticated capability."`). 정상은 상태: 취소 → 과제 `cancelled`, 재시도 → `attempt: 2`, 재배정 → `assignedNodeId`, 목표 위임 → 루트 과제가 활성 세대 목록에 보임(`rootTaskId` capture로 존재 확인), 자식 보고 → 보고 `type`·`progressPercent`·`reporterRunId`(principal run)와 이어지는 과제 상태(`completed`·`inputRequired`·`blocked` — 해당 알림이 `delivered`가 된 뒤 조건 대기로 읽음), 명령 → `kind`·`status: accepted`, 대기·수집 → 과제 `completed`·결과 보고.
 - 보강 중 기대값이 틀렸던 곳 1건: 목표 위임 뒤 과제 목록을 빈 목록으로 적었다가 실제로는 루트 과제가 생긴다는 계약(contracts `delegateGoal`)에 맞춰 고쳤다.
 - 경로 비교에서 뺀 값은 두 가지이고 fixture에 이유를 적었다: 보고 응답의 `notifications`(백그라운드 전달과 경합 — 전달은 liveness ①②와 조건 대기로 본다), 묶이지 않은 작업 영역 fixture의 `cancelledRuns` 순서.
+
+## CI 실패 대응 (run 36313466550)
+
+- 증상: `every_step_fixture_matches_on_in_memory_and_http_paths` — `orchestration-reassign-task-ok`의 두 경로가 갈림. 차이는 자식 **차단 보고 직후 `adoptManualChild` 단계**의 작업 영역: 한 경로는 coordinator 알림 `dispatching`·revision 7, 다른 경로는 `delivered`·revision 8.
+- 원인: 보고가 만든 알림의 전달은 백그라운드(오늘과 같음)인데, 조건 대기(`until … delivered`)를 그 다음 GET에만 두어 비동기 완료 경계가 보고보다 한 단계 늦었다. 같은 구조가 `orchestration-agent-reassign-blocked-child-ok`에도 있었다.
+- 수정: 생성기가 **모든 자식 보고(성공 기대) 바로 뒤**에 "그 보고의 알림이 `delivered`"를 기다리는 조건 대기 단계를 넣는다. 그 결과 보고 응답의 `notifications`도 결정적이 되어, 앞서 경로 비교에서 빼던 `notifications`(RACY)를 되돌려 **다시 비교한다**(뺀 값은 `cancelledRuns` 순서 하나만 남음).
+- 재현·검증: CPU 부하(논리 코어 12개 모두 busy loop)에서 orchestration fixture만 8회 실행 — **이전 fixture 6/8 실패**(두 재배정 fixture), **새 fixture 8/8 통과**. 반복 통과만이 아니라 실패를 재현하는 조건에서 비교했다.
+

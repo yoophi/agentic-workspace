@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.requestParentInput",
-        "requestId": "r-32",
+        "requestId": "r-40",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -160,7 +160,7 @@
             "question": "which?"
           }
         },
-        "idempotencyKey": "k-32"
+        "idempotencyKey": "k-40"
       },
       "expect": {
         "reply": {
@@ -179,7 +179,27 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-33",
+        "requestId": "r-42",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-41",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -214,7 +234,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

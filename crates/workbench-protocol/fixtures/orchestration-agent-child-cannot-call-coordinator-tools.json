@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-36",
+        "requestId": "r-46",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -166,7 +166,7 @@
             "expectedResult": "e"
           }
         },
-        "idempotencyKey": "k-36"
+        "idempotencyKey": "k-46"
       },
       "expect": {
         "fault": {
@@ -187,7 +187,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.waitChildTasks",
-        "requestId": "r-37",
+        "requestId": "r-47",
         "input": {
           "runId": "{{child}}",
           "arguments": {

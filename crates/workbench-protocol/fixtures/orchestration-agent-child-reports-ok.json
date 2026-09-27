@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.getOwnTask",
-        "requestId": "r-27",
+        "requestId": "r-32",
         "input": {
           "runId": "{{child}}",
           "arguments": {}
@@ -171,7 +171,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportProgress",
-        "requestId": "r-28",
+        "requestId": "r-33",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -180,7 +180,7 @@
             "progressPercent": 50
           }
         },
-        "idempotencyKey": "k-28"
+        "idempotencyKey": "k-33"
       },
       "expect": {
         "reply": {
@@ -199,8 +199,28 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-37",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.sendParentMessage",
-        "requestId": "r-29",
+        "requestId": "r-34",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -208,7 +228,7 @@
             "summary": "fyi"
           }
         },
-        "idempotencyKey": "k-29"
+        "idempotencyKey": "k-34"
       },
       "expect": {
         "reply": {
@@ -225,8 +245,28 @@
     {
       "request": {
         "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-38",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/1/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
         "operation": "orchestration.reportResult",
-        "requestId": "r-30",
+        "requestId": "r-35",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -235,7 +275,7 @@
             "confidence": 0.9
           }
         },
-        "idempotencyKey": "k-30"
+        "idempotencyKey": "k-35"
       },
       "expect": {
         "reply": {
@@ -254,7 +294,27 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-31",
+        "requestId": "r-39",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/2/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-36",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -289,8 +349,6 @@
     "endedAt",
     "deliveredAt",
     "dispatchedAt",
-    "acknowledgedAt",
-    "notifications",
-    "notifications"
+    "acknowledgedAt"
   ]
 }

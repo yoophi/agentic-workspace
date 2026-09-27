@@ -118,11 +118,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "bench.close",
-        "requestId": "r-37",
+        "requestId": "r-40",
         "input": {
           "benchId": "{{bench}}"
         },
-        "idempotencyKey": "k-37"
+        "idempotencyKey": "k-40"
       },
       "expect": {
         "reply": {
@@ -137,11 +137,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "bench.open",
-        "requestId": "r-38",
+        "requestId": "r-41",
         "input": {
           "workingDirectory": "{{repo}}"
         },
-        "idempotencyKey": "k-38"
+        "idempotencyKey": "k-41"
       },
       "expect": {
         "reply": {
@@ -156,7 +156,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.listRecoverable",
-        "requestId": "r-39",
+        "requestId": "r-42",
         "input": {
           "benchId": "{{bench2}}",
           "worktreePath": "{{repo}}"
