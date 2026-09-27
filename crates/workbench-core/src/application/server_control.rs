@@ -372,18 +372,22 @@ impl ServerControl {
                         let derived = self.derive().await;
                         !self.active_work(&derived).blocks_stop()
                     };
-                let mut idle = self.lock_idle();
-                if !quiet {
-                    idle.since = None;
+                // 잠금은 이 블록 안에서만 쥔다(await를 걸치지 않는다 — 감시 future가 `Send`여야 한다).
+                let timed_out = {
+                    let mut idle = self.lock_idle();
+                    if quiet {
+                        let (started, _) = *idle
+                            .since
+                            .get_or_insert_with(|| (Instant::now(), Utc::now()));
+                        started.elapsed() >= idle_timeout
+                    } else {
+                        idle.since = None;
+                        false
+                    }
+                };
+                if !timed_out {
                     return false;
                 }
-                let (started, _) = *idle
-                    .since
-                    .get_or_insert_with(|| (Instant::now(), Utc::now()));
-                if started.elapsed() < idle_timeout {
-                    return false;
-                }
-                drop(idle);
                 self.work_gate.begin_drain(DrainMode::Idle);
                 self.try_stop().await
             }
