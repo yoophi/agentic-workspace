@@ -1,5 +1,6 @@
 pub mod agent_catalog_reader;
 pub mod agent_run_settings_repository;
+pub mod agent_workspace_registry;
 pub mod aggregate_lock;
 pub mod desktop_bridge;
 pub mod event_publisher;

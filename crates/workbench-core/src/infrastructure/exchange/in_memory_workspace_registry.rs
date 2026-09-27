@@ -1,19 +1,17 @@
+//! 교환 작업 영역 registry(040: AW `in_memory_agent_workspace_registry.rs`에서 이동). 작업대별 패널 스냅샷과
+//! 교환 이력(최근 500개)을 메모리에 둔다. 이벤트 발행은 `hub_event_sink`(교환 스트림 + 데스크톱 전달)가 한다.
+
 use std::{
     collections::{HashMap, VecDeque},
-    sync::Arc,
+    sync::{Arc, Mutex, MutexGuard},
 };
-
-use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::Mutex;
 
 use crate::{
     domain::agent_exchange::{
-        AgentExchange, AgentExchangeError, AgentExchangeStatus, AgentWorkspaceSnapshot,
-        AgentWorkspaceSyncResponse, can_transition_exchange,
+        can_transition_exchange, AgentExchange, AgentExchangeError, AgentExchangeStatus,
+        AgentWorkspaceSnapshot, AgentWorkspaceSyncResponse,
     },
-    ports::agent_workspace_registry::{
-        AgentExchangeEventSink, AgentRunOwnerLookup, AgentWorkspaceRegistry, StoreExchangeOutcome,
-    },
+    ports::agent_workspace_registry::{AgentWorkspaceRegistry, StoreExchangeOutcome},
 };
 
 const MAX_RETAINED_EXCHANGES: usize = 500;
@@ -23,71 +21,18 @@ pub struct InMemoryAgentWorkspaceRegistry {
     inner: Arc<Mutex<RegistryData>>,
 }
 
-pub const AGENT_EXCHANGE_REQUESTED_EVENT: &str = "agent-exchange-requested";
-pub const AGENT_EXCHANGE_STATUS_EVENT: &str = "agent-exchange-status";
-
-impl AgentRunOwnerLookup for crate::infrastructure::agent_session_registry::AppState {
-    /// 040 과도기(US2 전): run 소유자는 작업대 id다. 교환 registry는 아직 창 label로 키를 잡으므로 창으로 바꾼다.
-    async fn active_owner_for_exchange(&self, run_id: &str) -> Option<String> {
-        let bench = self.active_owner_of(run_id).await?;
-        crate::infrastructure::desktop_benches::label_for(&bench)
-    }
-}
-
-#[derive(Clone)]
-pub struct TauriAgentExchangeEventSink {
-    app: AppHandle,
-}
-
-impl TauriAgentExchangeEventSink {
-    pub fn new(app: AppHandle) -> Self {
-        Self { app }
+impl InMemoryAgentWorkspaceRegistry {
+    fn data(&self) -> MutexGuard<'_, RegistryData> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn emit_payload<T: serde::Serialize>(
-        &self,
-        window_label: &str,
-        event_name: &str,
-        payload: &T,
-    ) -> Result<(), AgentExchangeError> {
-        let window = self.app.get_webview_window(window_label).ok_or_else(|| {
-            AgentExchangeError::new(
-                "windowUnavailable",
-                "Owner Worktree Session window is unavailable.",
-            )
-        })?;
-        window.emit(event_name, payload).map_err(|error| {
-            AgentExchangeError::new(
-                "deliveryFailed",
-                format!("Failed to emit exchange: {error}"),
-            )
-        })?;
-        if let Ok(serialized) = serde_json::to_string(payload) {
-            let fallback = format!("{event_name}-fallback");
-            let script = format!(
-                "window.dispatchEvent(new CustomEvent('{fallback}', {{ detail: {serialized} }}));"
-            );
-            let _ = window.eval(&script);
-        }
-        Ok(())
-    }
-}
-
-impl AgentExchangeEventSink for TauriAgentExchangeEventSink {
-    fn emit_requested(&self, exchange: &AgentExchange) -> Result<(), AgentExchangeError> {
-        self.emit_payload(
-            &exchange.window_label,
-            AGENT_EXCHANGE_REQUESTED_EVENT,
-            &crate::domain::agent_exchange::AgentExchangeRequestedEvent::from(exchange),
-        )
-    }
-
-    fn emit_status(&self, exchange: &AgentExchange) -> Result<(), AgentExchangeError> {
-        self.emit_payload(
-            &exchange.window_label,
-            AGENT_EXCHANGE_STATUS_EVENT,
-            exchange,
-        )
+    /// 작업대 닫기 hook(동기)용.
+    pub fn remove_bench_now(&self, bench_id: &str) {
+        let mut inner = self.data();
+        inner.snapshots.remove(bench_id);
+        inner.exchanges.remove(bench_id);
     }
 }
 
@@ -102,37 +47,35 @@ impl AgentWorkspaceRegistry for InMemoryAgentWorkspaceRegistry {
         &self,
         snapshot: AgentWorkspaceSnapshot,
     ) -> Result<AgentWorkspaceSyncResponse, AgentExchangeError> {
-        let mut inner = self.inner.lock().await;
-        if let Some(current) = inner.snapshots.get(&snapshot.window_label)
-            && current.revision > snapshot.revision
-        {
-            return Ok(AgentWorkspaceSyncResponse {
-                revision: current.revision,
-                accepted_panels: current.panels.len(),
-            });
+        let mut inner = self.data();
+        if let Some(current) = inner.snapshots.get(&snapshot.bench_id) {
+            if current.revision > snapshot.revision {
+                return Ok(AgentWorkspaceSyncResponse {
+                    revision: current.revision,
+                    accepted_panels: current.panels.len(),
+                });
+            }
         }
         let response = AgentWorkspaceSyncResponse {
             revision: snapshot.revision,
             accepted_panels: snapshot.panels.len(),
         };
-        inner
-            .snapshots
-            .insert(snapshot.window_label.clone(), snapshot);
+        inner.snapshots.insert(snapshot.bench_id.clone(), snapshot);
         Ok(response)
     }
 
-    async fn snapshot(&self, window_label: &str) -> Option<AgentWorkspaceSnapshot> {
-        self.inner.lock().await.snapshots.get(window_label).cloned()
+    async fn snapshot(&self, bench_id: &str) -> Option<AgentWorkspaceSnapshot> {
+        self.data().snapshots.get(bench_id).cloned()
     }
 
     async fn store_exchange(
         &self,
         exchange: AgentExchange,
     ) -> Result<StoreExchangeOutcome, AgentExchangeError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.data();
         let queue = inner
             .exchanges
-            .entry(exchange.window_label.clone())
+            .entry(exchange.bench_id.clone())
             .or_default();
         if let Some(existing) = queue
             .iter()
@@ -157,12 +100,10 @@ impl AgentWorkspaceRegistry for InMemoryAgentWorkspaceRegistry {
         Ok(StoreExchangeOutcome::Stored(exchange))
     }
 
-    async fn exchange(&self, window_label: &str, request_id: &str) -> Option<AgentExchange> {
-        self.inner
-            .lock()
-            .await
+    async fn exchange(&self, bench_id: &str, request_id: &str) -> Option<AgentExchange> {
+        self.data()
             .exchanges
-            .get(window_label)?
+            .get(bench_id)?
             .iter()
             .find(|item| item.request_id == request_id)
             .cloned()
@@ -170,16 +111,16 @@ impl AgentWorkspaceRegistry for InMemoryAgentWorkspaceRegistry {
 
     async fn transition_exchange(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request_id: &str,
         status: AgentExchangeStatus,
         failure_code: Option<String>,
         failure_reason: Option<String>,
     ) -> Result<AgentExchange, AgentExchangeError> {
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.data();
         let exchange = inner
             .exchanges
-            .get_mut(window_label)
+            .get_mut(bench_id)
             .and_then(|queue| queue.iter_mut().find(|item| item.request_id == request_id))
             .ok_or_else(|| AgentExchangeError::new("unknownExchange", "Exchange was not found."))?;
         if exchange.status == status {
@@ -198,20 +139,16 @@ impl AgentWorkspaceRegistry for InMemoryAgentWorkspaceRegistry {
         Ok(exchange.clone())
     }
 
-    async fn list_exchanges(&self, window_label: &str) -> Vec<AgentExchange> {
-        self.inner
-            .lock()
-            .await
+    async fn list_exchanges(&self, bench_id: &str) -> Vec<AgentExchange> {
+        self.data()
             .exchanges
-            .get(window_label)
+            .get(bench_id)
             .map(|queue| queue.iter().cloned().collect())
             .unwrap_or_default()
     }
 
-    async fn remove_window(&self, window_label: &str) {
-        let mut inner = self.inner.lock().await;
-        inner.snapshots.remove(window_label);
-        inner.exchanges.remove(window_label);
+    async fn remove_bench(&self, bench_id: &str) {
+        self.remove_bench_now(bench_id);
     }
 }
 
@@ -224,7 +161,7 @@ mod tests {
 
     fn snapshot(revision: u64) -> AgentWorkspaceSnapshot {
         AgentWorkspaceSnapshot {
-            window_label: "session-a".into(),
+            bench_id: "session-a".into(),
             worktree_path: "/repo".into(),
             revision,
             focused_panel_id: "main".into(),
@@ -245,7 +182,7 @@ mod tests {
         };
         AgentExchange {
             request_id: "request-1".into(),
-            window_label: "session-a".into(),
+            bench_id: "session-a".into(),
             worktree_path: "/repo".into(),
             source: endpoint.clone(),
             target: endpoint,

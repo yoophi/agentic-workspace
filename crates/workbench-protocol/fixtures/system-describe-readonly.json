@@ -147,6 +147,27 @@
             ]
           },
           {
+            "id": "exchange.list",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.listPeers",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.getForRun",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

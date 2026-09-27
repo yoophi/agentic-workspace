@@ -94,6 +94,14 @@ pub async fn call_command<Out: DeserializeOwned>(
     dispatch(runtime, command_request(operation, input)).await
 }
 
+// ---- 040 US2: 교환 오류 ----
+
+/// 오늘 교환 command·MCP가 쓰던 오류 문자열(`AgentExchangeError`의 serde JSON `{"code","message"}`).
+pub fn exchange_error_string(code: &str, message: &str) -> String {
+    serde_json::to_string(&serde_json::json!({ "code": code, "message": message }))
+        .expect("error json serializes")
+}
+
 // ---- 040 US1: run 입력 변환 ----
 
 /// `start_agent_run` → `run.start` 입력. 요청은 acp `AgentRunRequest`를 그대로 싣는다(protocol DTO와 wire 동일).
@@ -370,6 +378,25 @@ pub async fn call_create_project(
 
 #[cfg(test)]
 mod tests {
+    /// 오늘 `exchange_error`(`AgentExchangeError`의 serde JSON)와 바이트 단위로 같아야 한다 — 화면·MCP가 파싱한다.
+    #[test]
+    fn exchange_error_string_matches_the_legacy_json() {
+        let legacy = serde_json::to_string(
+            &workbench_core::domain::agent_exchange::AgentExchangeError::new(
+                "staleSourceRun",
+                "Panel run is inactive or owned by another window.",
+            ),
+        )
+        .unwrap();
+        assert_eq!(
+            super::exchange_error_string(
+                "staleSourceRun",
+                "Panel run is inactive or owned by another window."
+            ),
+            legacy
+        );
+    }
+
     #[test]
     fn run_start_input_carries_bench_request_and_optional_panel() {
         let request: crate::domain::run::AgentRunRequest =

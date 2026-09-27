@@ -1,9 +1,12 @@
+//! 교환 서비스(040: AW에서 이동). 작업 영역은 작업대에 묶이고, 소유 조회는 run 엔진(작업대 id)이다. 백엔드는
+//! 프롬프트를 보내지 않는다 — 요청 이벤트를 받은 화면이 패널에 라우팅하고 확인한다.
+
 use crate::{
     domain::agent_exchange::{
-        AgentExchange, AgentExchangeAckRequest, AgentExchangeEndpointRef, AgentExchangeError,
-        AgentExchangeStatus, AgentPanelEndpoint, AgentPanelStatus, AgentWorkspaceSnapshot,
-        AgentWorkspaceSyncRequest, AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
-        validate_exchange_message, validate_workspace_request,
+        validate_exchange_message, validate_workspace_request, AgentExchange,
+        AgentExchangeAckRequest, AgentExchangeEndpointRef, AgentExchangeError, AgentExchangeStatus,
+        AgentPanelEndpoint, AgentPanelStatus, AgentWorkspaceSnapshot, AgentWorkspaceSyncRequest,
+        AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
     },
     ports::agent_workspace_registry::{
         AgentExchangeEventSink, AgentRunOwnerLookup, AgentWorkspaceRegistry, StoreExchangeOutcome,
@@ -37,7 +40,7 @@ where
 
     pub async fn sync_workspace(
         &self,
-        window_label: String,
+        bench_id: String,
         request: AgentWorkspaceSyncRequest,
     ) -> Result<AgentWorkspaceSyncResponse, AgentExchangeError> {
         validate_workspace_request(&request)?;
@@ -50,7 +53,7 @@ where
         for panel in &request.panels {
             if let Some(run_id) = &panel.run_id {
                 let owner = self.owners.active_owner_for_exchange(run_id).await;
-                if owner.as_deref() != Some(window_label.as_str()) {
+                if owner.as_deref() != Some(bench_id.as_str()) {
                     return Err(AgentExchangeError::new(
                         "staleSourceRun",
                         "Panel run is inactive or owned by another window.",
@@ -60,7 +63,7 @@ where
         }
         self.registry
             .sync_snapshot(AgentWorkspaceSnapshot {
-                window_label,
+                bench_id,
                 worktree_path: request.worktree_path,
                 revision: request.revision,
                 focused_panel_id: request.focused_panel_id,
@@ -73,14 +76,14 @@ where
         &self,
         run_id: &str,
     ) -> Result<Vec<AgentPanelEndpoint>, AgentExchangeError> {
-        let window_label = self
+        let bench_id = self
             .owners
             .active_owner_for_exchange(run_id)
             .await
             .ok_or_else(|| {
                 AgentExchangeError::new("unknownSource", "Source agent run is not active.")
             })?;
-        let snapshot = self.registry.snapshot(&window_label).await.ok_or_else(|| {
+        let snapshot = self.registry.snapshot(&bench_id).await.ok_or_else(|| {
             AgentExchangeError::new("unknownWorkspace", "Agent workspace is not registered.")
         })?;
         Ok(snapshot
@@ -94,10 +97,10 @@ where
 
     pub async fn send_user_exchange(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: SendAgentExchangeRequest,
     ) -> Result<AgentExchange, AgentExchangeError> {
-        self.send(window_label, request, None).await
+        self.send(bench_id, request, None).await
     }
 
     pub async fn send_agent_exchange(
@@ -105,14 +108,14 @@ where
         source_run_id: &str,
         mut request: SendAgentExchangeRequest,
     ) -> Result<AgentExchange, AgentExchangeError> {
-        let window_label = self
+        let bench_id = self
             .owners
             .active_owner_for_exchange(source_run_id)
             .await
             .ok_or_else(|| {
                 AgentExchangeError::new("unknownSource", "Source agent run is not active.")
             })?;
-        let snapshot = self.registry.snapshot(&window_label).await.ok_or_else(|| {
+        let snapshot = self.registry.snapshot(&bench_id).await.ok_or_else(|| {
             AgentExchangeError::new("unknownWorkspace", "Agent workspace is not registered.")
         })?;
         let source = snapshot
@@ -127,16 +130,16 @@ where
             })?;
         request.source_panel_id = source.panel_id.clone();
         request.source_run_id = Some(source_run_id.to_string());
-        self.send(&window_label, request, Some(source_run_id)).await
+        self.send(&bench_id, request, Some(source_run_id)).await
     }
 
     async fn send(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: SendAgentExchangeRequest,
         required_source_run: Option<&str>,
     ) -> Result<AgentExchange, AgentExchangeError> {
-        let snapshot = self.registry.snapshot(window_label).await.ok_or_else(|| {
+        let snapshot = self.registry.snapshot(bench_id).await.ok_or_else(|| {
             AgentExchangeError::new("unknownWorkspace", "Agent workspace is not registered.")
         })?;
         let source = find_panel(&snapshot.panels, &request.source_panel_id, "unknownSource")?;
@@ -147,9 +150,7 @@ where
                 "Target panel is closing.",
             ));
         }
-        if let Some(required) = required_source_run
-            && source.run_id.as_deref() != Some(required)
-        {
+        if required_source_run.is_some_and(|required| source.run_id.as_deref() != Some(required)) {
             return Err(AgentExchangeError::new(
                 "staleSourceRun",
                 "Source run no longer matches the source panel.",
@@ -171,7 +172,7 @@ where
         let now = chrono::Utc::now().to_rfc3339();
         let exchange = AgentExchange {
             request_id: request.request_id,
-            window_label: snapshot.window_label,
+            bench_id: snapshot.bench_id,
             worktree_path: snapshot.worktree_path,
             source: endpoint_ref(source),
             target: endpoint_ref(target),
@@ -190,7 +191,7 @@ where
                     let failed = self
                         .registry
                         .transition_exchange(
-                            window_label,
+                            bench_id,
                             &stored.request_id,
                             AgentExchangeStatus::Failed,
                             Some(error.code),
@@ -208,7 +209,7 @@ where
 
     pub async fn acknowledge(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: AgentExchangeAckRequest,
     ) -> Result<AgentExchange, AgentExchangeError> {
         if !matches!(
@@ -225,7 +226,7 @@ where
         }
         let current = self
             .registry
-            .exchange(window_label, &request.request_id)
+            .exchange(bench_id, &request.request_id)
             .await
             .ok_or_else(|| AgentExchangeError::new("unknownExchange", "Exchange was not found."))?;
         if current.target.panel_id != request.target_panel_id {
@@ -234,10 +235,14 @@ where
                 "Acknowledgement target does not match the exchange.",
             ));
         }
+        // 같은 결과의 두 번째 확인은 값만 돌려주고 상태 이벤트를 다시 내지 않는다(040 Q5, 요청 id 기준 멱등).
+        if current.status == request.outcome {
+            return Ok(current);
+        }
         let next = self
             .registry
             .transition_exchange(
-                window_label,
+                bench_id,
                 &request.request_id,
                 request.outcome,
                 request
@@ -256,7 +261,7 @@ where
         source_run_id: &str,
         request_id: &str,
     ) -> Result<AgentExchange, AgentExchangeError> {
-        let window_label = self
+        let bench_id = self
             .owners
             .active_owner_for_exchange(source_run_id)
             .await
@@ -265,7 +270,7 @@ where
             })?;
         let exchange = self
             .registry
-            .exchange(&window_label, request_id)
+            .exchange(&bench_id, request_id)
             .await
             .ok_or_else(|| AgentExchangeError::new("unknownExchange", "Exchange was not found."))?;
         if exchange.source.run_id.as_deref() != Some(source_run_id) {
@@ -277,8 +282,8 @@ where
         Ok(exchange)
     }
 
-    pub async fn list_exchanges(&self, window_label: &str) -> Vec<AgentExchange> {
-        self.registry.list_exchanges(window_label).await
+    pub async fn list_exchanges(&self, bench_id: &str) -> Vec<AgentExchange> {
+        self.registry.list_exchanges(bench_id).await
     }
 }
 
@@ -309,7 +314,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        infrastructure::in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry,
+        infrastructure::exchange::in_memory_workspace_registry::InMemoryAgentWorkspaceRegistry,
         ports::agent_workspace_registry::{AgentExchangeEventSink, AgentRunOwnerLookup},
     };
 

@@ -22,7 +22,6 @@ pub(crate) enum Scope {
     /// 작업대가 아직 없는 호출(`bench.open`): 주체별.
     Open,
     /// run의 소유 작업대(agent 전용 operation). 소유 작업대가 없으면 기록 없이 실행한다(대상이 없어 실패한다).
-    #[allow(dead_code)] // TODO(040 US2): agent 전용 교환 operation이 쓴다.
     RunOwner(String),
     /// 기록하지 않음(자연 멱등: `bench.close`).
     None,

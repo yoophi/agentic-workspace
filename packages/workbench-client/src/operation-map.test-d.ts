@@ -65,6 +65,13 @@ test("operation ids are exactly the registered operations (037 + 038 + 040)", ()
     | "run.setPermissionMode"
     | "run.cancel"
     | "run.respondPermission"
+    | "exchange.syncWorkspace"
+    | "exchange.send"
+    | "exchange.acknowledge"
+    | "exchange.list"
+    | "exchange.listPeers"
+    | "exchange.sendFromRun"
+    | "exchange.getForRun"
     | "system.describe"
   >();
 });
@@ -160,7 +167,12 @@ test("generic CallReply output is unconstrained JSON and Accepted uses camelCase
 
 test("event schema ids correlate with typed bodies (039)", () => {
   expectTypeOf<EventSchemaId>().toEqualTypeOf<
-    "run.event.v1" | "worktree.changed.v1" | "orchestration.workspaceUpdated.v1"
+    | "run.event.v1"
+    | "worktree.changed.v1"
+    | "orchestration.workspaceUpdated.v1"
+    | "exchange.requested.v1"
+    | "exchange.status.v1"
+    | "bench.titleRequested.v1"
   >();
 
   const run = {} as EventMap["run.event.v1"];

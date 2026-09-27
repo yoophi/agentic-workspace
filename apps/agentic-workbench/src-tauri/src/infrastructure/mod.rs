@@ -8,7 +8,6 @@ pub mod acp_agent_worker_adapter;
 #[cfg(debug_assertions)]
 pub mod desktop_benches;
 pub mod devtools;
-pub mod in_memory_agent_workspace_registry;
 pub mod json_appearance_preferences_repository;
 pub mod json_orchestration_repository;
 pub mod json_session_window_state_repository;

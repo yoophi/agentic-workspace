@@ -331,6 +331,59 @@
             "idempotencyScope": "epoch"
           },
           {
+            "id": "exchange.syncWorkspace",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.send",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.acknowledge",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.list",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.listPeers",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.sendFromRun",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.getForRun",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

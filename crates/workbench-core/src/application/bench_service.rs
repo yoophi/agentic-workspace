@@ -9,12 +9,19 @@ use workbench_protocol::{
 };
 
 use crate::{
-    application::epoch_idempotency::{bench_scope, open_scope, EpochIdempotency},
+    application::{
+        agent_exchange_service::AgentExchangeService,
+        epoch_idempotency::{bench_scope, open_scope, EpochIdempotency},
+    },
     infrastructure::{
         bench::in_memory_bench_registry::{
             wait_closed, BenchAdmission, BenchError, BenchView, CloseStart, InMemoryBenchRegistry,
         },
         event_hub::EventHub,
+        exchange::{
+            hub_event_sink::HubExchangeEventSink,
+            in_memory_workspace_registry::InMemoryAgentWorkspaceRegistry, EngineRunOwners,
+        },
         run::workbench_run_sink::WorkbenchRunSink,
     },
     ports::{
@@ -40,6 +47,8 @@ pub struct BenchServices {
     pub terminal_hook: Option<Arc<dyn RunTerminalHook>>,
     pub launch_decorator: Option<Arc<dyn RunLaunchDecorator>>,
     pub idempotency: Arc<EpochIdempotency>,
+    /// 작업대별 교환 작업 영역(040 US2).
+    pub exchange_registry: InMemoryAgentWorkspaceRegistry,
     close_hooks: Mutex<Vec<BenchCloseHook>>,
 }
 
@@ -82,8 +91,21 @@ impl BenchServices {
             terminal_hook,
             launch_decorator,
             idempotency,
+            exchange_registry: InMemoryAgentWorkspaceRegistry::default(),
             close_hooks: Mutex::default(),
         }
+    }
+
+    /// 교환 서비스. 소유 조회는 run 엔진, 발행은 교환 스트림 + 데스크톱 전달.
+    pub fn exchange_service(
+        &self,
+    ) -> AgentExchangeService<InMemoryAgentWorkspaceRegistry, EngineRunOwners, HubExchangeEventSink>
+    {
+        AgentExchangeService::new(
+            self.exchange_registry.clone(),
+            EngineRunOwners(Arc::clone(&self.engine)),
+            HubExchangeEventSink::new(Arc::clone(&self.hub), self.desktop.clone()),
+        )
     }
 
     pub fn add_close_hook(&self, hook: BenchCloseHook) {
@@ -192,6 +214,7 @@ impl BenchServices {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
+        self.exchange_registry.remove_bench_now(bench_id);
         for hook in hooks {
             hook(bench_id);
         }

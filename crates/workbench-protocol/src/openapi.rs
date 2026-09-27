@@ -139,6 +139,24 @@ pub const EVENT_BY_SCHEMA: &str = "EventBySchema";
         crate::operations::run::RunSetPermissionModeInput,
         crate::operations::run::RunCancelInput,
         crate::operations::run::RunRespondPermissionInput,
+        crate::operations::exchange::AgentPanelStatusDto,
+        crate::operations::exchange::AgentExchangeDeliveryDto,
+        crate::operations::exchange::AgentExchangeStatusDto,
+        crate::operations::exchange::AgentPanelEndpointDto,
+        crate::operations::exchange::AgentWorkspaceSyncRequestDto,
+        crate::operations::exchange::AgentWorkspaceSyncResponseDto,
+        crate::operations::exchange::SendAgentExchangeRequestDto,
+        crate::operations::exchange::AgentExchangeAckRequestDto,
+        crate::operations::exchange::AgentExchangeEndpointRefDto,
+        crate::operations::exchange::AgentExchangeDto,
+        crate::operations::exchange::AgentPeersDto,
+        crate::operations::exchange::ExchangeSyncWorkspaceInput,
+        crate::operations::exchange::ExchangeSendInput,
+        crate::operations::exchange::ExchangeAcknowledgeInput,
+        crate::operations::exchange::ExchangeListInput,
+        crate::operations::exchange::ExchangeListPeersInput,
+        crate::operations::exchange::ExchangeSendFromRunInput,
+        crate::operations::exchange::ExchangeGetForRunInput,
         crate::operations::system::SystemDescribeInput,
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
@@ -161,6 +179,8 @@ pub const EVENT_BY_SCHEMA: &str = "EventBySchema";
         crate::events::worktree::WorktreeChangedDto,
         crate::events::worktree::WorktreeChangeKindDto,
         crate::events::orchestration::OrchestrationEventDto,
+        crate::events::exchange::ExchangeRequestedDto,
+        crate::events::bench::TitleRequestedDto,
     ))
 )]
 struct ApiDoc;
@@ -213,6 +233,13 @@ fn input_schema_name(id: OperationId) -> &'static str {
         OperationId::RunSetPermissionMode => "RunSetPermissionModeInput",
         OperationId::RunCancel => "RunCancelInput",
         OperationId::RunRespondPermission => "RunRespondPermissionInput",
+        OperationId::ExchangeSyncWorkspace => "ExchangeSyncWorkspaceInput",
+        OperationId::ExchangeSend => "ExchangeSendInput",
+        OperationId::ExchangeAcknowledge => "ExchangeAcknowledgeInput",
+        OperationId::ExchangeList => "ExchangeListInput",
+        OperationId::ExchangeListPeers => "ExchangeListPeersInput",
+        OperationId::ExchangeSendFromRun => "ExchangeSendFromRunInput",
+        OperationId::ExchangeGetForRun => "ExchangeGetForRunInput",
         OperationId::SystemDescribe => "SystemDescribeInput",
     }
 }
@@ -265,6 +292,13 @@ fn output_schema(id: OperationId) -> RefOr<Schema> {
         OperationId::RunSetPermissionMode => null_schema(),
         OperationId::RunCancel => null_schema(),
         OperationId::RunRespondPermission => null_schema(),
+        OperationId::ExchangeSyncWorkspace => dto("AgentWorkspaceSyncResponseDto"),
+        OperationId::ExchangeSend => dto("AgentExchangeDto"),
+        OperationId::ExchangeAcknowledge => dto("AgentExchangeDto"),
+        OperationId::ExchangeList => array_schema(dto("AgentExchangeDto")),
+        OperationId::ExchangeListPeers => dto("AgentPeersDto"),
+        OperationId::ExchangeSendFromRun => dto("AgentExchangeDto"),
+        OperationId::ExchangeGetForRun => dto("AgentExchangeDto"),
         OperationId::SystemDescribe => dto("DescribeOutput"),
     }
 }
@@ -612,6 +646,18 @@ mod tests {
                 (
                     "orchestration.workspaceUpdated.v1",
                     "#/components/schemas/OrchestrationEventDto"
+                ),
+                (
+                    "exchange.requested.v1",
+                    "#/components/schemas/ExchangeRequestedDto"
+                ),
+                (
+                    "exchange.status.v1",
+                    "#/components/schemas/AgentExchangeDto"
+                ),
+                (
+                    "bench.titleRequested.v1",
+                    "#/components/schemas/TitleRequestedDto"
                 ),
             ]
             .map(|(schema, body)| (schema.to_owned(), body.to_owned()))

@@ -4,6 +4,7 @@ pub mod agent;
 pub mod agent_run_settings;
 pub mod bench;
 pub mod common;
+pub mod exchange;
 pub mod git;
 pub mod goal;
 pub mod project;
@@ -67,7 +68,7 @@ const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpe
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 43] = [
+pub const OPERATIONS: [OperationSpec; 50] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -119,6 +120,13 @@ pub const OPERATIONS: [OperationSpec; 43] = [
     epoch_command(OperationId::RunSetPermissionMode, &[Scope::RunWrite]),
     epoch_command(OperationId::RunCancel, &[Scope::RunWrite]),
     epoch_command(OperationId::RunRespondPermission, &[Scope::RunWrite]),
+    epoch_command(OperationId::ExchangeSyncWorkspace, &[Scope::ExchangeWrite]),
+    epoch_command(OperationId::ExchangeSend, &[Scope::ExchangeWrite]),
+    epoch_command(OperationId::ExchangeAcknowledge, &[Scope::ExchangeWrite]),
+    query(OperationId::ExchangeList, &[Scope::ExchangeRead]),
+    query(OperationId::ExchangeListPeers, &[Scope::ExchangeRead]),
+    epoch_command(OperationId::ExchangeSendFromRun, &[Scope::ExchangeWrite]),
+    query(OperationId::ExchangeGetForRun, &[Scope::ExchangeRead]),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
 
@@ -271,6 +279,34 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::RunRespondPermission => (
             run::RunRespondPermissionInput::schema(),
             EmptyOutput::schema(),
+        ),
+        OperationId::ExchangeSyncWorkspace => (
+            exchange::ExchangeSyncWorkspaceInput::schema(),
+            exchange::AgentWorkspaceSyncResponseDto::schema(),
+        ),
+        OperationId::ExchangeSend => (
+            exchange::ExchangeSendInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeAcknowledge => (
+            exchange::ExchangeAcknowledgeInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeList => (
+            exchange::ExchangeListInput::schema(),
+            exchange::exchange_list_output_schema(),
+        ),
+        OperationId::ExchangeListPeers => (
+            exchange::ExchangeListPeersInput::schema(),
+            exchange::AgentPeersDto::schema(),
+        ),
+        OperationId::ExchangeSendFromRun => (
+            exchange::ExchangeSendFromRunInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeGetForRun => (
+            exchange::ExchangeGetForRunInput::schema(),
+            exchange::AgentExchangeDto::schema(),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

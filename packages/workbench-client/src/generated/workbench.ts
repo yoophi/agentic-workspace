@@ -47,6 +47,34 @@ export interface components {
             efforts?: components["schemas"]["AgentOptionDescriptorDto"][];
             contextSizes?: components["schemas"]["AgentOptionDescriptorDto"][];
         };
+        AgentExchangeAckRequestDto: {
+            requestId: string;
+            targetPanelId: string;
+            outcome: components["schemas"]["AgentExchangeStatusDto"];
+            reason?: string | null;
+        };
+        /** @enum {string} */
+        AgentExchangeDeliveryDto: "send" | "queue" | "draft";
+        AgentExchangeDto: {
+            requestId: string;
+            worktreePath: string;
+            source: components["schemas"]["AgentExchangeEndpointRefDto"];
+            target: components["schemas"]["AgentExchangeEndpointRefDto"];
+            message: string;
+            delivery: components["schemas"]["AgentExchangeDeliveryDto"];
+            status: components["schemas"]["AgentExchangeStatusDto"];
+            failureCode?: string | null;
+            failureReason?: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        AgentExchangeEndpointRefDto: {
+            panelId: string;
+            title: string;
+            runId?: string | null;
+        };
+        /** @enum {string} */
+        AgentExchangeStatusDto: "pending" | "accepted" | "delivered" | "rejected" | "failed" | "cancelled";
         AgentListInput: Record<string, never>;
         /** @description `cwd`가 없거나 공백이면 전체 범위. 결과는 최신순 최대 50개. 네이티브 세션 조회를 지원하지 않는 agent는 빈 목록. */
         AgentListProviderSessionsInput: {
@@ -67,6 +95,18 @@ export interface components {
         AgentOptionDescriptorDto: {
             id: string;
             label: string;
+        };
+        AgentPanelEndpointDto: {
+            panelId: string;
+            title: string;
+            runId?: string | null;
+            status: components["schemas"]["AgentPanelStatusDto"];
+        };
+        /** @enum {string} */
+        AgentPanelStatusDto: "idle" | "running" | "closing";
+        /** @description `exchange.listPeers` 출력. */
+        AgentPeersDto: {
+            peers: components["schemas"]["AgentPanelEndpointDto"][];
         };
         AgentProfileDto: {
             id: string;
@@ -164,6 +204,18 @@ export interface components {
         AgentToolCandidateSourceDto: "sessionTool" | "appCommand" | "extension";
         /** @enum {string} */
         AgentToolCandidateStatusDto: "loading" | "ready" | "empty" | "error";
+        AgentWorkspaceSyncRequestDto: {
+            worktreePath: string;
+            /** Format: int64 */
+            revision: number;
+            focusedPanelId: string;
+            panels: components["schemas"]["AgentPanelEndpointDto"][];
+        };
+        AgentWorkspaceSyncResponseDto: {
+            /** Format: int64 */
+            revision: number;
+            acceptedPanels: number;
+        };
         BenchCloseInput: {
             benchId: string;
         };
@@ -541,6 +593,62 @@ export interface components {
             /** @enum {string} */
             operation: "run.respondPermission";
             output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.syncWorkspace";
+            output: components["schemas"]["AgentWorkspaceSyncResponseDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.send";
+            output: components["schemas"]["AgentExchangeDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.acknowledge";
+            output: components["schemas"]["AgentExchangeDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.list";
+            output: components["schemas"]["AgentExchangeDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.listPeers";
+            output: components["schemas"]["AgentPeersDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.sendFromRun";
+            output: components["schemas"]["AgentExchangeDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "exchange.getForRun";
+            output: components["schemas"]["AgentExchangeDto"];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
             revision?: number;
         } | {
@@ -1060,6 +1168,90 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "exchange.syncWorkspace";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeSyncWorkspaceInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.send";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeSendInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.acknowledge";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeAcknowledgeInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.list";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeListInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.listPeers";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeListPeersInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.sendFromRun";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeSendFromRunInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "exchange.getForRun";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeGetForRunInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "system.describe";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["SystemDescribeInput"];
@@ -1116,6 +1308,39 @@ export interface components {
             occurredAt: string;
             correlationId?: components["schemas"]["RequestId"];
             body: components["schemas"]["OrchestrationEventDto"];
+        } | {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "exchange.requested.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["ExchangeRequestedDto"];
+        } | {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "exchange.status.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["AgentExchangeDto"];
+        } | {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "bench.titleRequested.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["TitleRequestedDto"];
         };
         /**
          * @description 상태 복원용(보관·replay) 또는 알림용(보관 없음, 구독 시작 이후만).
@@ -1173,6 +1398,41 @@ export interface components {
             streamKind: components["schemas"]["StreamKind"];
             class: components["schemas"]["EventClass"];
             requiredScopes: components["schemas"]["Scope"][];
+        };
+        ExchangeAcknowledgeInput: {
+            benchId: string;
+            request: components["schemas"]["AgentExchangeAckRequestDto"];
+        };
+        ExchangeGetForRunInput: {
+            runId: string;
+            requestId: string;
+        };
+        ExchangeListInput: {
+            benchId: string;
+        };
+        ExchangeListPeersInput: {
+            runId: string;
+        };
+        ExchangeRequestedDto: {
+            requestId: string;
+            source: components["schemas"]["AgentExchangeEndpointRefDto"];
+            target: components["schemas"]["AgentExchangeEndpointRefDto"];
+            message: string;
+            delivery: components["schemas"]["AgentExchangeDeliveryDto"];
+            createdAt: string;
+        };
+        /** @description agent가 보내는 교환. 출발 패널은 서버가 run으로 찾으므로 요청의 `sourcePanelId`·`sourceRunId`는 덮어쓴다. */
+        ExchangeSendFromRunInput: {
+            runId: string;
+            request: components["schemas"]["SendAgentExchangeRequestDto"];
+        };
+        ExchangeSendInput: {
+            benchId: string;
+            request: components["schemas"]["SendAgentExchangeRequestDto"];
+        };
+        ExchangeSyncWorkspaceInput: {
+            benchId: string;
+            request: components["schemas"]["AgentWorkspaceSyncRequestDto"];
         };
         /**
          * @description 안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.
@@ -1628,6 +1888,15 @@ export interface components {
          * @enum {string}
          */
         Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "run:write" | "bench:read" | "bench:write" | "exchange:read" | "exchange:write" | "presentation:write" | "system:describe";
+        SendAgentExchangeRequestDto: {
+            requestId: string;
+            sourcePanelId: string;
+            sourceRunId?: string | null;
+            targetPanelId: string;
+            targetRunId?: string | null;
+            message: string;
+            delivery: components["schemas"]["AgentExchangeDeliveryDto"];
+        };
         /**
          * @description stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).
          *     알림용 스트림(`worktree:*`)은 `afterSequence`를 보지 않고 live부터 전달한다.
@@ -1655,6 +1924,9 @@ export interface components {
             appliedTitle?: string | null;
             reason?: string | null;
             code?: string | null;
+        };
+        TitleRequestedDto: {
+            title: string;
         };
         ToolFileChangeDto: {
             path: string;

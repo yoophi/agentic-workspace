@@ -17,7 +17,6 @@ use workbench_protocol::{
 use crate::inbound::workbench_compat;
 use crate::{
     application::{
-        agent_exchange_service::AgentExchangeService,
         appearance_preferences_service::AppearancePreferencesService,
         coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
         orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
@@ -31,10 +30,6 @@ use crate::{
     },
     domain::{
         agent::AgentDescriptor,
-        agent_exchange::{
-            AgentExchange, AgentExchangeAckRequest, AgentWorkspaceSyncRequest,
-            AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
-        },
         agent_orchestration::{
             AccessPolicy, MAIN_AGENT_NODE_ID, PromptDelivery, PromptDispatchTargetStatus,
             TaskCommand, TaskCommandKind, TaskCommandSource, TaskReportType, WorkerRuntimeProfile,
@@ -62,9 +57,6 @@ use crate::{
         acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
         agent_session_registry::AppState,
         desktop_benches,
-        in_memory_agent_workspace_registry::{
-            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
-        },
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
@@ -964,84 +956,114 @@ pub struct WorktreeWatcherState {
     handles: Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 }
 
-fn exchange_error(error: crate::domain::agent_exchange::AgentExchangeError) -> String {
-    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+use workbench_core::domain::agent_exchange::{
+    AgentExchangeAckRequest, AgentWorkspaceSyncRequest, SendAgentExchangeRequest,
+};
+use workbench_protocol::operations::exchange::{AgentExchangeDto, AgentWorkspaceSyncResponseDto};
+
+// 040 US2: 교환 command 4개는 `exchange.*` 호환 어댑터다. 작업 영역은 창의 작업대에 묶이고, 오류는 오늘과 같은
+// `{code, message}` JSON 문자열이다(도메인 코드는 fault `details.exchangeCode`).
+fn exchange_command_error(fault: &workbench_protocol::WorkbenchFault) -> String {
+    match fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("exchangeCode"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(code) => workbench_compat::exchange_error_string(code, &fault.message),
+        None => fault.message.clone(),
+    }
+}
+
+async fn call_exchange<Out: serde::de::DeserializeOwned>(
+    app: &AppHandle,
+    request: workbench_protocol::CallRequest,
+) -> Result<Out, String> {
+    let runtime = workbench_runtime(app);
+    match runtime
+        .call(workbench_compat::desktop_principal(), request)
+        .await
+    {
+        Ok(reply) => workbench_compat::decode_output(reply),
+        Err(fault) => Err(exchange_command_error(&fault)),
+    }
+}
+
+fn unregistered_workspace() -> String {
+    workbench_compat::exchange_error_string(
+        "unknownWorkspace",
+        "Agent workspace is not registered.",
+    )
 }
 
 #[tauri::command]
 pub async fn sync_agent_workspace(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
-    mut request: AgentWorkspaceSyncRequest,
-) -> Result<AgentWorkspaceSyncResponse, String> {
-    let canonical = std::fs::canonicalize(&request.worktree_path)
-        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
-    if !canonical.is_dir() {
-        return Err("Workspace path must be a directory.".into());
-    }
-    request.worktree_path = canonical.to_string_lossy().into_owned();
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+    request: AgentWorkspaceSyncRequest,
+) -> Result<AgentWorkspaceSyncResponseDto, String> {
+    let runtime = workbench_runtime(&app);
+    let bench =
+        desktop_benches::ensure(&runtime, window.label(), Some(&request.worktree_path)).await?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeSyncWorkspace,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .sync_workspace(window.label().to_string(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn send_agent_exchange(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
     request: SendAgentExchangeRequest,
-) -> Result<AgentExchange, String> {
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<AgentExchangeDto, String> {
+    let bench = desktop_benches::lookup(window.label()).ok_or_else(unregistered_workspace)?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeSend,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .send_user_exchange(window.label(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn acknowledge_agent_exchange(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
     request: AgentExchangeAckRequest,
-) -> Result<AgentExchange, String> {
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<AgentExchangeDto, String> {
+    let bench = desktop_benches::lookup(window.label()).ok_or_else(|| {
+        workbench_compat::exchange_error_string("unknownExchange", "Exchange was not found.")
+    })?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeAcknowledge,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .acknowledge(window.label(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn list_agent_exchanges(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
-) -> Result<Vec<AgentExchange>, String> {
-    Ok(AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<Vec<AgentExchangeDto>, String> {
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(Vec::new());
+    };
+    call_exchange(
+        &app,
+        workbench_compat::query_request(OperationId::ExchangeList, json!({ "benchId": bench })),
     )
-    .list_exchanges(window.label())
-    .await)
+    .await
 }
 
 impl WorktreeWatcherState {

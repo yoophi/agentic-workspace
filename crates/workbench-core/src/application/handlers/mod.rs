@@ -5,6 +5,7 @@ pub mod agent;
 pub mod agent_run_settings;
 pub mod bench;
 pub(crate) mod epoch;
+pub mod exchange;
 pub mod git;
 pub mod goal;
 pub mod project;
@@ -276,6 +277,7 @@ pub fn build_registry(
     );
     bench::register(&mut registry, benches);
     run::register(&mut registry, &runner, &coordinator, benches);
+    exchange::register(&mut registry, benches);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler::new(epoch)),

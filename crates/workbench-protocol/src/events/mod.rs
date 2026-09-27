@@ -3,6 +3,8 @@
 //! `system.describe.eventSchemas`, OpenAPI `EventBySchema`, TS `EventMap`이 모두 `EVENT_SCHEMAS`를 읽는다.
 //! 분류(상태 복원용/알림용)는 ADR `crates/workbench-core/docs/adr/0003`.
 
+pub mod bench;
+pub mod exchange;
 pub mod orchestration;
 pub mod run;
 pub mod worktree;
@@ -136,17 +138,17 @@ pub const EVENT_SCHEMAS: [EventSchemaSpec; 6] = [
     EventSchemaSpec {
         schema: EXCHANGE_REQUESTED_V1,
         stream_kind: StreamKind::Exchange,
-        body_schema: None,
+        body_schema: Some("ExchangeRequestedDto"),
     },
     EventSchemaSpec {
         schema: EXCHANGE_STATUS_V1,
         stream_kind: StreamKind::Exchange,
-        body_schema: None,
+        body_schema: Some("AgentExchangeDto"),
     },
     EventSchemaSpec {
         schema: BENCH_TITLE_REQUESTED_V1,
         stream_kind: StreamKind::Bench,
-        body_schema: None,
+        body_schema: Some("TitleRequestedDto"),
     },
 ];
 

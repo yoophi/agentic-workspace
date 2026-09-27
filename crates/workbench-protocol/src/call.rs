@@ -102,13 +102,27 @@ pub enum OperationId {
     RunCancel,
     #[serde(rename = "run.respondPermission")]
     RunRespondPermission,
+    #[serde(rename = "exchange.syncWorkspace")]
+    ExchangeSyncWorkspace,
+    #[serde(rename = "exchange.send")]
+    ExchangeSend,
+    #[serde(rename = "exchange.acknowledge")]
+    ExchangeAcknowledge,
+    #[serde(rename = "exchange.list")]
+    ExchangeList,
+    #[serde(rename = "exchange.listPeers")]
+    ExchangeListPeers,
+    #[serde(rename = "exchange.sendFromRun")]
+    ExchangeSendFromRun,
+    #[serde(rename = "exchange.getForRun")]
+    ExchangeGetForRun,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 43] = [
+    pub const ALL: [OperationId; 50] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -151,6 +165,13 @@ impl OperationId {
         OperationId::RunSetPermissionMode,
         OperationId::RunCancel,
         OperationId::RunRespondPermission,
+        OperationId::ExchangeSyncWorkspace,
+        OperationId::ExchangeSend,
+        OperationId::ExchangeAcknowledge,
+        OperationId::ExchangeList,
+        OperationId::ExchangeListPeers,
+        OperationId::ExchangeSendFromRun,
+        OperationId::ExchangeGetForRun,
         OperationId::SystemDescribe,
     ];
 
@@ -198,6 +219,13 @@ impl OperationId {
             OperationId::RunSetPermissionMode => "run.setPermissionMode",
             OperationId::RunCancel => "run.cancel",
             OperationId::RunRespondPermission => "run.respondPermission",
+            OperationId::ExchangeSyncWorkspace => "exchange.syncWorkspace",
+            OperationId::ExchangeSend => "exchange.send",
+            OperationId::ExchangeAcknowledge => "exchange.acknowledge",
+            OperationId::ExchangeList => "exchange.list",
+            OperationId::ExchangeListPeers => "exchange.listPeers",
+            OperationId::ExchangeSendFromRun => "exchange.sendFromRun",
+            OperationId::ExchangeGetForRun => "exchange.getForRun",
             OperationId::SystemDescribe => "system.describe",
         }
     }

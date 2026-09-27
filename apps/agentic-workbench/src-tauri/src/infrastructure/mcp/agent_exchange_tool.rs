@@ -1,17 +1,18 @@
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{
-    application::agent_exchange_service::AgentExchangeService,
-    domain::agent_exchange::{AgentExchangeDelivery, AgentExchangeError, SendAgentExchangeRequest},
-    infrastructure::{
-        agent_session_registry::AppState,
-        in_memory_agent_workspace_registry::{
-            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
-        },
-        mcp::capability_registry::CapabilityPrincipal,
-    },
+use std::sync::Arc;
+
+use workbench_core::{
+    application::workbench_runtime::WorkbenchRuntime,
+    domain::agent_exchange::{AgentExchangeDelivery, AgentExchangeError},
 };
+use workbench_protocol::{
+    AuthenticatedPrincipal, CallRequest, IdempotencyKey, OperationId, OperationKind, Workbench,
+    WorkbenchFault, operations::spec_for,
+};
+
+use crate::infrastructure::mcp::capability_registry::CapabilityPrincipal;
 
 pub const LIST_PEER_AGENTS_TOOL: &str = "list_peer_agents";
 pub const SEND_MESSAGE_TO_AGENT_TOOL: &str = "send_message_to_agent";
@@ -93,11 +94,38 @@ struct SendRequest {
     delivery: AgentExchangeDelivery,
 }
 
-type ExchangeService =
-    AgentExchangeService<InMemoryAgentWorkspaceRegistry, AppState, TauriAgentExchangeEventSink>;
+/// 040(ADR 0006): 교환 도구는 run에 묶인 agent principal로 `Workbench.call`을 거친다. 작업대는 run의 소유로 서버가 찾는다.
+async fn call_as_agent(
+    runtime: &Arc<WorkbenchRuntime>,
+    run_id: &str,
+    operation: OperationId,
+    input: Value,
+) -> Result<Value, AgentExchangeError> {
+    let mut request = CallRequest::query(operation, input);
+    if matches!(spec_for(operation).kind, OperationKind::Command) {
+        request.idempotency_key = Some(IdempotencyKey::random());
+    }
+    runtime
+        .call(AuthenticatedPrincipal::agent(run_id), request)
+        .await
+        .map(|reply| reply.output().cloned().unwrap_or(Value::Null))
+        .map_err(|fault| exchange_error_of(&fault))
+}
+
+/// fault → 오늘 도구 결과의 `{code, message}`. 교환 도메인 코드는 `details.exchangeCode`에 있다.
+pub fn exchange_error_of(fault: &WorkbenchFault) -> AgentExchangeError {
+    let code = fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("exchangeCode"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+        .unwrap_or_else(|| fault.code.as_str().to_owned());
+    AgentExchangeError::new(code, fault.message.clone())
+}
 
 pub async fn handle_tool(
-    service: &ExchangeService,
+    runtime: &Arc<WorkbenchRuntime>,
     principal: &CapabilityPrincipal,
     name: &str,
     arguments: Option<&Value>,
@@ -111,10 +139,13 @@ pub async fn handle_tool(
             if let Err(error) = require_authenticated_run(principal, &request.run_id) {
                 return tool_error(error);
             }
-            service
-                .list_peers_for_run(&principal.run_id)
-                .await
-                .map(|peers| json!({ "peers": peers }))
+            call_as_agent(
+                runtime,
+                &principal.run_id,
+                OperationId::ExchangeListPeers,
+                json!({ "runId": principal.run_id }),
+            )
+            .await
         }
         SEND_MESSAGE_TO_AGENT_TOOL => {
             let request: SendRequest = match parse(arguments) {
@@ -124,21 +155,24 @@ pub async fn handle_tool(
             if let Err(error) = require_authenticated_run(principal, &request.run_id) {
                 return tool_error(error);
             }
-            service
-                .send_agent_exchange(
-                    &principal.run_id,
-                    SendAgentExchangeRequest {
-                        request_id: request.request_id,
-                        source_panel_id: String::new(),
-                        source_run_id: Some(principal.run_id.clone()),
-                        target_panel_id: request.target_panel_id,
-                        target_run_id: request.target_run_id,
-                        message: request.message,
-                        delivery: request.delivery,
+            call_as_agent(
+                runtime,
+                &principal.run_id,
+                OperationId::ExchangeSendFromRun,
+                json!({
+                    "runId": principal.run_id,
+                    "request": {
+                        "requestId": request.request_id,
+                        "sourcePanelId": "",
+                        "sourceRunId": principal.run_id,
+                        "targetPanelId": request.target_panel_id,
+                        "targetRunId": request.target_run_id,
+                        "message": request.message,
+                        "delivery": request.delivery,
                     },
-                )
-                .await
-                .map(|exchange| serde_json::to_value(exchange).unwrap_or(Value::Null))
+                }),
+            )
+            .await
         }
         GET_AGENT_EXCHANGE_STATUS_TOOL => {
             let request: StatusRequest = match parse(arguments) {
@@ -148,10 +182,13 @@ pub async fn handle_tool(
             if let Err(error) = require_authenticated_run(principal, &request.run_id) {
                 return tool_error(error);
             }
-            service
-                .exchange_for_source_run(&principal.run_id, &request.request_id)
-                .await
-                .map(|exchange| serde_json::to_value(exchange).unwrap_or(Value::Null))
+            call_as_agent(
+                runtime,
+                &principal.run_id,
+                OperationId::ExchangeGetForRun,
+                json!({ "runId": principal.run_id, "requestId": request.request_id }),
+            )
+            .await
         }
         _ => Err(AgentExchangeError::new(
             "unsupportedTool",
@@ -206,6 +243,25 @@ fn tool_error(error: AgentExchangeError) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fault_details_restore_the_exchange_code() {
+        let fault = WorkbenchFault::new(
+            workbench_protocol::FaultCode::NotFound,
+            workbench_protocol::RequestId::random(),
+            "Source agent run is not active.",
+        )
+        .with_details(json!({ "exchangeCode": "unknownSource" }));
+        let error = exchange_error_of(&fault);
+        assert_eq!(error.code, "unknownSource");
+        assert_eq!(error.message, "Source agent run is not active.");
+        let plain = WorkbenchFault::new(
+            workbench_protocol::FaultCode::Forbidden,
+            workbench_protocol::RequestId::random(),
+            "denied",
+        );
+        assert_eq!(exchange_error_of(&plain).code, "forbidden");
+    }
 
     #[test]
     fn exposes_peer_send_and_status_tool_schemas() {

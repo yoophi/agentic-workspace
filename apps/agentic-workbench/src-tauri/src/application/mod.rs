@@ -3,7 +3,6 @@ pub use acp_agent_core::application::{
     start_agent_run, steer_prompt,
 };
 
-pub mod agent_exchange_service;
 pub mod appearance_preferences_service;
 pub mod coordinator_notification_dispatcher;
 pub mod mcp_title_control_service;

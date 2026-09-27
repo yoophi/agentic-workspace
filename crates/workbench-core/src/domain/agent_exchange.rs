@@ -1,3 +1,6 @@
+//! 두 agent 패널 사이의 교환(040: AW `domain/agent_exchange.rs`에서 이동). 작업 영역·이력은 작업대(Bench)에 묶인다.
+//! 오류 코드·문구는 오늘과 같다(화면·MCP가 `{code, message}` JSON을 해석한다).
+
 use serde::{Deserialize, Serialize};
 
 pub const MAX_WORKSPACE_PANELS: usize = 8;
@@ -66,7 +69,7 @@ pub struct AgentWorkspaceSyncResponse {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AgentWorkspaceSnapshot {
-    pub window_label: String,
+    pub bench_id: String,
     pub worktree_path: String,
     pub revision: u64,
     pub focused_panel_id: String,
@@ -106,7 +109,9 @@ pub struct AgentExchangeEndpointRef {
 #[serde(rename_all = "camelCase")]
 pub struct AgentExchange {
     pub request_id: String,
-    pub window_label: String,
+    /// 소유 작업대. wire에는 싣지 않는다(창 label을 대신하던 `windowLabel`은 계약에서 빠졌다, SC-002).
+    #[serde(skip)]
+    pub bench_id: String,
     pub worktree_path: String,
     pub source: AgentExchangeEndpointRef,
     pub target: AgentExchangeEndpointRef,

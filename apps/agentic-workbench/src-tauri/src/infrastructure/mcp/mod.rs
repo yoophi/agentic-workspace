@@ -2,7 +2,6 @@ use std::net::Ipv4Addr;
 
 use crate::{
     application::{
-        agent_exchange_service::AgentExchangeService,
         mcp_title_control_service::McpTitleControlService,
         orchestration_scheduler::OrchestrationScheduler,
     },
@@ -12,9 +11,6 @@ use crate::{
     },
     infrastructure::{
         agent_session_registry::AppState,
-        in_memory_agent_workspace_registry::{
-            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
-        },
         mcp::{
             agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
             capability_registry::{CapabilityPrincipal, CapabilityRegistry},
@@ -67,7 +63,6 @@ pub struct McpServerState {
 struct McpRouterState {
     app: AppHandle,
     registry: AppState,
-    workspace_registry: InMemoryAgentWorkspaceRegistry,
     mcp_state: McpServerState,
 }
 
@@ -125,11 +120,7 @@ Do not use this MCP server for file edits, Git operations, permission approval, 
 }
 
 impl McpServerState {
-    pub fn start(
-        app: AppHandle,
-        registry: AppState,
-        workspace_registry: InMemoryAgentWorkspaceRegistry,
-    ) -> Result<Self> {
+    pub fn start(app: AppHandle, registry: AppState) -> Result<Self> {
         let capability_registry = CapabilityRegistry::default();
         let std_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .context("failed to bind MCP server to localhost")?;
@@ -155,7 +146,6 @@ impl McpServerState {
         let router_state = McpRouterState {
             app,
             registry,
-            workspace_registry,
             mcp_state: server_state.clone(),
         };
         let router = Router::new()
@@ -350,13 +340,13 @@ async fn handle_tool_call(
         .await;
     }
     if is_exchange_tool(name) {
-        let service = AgentExchangeService::new(
-            state.workspace_registry.clone(),
-            state.registry.clone(),
-            TauriAgentExchangeEventSink::new(state.app.clone()),
-        );
+        let runtime = state
+            .app
+            .state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
+            .inner()
+            .clone();
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_exchange_tool(&service, principal, name, arguments).await;
+        return handle_exchange_tool(&runtime, principal, name, arguments).await;
     }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);

@@ -33,12 +33,10 @@ use inbound::tauri_commands::{
 };
 use infrastructure::{
     agent_session_registry::AppState,
-    in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry,
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
     json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
     tauri_orchestration_event_sink::TauriOrchestrationEventSink,
 };
-use ports::agent_workspace_registry::AgentWorkspaceRegistry;
 use std::sync::Arc;
 use tauri::{
     Manager, WindowEvent,
@@ -60,7 +58,6 @@ const BUILD_COMMIT_TAG: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_TAG");
 const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
-    let agent_workspace_registry = InMemoryAgentWorkspaceRegistry::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .menu(build_native_menu)
@@ -114,9 +111,6 @@ pub fn run() {
             let mcp_state = McpServerState::start(
                 _app.handle().clone(),
                 _app.state::<AppState>().inner().clone(),
-                _app.state::<InMemoryAgentWorkspaceRegistry>()
-                    .inner()
-                    .clone(),
             )?;
             desktop_bridge.bind_mcp(mcp_state.clone());
             _app.manage(mcp_state);
@@ -152,17 +146,12 @@ pub fn run() {
                 if label.starts_with("session-") {
                     infrastructure::window_manager::forget_session_window(&label);
                     let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
-                    let workspace_registry = window
-                        .state::<InMemoryAgentWorkspaceRegistry>()
-                        .inner()
-                        .clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소, ADR 0005).
+                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
                         infrastructure::desktop_benches::close(&runtime, &label).await;
-                        workspace_registry.remove_window(&label).await;
                         if let Ok(repository) = JsonOrchestrationRepository::from_app(&app) {
                             let _ = OrchestrationService::new(
                                 repository,
@@ -175,7 +164,6 @@ pub fn run() {
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }
         })
-        .manage(agent_workspace_registry)
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             list_projects,
