@@ -21,12 +21,13 @@
 
 ## R1. 저장소 전체 읽기-수정-쓰기 경계 (사용자 점검 사항)
 
-**Decision**: orchestration 저장은 `StorageCoordinator`의 aggregate `orchestration-sessions` 하나로 직렬화한다. 저장소 포트를 `load`/`save`에서 **`read(|sessions| …)`와 `update(|sessions| -> R)`** 로 바꾸고, `update`는 aggregate lock 안에서 파일 전체 load → 클로저 → save를 한 번에 한다. 서비스의 모든 변경은 `update` 하나 안에서 **상태를 검사하고 바꾼다**(예전의 "load → 작업 → save" 사이에 다른 await가 끼는 경로를 모두 없앤다). await가 필요한 다단계 흐름(명령 전달, 알림 전달, 자식 기동)은 단계마다 독립된 `update`이며 단계 사이에 어떤 lock도 쥐지 않는다(R2).
+**Decision**: orchestration 저장은 **저장 단위(파일) 하나당 경계 하나**로 직렬화한다. 포트(`ports/orchestration_repository.rs`)는 계약만 둔다 — `begin()`이 경계를 잡고 전체를 읽은 transaction(`OrchestrationTransaction::sessions()`·`commit()`)을 열고, `snapshot()`이 경계 안의 일관된 사본을 준다. 구현(경계 lock·transaction·파일 입출력)은 `infrastructure/orchestration/store_boundary.rs`(경로별 lock registry, `BoundaryTx`)와 `infrastructure/fs/orchestration_store.rs`(JSON)·`infrastructure/orchestration/memory_store.rs`(메모리)에 있다. 서비스의 모든 변경은 `update` 하나 안에서 **상태를 검사하고 바꾼다**(예전의 "load → 작업 → save" 사이에 다른 await가 끼는 경로를 모두 없앤다). await가 필요한 다단계 흐름(명령 전달, 알림 전달, 자식 기동)은 단계마다 독립된 `update`이며 단계 사이에 어떤 lock도 쥐지 않는다(R2).
 
 - 실행 문맥: `update`·`read`는 동기 파일 I/O·fsync를 하므로 async 코드에서는 항상 `spawn_blocking`으로 부른다(038 handler 규칙). 저장소 lock 안에서 엔진·전달·다른 lock을 부르지 않는다.
-- 손상 복구: 오늘 `json_store::load_json`은 읽기 경로 안에서 `.bak`을 복구한다(`json_store.rs:34-57`). 이 복구가 aggregate lock 안에서 일어나므로 그대로 쓴다 — `with_aggregate`의 "손상 시 recover 후 1회 재시도"는 쓰지 않고 lock만 잡는다(`run_locked`에 해당하는 공개 함수 `with_aggregate_lock`). 백업도 없거나 `validate()`가 실패하면 오늘처럼 오류(`WorkerUnavailable`)를 돌려준다.
+- 손상 복구: 오늘 `json_store::load_json`은 읽기 경로 안에서 `.bak`을 복구한다(`json_store.rs:34-57`). core는 이 함수를 tauri 의존만 빼고 `infrastructure/fs/legacy_json_store.rs`로 복사해 쓰며, 복구는 경계 안에서만 일어난다. 백업도 없거나 `validate()`가 실패하면 오늘처럼 오류(`WorkerUnavailable`)를 돌려준다.
+- **경계 구현 메모(구현 중 결정, 사용자 구조 점검 반영)**: 설계 초안의 `StorageCoordinator` aggregate lock 대신 **정규화한 파일 경로별 프로세스 전역 lock**을 쓴다. 이유: (1) `StorageCoordinator`의 lock은 코디네이터 인스턴스마다 따로라, 같은 파일을 여는 다른 인스턴스(과도기 AW는 command마다 저장소를 새로 연다, 런타임·테스트 인스턴스도 따로 만든다)가 경계를 공유하지 못한다. (2) transaction이 guard를 소유하려면 lock이 `'static`이어야 한다(경로별로 한 번 만들어 유지). (3) orchestration 파일은 `StorageCoordinator`가 다루지 않으므로(`storage_coordinator.rs`에 orchestration 참조 없음) 보호 경계는 이것 **하나뿐**이다 — 두 경계가 겹치지 않는다. 키는 부모 디렉터리를 정규화하고 파일 이름을 붙여, 파일이 아직 없어도 같은 파일의 다른 표기가 같은 lock이 된다(`store_boundary` 단위 테스트). transaction은 `MutexGuard`를 쥐어 `Send`가 아니므로 async 코드가 await 너머로 들고 있으면 컴파일되지 않는다 — 명령 전달·알림 전달의 단계들은 블록으로 감싸 경계를 await 전에 푼다.
 - revision: 작업 영역 revision은 `update` 안에서 그 작업 영역을 바꿀 때마다 +1(오늘 규칙). aggregate revision은 추적하지 않는다(`STORE_AGGREGATES` 밖, ledger 미사용).
-- 검증: cross-workspace 동시성 테스트 — 작업 영역 2개 이상(각각 다른 작업대)에 thread 여러 개로 변경 100회 이상을 동시에 넣고 끝난 뒤 모든 변경(과제 수·보고 수·revision 합)이 남았는지 확인한다. 같은 작업 영역에 화면 명령 + agent 보고를 동시에 넣는 테스트도 둔다. lock을 빼면 실패하는지(회귀 검출) 확인한다.
+- 검증(`crates/workbench-core/tests/orchestration_concurrency.rs`): 작업 영역 3개에 thread 8개(스레드마다 **별도 저장소 인스턴스**)로 변경 200회 → 모두 보존, 같은 작업 영역 한 인스턴스 공유 200회 → 보존, 같은 흐름을 경계 없이(`update_unlocked_for_test`) 돌리면 변경을 잃는다(회귀 검출). 서비스 수준의 화면 명령 + agent 보고 동시 시험은 US1·US2 흐름 테스트에서 추가한다.
 
 **Rationale**: 파일이 하나인 한 작업 영역별 lock은 다른 작업 영역의 저장이 오래된 사본으로 전체를 덮어쓰는 것을 막지 못한다. 038이 같은 문제를 aggregate lock으로 풀었다. 작업 영역마다 파일을 나누는 방식은 저장 형식 변경(이전 빌드 호환 깨짐)이라 피한다.
 

@@ -12,7 +12,7 @@ use crate::{
     },
     ports::{
         agent_worker::{AgentWorkerPort, WorkerBinding, WorkerCommandOutcome},
-        orchestration_repository::OrchestrationRepository,
+        orchestration_repository::{OrchestrationRepository, OrchestrationTransaction},
     },
 };
 
@@ -50,99 +50,110 @@ where
     ) -> Result<TaskCommand, OrchestrationError> {
         validate_request(&request)?;
         let fingerprint = full_payload_fingerprint(&request)?;
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        // 세 단계(기록 → 전달 → 결과)는 각자 저장소 경계 블록 안에서만 쥐고, worker 호출 동안은 쥐지 않는다
+        // (research R2·R9).
+        let command = {
+            let mut tx = self.repository.begin()?;
+            let sessions = tx.sessions();
+            let session = session_for_window_mut(sessions, window_label)?;
 
-        if let Some(existing) = session
-            .commands
-            .iter()
-            .find(|command| command.request_id == request.request_id)
-        {
-            return if existing.payload_fingerprint == fingerprint {
-                Ok(existing.clone())
-            } else {
-                Err(duplicate_conflict())
-            };
-        }
+            if let Some(existing) = session
+                .commands
+                .iter()
+                .find(|command| command.request_id == request.request_id)
+            {
+                return if existing.payload_fingerprint == fingerprint {
+                    Ok(existing.clone())
+                } else {
+                    Err(duplicate_conflict())
+                };
+            }
 
-        let task_index = session
-            .tasks
-            .iter()
-            .position(|task| task.id == request.task_id)
-            .ok_or_else(|| not_found("Task"))?;
-        if request
-            .expected_task_revision
-            .is_some_and(|expected| session.tasks[task_index].revision != expected)
-        {
-            return Err(OrchestrationError::new(
-                OrchestrationErrorCode::RevisionConflict,
-                "The task revision is stale.",
-            )
-            .retryable());
-        }
-        if session.tasks[task_index].status.is_terminal() {
-            return Err(OrchestrationError::new(
-                OrchestrationErrorCode::InvalidTransition,
-                "A terminal task cannot receive a runtime command.",
-            ));
-        }
-        validate_input_report(session, task_index, &request)?;
-
-        let node_id = session.tasks[task_index]
-            .assigned_node_id
-            .clone()
-            .ok_or_else(|| not_found("Assigned child node"))?;
-        let node_index = session
-            .nodes
-            .iter()
-            .position(|node| node.id == node_id)
-            .ok_or_else(|| not_found("Assigned child node"))?;
-        let run_id = session.nodes[node_index]
-            .current_run_id
-            .clone()
-            .ok_or_else(|| {
-                OrchestrationError::new(
-                    OrchestrationErrorCode::RuntimeLost,
-                    "The assigned child has no active run.",
+            let task_index = session
+                .tasks
+                .iter()
+                .position(|task| task.id == request.task_id)
+                .ok_or_else(|| not_found("Task"))?;
+            if request
+                .expected_task_revision
+                .is_some_and(|expected| session.tasks[task_index].revision != expected)
+            {
+                return Err(OrchestrationError::new(
+                    OrchestrationErrorCode::RevisionConflict,
+                    "The task revision is stale.",
                 )
-                .retryable()
-            })?;
-        let now = now();
-        let command = TaskCommand {
-            id: Uuid::new_v4().to_string(),
-            request_id: request.request_id,
-            payload_fingerprint: fingerprint,
-            task_id: request.task_id,
-            node_id,
-            run_id,
-            attempt: session.tasks[task_index].attempt,
-            kind: request.kind,
-            message: request.message,
-            input_report_id: request.input_report_id,
-            delivery: request.delivery,
-            source: request.source,
-            status: TaskCommandStatus::Pending,
-            failure: None,
-            created_at: now.clone(),
-            updated_at: now,
-        };
-        command.assert_current_binding(&session.tasks[task_index], &session.nodes[node_index])?;
-        session.commands.push(command.clone());
-        touch(session);
-        self.repository.save_sessions(&sessions)?;
+                .retryable());
+            }
+            if session.tasks[task_index].status.is_terminal() {
+                return Err(OrchestrationError::new(
+                    OrchestrationErrorCode::InvalidTransition,
+                    "A terminal task cannot receive a runtime command.",
+                ));
+            }
+            validate_input_report(session, task_index, &request)?;
 
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
-        transition_command(session, &command.id, TaskCommandStatus::Dispatching, None)?;
-        touch(session);
-        let binding = WorkerBinding {
-            workspace_id: session.id.clone(),
-            window_label: window_label.into(),
-            node_id: command.node_id.clone(),
-            task_id: command.task_id.clone(),
-            run_id: command.run_id.clone(),
+            let node_id = session.tasks[task_index]
+                .assigned_node_id
+                .clone()
+                .ok_or_else(|| not_found("Assigned child node"))?;
+            let node_index = session
+                .nodes
+                .iter()
+                .position(|node| node.id == node_id)
+                .ok_or_else(|| not_found("Assigned child node"))?;
+            let run_id = session.nodes[node_index]
+                .current_run_id
+                .clone()
+                .ok_or_else(|| {
+                    OrchestrationError::new(
+                        OrchestrationErrorCode::RuntimeLost,
+                        "The assigned child has no active run.",
+                    )
+                    .retryable()
+                })?;
+            let now = now();
+            let command = TaskCommand {
+                id: Uuid::new_v4().to_string(),
+                request_id: request.request_id,
+                payload_fingerprint: fingerprint,
+                task_id: request.task_id,
+                node_id,
+                run_id,
+                attempt: session.tasks[task_index].attempt,
+                kind: request.kind,
+                message: request.message,
+                input_report_id: request.input_report_id,
+                delivery: request.delivery,
+                source: request.source,
+                status: TaskCommandStatus::Pending,
+                failure: None,
+                created_at: now.clone(),
+                updated_at: now,
+            };
+            command
+                .assert_current_binding(&session.tasks[task_index], &session.nodes[node_index])?;
+            session.commands.push(command.clone());
+            touch(session);
+            tx.commit()?;
+            command
         };
-        self.repository.save_sessions(&sessions)?;
+
+        let binding = {
+            let mut tx = self.repository.begin()?;
+            let sessions = tx.sessions();
+            let session = session_for_window_mut(sessions, window_label)?;
+            transition_command(session, &command.id, TaskCommandStatus::Dispatching, None)?;
+            touch(session);
+            let binding = WorkerBinding {
+                workspace_id: session.id.clone(),
+                window_label: window_label.into(),
+                node_id: command.node_id.clone(),
+                task_id: command.task_id.clone(),
+                run_id: command.run_id.clone(),
+            };
+            tx.commit()?;
+            binding
+        };
         let delivery = match command.kind {
             TaskCommandKind::Message | TaskCommandKind::InputResponse => {
                 self.worker
@@ -157,8 +168,9 @@ where
             TaskCommandKind::Cancel => self.worker.cancel_worker(&binding).await,
         };
 
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let outcome = match delivery {
             Ok(receipt) if receipt.accepted => match accept_command(session, &command.id) {
                 Ok(()) => WorkerCommandOutcome {
@@ -203,7 +215,7 @@ where
             .find(|candidate| candidate.id == command.id)
             .cloned()
             .ok_or_else(|| not_found("Task command"))?;
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         debug_assert_eq!(
             command.status == TaskCommandStatus::Accepted,
             outcome.accepted
@@ -216,8 +228,9 @@ where
         &self,
         window_label: &str,
     ) -> Result<Vec<TaskCommand>, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let mut recovered = Vec::new();
         let mut changed = false;
         for command in &mut session.commands {
@@ -242,7 +255,7 @@ where
         }
         if changed {
             touch(session);
-            self.repository.save_sessions(&sessions)?;
+            tx.commit()?;
         }
         Ok(recovered)
     }
@@ -430,22 +443,7 @@ mod tests {
         ports::agent_worker::{StartWorkerOutcome, WorkerAssignment},
     };
 
-    #[derive(Clone)]
-    struct MemoryRepository(Arc<Mutex<Vec<OrchestrationSession>>>);
-
-    impl OrchestrationRepository for MemoryRepository {
-        fn load_sessions(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn save_sessions(
-            &self,
-            sessions: &[OrchestrationSession],
-        ) -> Result<(), OrchestrationError> {
-            *self.0.lock().unwrap() = sessions.to_vec();
-            Ok(())
-        }
-    }
+    use crate::infrastructure::orchestration::memory_store::InMemoryOrchestrationRepository as MemoryRepository;
 
     #[derive(Clone)]
     struct FakeWorker {
@@ -552,7 +550,7 @@ mod tests {
                 created_at: now,
             });
         }
-        MemoryRepository(Arc::new(Mutex::new(vec![session])))
+        MemoryRepository::from_sessions(vec![session])
     }
 
     fn message_request(message: &str) -> DeliverTaskCommandRequest {
@@ -627,7 +625,7 @@ mod tests {
         assert_eq!(command.status, TaskCommandStatus::Failed);
         assert_eq!(command.message.as_deref(), Some("Use read-only"));
         assert_eq!(
-            repository.load_sessions().unwrap()[0].tasks[0].status,
+            repository.snapshot().unwrap()[0].tasks[0].status,
             TaskStatus::InputRequired
         );
     }
@@ -694,9 +692,10 @@ mod tests {
             &self,
             _binding: &WorkerBinding,
         ) -> Result<WorkerCommandOutcome, OrchestrationError> {
-            let mut sessions = self.repository.load_sessions()?;
+            let mut tx = self.repository.begin()?;
+            let sessions = tx.sessions();
             sessions[0].tasks[0].status = TaskStatus::Completed;
-            self.repository.save_sessions(&sessions)?;
+            tx.commit()?;
             Ok(WorkerCommandOutcome {
                 accepted: true,
                 reason: None,
@@ -735,7 +734,7 @@ mod tests {
             .unwrap();
         assert_eq!(command.status, TaskCommandStatus::Accepted);
         assert_eq!(
-            repository.load_sessions().unwrap()[0].tasks[0].status,
+            repository.snapshot().unwrap()[0].tasks[0].status,
             TaskStatus::Completed
         );
     }

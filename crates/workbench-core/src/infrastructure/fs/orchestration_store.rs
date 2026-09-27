@@ -1,6 +1,6 @@
 //! Atomic JSON implementation of the orchestration repository.
 
-use std::{collections::HashSet, path::PathBuf};
+use std::{collections::HashSet, path::PathBuf, sync::Mutex};
 
 use crate::{
     domain::agent_orchestration::{
@@ -10,6 +10,7 @@ use crate::{
     infrastructure::{
         data_paths::DataPaths,
         fs::legacy_json_store::{load_json, save_json},
+        orchestration::store_boundary::{self, BoundaryTx, SessionStorage},
     },
     ports::orchestration_repository::OrchestrationRepository,
 };
@@ -31,13 +32,24 @@ impl JsonOrchestrationRepository {
         Self { store_path }
     }
 
+    /// 회귀 검출 전용: 저장소 lock 없이 읽기-수정-쓰기를 한다(`tests/orchestration_concurrency.rs`).
+    #[doc(hidden)]
+    pub fn update_unlocked_for_test(
+        &self,
+        f: impl FnOnce(&mut Vec<OrchestrationSession>) -> Result<(), OrchestrationError>,
+    ) -> Result<(), OrchestrationError> {
+        let mut sessions = self.read_all()?;
+        f(&mut sessions)?;
+        self.write_all(&sessions)
+    }
+
     fn persistence_error(error: String) -> OrchestrationError {
         OrchestrationError::new(OrchestrationErrorCode::WorkerUnavailable, error).retryable()
     }
 
     /// Returns durable work that must be reconciled after a process restart.
     pub fn pending_outbox(&self) -> Result<Vec<PendingOutboxEntry>, OrchestrationError> {
-        self.load_sessions().map(|sessions| {
+        self.snapshot().map(|sessions| {
             sessions
                 .into_iter()
                 .map(|session| {
@@ -71,8 +83,8 @@ impl JsonOrchestrationRepository {
     }
 }
 
-impl OrchestrationRepository for JsonOrchestrationRepository {
-    fn load_sessions(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
+impl SessionStorage for JsonOrchestrationRepository {
+    fn read_all(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
         let mut sessions: Vec<OrchestrationSession> =
             load_json(&self.store_path, STORE_LABEL).map_err(Self::persistence_error)?;
         for session in &mut sessions {
@@ -94,7 +106,7 @@ impl OrchestrationRepository for JsonOrchestrationRepository {
         Ok(sessions)
     }
 
-    fn save_sessions(&self, sessions: &[OrchestrationSession]) -> Result<(), OrchestrationError> {
+    fn write_all(&self, sessions: &[OrchestrationSession]) -> Result<(), OrchestrationError> {
         let mut ids = HashSet::new();
         for session in sessions {
             session.validate()?;
@@ -106,6 +118,22 @@ impl OrchestrationRepository for JsonOrchestrationRepository {
             }
         }
         save_json(&self.store_path, STORE_LABEL, sessions).map_err(Self::persistence_error)
+    }
+
+    fn boundary(&self) -> &'static Mutex<()> {
+        store_boundary::boundary_for_path(&self.store_path)
+    }
+}
+
+impl OrchestrationRepository for JsonOrchestrationRepository {
+    type Tx<'a> = BoundaryTx<'a, Self>;
+
+    fn begin(&self) -> Result<Self::Tx<'_>, OrchestrationError> {
+        store_boundary::begin(self)
+    }
+
+    fn snapshot(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
+        store_boundary::snapshot(self)
     }
 }
 
@@ -130,12 +158,12 @@ mod tests {
         let repository = JsonOrchestrationRepository::from_path(path.clone());
         let mut session = OrchestrationSession::new("workspace-1", "/repo", "window-1", "now");
 
-        repository.save_sessions(&[session.clone()]).unwrap();
+        repository.write_all(&[session.clone()]).unwrap();
         session.revision = 1;
-        repository.save_sessions(&[session]).unwrap();
+        repository.write_all(&[session]).unwrap();
         fs::write(&path, "{ broken").unwrap();
 
-        let recovered = repository.load_sessions().unwrap();
+        let recovered = repository.snapshot().unwrap();
         assert_eq!(recovered.len(), 1);
         assert_eq!(recovered[0].revision, 0);
     }
@@ -147,7 +175,7 @@ mod tests {
         let session = OrchestrationSession::new("workspace-1", "/repo", "window-1", "now");
 
         let error = repository
-            .save_sessions(&[session.clone(), session])
+            .write_all(&[session.clone(), session])
             .unwrap_err();
         assert_eq!(error.code, OrchestrationErrorCode::DuplicateConflict);
     }
@@ -193,7 +221,7 @@ mod tests {
         )
         .unwrap();
 
-        let sessions = repository.load_sessions().unwrap();
+        let sessions = repository.snapshot().unwrap();
         assert_eq!(sessions[0].schema_version, ORCHESTRATION_SCHEMA_VERSION);
         assert!(sessions[0].commands.is_empty());
         assert!(sessions[0].coordinator_notifications.is_empty());
@@ -222,9 +250,9 @@ mod tests {
                 created_at: "now".into(),
                 updated_at: "now".into(),
             });
-        repository.save_sessions(&[session]).unwrap();
+        repository.write_all(&[session]).unwrap();
 
-        let loaded = repository.load_sessions().unwrap();
+        let loaded = repository.snapshot().unwrap();
         let notification = &loaded[0].coordinator_notifications[0];
 
         assert_eq!(notification.status, CoordinatorNotificationStatus::Pending);

@@ -7,8 +7,9 @@ use crate::{
         OrchestrationSession, MAIN_AGENT_NODE_ID,
     },
     ports::{
-        agent_worker::WorkerBinding, coordinator_notification::CoordinatorNotificationPort,
-        orchestration_repository::OrchestrationRepository,
+        agent_worker::WorkerBinding,
+        coordinator_notification::CoordinatorNotificationPort,
+        orchestration_repository::{OrchestrationRepository, OrchestrationTransaction},
     },
 };
 
@@ -36,92 +37,102 @@ where
         let mut delivered = Vec::new();
         let mut reactivate_failed = true;
         loop {
-            let mut sessions = self.repository.load_sessions()?;
-            let session = session_for_window_mut(&mut sessions, window_label)?;
-            supersede_stale_notifications(session);
-            if reactivate_failed {
-                for notification in &mut session.coordinator_notifications {
-                    if notification.status == CoordinatorNotificationStatus::Failed
-                        && notification
-                            .failure
-                            .as_ref()
-                            .is_some_and(|failure| failure.retryable)
-                    {
-                        notification.transition(CoordinatorNotificationStatus::Pending, now())?;
+            // 저장소 경계는 각 단계 블록 안에서만 쥔다 — Main 턴을 기다리는 동안 쥐지 않는다(research R2·R9).
+            let (notification_id, binding, snapshot) = {
+                let mut tx = self.repository.begin()?;
+                let sessions = tx.sessions();
+                let session = session_for_window_mut(sessions, window_label)?;
+                supersede_stale_notifications(session);
+                if reactivate_failed {
+                    for notification in &mut session.coordinator_notifications {
+                        if notification.status == CoordinatorNotificationStatus::Failed
+                            && notification
+                                .failure
+                                .as_ref()
+                                .is_some_and(|failure| failure.retryable)
+                        {
+                            notification
+                                .transition(CoordinatorNotificationStatus::Pending, now())?;
+                        }
                     }
+                    reactivate_failed = false;
                 }
-                reactivate_failed = false;
-            }
-            let Some((notification_id, binding)) = next_delivery(session, window_label)? else {
-                self.repository.save_sessions(&sessions)?;
-                break;
-            };
-            {
-                let notification = session
+                let Some((notification_id, binding)) = next_delivery(session, window_label)? else {
+                    tx.commit()?;
+                    break;
+                };
+                {
+                    let notification = session
+                        .coordinator_notifications
+                        .iter_mut()
+                        .find(|notification| notification.id == notification_id)
+                        .ok_or_else(|| not_found("Coordinator notification"))?;
+                    notification.attempt_count += 1;
+                    notification.transition(CoordinatorNotificationStatus::Dispatching, now())?;
+                }
+                touch(session);
+                let snapshot = session
                     .coordinator_notifications
-                    .iter_mut()
+                    .iter()
                     .find(|notification| notification.id == notification_id)
+                    .cloned()
                     .ok_or_else(|| not_found("Coordinator notification"))?;
-                notification.attempt_count += 1;
-                notification.transition(CoordinatorNotificationStatus::Dispatching, now())?;
-            }
-            touch(session);
-            let snapshot = session
-                .coordinator_notifications
-                .iter()
-                .find(|notification| notification.id == notification_id)
-                .cloned()
-                .ok_or_else(|| not_found("Coordinator notification"))?;
-            self.repository.save_sessions(&sessions)?;
+                tx.commit()?;
+                (notification_id, binding, snapshot)
+            };
             let receipt = self.notifier.notify_coordinator(&binding, &snapshot).await;
 
-            let mut sessions = self.repository.load_sessions()?;
-            let session = session_for_window_mut(&mut sessions, window_label)?;
             let notification = {
-                let notification = session
-                    .coordinator_notifications
-                    .iter_mut()
-                    .find(|candidate| candidate.id == notification_id)
-                    .ok_or_else(|| not_found("Coordinator notification"))?;
-                if notification.status != CoordinatorNotificationStatus::Processed {
-                    match receipt {
-                        Ok(receipt) if receipt.accepted => {
-                            notification.failure = None;
-                            let status = if notification.collected_at.is_some() {
-                                CoordinatorNotificationStatus::Processed
-                            } else {
-                                CoordinatorNotificationStatus::Delivered
-                            };
-                            notification.transition(status, now())?;
-                        }
-                        Ok(receipt) => {
-                            // The Main run exists but declined delivery, so this is the
-                            // "Main 사용 중" case rather than a missing runtime (FR-022).
-                            notification.failure = Some(CommandFailure {
+                let mut tx = self.repository.begin()?;
+                let sessions = tx.sessions();
+                let session = session_for_window_mut(sessions, window_label)?;
+                let notification = {
+                    let notification = session
+                        .coordinator_notifications
+                        .iter_mut()
+                        .find(|candidate| candidate.id == notification_id)
+                        .ok_or_else(|| not_found("Coordinator notification"))?;
+                    if notification.status != CoordinatorNotificationStatus::Processed {
+                        match receipt {
+                            Ok(receipt) if receipt.accepted => {
+                                notification.failure = None;
+                                let status = if notification.collected_at.is_some() {
+                                    CoordinatorNotificationStatus::Processed
+                                } else {
+                                    CoordinatorNotificationStatus::Delivered
+                                };
+                                notification.transition(status, now())?;
+                            }
+                            Ok(receipt) => {
+                                // The Main run exists but declined delivery, so this is the
+                                // "Main 사용 중" case rather than a missing runtime (FR-022).
+                                notification.failure = Some(CommandFailure {
                                 code: OrchestrationErrorCode::CoordinatorBusy,
                                 message: receipt.reason.unwrap_or_else(|| {
                                     "Main이 보고 통지를 아직 받을 수 없습니다. 잠시 뒤 다시 전달합니다.".into()
                                 }),
                                 retryable: true,
                             });
-                            notification
-                                .transition(CoordinatorNotificationStatus::Failed, now())?;
-                        }
-                        Err(error) => {
-                            notification.failure = Some(CommandFailure {
-                                code: error.code,
-                                message: error.message,
-                                retryable: error.retryable,
-                            });
-                            notification
-                                .transition(CoordinatorNotificationStatus::Failed, now())?;
+                                notification
+                                    .transition(CoordinatorNotificationStatus::Failed, now())?;
+                            }
+                            Err(error) => {
+                                notification.failure = Some(CommandFailure {
+                                    code: error.code,
+                                    message: error.message,
+                                    retryable: error.retryable,
+                                });
+                                notification
+                                    .transition(CoordinatorNotificationStatus::Failed, now())?;
+                            }
                         }
                     }
-                }
-                notification.clone()
+                    notification.clone()
+                };
+                touch(session);
+                tx.commit()?;
+                notification
             };
-            touch(session);
-            self.repository.save_sessions(&sessions)?;
             delivered.push(notification);
         }
         Ok(delivered)
@@ -131,8 +142,9 @@ where
         &self,
         window_label: &str,
     ) -> Result<Vec<CoordinatorNotification>, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let mut recovered = Vec::new();
         for notification in &mut session.coordinator_notifications {
             if notification.status == CoordinatorNotificationStatus::Dispatching {
@@ -148,7 +160,7 @@ where
         }
         if !recovered.is_empty() {
             touch(session);
-            self.repository.save_sessions(&sessions)?;
+            tx.commit()?;
         }
         Ok(recovered)
     }
@@ -252,22 +264,7 @@ mod tests {
         ports::coordinator_notification::CoordinatorNotificationReceipt,
     };
 
-    #[derive(Clone)]
-    struct MemoryRepository(Arc<Mutex<Vec<OrchestrationSession>>>);
-
-    impl OrchestrationRepository for MemoryRepository {
-        fn load_sessions(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn save_sessions(
-            &self,
-            sessions: &[OrchestrationSession],
-        ) -> Result<(), OrchestrationError> {
-            *self.0.lock().unwrap() = sessions.to_vec();
-            Ok(())
-        }
-    }
+    use crate::infrastructure::orchestration::memory_store::InMemoryOrchestrationRepository as MemoryRepository;
 
     #[derive(Clone)]
     struct FakeNotifier(Arc<Mutex<Vec<String>>>);
@@ -311,16 +308,16 @@ mod tests {
             _binding: &WorkerBinding,
             notification: &CoordinatorNotification,
         ) -> Result<CoordinatorNotificationReceipt, OrchestrationError> {
-            let mut sessions = self.0.load_sessions()?;
+            let mut tx = self.0.begin()?;
             let collected_at = now();
-            let notification = sessions[0]
+            let notification = tx.sessions()[0]
                 .coordinator_notifications
                 .iter_mut()
                 .find(|candidate| candidate.id == notification.id)
                 .unwrap();
             notification.collected_at = Some(collected_at.clone());
             notification.updated_at = collected_at;
-            self.0.save_sessions(&sessions)?;
+            tx.commit()?;
             Ok(CoordinatorNotificationReceipt {
                 accepted: true,
                 reason: None,
@@ -364,7 +361,7 @@ mod tests {
                 created_at: now.clone(),
                 updated_at: now,
             });
-        MemoryRepository(Arc::new(Mutex::new(vec![session])))
+        MemoryRepository::from_sessions(vec![session])
     }
 
     #[tokio::test]
@@ -400,7 +397,7 @@ mod tests {
             .unwrap()
             .is_empty());
         assert_eq!(
-            repository.load_sessions().unwrap()[0].coordinator_notifications[0].status,
+            repository.snapshot().unwrap()[0].coordinator_notifications[0].status,
             CoordinatorNotificationStatus::Pending
         );
     }
@@ -441,7 +438,7 @@ mod tests {
             CoordinatorNotificationStatus::Processed
         );
         assert_eq!(
-            repository.load_sessions().unwrap()[0].coordinator_notifications[0].status,
+            repository.snapshot().unwrap()[0].coordinator_notifications[0].status,
             CoordinatorNotificationStatus::Processed
         );
     }

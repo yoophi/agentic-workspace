@@ -27,19 +27,7 @@ use tokio::{
     process::Command,
 };
 
-#[derive(Clone, Default)]
-struct MemoryRepository(Arc<Mutex<Vec<OrchestrationSession>>>);
-
-impl OrchestrationRepository for MemoryRepository {
-    fn load_sessions(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
-        Ok(self.0.lock().unwrap().clone())
-    }
-
-    fn save_sessions(&self, sessions: &[OrchestrationSession]) -> Result<(), OrchestrationError> {
-        *self.0.lock().unwrap() = sessions.to_vec();
-        Ok(())
-    }
-}
+use workbench_core::infrastructure::orchestration::memory_store::InMemoryOrchestrationRepository as MemoryRepository;
 
 #[derive(Clone, Default)]
 struct NoopSink;

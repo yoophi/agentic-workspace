@@ -15,7 +15,7 @@ use crate::{
     },
     ports::{
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
-        orchestration_repository::OrchestrationRepository,
+        orchestration_repository::{OrchestrationRepository, OrchestrationTransaction},
     },
 };
 
@@ -155,7 +155,8 @@ where
         window_label: &str,
         resume_workspace_id: Option<&str>,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
         if let Some(existing) = sessions
             .iter()
             .find(|session| session.bound_window_label.as_deref() == Some(window_label))
@@ -201,7 +202,7 @@ where
             session
         };
 
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&session, "bootstrap");
         Ok(session)
     }
@@ -212,7 +213,7 @@ where
     ) -> Result<Option<OrchestrationSession>, OrchestrationError> {
         Ok(self
             .repository
-            .load_sessions()?
+            .snapshot()?
             .into_iter()
             .find(|session| session.bound_window_label.as_deref() == Some(window_label)))
     }
@@ -223,7 +224,7 @@ where
     ) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
         Ok(self
             .repository
-            .load_sessions()?
+            .snapshot()?
             .into_iter()
             .filter(|session| session.worktree_path == worktree_path)
             .collect())
@@ -252,7 +253,8 @@ where
         &self,
         window_label: &str,
     ) -> Result<Option<OrchestrationSession>, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
         let Some(session) = sessions
             .iter_mut()
             .find(|session| session.bound_window_label.as_deref() == Some(window_label))
@@ -288,7 +290,7 @@ where
         session.revision += 1;
         session.updated_at = now();
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         Ok(Some(snapshot))
     }
 
@@ -297,7 +299,8 @@ where
         window_label: &str,
         request: BindMainRunRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
         let session = sessions
             .iter_mut()
             .find(|session| session.bound_window_label.as_deref() == Some(window_label))
@@ -434,7 +437,7 @@ where
             created_at: now,
         });
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "mainRunBinding");
         Ok(snapshot)
     }
@@ -445,8 +448,9 @@ where
         generation_id: &str,
         request: CreateChildTaskRequest,
     ) -> Result<CreateChildTaskOutcome, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         if session.active_coordinator_generation_id.as_deref() != Some(generation_id) {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::Unauthorized,
@@ -610,7 +614,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "childTaskCreated");
         Ok(CreateChildTaskOutcome {
             task_id,
@@ -625,8 +629,9 @@ where
         window_label: &str,
         request: DelegateGoalRequest,
     ) -> Result<DelegateGoalOutcome, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let generation_id = session
             .active_coordinator_generation_id
             .clone()
@@ -739,7 +744,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "goalDelegated");
         Ok(DelegateGoalOutcome {
             root_task_id,
@@ -755,8 +760,9 @@ where
         panel_id: &str,
         title: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         if let Some(existing) = session.nodes.iter().find(|node| node.id == panel_id) {
             if existing.kind == crate::domain::agent_orchestration::AgentNodeKind::Child {
                 return Ok(session.clone());
@@ -790,7 +796,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "manualChildAdopted");
         Ok(snapshot)
     }
@@ -802,8 +808,9 @@ where
         node_id: &str,
         run_id: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let now = now();
         let task = session
             .tasks
@@ -834,7 +841,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "childRunBound");
         Ok(snapshot)
     }
@@ -844,8 +851,9 @@ where
         window_label: &str,
         request: ReportTaskRequest,
     ) -> Result<TaskReport, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         if let Some(existing) = session
             .reports
             .iter()
@@ -1003,7 +1011,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "taskReport");
         Ok(report)
     }
@@ -1032,8 +1040,9 @@ where
         generation_id: &str,
         task_ids: &[String],
     ) -> Result<Vec<TaskReport>, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         if session.active_coordinator_generation_id.as_deref() != Some(generation_id) {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::Unauthorized,
@@ -1093,7 +1102,7 @@ where
             session.revision += 1;
             session.updated_at = collected_at;
             let snapshot = session.clone();
-            self.repository.save_sessions(&sessions)?;
+            tx.commit()?;
             self.emit_workspace_changed(&snapshot, "coordinatorResultsCollected");
         }
         Ok(reports)
@@ -1104,8 +1113,9 @@ where
         window_label: &str,
         request: SetPresentationRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         if session.revision != request.expected_revision {
             return Err(revision_conflict());
         }
@@ -1155,7 +1165,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "presentationChanged");
         Ok(snapshot)
     }
@@ -1165,8 +1175,9 @@ where
         window_label: &str,
         request: DispatchPromptRequest,
     ) -> Result<PromptDispatch, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let message = request.message.trim();
         if message.is_empty()
             || message.len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
@@ -1264,7 +1275,7 @@ where
         session.revision += 1;
         session.updated_at = now;
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "promptDispatched");
         Ok(dispatch)
     }
@@ -1277,8 +1288,9 @@ where
         status: PromptDispatchTargetStatus,
         failure: Option<(String, String)>,
     ) -> Result<PromptDispatch, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let dispatch = session
             .dispatches
             .iter_mut()
@@ -1306,7 +1318,7 @@ where
         session.revision += 1;
         session.updated_at = now();
         let snapshot = session.clone();
-        self.repository.save_sessions(&sessions)?;
+        tx.commit()?;
         self.emit_workspace_changed(&snapshot, "promptDispatchTargetUpdated");
         Ok(result)
     }
@@ -1393,8 +1405,9 @@ where
                 "A target child node is required.",
             )
         })?;
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         ensure_revision(session, request.expected_revision)?;
         let task_index = session
             .tasks
@@ -1438,13 +1451,7 @@ where
         }
         task.attempt += 1;
         task.failure = None;
-        persist_mutation(
-            &self.repository,
-            &self.event_sink,
-            &mut sessions,
-            window_label,
-            "taskReassigned",
-        )
+        persist_mutation(tx, &self.event_sink, window_label, "taskReassigned")
     }
 
     pub fn handoff_coordinator(
@@ -1458,8 +1465,9 @@ where
                 "Coordinator handoff requires explicit confirmation.",
             ));
         }
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         ensure_revision(session, request.expected_revision)?;
         let previous_id = session
             .active_coordinator_generation_id
@@ -1505,13 +1513,7 @@ where
             main.current_run_id = Some(request.successor_run_id);
             main.execution_status = ExecutionStatus::Active;
         }
-        persist_mutation(
-            &self.repository,
-            &self.event_sink,
-            &mut sessions,
-            window_label,
-            "coordinatorHandoff",
-        )
+        persist_mutation(tx, &self.event_sink, window_label, "coordinatorHandoff")
     }
 
     pub fn reconcile_runtime(
@@ -1519,16 +1521,11 @@ where
         window_label: &str,
         live_run_ids: &[String],
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         reconcile_session_runtime(session, live_run_ids);
-        persist_mutation(
-            &self.repository,
-            &self.event_sink,
-            &mut sessions,
-            window_label,
-            "runtimeReconciled",
-        )
+        persist_mutation(tx, &self.event_sink, window_label, "runtimeReconciled")
     }
 
     pub fn fail_task_for_runtime(
@@ -1539,8 +1536,9 @@ where
         code: OrchestrationErrorCode,
         message: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         let now = now();
         let task = session
             .tasks
@@ -1567,13 +1565,7 @@ where
             node.presentation_status = PresentationStatus::AttentionRequired;
             node.last_activity_at = Some(now);
         }
-        persist_mutation(
-            &self.repository,
-            &self.event_sink,
-            &mut sessions,
-            window_label,
-            "runtimePolicyViolation",
-        )
+        persist_mutation(tx, &self.event_sink, window_label, "runtimePolicyViolation")
     }
 
     fn mutate_task<F>(
@@ -1586,8 +1578,9 @@ where
     where
         F: FnOnce(&mut OrchestrationTask, &mut AgentNode, &str) -> Result<(), OrchestrationError>,
     {
-        let mut sessions = self.repository.load_sessions()?;
-        let session = session_for_window_mut(&mut sessions, window_label)?;
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_window_mut(sessions, window_label)?;
         ensure_revision(session, request.expected_revision)?;
         if let Some(record) = session.idempotency_records.iter().find(|record| {
             record.actor_key == window_label
@@ -1627,13 +1620,7 @@ where
             result_ref: request.task_id.clone(),
             created_at: now,
         });
-        persist_mutation(
-            &self.repository,
-            &self.event_sink,
-            &mut sessions,
-            window_label,
-            operation,
-        )
+        persist_mutation(tx, &self.event_sink, window_label, operation)
     }
 
     fn emit_workspace_changed(&self, session: &OrchestrationSession, reason: &str) {
@@ -1759,22 +1746,21 @@ fn not_found(subject: &str) -> OrchestrationError {
     )
 }
 
-fn persist_mutation<R, E>(
-    repository: &R,
+fn persist_mutation<T, E>(
+    mut tx: T,
     event_sink: &E,
-    sessions: &mut [OrchestrationSession],
     window_label: &str,
     reason: &str,
 ) -> Result<OrchestrationSession, OrchestrationError>
 where
-    R: OrchestrationRepository,
+    T: OrchestrationTransaction,
     E: OrchestrationEventSink,
 {
-    let session = session_for_window_mut(sessions, window_label)?;
+    let session = session_for_window_mut(tx.sessions(), window_label)?;
     session.revision += 1;
     session.updated_at = now();
     let snapshot = session.clone();
-    repository.save_sessions(sessions)?;
+    tx.commit()?;
     let _ = event_sink.emit(
         window_label,
         OrchestrationEvent {
@@ -1802,28 +1788,10 @@ mod tests {
             ArtifactKind, OrchestrationError, OrchestrationErrorCode, OrchestrationSession,
             TaskReportType, TaskStatus, MAIN_AGENT_NODE_ID,
         },
-        ports::{
-            orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
-            orchestration_repository::OrchestrationRepository,
-        },
+        ports::orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
     };
 
-    #[derive(Clone, Default)]
-    struct MemoryRepository(Arc<Mutex<Vec<OrchestrationSession>>>);
-
-    impl OrchestrationRepository for MemoryRepository {
-        fn load_sessions(&self) -> Result<Vec<OrchestrationSession>, OrchestrationError> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn save_sessions(
-            &self,
-            sessions: &[OrchestrationSession],
-        ) -> Result<(), OrchestrationError> {
-            *self.0.lock().unwrap() = sessions.to_vec();
-            Ok(())
-        }
-    }
+    use crate::infrastructure::orchestration::memory_store::InMemoryOrchestrationRepository as MemoryRepository;
 
     #[derive(Clone, Default)]
     struct RecordingSink(Arc<Mutex<Vec<(String, OrchestrationEvent)>>>);

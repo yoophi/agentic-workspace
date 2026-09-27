@@ -49,7 +49,7 @@ stateDiagram-v2
 |---|---|---|---|
 | 작업대 입장권(040) | 작업대 | read guard | 묶기(찾기·만들기·표 삽입), 자식 기동(엔진 `start` 반환까지) |
 | binding mutex | 묶임 표 전체 | 동기 mutex | 묶기·풀기의 `update` + 표 변경(await 없음) |
-| 저장소 aggregate lock | `orchestration-sessions` 전체 | 동기 mutex(`StorageCoordinator`, `spawn_blocking`) | load → 수정 → save 한 번(await 없음) |
+| 저장소 경계 | 저장 단위(파일) 전체 — 정규화한 경로별 프로세스 전역 lock(`infrastructure/orchestration/store_boundary.rs`) | 동기 mutex, transaction이 guard 소유(`Send` 아님), async 문맥에서는 `spawn_blocking` | `begin` → 수정 → `commit` 한 번(await 없음) |
 
 - 순서는 위에서 아래로만. operation 범위 작업 영역 lock은 없다(research R2): 같은 작업 영역의 교차는 `update` 안의 상태 조건으로 판정한다.
 - `notify_coordinator`·`waitChildTasks`·엔진 `send`/`cancel`·작업대 닫기 대기 중에는 어떤 lock도 쥐지 않는다.

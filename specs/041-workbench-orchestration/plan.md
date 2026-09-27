@@ -6,7 +6,7 @@
 
 ## Summary
 
-AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 전달·자식 run 기동·worktree 감시, 약 7,500줄)을 `workbench-core`로 옮기고, 소유를 창 label에서 작업대 묶임(메모리)으로 바꾼다. orchestration 화면 동작 18개(`orchestration.*` 17 + `run.replay`)와 MCP orchestration 도구 16개(agent 전용 operation 16 + 역할 조회 1)를 `Workbench.call`로 제공하고(operation 50 → 85), 묶임마다 새 id를 갖는 `orchestration:<bindingId>` 스트림을 연다. 저장소는 파일 하나이므로 **저장소 전체의 읽기-수정-쓰기를 `StorageCoordinator` aggregate lock 하나로 직렬화**하고(서로 다른 작업 영역의 동시 변경 보호), operation 범위 lock은 두지 않고 같은 작업 영역의 교차는 `update` 안의 상태 조건으로 판정하며, 묶기·풀기만 binding mutex로 직렬화하고 await 경계(알림 전달·대기·엔진 호출·닫기)에서는 어떤 lock도 쥐지 않는다(research R1·R2, 설계 리뷰 반영). agent 권한은 토큰 주장이 아니라 서버 상태로 판정한다(R7). run 스트림에 소유 작업대를 기록해 `run.replay`와 run 구독의 권한을 검사한다(R17). 040의 과도기 통로와 AW의 orchestration 후처리·창 닫힘 해제를 모두 없애 core·계약에서 창 label을 0으로 만든다(R14). 화면 코드는 바뀌지 않는다 — AW 호환 command가 `boundWindowLabel`을 다시 채운다(R11).
+AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 전달·자식 run 기동·worktree 감시, 약 7,500줄)을 `workbench-core`로 옮기고, 소유를 창 label에서 작업대 묶임(메모리)으로 바꾼다. orchestration 화면 동작 18개(`orchestration.*` 17 + `run.replay`)와 MCP orchestration 도구 16개(agent 전용 operation 16 + 역할 조회 1)를 `Workbench.call`로 제공하고(operation 50 → 85), 묶임마다 새 id를 갖는 `orchestration:<bindingId>` 스트림을 연다. 저장소는 파일 하나이므로 **저장소 전체의 읽기-수정-쓰기를 저장 단위(파일)당 경계 하나로 직렬화**하고(서로 다른 작업 영역의 동시 변경 보호 — 포트는 transaction 계약만, 경로별 lock 구현은 infrastructure, `StorageCoordinator`와 겹치지 않는 단일 경계, research R1 구현 메모), operation 범위 lock은 두지 않고 같은 작업 영역의 교차는 `update` 안의 상태 조건으로 판정하며, 묶기·풀기만 binding mutex로 직렬화하고 await 경계(알림 전달·대기·엔진 호출·닫기)에서는 어떤 lock도 쥐지 않는다(research R1·R2, 설계 리뷰 반영). agent 권한은 토큰 주장이 아니라 서버 상태로 판정한다(R7). run 스트림에 소유 작업대를 기록해 `run.replay`와 run 구독의 권한을 검사한다(R17). 040의 과도기 통로와 AW의 orchestration 후처리·창 닫힘 해제를 모두 없애 core·계약에서 창 label을 0으로 만든다(R14). 화면 코드는 바뀌지 않는다 — AW 호환 command가 `boundWindowLabel`을 다시 채운다(R11).
 
 ## Technical Context
 
@@ -14,7 +14,7 @@ AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 �
 
 **Primary Dependencies**: 기존 — tokio, serde, utoipa, axum 0.7(테스트 HTTP harness), tauri 2, `acp-agent-core`(불변). 새 의존성 없음.
 
-**Storage**: `orchestration-sessions.json`(형식 유지, `boundWindowLabel`만 생략), `StorageCoordinator` aggregate `orchestration-sessions`. ledger 미사용(ADR core 0005 유지).
+**Storage**: `orchestration-sessions.json`(형식 유지, `boundWindowLabel`만 생략), 파일 경로별 저장소 경계(infrastructure, `StorageCoordinator` 밖 단일 경계). ledger 미사용(ADR core 0005 유지).
 
 **Testing**: `cargo test`(core 단위·통합·계약 suite fixture 두 경로), `vitest --typecheck`(workbench-client 타입 테스트), AW 테스트.
 
@@ -77,7 +77,8 @@ crates/workbench-core/src/
 ├── application/orchestration/              # 신규 모듈: service·command_service·scheduler·notification_dispatcher·binding(binding mutex)·roles·revision watch
 ├── application/handlers/orchestration/     # 데스크톱 18·agent 16 handler
 ├── application/handlers/run/               # run.replay
-├── infrastructure/fs/orchestration_store.rs    # JsonOrchestrationRepository 이동 + aggregate lock
+├── infrastructure/fs/orchestration_store.rs    # JsonOrchestrationRepository 이동(SessionStorage 구현)
+├── infrastructure/orchestration/{store_boundary,memory_store}.rs  # 경로별 경계 lock·transaction, 메모리 저장소
 ├── infrastructure/orchestration/engine_agent_worker.rs  # 자식 run 기동(입장·decorator·RunEngine), worktree 감시
 ├── infrastructure/event_hub/mod.rs         # run 스트림 소유 기록, orchestration journal
 └── application/workbench_runtime.rs        # 과도기 접근자 제거, RuntimeAdapters.orchestration

@@ -27,8 +27,8 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 기준선 기록: `cargo test --workspace --all-targets`·`pnpm run check-types`·`pnpm run test` 결과를 이 파일 Notes에 적는다
-- [ ] T002 [P] 오늘 동작 캡처: orchestration command 18개의 오류 JSON 문자열·창 문구 3개·도구 오류(`forbiddenActor`·`scopeMismatch`)·`replay` Missing/Evicted 형태를 research 사실 요약과 대조해 차이를 Notes에 적는다(`inbound/tauri_commands.rs`, `infrastructure/mcp/orchestration_tool.rs`, core `infrastructure/event_hub/mod.rs`)
+- [X] T001 기준선 기록: `cargo test --workspace --all-targets`·`pnpm run check-types`·`pnpm run test` 결과를 이 파일 Notes에 적는다
+- [X] T002 [P] 오늘 동작 캡처: orchestration command 18개의 오류 JSON 문자열·창 문구 3개·도구 오류(`forbiddenActor`·`scopeMismatch`)·`replay` Missing/Evicted 형태를 research 사실 요약과 대조해 차이를 Notes에 적는다(`inbound/tauri_commands.rs`, `infrastructure/mcp/orchestration_tool.rs`, core `infrastructure/event_hub/mod.rs`)
 - [ ] T003 [P] fixture 생성기: scratchpad `gen_041_fixtures.py <group>`(040 `gen_040_fixtures.py` 형식, 그룹 desktop·agent·stream), `add_ops.py`에 orchestration 그룹 추가
 
 ---
@@ -46,9 +46,9 @@
 ### core 이동과 저장 경계 (research R1·R3·R13)
 
 - [ ] T009 AW `domain/agent_orchestration.rs` → core `domain/agent_orchestration.rs`로 이동(`boundWindowLabel`: `#[serde(default, skip_serializing)]`, 도메인 로직에서 창 label 사용 제거는 US1에서). 이전 빌드 호환 단위 테스트: 필드 있는 JSON 읽기 → 무시, 쓰기 → 필드 없음
-- [ ] T010 [P] core `ports/orchestration_repository.rs`: `read<R>(&self, f: impl FnOnce(&[OrchestrationSession]) -> R)`·`update<R>(&self, f: impl FnOnce(&mut Vec<OrchestrationSession>) -> Result<R, OrchestrationError>)`. `ports/agent_worker.rs`·`ports/coordinator_notification.rs` 이동(창 label 필드 제거)
-- [ ] T011 core `infrastructure/fs/orchestration_store.rs`: `JsonOrchestrationRepository` 이동 + `StorageCoordinator` 공개 `with_aggregate_lock(aggregate, f)`(`run_locked` 노출, 재시도 없음) 안에서 load→f→save. `json_store` 이동 또는 core 대응 함수 재사용(`.bak` 복구는 읽기 경로 안, lock 안)
-- [ ] T012 [P] **테스트 먼저** core `tests/orchestration_concurrency.rs`: (a) 작업 영역 2개 이상(다른 worktree)에 thread 8개로 변경 100회 이상 동시 → 모든 변경·revision 합 보존, (b) 같은 작업 영역에 화면 변경 + 보고 동시 100회 이상 → 손실 0. 저장소 lock 없이(임시 우회 플래그 또는 lock 없는 fake 저장소) 실패함을 확인하고 Notes에 기록
+- [X] T010 [P] core `ports/orchestration_repository.rs`: 계약만 — `OrchestrationTransaction{sessions(), commit()}`, `OrchestrationRepository{type Tx, begin(), snapshot()}`. `ports/agent_worker.rs`·`ports/coordinator_notification.rs` 이동(창 label 필드 제거는 US1·US2)
+- [X] T011 core `infrastructure/orchestration/store_boundary.rs`(경로별 경계 lock registry·`BoundaryTx`·`SessionStorage`), `infrastructure/fs/orchestration_store.rs`(JSON, `legacy_json_store`로 `.bak` 복구 보존), `infrastructure/orchestration/memory_store.rs`(테스트용). 서비스·명령·알림 전달을 transaction으로 전환(await 단계는 블록으로 경계 분리). `StorageCoordinator`는 쓰지 않음(research R1 구현 메모)
+- [X] T012 [P] **테스트 먼저** core `tests/orchestration_concurrency.rs`: (a) 작업 영역 2개 이상(다른 worktree)에 thread 8개로 변경 100회 이상 동시 → 모든 변경·revision 합 보존, (b) 같은 작업 영역에 화면 변경 + 보고 동시 100회 이상 → 손실 0. 저장소 lock 없이(임시 우회 플래그 또는 lock 없는 fake 저장소) 실패함을 확인하고 Notes에 기록
 - [ ] T013 core `application/orchestration/binding.rs`: `OrchestrationBindings`(workspace↔bench↔binding_id, 전역 std mutex = binding mutex), 묶기·풀기 API(클로저로 저장소 `update` 동반), 단위 테스트
 - [ ] T014 [P] core `application/orchestration/roles.rs`: 역할 판정(coordinator = `activeCoordinatorGenerationId` 세대 Active + run 일치, 자식 = orchestration 기동 과제 시도의 `currentRunId`(Launching 포함), 수동 채택 자식 제외), 단위 테스트
 - [ ] T015 [P] core `application/orchestration/revision_watch.rs`: 작업 영역 id별 `tokio::sync::watch<u64>`, `update`가 작업 영역을 바꾸면 알림
