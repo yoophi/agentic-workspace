@@ -10,7 +10,9 @@
 
 **Alternatives**: 한 주체 유지 + 서버가 "토큰의 창 label"과 작업대의 label을 비교(작업대에 label 개념을 되살림 — 040에서 없앤 창 label 결합이 계약에 돌아온다), 화면 대상 선택만(격리 입증 불가 — 거절).
 
-**Consequences**: 창 label은 주체 subject 문자열에만 나타나고 작업대·계약에는 없다. 연구 표기와 CONTEXT: "데스크톱 창 주체". 시험: 다른 창 토큰으로 작업대·run·교환·orchestration 조작·구독 → `forbidden`/`notFound`(오늘 문구), 같은 창 두 경로는 같은 소유.
+**창 재사용(incarnation) — 사용자 검토**: label만 subject로 쓰면 창을 닫고 **같은 label로 다시 열었을 때** 만료 전 옛 토큰이 새 창의 작업대를 조작할 수 있다(세션 창 label은 Worktree 경로에서 나와 재사용될 수 있다). 그래서 subject에 **창 incarnation**을 넣는다: `desktop:window:<label>:<incarnation>` — incarnation은 창 생성(첫 `get_workbench_connection`·`ensure_window_bench`) 때 만든 uuid이고 창 수명 동안 고정이다. 창 `Destroyed`에서 (a) 그 incarnation을 폐기하고 (b) 그 주체로 발급한 토큰을 모두 폐기한다(`DesktopTokenIssuer::revoke_principal`). 같은 label로 다시 연 창은 새 incarnation을 받는다. 시험: 닫힌 창의 미만료 토큰으로 호출 → `unauthenticated`(폐기), 폐기를 뺀 변이에서도 새 창 작업대 조작은 소유 판정으로 거절(incarnation이 다름).
+
+**Consequences**: 창 label은 주체 subject 문자열에만 나타나고 작업대·계약에는 없다. 연구 표기와 CONTEXT: "데스크톱 창 주체". 시험: 다른 창 토큰으로 작업대·run·교환·orchestration 조작·구독 → `forbidden`/`notFound`(오늘 문구), 같은 창 두 경로는 같은 소유, 창 닫고 같은 label 재개 뒤 옛 토큰 거절.
 
 ## R2. 창의 작업대 id를 화면에 건네기
 
@@ -57,7 +59,8 @@
 ## R7. 이벤트 클라이언트: 반영 완료 cursor와 수신자 교체 (사용자 검토 4)
 
 **Decision**: `createEventClient({ baseUrl, credentials })`. 구독 단위는 **스트림 하나당 WebSocket 하나**(표에 cursor 하나). 스트림마다 상태 `{ streamId, epoch, appliedSequence, queue, listeners }`.
-- **반영 완료 기준**: 프레임을 받으면 큐에 넣고, 등록된 수신자에게 순서대로 넘긴다. 수신자 콜백이 예외 없이 끝나야 `appliedSequence`를 그 순번으로 올린다. 재연결 표의 cursor는 `appliedSequence`다 — 받았지만 넘기지 못한 이벤트는 다시 받는다.
+- **반영 완료 기준**: 프레임을 받으면 큐에 넣고, 등록된 수신자에게 순서대로 넘긴다. 수신자 콜백은 **동기**다 — 반환이 곧 반영 완료이며 Promise를 돌려도 기다리지 않는다(화면 상태 갱신은 동기 setter). 재연결 표의 cursor는 `appliedSequence`다 — 받았지만 넘기지 못한 이벤트는 다시 받는다.
+- **여러 수신자와 예외(사용자 검토)**: 수신자마다 자기 `deliveredSequence`를 가진다. 스트림의 `appliedSequence` = 붙어 있는 수신자들의 `deliveredSequence` 최솟값. 재연결 뒤 다시 받은 프레임은 `deliveredSequence`가 그 순번보다 작은 수신자에게만 넘긴다 — 이미 성공한 수신자에게 중복 적용하지 않는다. 수신자 콜백이 예외를 던지면 그 순번은 그 수신자에게 **넘긴 것으로 친다**(예외는 기록하고 화면 오류 신호로 올림, 같은 프레임을 그 수신자에게 무한 재시도하지 않는다) — 예외가 스트림 전체를 멈추거나 다른 수신자에게 중복을 만들지 않는다. 새로 붙는 수신자는 붙는 시점의 큐부터 받는다(`deliveredSequence` = 붙기 직전 `appliedSequence`).
 - **수신자 교체**: 수신자가 0명인 동안 도착한 이벤트는 큐에 남는다(cursor 안 올림). 새 수신자가 붙으면 큐부터 넘긴다. 구독 해제는 마지막 수신자가 떠나고 유예(React StrictMode·재마운트) 뒤에 한다.
 - **준비**: `hello`를 받은 뒤를 구독 시작으로 본다(042). 그 전 상태는 `connecting`.
 - **중복 방지**: 넘긴 순번 이하 프레임은 버린다(재연결 경계).
@@ -68,9 +71,22 @@
 
 ## R8. gap·세대 변경 복구와 재조회 경계 (사용자 검토 4)
 
-**Decision**: 사유별:
-- `evicted`·`retentionExceeded`·`unknownStream`(run·교환 등 재생 스트림): **스냅샷을 먼저** 얻고 그 기준점 뒤로 구독한다 — run은 `run.replay(runId, after: 0)`의 `lastSequence`를 기준점으로 삼아 화면을 스냅샷으로 맞춘 뒤 `after = lastSequence`로 새 표를 연다(hub가 기록→실시간 경계를 원자적으로 잇는다, 039). 기준점이 이미 보관 밖이면 다시 gap → 같은 절차(최대 3회 뒤 오류 표시).
-- 알림 스트림(`worktree:`, `bench:`)의 gap: **구독을 먼저** 열고(`hello` 확인) 그 뒤 대상 상태를 재조회한다 — 알림은 "다시 읽어라" 신호라 재조회 전후 중복 알림은 재조회 한 번 더일 뿐 유실이 없다.
+**protocol 대응표**(`workbench-protocol` `StreamKind::class`, `GapReason`, operation 목록으로 확인 — 사용자 검토: run 규칙을 일반화하지 않는다):
+
+| 스트림 | 분류 | 스트림 순번을 주는 스냅샷 | 상태 스냅샷(순번 없음) |
+|---|---|---|---|
+| `run:<id>` | 상태 복원 | `run.replay{benchId, runId, afterSequence}` → `lastSequence`·`events`·`gapDetected` | — |
+| `exchange:<bench>` | 상태 복원 | 없음 | `exchange.list{benchId}`(작업 영역 `revision`) |
+| `orchestration:<binding>` | 상태 복원 | 없음 | `orchestration.get{benchId}`(작업 영역 `revision`) |
+| `bench:<bench>` | 알림 | — | 없음(제목 요청 알림 — 재조회 대상 없음) |
+| `worktree:<path>` | 알림 | — | Worktree 변경 목록·Git 조회 |
+
+`GapReason`: `UnknownStream`·`Evicted`·`EpochChanged`·`RetentionExceeded`·`SubscriberLagged`·`Shutdown`.
+
+**Decision**: 사유·스트림별:
+- **run** + `Evicted`·`RetentionExceeded`·`UnknownStream`: **스냅샷을 먼저** — `run.replay(after: 0)`로 화면을 맞추고 `lastSequence`를 기준점으로 `after = lastSequence` 새 표(hub가 기록→실시간 경계를 원자적으로 잇는다, 039). 기준점이 이미 보관 밖이면 다시 gap → 같은 절차(최대 3회 뒤 오류 표시). `Evicted`는 run이 보관 한도로 지워졌다는 뜻이라 replay도 `gapDetected`·빈 events — 화면은 "기록 일부 없음"을 오늘 방식으로 표시하고 종료 상태로 둔다.
+- **교환·orchestration** + 같은 사유: 순번 기준점이 없으므로 **구독을 먼저** 연다 — `after: 0`(보관된 기록부터) 표로 `hello`를 받고, 그 뒤 상태 스냅샷(`exchange.list`/`orchestration.get`)을 조회해 화면을 맞춘다. 스냅샷 뒤에 오는 이벤트는 이벤트 본문의 작업 영역 `revision`이 스냅샷 `revision` 이하면 버린다(중복 방지). **이 규칙은 두 스트림 이벤트 본문에 `revision`이 실리는지 tasks 첫 단계에서 코드로 확인한 뒤 확정한다** — 없으면 "구독 후 재조회, 이벤트는 재조회 트리거로만 사용"으로 낮춘다.
+- **알림**(`worktree:`, `bench:`): 구독(`hello`) → 재조회(worktree만, bench는 재조회 대상 없음). 알림은 "다시 읽어라" 신호라 중복 알림은 재조회 한 번 더일 뿐이다.
 - `epochChanged`(또는 재연결 handshake의 `serverEpoch` 변경): 창 전체 재동기 — 작업대 id 다시 받기(R2), 열린 run·교환·orchestration 목록 재조회, 모든 구독을 새 세대 기준으로 다시. 응답 유실 변경은 R6대로 재전송 없음.
 - `subscriberLagged`: 같은 cursor(`appliedSequence`)로 재연결.
 - `shutdown`: 재연결 루프.
@@ -89,7 +105,8 @@
 
 **Decision**:
 - **클라이언트 단위**(`packages/workbench-client`, vitest): 가짜 fetch·가짜 WebSocket 서버로 R6(세 결과·같은 세대 재시도·새 세대 무재전송), R7(반영 완료 cursor, 수신자 교체 중 도착, 예외 시 cursor 유지), R8(사유별 복구, 스냅샷→구독·구독→재조회 순서), R9(backoff·갱신·401) — 강제 끊김 100회 이상(SC-004).
-- **저장소 동등성**(AW, vitest): 저장소 함수마다 같은 시나리오를 `CompatTransport`(기존 `invoke` mock)와 `HttpTransport`(계약 응답 mock)로 실행해 결과·오류 문자열이 같다. 기존 화면 시험은 기본 transport(호환)로 그대로 통과(FR-012).
+- **저장소 동등성**(AW, vitest): 저장소 함수마다 같은 시나리오를 `CompatTransport`(기존 `invoke` mock)와 `HttpTransport`(계약 응답 mock)로 실행해 결과·오류 문자열이 같다.
+- **화면 통합을 새 경로로(사용자 검토 — FR-012)**: 기존 화면 시험을 호환 기본값으로만 돌리면 새 경로의 근거가 없다. 기존 화면 시험 harness(`agent-run-panel.test-harness.tsx` 등)를 transport에 대해 매개변수화해 **같은 기대값으로 `HttpTransport`에서도** 돈다 — HTTP 쪽은 가짜 Workbench 서버(계약 형식의 `/v1/calls` 응답과 `/v1/events` WebSocket 프레임)를 쓴다. 이벤트를 쓰는 화면(run 패널·교환·orchestration)은 가짜 서버가 구독 프레임을 흘려 같은 화면 결과를 낸다.
 - **서버 계약**(Rust): 창별 주체 격리 — 다른 창 토큰으로 작업대·run·교환·orchestration 조작·구독 거절(SC-004a), 같은 창 두 경로 같은 소유.
 - **실제 앱**(debug probe 확장): 메인 창·세션 창에서 앱 자신의 transport로 프로젝트 조회, 세션 창 작업대 받기, run 시작(042 가짜 ACP agent — `agentCommand`)·출력 구독, 서버가 구독을 닫는 강제 끊김(debug 전용 hook) 뒤 자동 재연결·이어 받기, 앱 내부 전달 비활성 확인 — 개발·배포 frontend(`tauri build --debug --no-bundle`) 두 출처(SC-005).
 
