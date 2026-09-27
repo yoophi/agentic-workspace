@@ -7,6 +7,8 @@
 //! `streams` → 개별 스트림 → `retention` 순으로만 잡는다. 스트림 lock을 쥔 채 `streams`를 잡지 않고, 두 스트림
 //! lock을 동시에 쥐지 않는다. run 정리(eviction)는 발행한 스트림의 lock을 푼 뒤 `streams` → `retention`을 잡아
 //! 대상을 map에서 빼고, 두 lock을 푼 다음 대상 스트림 lock을 하나씩 잡아 구독자에게 gap을 보낸다.
+//! worktree 감시 표(`watchers`)는 `streams`보다 먼저 잡는다(`watchers` → `streams`). 감시 해제가 알림용 스트림을
+//! 같은 lock 안에서 map에서 빼기 위해서다.
 //!
 //! # 발행과 구독의 원자성
 //!
@@ -619,6 +621,10 @@ impl EventHub {
     }
 
     /// 참조 수를 내리고 0이면 감시를 멈춘다(handle drop). 알림용 스트림도 map에서 뺀다.
+    ///
+    /// 스트림 제거는 `watchers` lock 안에서 한다: 밖에서 하면 그 사이 새 구독이 감시를 다시 시작하고 옛 스트림에
+    /// 붙은 뒤 스트림이 map에서 빠져, 새 감시의 알림이 그 구독에 영영 닿지 않는다. lock 순서는 `watchers` → `streams`
+    /// (`streams`를 쥔 채 `watchers`를 잡는 경로는 없다). 감시 handle drop(스레드 정리)은 lock 밖에서 한다.
     fn release_watch(&self, canonical: &Path) {
         let stopped = {
             let mut watchers = lock(&self.watchers);
@@ -627,14 +633,14 @@ impl EventHub {
                     entry.refcount -= 1;
                     None
                 }
-                Some(_) => watchers.remove(canonical),
+                Some(_) => {
+                    let stream_id = StreamKind::Worktree.stream_id(&canonical.to_string_lossy());
+                    lock(&self.streams).remove(&stream_id);
+                    watchers.remove(canonical)
+                }
                 None => None,
             }
         };
-        if stopped.is_some() {
-            let stream_id = StreamKind::Worktree.stream_id(&canonical.to_string_lossy());
-            lock(&self.streams).remove(&stream_id);
-        }
         drop(stopped);
     }
 }
