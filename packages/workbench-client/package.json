@@ -6,7 +6,8 @@
   "description": "Workbench v1 contract types, OperationMap, and the HTTP/WebSocket client for Agentic Workbench (043)",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/index.ts"
+    "./testing": "./src/testing/index.ts",
+    "./test-host": "./src/test/integration/host.ts"
   },
   "scripts": {
     "generate": "cargo run -q -p workbench-protocol --bin export_openapi > ../../crates/workbench-protocol/openapi/workbench.openapi.json && openapi-typescript ../../crates/workbench-protocol/openapi/workbench.openapi.json -o src/generated/workbench.ts",

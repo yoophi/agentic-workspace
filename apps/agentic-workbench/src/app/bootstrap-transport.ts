@@ -15,6 +15,7 @@ import { compatTransport, getTransport, setTransport } from "@/shared/api/transp
 import { setConnectionStatus } from "@/shared/api/transport/connection-status";
 import { createHttpTransport } from "@/shared/api/transport/http-transport";
 import { createNetworkEvents } from "@/shared/api/transport/network-events";
+import { createExchangeReconciler, exchangeDeliveryKey } from "@/features/agent-run/model/exchange-reconciler";
 
 export interface BootstrapDeps {
   getConnection: () => Promise<ConnectionInfo>;
@@ -101,10 +102,14 @@ function exposeDebugProbe(connection: Connection | undefined, events: { debugDro
   }
   (window as unknown as { __awDebug?: unknown }).__awDebug = {
     transportKind: () => getTransport().kind,
-    invoke: (command: string, args?: Record<string, unknown>) => getTransport().invoke(command, args),
+    invoke: (command: string, args?: Record<string, unknown>, options?: { idempotencyKey?: string }) =>
+      getTransport().invoke(command, args, options),
     listen: (event: string, callback: (payload: unknown) => void) => getTransport().listen(event, callback),
     dropEventSockets: () => events?.debugDropSockets() ?? 0,
     connectionState: () => connection?.state() ?? "compat",
+    // SC-004d 새로고침 스모크: 운영 교환 원장·키를 그대로 쓴다.
+    createExchangeReconciler,
+    exchangeDeliveryKey,
     epoch: () => connection?.epoch(),
   };
 }
