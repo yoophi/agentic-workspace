@@ -163,6 +163,30 @@
             "requiredScopes": [
               "worktree:read"
             ]
+          },
+          {
+            "schema": "exchange.requested.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "exchange.status.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "bench.titleRequested.v1",
+            "streamKind": "bench",
+            "class": "notification",
+            "requiredScopes": [
+              "bench:read"
+            ]
           }
         ]
       }

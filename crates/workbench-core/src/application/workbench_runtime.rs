@@ -17,11 +17,18 @@ pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for comm
 use crate::{
     application::{
         authorization,
+        bench_service::BenchServices,
+        epoch_idempotency::{EpochIdempotency, EpochIdempotencyLimits},
         reconcilers::ReconcilerRegistry,
         registry::{CallContext, Registry},
     },
     domain::project_error::ProjectError,
     infrastructure::event_hub::{EventHub, EventHubLimits},
+    infrastructure::{
+        bench::in_memory_bench_registry::{BenchAdmission, BenchLimits, InMemoryBenchRegistry},
+        fs::acp_session_store::JsonAcpSessionStore,
+        run::{acp_run_engine::AcpRunEngine, workbench_run_sink::WorkbenchRunSink},
+    },
     infrastructure::{
         data_paths::DataPaths,
         sqlite_ledger::SqliteOperationLedger,
@@ -29,9 +36,11 @@ use crate::{
     },
     ports::{
         agent_catalog_reader::AgentCatalogReader,
+        desktop_bridge::{DesktopBridge, RunLaunchDecorator, RunTerminalHook},
         event_publisher::RunEventPublisher,
         operation_ledger::{LedgerError, OperationLedger},
         provider_session_repository::ProviderSessionRepository,
+        run_engine::RunEngine,
     },
 };
 
@@ -42,6 +51,14 @@ pub struct RuntimeAdapters {
     pub provider_sessions: Arc<dyn ProviderSessionRepository>,
     /// 이벤트 hub 한도(039). 테스트는 낮춘 값으로 overflow·정리를 재현한다.
     pub event_limits: EventHubLimits,
+    /// run 기계(040). `None`이면 bootstrap이 acp-agent-core 기반 `AcpRunEngine`을 만든다. 테스트는 가짜 엔진.
+    pub run_engine: Option<Arc<dyn RunEngine>>,
+    /// 데스크톱 전달·run 종료 후처리·`run.start` 보강(040). 없으면 no-op.
+    pub desktop: Option<Arc<dyn DesktopBridge>>,
+    pub terminal_hook: Option<Arc<dyn RunTerminalHook>>,
+    pub launch_decorator: Option<Arc<dyn RunLaunchDecorator>>,
+    pub bench_limits: BenchLimits,
+    pub idempotency_limits: EpochIdempotencyLimits,
 }
 
 impl RuntimeAdapters {
@@ -55,6 +72,12 @@ impl RuntimeAdapters {
                 crate::infrastructure::fs::provider_session_repository::FsProviderSessionRepository::new(),
             ),
             event_limits: EventHubLimits::default(),
+            run_engine: None,
+            desktop: None,
+            terminal_hook: None,
+            launch_decorator: None,
+            bench_limits: BenchLimits::default(),
+            idempotency_limits: EpochIdempotencyLimits::default(),
         }
     }
 }
@@ -145,6 +168,7 @@ pub struct WorkbenchRuntime {
     registry: Registry,
     reconcilers: ReconcilerRegistry,
     hooks: Arc<TestHooks>,
+    benches: Arc<BenchServices>,
 }
 
 impl WorkbenchRuntime {
@@ -175,6 +199,23 @@ impl WorkbenchRuntime {
             Some(crate::infrastructure::fs::worktree_watcher::start_watch()),
         );
 
+        let engine: Arc<dyn RunEngine> = match adapters.run_engine.clone() {
+            Some(engine) => engine,
+            None => Arc::new(AcpRunEngine::new(
+                acp_agent_core::infrastructure::agent_session_registry::AppState::default(),
+                Arc::new(JsonAcpSessionStore::from_paths(&paths)),
+            )),
+        };
+        let benches = Arc::new(BenchServices::new(
+            Arc::new(InMemoryBenchRegistry::new(adapters.bench_limits)),
+            engine,
+            Arc::clone(&events),
+            adapters.desktop.clone(),
+            adapters.terminal_hook.clone(),
+            adapters.launch_decorator.clone(),
+            Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
+        ));
+
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
             Arc::clone(&ledger),
@@ -182,6 +223,7 @@ impl WorkbenchRuntime {
             Arc::clone(&hooks),
             &adapters,
             &epoch,
+            &benches,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -199,7 +241,29 @@ impl WorkbenchRuntime {
             registry,
             reconcilers,
             hooks,
+            benches,
         }))
+    }
+
+    /// 작업대·run·교환 서비스(040).
+    pub fn benches(&self) -> &Arc<BenchServices> {
+        &self.benches
+    }
+
+    /// run 기계(040). AW 과도기 orchestration은 `acp_registry()`·`acp_session_store()`로 같은 기계를 빌린다.
+    pub fn run_engine(&self) -> &Arc<dyn RunEngine> {
+        &self.benches.engine
+    }
+
+    /// 041 전 과도기: AW orchestration이 자식 run을 작업대 단위 sink로 발행하게 한다. 041에서 제거한다.
+    pub fn run_sink(&self, bench_id: &str) -> WorkbenchRunSink {
+        self.benches.run_sink(bench_id)
+    }
+
+    /// 041 전 과도기: AW orchestration이 run을 띄우는 동안 작업대 입장권을 잡는다(research R1·R12). 041에서 제거한다.
+    pub fn admit(&self, bench_id: &str) -> Result<BenchAdmission, WorkbenchFault> {
+        self.benches
+            .admit(&workbench_protocol::RequestId::random(), None, bench_id)
     }
 
     /// 이벤트 hub(039). 발행은 `publish_run`을, 구독은 `Workbench::events`를 쓴다.

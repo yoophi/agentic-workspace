@@ -110,6 +110,7 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
     let filter = std::env::var("WORKBENCH_FIXTURE_FILTER").ok();
     let all: Vec<Fixture> = fixtures::load_all()
         .into_iter()
+        .filter(|fixture| fixture.steps.is_empty())
         .filter(|fixture| {
             filter
                 .as_deref()
@@ -126,7 +127,7 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
         let principal = fixture.principal();
 
         // in-memory: runtime.call을 직접 호출
-        let mem = TestRuntime::with_adapters(fixture.seed.adapters());
+        let mem = TestRuntime::with_adapters(fixture.adapters());
         let mem_seed = fixtures::apply_seed(&mem.paths, &fixture.seed);
         let steps = fixture.steps_with(&mem_seed);
         let mut mem_results = Vec::new();
@@ -148,7 +149,7 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
         );
 
         // HTTP: 실제 loopback 왕복 (별도 seed → 별도 저장소 경로이므로 steps도 다시 치환)
-        let http = TestRuntime::with_adapters(fixture.seed.adapters());
+        let http = TestRuntime::with_adapters(fixture.adapters());
         let http_seed = fixtures::apply_seed(&http.paths, &fixture.seed);
         let steps = fixture.steps_with(&http_seed);
         let workbench: Arc<dyn Workbench> = http.runtime.clone();
@@ -194,4 +195,93 @@ async fn http_without_bearer_is_unauthenticated() {
     assert_eq!(fault.code, workbench_protocol::FaultCode::Unauthenticated);
     let fault = harness.call(Some("nope"), &request).await.unwrap_err();
     assert_eq!(fault.code, workbench_protocol::FaultCode::Unauthenticated);
+}
+
+/// 040: 순차 호출(`steps`) fixture. 요청마다 principal을 바꾸고, 앞 응답에서 포착한 값(`{{bench}}` 등)을 뒤 요청에
+/// 넣는다. 포착 값은 두 경로에서 다르므로 비교 전에 자리표시자로 되돌린다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn every_step_fixture_matches_on_in_memory_and_http_paths() {
+    let filter = std::env::var("WORKBENCH_FIXTURE_FILTER").ok();
+    let all: Vec<Fixture> = fixtures::load_all()
+        .into_iter()
+        .filter(|fixture| !fixture.steps.is_empty())
+        .filter(|fixture| {
+            filter
+                .as_deref()
+                .is_none_or(|prefix| fixture.name.starts_with(prefix))
+        })
+        .collect();
+    for fixture in &all {
+        let mem = run_steps(fixture, false).await;
+        let http = run_steps(fixture, true).await;
+        assert_eq!(http, mem, "{}: http and in-memory diverge", fixture.name);
+    }
+}
+
+async fn run_steps(fixture: &Fixture, over_http: bool) -> Vec<Value> {
+    let label = if over_http { "http" } else { "in-memory" };
+    let runtime = TestRuntime::with_adapters(fixture.adapters());
+    let mut seed = fixtures::apply_seed(&runtime.paths, &fixture.seed);
+    let harness = if over_http {
+        let workbench: Arc<dyn Workbench> = runtime.runtime.clone();
+        Some(Harness::spawn(workbench).await)
+    } else {
+        None
+    };
+    let mut observed = Vec::new();
+    for (index, step) in fixture.steps.iter().enumerate() {
+        let mut request = step.request.clone();
+        seed.substitute(&mut request);
+        let request: workbench_protocol::CallRequest = serde_json::from_value(request)
+            .unwrap_or_else(|error| panic!("fixture {}: bad request: {error}", fixture.name));
+        let mut principal_name = Value::String(
+            step.principal
+                .clone()
+                .unwrap_or_else(|| fixture.principal.clone()),
+        );
+        seed.substitute(&mut principal_name);
+        let principal = fixtures::principal_named(&fixture.name, principal_name.as_str().unwrap());
+        let actual = match &harness {
+            Some(harness) => {
+                harness
+                    .call(Some(&Harness::token_string(&principal)), &request)
+                    .await
+            }
+            None => runtime.runtime.call(principal, request).await,
+        };
+        let mut expect = step.expect.clone();
+        if let Some(reply) = &mut expect.reply {
+            seed.substitute(reply);
+        }
+        if let Some(fault) = &mut expect.fault {
+            seed.substitute(fault);
+        }
+        fixtures::assert_matches(
+            &format!("{} [{label} #{index}]", fixture.name),
+            &actual,
+            &expect,
+            &fixture.ignore_fields,
+        );
+        if let Ok(reply) = &actual {
+            let reply_json = serde_json::to_value(reply).unwrap();
+            for (name, pointer) in &step.capture {
+                let value = reply_json.pointer(pointer).unwrap_or_else(|| {
+                    panic!(
+                        "{} #{index}: capture {pointer} missing in {reply_json}",
+                        fixture.name
+                    )
+                });
+                let value = value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string());
+                seed.capture(name, value);
+            }
+        }
+        let mut value = observable(&actual, &fixture.ignore_fields);
+        seed.normalize_paths(&mut value);
+        seed.normalize_captured(&mut value);
+        observed.push(value);
+    }
+    observed
 }

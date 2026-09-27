@@ -6,6 +6,8 @@ pub mod event_fixtures;
 pub mod fixtures;
 pub mod git_repo;
 pub mod http_harness;
+pub mod recording_desktop;
+pub mod scripted_run_engine;
 
 use std::{fs, sync::Arc};
 
@@ -69,11 +71,29 @@ pub fn stub_adapters(
     agents: Vec<AgentDescriptor>,
     sessions: Vec<ProviderSession>,
 ) -> RuntimeAdapters {
-    RuntimeAdapters {
-        agent_catalog: Arc::new(StubCatalog(agents)),
-        provider_sessions: Arc::new(StubProviderSessions(sessions)),
-        event_limits: workbench_core::infrastructure::event_hub::EventHubLimits::default(),
-    }
+    stub_adapters_with(agents, sessions, scripted_run_engine::RunScript::default()).0
+}
+
+/// 040: 가짜 run 엔진·기록형 데스크톱을 넣은 stub. 테스트가 엔진·데스크톱을 관찰할 수 있게 함께 돌려준다.
+pub fn stub_adapters_with(
+    agents: Vec<AgentDescriptor>,
+    sessions: Vec<ProviderSession>,
+    script: scripted_run_engine::RunScript,
+) -> (
+    RuntimeAdapters,
+    Arc<scripted_run_engine::ScriptedRunEngine>,
+    Arc<recording_desktop::RecordingDesktop>,
+) {
+    let engine = Arc::new(scripted_run_engine::ScriptedRunEngine::new(script));
+    let desktop = Arc::new(recording_desktop::RecordingDesktop::default());
+    let mut adapters = RuntimeAdapters::production();
+    adapters.agent_catalog = Arc::new(StubCatalog(agents));
+    adapters.provider_sessions = Arc::new(StubProviderSessions(sessions));
+    adapters.run_engine = Some(engine.clone());
+    adapters.desktop = Some(desktop.clone());
+    adapters.terminal_hook = Some(desktop.clone());
+    adapters.launch_decorator = Some(desktop.clone());
+    (adapters, engine, desktop)
 }
 
 pub struct TestRuntime {

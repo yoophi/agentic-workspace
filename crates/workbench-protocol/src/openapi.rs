@@ -115,6 +115,12 @@ pub const EVENT_BY_SCHEMA: &str = "EventBySchema";
         crate::operations::agent::ProviderSessionDto,
         crate::operations::agent::AgentListInput,
         crate::operations::agent::AgentListProviderSessionsInput,
+        crate::operations::bench::BenchOpenInput,
+        crate::operations::bench::BenchOpenOutput,
+        crate::operations::bench::BenchCloseInput,
+        crate::operations::bench::BenchCloseOutput,
+        crate::operations::bench::BenchRequestTitleInput,
+        crate::operations::bench::TitleChangeResultDto,
         crate::operations::system::SystemDescribeInput,
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
@@ -178,6 +184,9 @@ fn input_schema_name(id: OperationId) -> &'static str {
         OperationId::WorktreeGetCommitFileDiff => "WorktreeGetCommitFileDiffInput",
         OperationId::AgentList => "AgentListInput",
         OperationId::AgentListProviderSessions => "AgentListProviderSessionsInput",
+        OperationId::BenchOpen => "BenchOpenInput",
+        OperationId::BenchClose => "BenchCloseInput",
+        OperationId::BenchRequestTitle => "BenchRequestTitleInput",
         OperationId::SystemDescribe => "SystemDescribeInput",
     }
 }
@@ -219,6 +228,9 @@ fn output_schema(id: OperationId) -> RefOr<Schema> {
         OperationId::WorktreeGetCommitFileDiff => dto("GitFileDiffDto"),
         OperationId::AgentList => array_schema(dto("AgentDescriptorDto")),
         OperationId::AgentListProviderSessions => array_schema(dto("ProviderSessionDto")),
+        OperationId::BenchOpen => dto("BenchOpenOutput"),
+        OperationId::BenchClose => dto("BenchCloseOutput"),
+        OperationId::BenchRequestTitle => dto("TitleChangeResultDto"),
         OperationId::SystemDescribe => dto("DescribeOutput"),
     }
 }

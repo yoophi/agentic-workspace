@@ -1,0 +1,27 @@
+{
+  "name": "bench-close-unknown-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-10",
+        "input": {
+          "benchId": "nope"
+        },
+        "idempotencyKey": "k-10"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": false
+          }
+        }
+      }
+    }
+  ]
+}

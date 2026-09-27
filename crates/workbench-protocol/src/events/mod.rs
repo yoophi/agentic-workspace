@@ -30,10 +30,12 @@ pub enum EventClass {
 pub enum StreamKind {
     Run,
     Worktree,
-    /// 2b 예약.
+    /// 041 예약.
     Orchestration,
-    /// 2b 예약.
+    /// 작업대별 교환 요청·상태(040).
     Exchange,
+    /// 작업대 알림(표현 요청, 040).
+    Bench,
 }
 
 impl StreamKind {
@@ -43,17 +45,18 @@ impl StreamKind {
             StreamKind::Worktree => "worktree",
             StreamKind::Orchestration => "orchestration",
             StreamKind::Exchange => "exchange",
+            StreamKind::Bench => "bench",
         }
     }
 
-    /// 039에서 구독을 여는 kind인지.
+    /// 구독을 여는 kind인지. orchestration은 041에서 연다.
     pub fn is_subscribable(self) -> bool {
-        matches!(self, StreamKind::Run | StreamKind::Worktree)
+        !matches!(self, StreamKind::Orchestration)
     }
 
     pub fn class(self) -> EventClass {
         match self {
-            StreamKind::Worktree => EventClass::Notification,
+            StreamKind::Worktree | StreamKind::Bench => EventClass::Notification,
             StreamKind::Run | StreamKind::Orchestration | StreamKind::Exchange => EventClass::State,
         }
     }
@@ -62,8 +65,10 @@ impl StreamKind {
         match self {
             StreamKind::Run => Scope::RunRead,
             StreamKind::Worktree => Scope::WorktreeRead,
-            // 2b에서 정한다. 구독이 열리기 전까지 쓰이지 않는다.
-            StreamKind::Orchestration | StreamKind::Exchange => Scope::RunRead,
+            StreamKind::Exchange => Scope::ExchangeRead,
+            StreamKind::Bench => Scope::BenchRead,
+            // 041에서 정한다. 구독이 열리기 전까지 쓰이지 않는다.
+            StreamKind::Orchestration => Scope::RunRead,
         }
     }
 
@@ -83,6 +88,7 @@ pub fn parse_stream_id(stream_id: &str) -> Option<(StreamKind, &str)> {
         "worktree" => StreamKind::Worktree,
         "orchestration" => StreamKind::Orchestration,
         "exchange" => StreamKind::Exchange,
+        "bench" => StreamKind::Bench,
         _ => return None,
     };
     Some((kind, key))
@@ -108,9 +114,10 @@ pub const WORKTREE_CHANGED_V1: &str = "worktree.changed.v1";
 pub const ORCHESTRATION_WORKSPACE_UPDATED_V1: &str = "orchestration.workspaceUpdated.v1";
 pub const EXCHANGE_REQUESTED_V1: &str = "exchange.requested.v1";
 pub const EXCHANGE_STATUS_V1: &str = "exchange.status.v1";
+pub const BENCH_TITLE_REQUESTED_V1: &str = "bench.titleRequested.v1";
 
 /// 계약 순서. describe·OpenAPI가 이 순서를 따른다.
-pub const EVENT_SCHEMAS: [EventSchemaSpec; 5] = [
+pub const EVENT_SCHEMAS: [EventSchemaSpec; 6] = [
     EventSchemaSpec {
         schema: RUN_EVENT_V1,
         stream_kind: StreamKind::Run,
@@ -134,6 +141,11 @@ pub const EVENT_SCHEMAS: [EventSchemaSpec; 5] = [
     EventSchemaSpec {
         schema: EXCHANGE_STATUS_V1,
         stream_kind: StreamKind::Exchange,
+        body_schema: None,
+    },
+    EventSchemaSpec {
+        schema: BENCH_TITLE_REQUESTED_V1,
+        stream_kind: StreamKind::Bench,
         body_schema: None,
     },
 ];
@@ -204,6 +216,9 @@ mod tests {
         assert_eq!(parse_stream_id("nope:x"), None);
         assert_eq!(parse_stream_id("run"), None);
         assert!(StreamKind::Run.is_subscribable());
+        assert!(StreamKind::Exchange.is_subscribable());
+        assert_eq!(parse_stream_id("bench:b1"), Some((StreamKind::Bench, "b1")));
+        assert_eq!(StreamKind::Bench.class(), EventClass::Notification);
         assert!(!StreamKind::Orchestration.is_subscribable());
     }
 

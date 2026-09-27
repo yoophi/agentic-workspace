@@ -1,3 +1,4 @@
+pub mod bench;
 pub mod data_paths;
 pub mod event_hub;
 pub mod fs;
@@ -9,5 +10,6 @@ pub mod json_project_repository;
 pub mod json_saved_prompt_repository;
 pub mod json_store;
 pub mod perf;
+pub mod run;
 pub mod sqlite_ledger;
 pub mod storage_coordinator;

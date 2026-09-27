@@ -1,4 +1,6 @@
-#![allow(dead_code)]
+//! ACP 세션 기록 저장소(`acp-sessions.json`). 040: AW `infrastructure/json_acp_session_store.rs`에서 이동 —
+//! run 기계(`AcpRunEngine`)와 041 전 AW orchestration이 **같은 인스턴스**를 쓴다(같은 파일을 두 인스턴스가
+//! 쓰지 않게).
 
 use std::{
     fs,
@@ -8,29 +10,21 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use anyhow::{Context, Result};
-use tauri::{AppHandle, Manager};
-
-use crate::{
+use acp_agent_core::{
     domain::acp_session::{AcpSessionListQuery, AcpSessionLookup, AcpSessionRecord},
     ports::acp_session_store::AcpSessionStore,
 };
+use anyhow::{Context, Result};
+
+use crate::infrastructure::data_paths::DataPaths;
 
 pub struct JsonAcpSessionStore {
     store_path: PathBuf,
 }
 
 impl JsonAcpSessionStore {
-    pub fn from_app(app: &AppHandle) -> Result<Self, String> {
-        let dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-
-        fs::create_dir_all(&dir)
-            .map_err(|error| format!("Failed to create app data directory: {error}"))?;
-
-        Ok(Self::new(dir.join("acp-sessions.json")))
+    pub fn from_paths(paths: &DataPaths) -> Self {
+        Self::new(paths.app_data_dir().join("acp-sessions.json"))
     }
 
     pub fn new(store_path: PathBuf) -> Self {

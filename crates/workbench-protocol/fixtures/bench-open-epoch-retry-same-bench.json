@@ -1,0 +1,63 @@
+{
+  "name": "bench-open-epoch-retry-same-bench",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-7",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-open"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-8",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-open"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "benchId": "{{bench}}"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-9",
+        "input": {
+          "workingDirectory": "{{dir}}/"
+        },
+        "idempotencyKey": "k-open"
+      },
+      "expect": {
+        "fault": {
+          "code": "conflict",
+          "message": "같은 멱등성 키로 다른 내용의 요청이 이미 처리되었습니다."
+        }
+      }
+    }
+  ]
+}

@@ -62,6 +62,7 @@ pub fn descriptor_for(id: OperationId) -> OperationDescriptor {
         kind: spec.kind,
         effect: spec.effect,
         idempotent: spec.idempotent,
+        idempotency_scope: spec.idempotency_scope,
         required_scopes: spec.required_scopes.to_vec(),
         input_schema,
         output_schema,

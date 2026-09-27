@@ -41,8 +41,8 @@ description: "Task list for introducing benches and migrating run/exchange comma
 
 ## Phase 1: Setup
 
-- [ ] T001 기준선 기록: `cargo test --workspace --all-targets` 통과 수, `pnpm run test`의 agentic-workbench·workbench-client 수, `pnpm run check-types`를 Notes에
-- [ ] T002 [P] 오늘 동작 캡처(회귀 비교용): AW 교환·run command의 오류 문자열 목록을 `specs/040-workbench-owners/contracts/workbench-benches.md` 표와 대조해 누락이 없는지 확인하고 차이를 Notes에
+- [X] T001 기준선 기록: `cargo test --workspace --all-targets` 통과 수, `pnpm run test`의 agentic-workbench·workbench-client 수, `pnpm run check-types`를 Notes에
+- [X] T002 [P] 오늘 동작 캡처(회귀 비교용): AW 교환·run command의 오류 문자열 목록을 `specs/040-workbench-owners/contracts/workbench-benches.md` 표와 대조해 누락이 없는지 확인하고 차이를 Notes에
 
 ---
 
@@ -52,44 +52,44 @@ description: "Task list for introducing benches and migrating run/exchange comma
 
 ### protocol (research R2·R7, contracts)
 
-- [ ] T003 `crates/workbench-protocol/src/principal.rs`: `PrincipalKind::Agent`(문자열 `"agent"`), `AuthenticatedPrincipal.subject: PrincipalSubject`, 생성자 `desktop()`(subject `desktop`)·`test_readonly()`(`test:readonly`)·`test_as(name)`(데스크톱과 같은 scope, `test:<name>`)·`agent(run_id)`(`agent:<runId>`, scope `exchange:read`·`exchange:write`·`presentation:write`)·`agent_run_id()`. 새 scope 6개(`run:write`, `bench:read`, `bench:write`, `exchange:read`, `exchange:write`, `presentation:write`), `ALL` 20, readonly 11. 단위 테스트 갱신
-- [ ] T004 `crates/workbench-core/src/infrastructure/sqlite_ledger.rs`: `principal_kind` 파싱에 `"agent"` 추가(쓰기는 기존). 단위 테스트
-- [ ] T005 [P] `crates/workbench-protocol/src/descriptor.rs`·`operations/mod.rs`: `IdempotencyScope{Durable, Epoch}`, `OperationSpec.idempotency_scope: Option<…>`(command만), descriptor `idempotencyScope`. 기존 command 전부 `Durable`. describe fixture 기대값 갱신(Notes)
-- [ ] T006 [P] `crates/workbench-protocol/src/operations/bench.rs`(신규): `BenchOpenInput{workingDirectory}`/`BenchOpenOutput{benchId, workingDirectory}`, `BenchCloseInput{benchId}`/`BenchCloseOutput{closed, cancelledRuns}`, `BenchRequestTitleInput{runId, title}`/`TitleChangeResultDto`. `OperationId::{BenchOpen, BenchClose, BenchRequestTitle}`, `OPERATIONS` 항목(scope·epoch)
-- [ ] T007 [P] `crates/workbench-protocol/src/events/mod.rs`: `StreamKind::Bench`(`bench:<id>`, 알림용, `bench:read`), `StreamKind::Exchange` 구독 가능(`exchange:read`), `BENCH_TITLE_REQUESTED_V1`, `EVENT_SCHEMAS`에 추가(body_schema는 US2·US3에서 채움). 기존 `stream-kind-not-available` fixture는 `orchestration:`으로 유지되는지 확인
+- [X] T003 `crates/workbench-protocol/src/principal.rs`: `PrincipalKind::Agent`(문자열 `"agent"`), `AuthenticatedPrincipal.subject: PrincipalSubject`, 생성자 `desktop()`(subject `desktop`)·`test_readonly()`(`test:readonly`)·`test_as(name)`(데스크톱과 같은 scope, `test:<name>`)·`agent(run_id)`(`agent:<runId>`, scope `exchange:read`·`exchange:write`·`presentation:write`)·`agent_run_id()`. 새 scope 6개(`run:write`, `bench:read`, `bench:write`, `exchange:read`, `exchange:write`, `presentation:write`), `ALL` 20, readonly 11. 단위 테스트 갱신
+- [X] T004 `crates/workbench-core/src/infrastructure/sqlite_ledger.rs`: `principal_kind` 파싱에 `"agent"` 추가(쓰기는 기존). 단위 테스트
+- [X] T005 [P] `crates/workbench-protocol/src/descriptor.rs`·`operations/mod.rs`: `IdempotencyScope{Durable, Epoch}`, `OperationSpec.idempotency_scope: Option<…>`(command만), descriptor `idempotencyScope`. 기존 command 전부 `Durable`. describe fixture 기대값 갱신(Notes)
+- [X] T006 [P] `crates/workbench-protocol/src/operations/bench.rs`(신규): `BenchOpenInput{workingDirectory}`/`BenchOpenOutput{benchId, workingDirectory}`, `BenchCloseInput{benchId}`/`BenchCloseOutput{closed, cancelledRuns}`, `BenchRequestTitleInput{runId, title}`/`TitleChangeResultDto`. `OperationId::{BenchOpen, BenchClose, BenchRequestTitle}`, `OPERATIONS` 항목(scope·epoch)
+- [X] T007 [P] `crates/workbench-protocol/src/events/mod.rs`: `StreamKind::Bench`(`bench:<id>`, 알림용, `bench:read`), `StreamKind::Exchange` 구독 가능(`exchange:read`), `BENCH_TITLE_REQUESTED_V1`, `EVENT_SCHEMAS`에 추가(body_schema는 US2·US3에서 채움). 기존 `stream-kind-not-available` fixture는 `orchestration:`으로 유지되는지 확인
 
 ### core 작업대 (research R1)
 
-- [ ] T008 `crates/workbench-core/src/infrastructure/bench/in_memory_bench_registry.rs`(신규) + `mod.rs`: `Bench{id, working_directory, opened_by, opened_at, state, admission: Arc<RwLock<()>>}`, `BenchLimits{max_benches: 256}`, `open`, `admit(id, subject) -> Result<BenchAdmission, BenchError>`(lock 안 `Open` 확인 + `try_read_owned`), `begin_close(id, subject) -> CloseTicket | AlreadyClosing(wait) | Unknown`, `finish_close`. 단위 테스트: 주체 불일치·상한·`Closing` 중 입장 거절·두 번째 닫기 대기
-- [ ] T009 `crates/workbench-core/src/application/bench_service.rs`(신규): `open`(canonicalize, 오늘 문구), `close`(write guard 대기 → `RunEngine::cancel_runs_owned_by` → 교환 삭제 hook → hub `remove_stream` 2개 → `finish_close`), `resolve(benchId, principal)`(공통 검사 문구 `"bench not found."`/`"bench belongs to another principal."`)
-- [ ] T010 `crates/workbench-core/src/infrastructure/event_hub/mod.rs`: `remove_stream(kind, key)`(구독자 `Gap(evicted)` + 상태 복원용이면 제거 표식), `publish_notification`에 `deliver` 인자(구독자 없어도 호출; worktree 호출부는 no-op 전달), 교환용 `EventHubLimits.exchange_journal_capacity = 512`(보관 run 수 계산 제외). 039 테스트 수정 없이 통과 + 새 단위 테스트
+- [X] T008 `crates/workbench-core/src/infrastructure/bench/in_memory_bench_registry.rs`(신규) + `mod.rs`: `Bench{id, working_directory, opened_by, opened_at, state, admission: Arc<RwLock<()>>}`, `BenchLimits{max_benches: 256}`, `open`, `admit(id, subject) -> Result<BenchAdmission, BenchError>`(lock 안 `Open` 확인 + `try_read_owned`), `begin_close(id, subject) -> CloseTicket | AlreadyClosing(wait) | Unknown`, `finish_close`. 단위 테스트: 주체 불일치·상한·`Closing` 중 입장 거절·두 번째 닫기 대기
+- [X] T009 `crates/workbench-core/src/application/bench_service.rs`(신규): `open`(canonicalize, 오늘 문구), `close`(write guard 대기 → `RunEngine::cancel_runs_owned_by` → 교환 삭제 hook → hub `remove_stream` 2개 → `finish_close`), `resolve(benchId, principal)`(공통 검사 문구 `"bench not found."`/`"bench belongs to another principal."`)
+- [X] T010 `crates/workbench-core/src/infrastructure/event_hub/mod.rs`: `remove_stream(kind, key)`(구독자 `Gap(evicted)` + 상태 복원용이면 제거 표식), `publish_notification`에 `deliver` 인자(구독자 없어도 호출; worktree 호출부는 no-op 전달), 교환용 `EventHubLimits.exchange_journal_capacity = 512`(보관 run 수 계산 제외). 039 테스트 수정 없이 통과 + 새 단위 테스트
 
 ### core run 기계 포트 (research R3·R4)
 
-- [ ] T011 `crates/workbench-core/src/ports/run_engine.rs`(신규): 객체 안전 `RunEngine`(`start`, `send_prompt`, `steer_prompt`, `cancel_current_prompt_and_send`, `set_permission_mode`, `cancel`, `respond_permission`, `owner_of`, `active_owner_of`, `cancel_runs_owned_by`, `acp_registry`, `acp_session_store`)과 `RunEngineError{kind, message}`(문구 보존), `RunSink` 타입
-- [ ] T012 [P] `crates/workbench-core/src/ports/desktop_bridge.rs`(신규): `DesktopBridge::deliver(DesktopDelivery)`(`Run`·`ExchangeRequested`·`ExchangeStatus`·`TitleRequested`), `RunTerminalHook::on_terminal(run_id)`, `RunLaunchDecorator::decorate(&mut AgentRunRequest, LaunchContext) -> Result<(), String>`
-- [ ] T013 `crates/workbench-core/src/infrastructure/fs/acp_session_store.rs`: AW `infrastructure/json_acp_session_store.rs`를 이동(`from_app` 제거, `DataPaths`로 경로), 기존 단위 테스트 이동
-- [ ] T014 `crates/workbench-core/src/infrastructure/run/workbench_run_sink.rs`(신규): acp `RunEventSink` 구현 — `publish_run(... deliver = desktop.deliver(Run{bench, delivered_payload}))`, 종료 이벤트면 lock 밖에서 `terminal_hook.on_terminal`. payload 형태는 039 `delivered_payload`와 같음(단위 테스트로 고정)
-- [ ] T015 `crates/workbench-core/src/infrastructure/run/acp_run_engine.rs`(신규): `AppState` + `AcpAgentRunner` + `JsonAcpSessionStore`로 `RunEngine` 구현(기존 유스케이스 호출, 권한은 `PermissionBroker::respond_for_run`), 소유자는 `BenchId` 문자열
-- [ ] T016 `crates/workbench-core/src/application/workbench_runtime.rs`: `RuntimeAdapters`에 `run_engine: Option<Arc<dyn RunEngine>>`(None → bootstrap이 `AcpRunEngine`), `desktop`, `terminal_hook`, `launch_decorator`(없으면 no-op), `bench_limits`. 필드 `benches`, 접근자 `run_engine()`·`run_sink(bench_id)`·`admit(bench_id)`(과도기, doc에 "041에서 제거"). `stub_adapters` 갱신
+- [X] T011 `crates/workbench-core/src/ports/run_engine.rs`(신규): 객체 안전 `RunEngine`(`start`, `send_prompt`, `steer_prompt`, `cancel_current_prompt_and_send`, `set_permission_mode`, `cancel`, `respond_permission`, `owner_of`, `active_owner_of`, `cancel_runs_owned_by`, `acp_registry`, `acp_session_store`)과 `RunEngineError{kind, message}`(문구 보존), `RunSink` 타입
+- [X] T012 [P] `crates/workbench-core/src/ports/desktop_bridge.rs`(신규): `DesktopBridge::deliver(DesktopDelivery)`(`Run`·`ExchangeRequested`·`ExchangeStatus`·`TitleRequested`), `RunTerminalHook::on_terminal(run_id)`, `RunLaunchDecorator::decorate(&mut AgentRunRequest, LaunchContext) -> Result<(), String>`
+- [X] T013 `crates/workbench-core/src/infrastructure/fs/acp_session_store.rs`: AW `infrastructure/json_acp_session_store.rs`를 이동(`from_app` 제거, `DataPaths`로 경로), 기존 단위 테스트 이동
+- [X] T014 `crates/workbench-core/src/infrastructure/run/workbench_run_sink.rs`(신규): acp `RunEventSink` 구현 — `publish_run(... deliver = desktop.deliver(Run{bench, delivered_payload}))`, 종료 이벤트면 lock 밖에서 `terminal_hook.on_terminal`. payload 형태는 039 `delivered_payload`와 같음(단위 테스트로 고정)
+- [X] T015 `crates/workbench-core/src/infrastructure/run/acp_run_engine.rs`(신규): `AppState` + `AcpAgentRunner` + `JsonAcpSessionStore`로 `RunEngine` 구현(기존 유스케이스 호출, 권한은 `PermissionBroker::respond_for_run`), 소유자는 `BenchId` 문자열
+- [X] T016 `crates/workbench-core/src/application/workbench_runtime.rs`: `RuntimeAdapters`에 `run_engine: Option<Arc<dyn RunEngine>>`(None → bootstrap이 `AcpRunEngine`), `desktop`, `terminal_hook`, `launch_decorator`(없으면 no-op), `bench_limits`. 필드 `benches`, 접근자 `run_engine()`·`run_sink(bench_id)`·`admit(bench_id)`(과도기, doc에 "041에서 제거"). `stub_adapters` 갱신
 
 ### 세대 범위 멱등 (research R7)
 
-- [ ] T017 `crates/workbench-core/src/application/epoch_idempotency.rs`(신규): 작업대별 결과 기록 1,024 → 요약 강등, 요약 65,536 → 새 command `rateLimited`, `bench.open` 주체별 기록, 키별 in-flight 대기, 다른 payload `conflict`, 요약 적중 `conflict(applied)` 문구. 작업대 닫기 시 폐기 hook. 단위 테스트(각 분기)
-- [ ] T018 `crates/workbench-core/src/application/registry.rs`·`workbench_runtime.rs`: dispatch가 `idempotency_scope == Epoch`인 command를 `epoch_idempotency`로 감싸도록 연결(키 필수 검사는 기존)
+- [X] T017 `crates/workbench-core/src/application/epoch_idempotency.rs`(신규): 작업대별 결과 기록 1,024 → 요약 강등, 요약 65,536 → 새 command `rateLimited`, `bench.open` 주체별 기록, 키별 in-flight 대기, 다른 payload `conflict`, 요약 적중 `conflict(applied)` 문구. 작업대 닫기 시 폐기 hook. 단위 테스트(각 분기)
+- [X] T018 `crates/workbench-core/src/application/registry.rs`·`workbench_runtime.rs`: dispatch가 `idempotency_scope == Epoch`인 command를 `epoch_idempotency`로 감싸도록 연결(키 필수 검사는 기존)
 
 ### 테스트 지원 (research R13)
 
-- [ ] T019 `crates/workbench-core/tests/support/scripted_run_engine.rs`(신규): 메모리 run 슬롯·소유·권한 대기, `RunScript`(이벤트 목록·권한 요청·실패 주입·`start` 지연), 호출 기록(엔진 호출 수)
-- [ ] T020 [P] `crates/workbench-core/tests/support/recording_desktop.rs`(신규): `DesktopBridge`·`RunTerminalHook`·`RunLaunchDecorator` 기록형 가짜
-- [ ] T021 `crates/workbench-core/tests/support/`(contract suite 로더): call fixture `steps`(순차 호출), `capture`(JSON pointer → `{{name}}`), principal `desktop`·`readonly`·`desktop2`(`test_as("desktop2")`)·`agent:{{run}}`, `runScript`. in-memory·HTTP 두 경로 모두 지원. 로더 자체 단위 테스트
+- [X] T019 `crates/workbench-core/tests/support/scripted_run_engine.rs`(신규): 메모리 run 슬롯·소유·권한 대기, `RunScript`(이벤트 목록·권한 요청·실패 주입·`start` 지연), 호출 기록(엔진 호출 수)
+- [X] T020 [P] `crates/workbench-core/tests/support/recording_desktop.rs`(신규): `DesktopBridge`·`RunTerminalHook`·`RunLaunchDecorator` 기록형 가짜
+- [X] T021 `crates/workbench-core/tests/support/`(contract suite 로더): call fixture `steps`(순차 호출), `capture`(JSON pointer → `{{name}}`), principal `desktop`·`readonly`·`desktop2`(`test_as("desktop2")`)·`agent:{{run}}`, `runScript`. in-memory·HTTP 두 경로 모두 지원. 로더 자체 단위 테스트
 
 ### 작업대 operation (Foundational에서 먼저 여는 이유: 모든 스토리의 전제)
 
-- [ ] T022 `crates/workbench-core/src/application/handlers/bench/`(신규): `bench.open`·`bench.close` handler, `build_registry` 등록
-- [ ] T023 [P] fixture `bench-open-ok`, `bench-open-missing-path`, `bench-open-not-directory`, `bench-open-readonly-forbidden`, `bench-close-unknown-ok`, `bench-close-other-principal-forbidden`, `bench-close-twice-ok`, `bench-limit-rate-limited`(`crates/workbench-protocol/fixtures/`)
-- [ ] T024 `crates/workbench-core/tests/bench_close_race.rs`(신규, 이 시점엔 `admit`만): 입장 guard 보유 중 닫기가 기다리는지, `Closing` 중 입장 `notFound`, 닫기 두 개 겹침. `cargo test -p workbench-core` 통과
-- [ ] T025 커밋 `feat(workbench-core): introduce benches, principal subjects, run engine port and epoch idempotency (040 foundation)`
+- [X] T022 `crates/workbench-core/src/application/handlers/bench/`(신규): `bench.open`·`bench.close` handler, `build_registry` 등록
+- [X] T023 [P] fixture `bench-open-ok`, `bench-open-missing-path`, `bench-open-not-directory`, `bench-open-readonly-forbidden`, `bench-close-unknown-ok`, `bench-close-other-principal-forbidden`, `bench-close-twice-ok`, `bench-limit-rate-limited`(`crates/workbench-protocol/fixtures/`)
+- [X] T024 `crates/workbench-core/tests/bench_close_race.rs`(신규, 이 시점엔 `admit`만): 입장 guard 보유 중 닫기가 기다리는지, `Closing` 중 입장 `notFound`, 닫기 두 개 겹침. `cargo test -p workbench-core` 통과
+- [X] T025 커밋 `feat(workbench-core): introduce benches, principal subjects, run engine port and epoch idempotency (040 foundation)`
 
 **Checkpoint**: 작업대 열기·닫기가 두 경로에서 동작하고, 가짜 엔진·데스크톱으로 run·교환 서비스를 붙일 수 있다.
 
@@ -252,3 +252,7 @@ T030 epoch_idempotency.rs
 - 커밋은 논리 단위마다(Foundation, 각 US 끝, 문서). push·PR은 사용자 지시 후.
 - 각 checkpoint에서 멈춰 스토리를 독립 검증한다.
 - 기준선·실측 기록 (T001, T061, T063, T064, T065):
+  - (T001, 2026-09-27) 기준선: `cargo test --workspace --all-targets` 592 passed / 0 failed / 6 ignored, agentic-workbench 429, workbench-client 15, `pnpm run check-types` 13/13.
+  - (T002) 오늘 오류 문구는 research 사실 요약·contracts 표와 대조 완료(run 13종·교환 21종·MCP 6종). 차이 없음.
+  - (Foundation 구현 중 결정) principal 주체는 `AuthenticatedPrincipal.subject`(`new`는 종류 이름을 주체로 — 기존 호출부 불변). ledger 멱등성 키 namespace는 여전히 `principal_kind`(주체 아님): 영속 command는 `run.start` 하나이고 데스크톱 주체가 하나라 충분하다(3단계에서 재검토). 작업대 operation id는 `system.describe` 앞에 끼워 넣어 계약 순서를 도메인별로 유지. hub: 제거 표식을 worktree 외 모든 kind로 확장, 교환은 `exchange_journal_capacity`(512, 보관 run 수 제외), 작업대 알림 스트림은 구독자가 없어도 발행 시 만들어 데스크톱 전달(닫힌 작업대는 표식으로 전달 안 함), idle 정리 대상 = 발행 전 상태 복원용 + 구독자 없는 작업대 스트림. 세대 멱등은 성공만 기록(실패 재시도는 재실행). `bench.close`는 멱등 기록 없이 자연 멱등. fixture `steps` 형식(요청별 principal·`capture` JSON pointer·`{{dir}}` seed)과 두 경로 비교 시 포착값 정규화. describe fixture는 scratchpad `gen_describe.py`로 registry 소스에서 재생성. T023 중 `not-directory`·`limit` fixture는 fixture로 재현하기 어려워(파일 seed·한도 주입 없음) registry 단위 테스트로 대신했다. `epoch.rs`의 일시 `allow(dead_code)`는 US1에서 제거.
+

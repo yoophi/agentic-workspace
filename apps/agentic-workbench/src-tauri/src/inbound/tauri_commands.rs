@@ -76,7 +76,6 @@ use crate::{
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
-        json_acp_session_store::JsonAcpSessionStore,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
@@ -1912,7 +1911,7 @@ pub async fn start_agent_run(
     }
 
     let owner_window_label = window.label().to_string();
-    let session_store = JsonAcpSessionStore::from_app(&app)?;
+    let session_store = crate::infrastructure::acp_session_store_for(&app)?;
     let sink =
         TauriRunEventSink::with_target(app, state.inner().clone(), owner_window_label.clone());
     let registry = state.inner().clone();

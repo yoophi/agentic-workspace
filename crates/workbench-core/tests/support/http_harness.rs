@@ -25,6 +25,10 @@ pub const TOKEN_DESKTOP: &str = "test-desktop";
 pub const TOKEN_READONLY: &str = "test-readonly";
 /// scope가 하나도 없는 호출자(039 이벤트 권한 거절 fixture).
 pub const TOKEN_NOSCOPE: &str = "test-noscope";
+/// 040: 데스크톱과 같은 scope의 다른 주체.
+pub const TOKEN_DESKTOP2: &str = "test-desktop2";
+/// 040: `test-agent:<runId>` → run에 묶인 agent principal.
+pub const TOKEN_AGENT_PREFIX: &str = "test-agent:";
 
 pub fn noscope_principal() -> AuthenticatedPrincipal {
     AuthenticatedPrincipal::new(PrincipalKind::Desktop, [])
@@ -37,7 +41,10 @@ fn principal_from_headers(headers: &HeaderMap) -> Option<AuthenticatedPrincipal>
         TOKEN_DESKTOP => Some(AuthenticatedPrincipal::desktop()),
         TOKEN_READONLY => Some(AuthenticatedPrincipal::test_readonly()),
         TOKEN_NOSCOPE => Some(noscope_principal()),
-        _ => None,
+        TOKEN_DESKTOP2 => Some(AuthenticatedPrincipal::test_as("desktop2")),
+        other => other
+            .strip_prefix(TOKEN_AGENT_PREFIX)
+            .map(AuthenticatedPrincipal::agent),
     }
 }
 
@@ -264,6 +271,17 @@ impl Harness {
                 "status/code mismatch: {body}"
             );
             Err(fault)
+        }
+    }
+
+    /// 040: 주체까지 구별하는 토큰(`desktop2`, `agent:<runId>` 포함).
+    pub fn token_string(principal: &AuthenticatedPrincipal) -> String {
+        if let Some(run_id) = principal.agent_run_id() {
+            format!("{TOKEN_AGENT_PREFIX}{run_id}")
+        } else if *principal == AuthenticatedPrincipal::test_as("desktop2") {
+            TOKEN_DESKTOP2.to_owned()
+        } else {
+            Self::token_for(principal).to_owned()
         }
     }
 

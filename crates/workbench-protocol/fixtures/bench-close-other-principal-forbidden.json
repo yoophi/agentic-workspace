@@ -1,0 +1,67 @@
+{
+  "name": "bench-close-other-principal-forbidden",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-11",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-11"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-12",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-12"
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden",
+          "message": "bench belongs to another principal."
+        }
+      },
+      "principal": "desktop2"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-13",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-13"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": true
+          }
+        }
+      }
+    }
+  ]
+}

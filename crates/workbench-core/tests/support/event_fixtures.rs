@@ -36,6 +36,7 @@ impl Limits {
             run_journal_capacity: self
                 .run_journal_capacity
                 .unwrap_or(base.run_journal_capacity),
+            exchange_journal_capacity: base.exchange_journal_capacity,
             max_retained_runs: self.max_retained_runs.unwrap_or(base.max_retained_runs),
             max_tombstones: self.max_tombstones.unwrap_or(base.max_tombstones),
             subscriber_queue: self.subscriber_queue.unwrap_or(base.subscriber_queue),

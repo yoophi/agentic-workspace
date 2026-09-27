@@ -21,7 +21,7 @@ import type {
   WorktreeTextFile,
 } from "./operation-map";
 
-test("operation ids are exactly the registered 32 operations (037 + 038)", () => {
+test("operation ids are exactly the registered operations (037 + 038 + 040)", () => {
   expectTypeOf<OperationId>().toEqualTypeOf<
     | "project.list"
     | "project.create"
@@ -54,6 +54,9 @@ test("operation ids are exactly the registered 32 operations (037 + 038)", () =>
     | "worktree.getCommitFileDiff"
     | "agent.list"
     | "agent.listProviderSessions"
+    | "bench.open"
+    | "bench.close"
+    | "bench.requestTitle"
     | "system.describe"
   >();
 });

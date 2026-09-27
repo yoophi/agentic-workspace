@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod agent_run_settings;
+pub mod bench;
 pub mod common;
 pub mod git;
 pub mod goal;
@@ -14,7 +15,7 @@ use utoipa::PartialSchema;
 
 use crate::{
     call::OperationId,
-    descriptor::{Effect, OperationKind},
+    descriptor::{Effect, IdempotencyScope, OperationKind},
     principal::Scope,
 };
 
@@ -25,6 +26,8 @@ pub struct OperationSpec {
     pub kind: OperationKind,
     pub effect: Effect,
     pub idempotent: bool,
+    /// command만 `Some`(040).
+    pub idempotency_scope: Option<IdempotencyScope>,
     pub required_scopes: &'static [Scope],
 }
 
@@ -34,6 +37,7 @@ const fn query(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
         kind: OperationKind::Query,
         effect: Effect::Read,
         idempotent: false,
+        idempotency_scope: None,
         required_scopes: scope,
     }
 }
@@ -44,12 +48,25 @@ const fn command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
         kind: OperationKind::Command,
         effect: Effect::Modify,
         idempotent: true,
+        idempotency_scope: Some(IdempotencyScope::Durable),
+        required_scopes: scope,
+    }
+}
+
+/// 세대 범위 멱등성 command(040): 메모리 상태를 바꾸는 작업대·run 제어·교환.
+const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
+    OperationSpec {
+        id,
+        kind: OperationKind::Command,
+        effect: Effect::Modify,
+        idempotent: true,
+        idempotency_scope: Some(IdempotencyScope::Epoch),
         required_scopes: scope,
     }
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 32] = [
+pub const OPERATIONS: [OperationSpec; 35] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -90,6 +107,9 @@ pub const OPERATIONS: [OperationSpec; 32] = [
     ),
     query(OperationId::AgentList, &[Scope::AgentRead]),
     query(OperationId::AgentListProviderSessions, &[Scope::AgentRead]),
+    epoch_command(OperationId::BenchOpen, &[Scope::BenchWrite]),
+    epoch_command(OperationId::BenchClose, &[Scope::BenchWrite]),
+    epoch_command(OperationId::BenchRequestTitle, &[Scope::PresentationWrite]),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
 
@@ -213,6 +233,18 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::AgentListProviderSessions => (
             agent::AgentListProviderSessionsInput::schema(),
             common::array_schema(agent::ProviderSessionDto::schema()),
+        ),
+        OperationId::BenchOpen => (
+            bench::BenchOpenInput::schema(),
+            bench::BenchOpenOutput::schema(),
+        ),
+        OperationId::BenchClose => (
+            bench::BenchCloseInput::schema(),
+            bench::BenchCloseOutput::schema(),
+        ),
+        OperationId::BenchRequestTitle => (
+            bench::BenchRequestTitleInput::schema(),
+            bench::TitleChangeResultDto::schema(),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

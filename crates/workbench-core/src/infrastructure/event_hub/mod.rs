@@ -50,6 +50,8 @@ pub const MESSAGE_CURSORS_REQUIRED: &str = "at least one cursor is required.";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EventHubLimits {
     pub run_journal_capacity: usize,
+    /// 작업대별 교환 스트림 보관 수(040). 보관 run 수 계산에는 들지 않는다 — 작업대 수 상한이 묶는다.
+    pub exchange_journal_capacity: usize,
     pub max_retained_runs: usize,
     pub max_tombstones: usize,
     pub subscriber_queue: usize,
@@ -61,6 +63,7 @@ impl Default for EventHubLimits {
     fn default() -> Self {
         Self {
             run_journal_capacity: 512,
+            exchange_journal_capacity: 512,
             max_retained_runs: 256,
             max_tombstones: 4_096,
             subscriber_queue: 1_024,
@@ -216,7 +219,7 @@ impl EventHub {
         if let Some(entry) = streams.get(stream_id) {
             return Lookup::Found(Arc::clone(&entry.state));
         }
-        if kind == StreamKind::Run && lock(&self.retention).evicted.contains(stream_id) {
+        if kind != StreamKind::Worktree && lock(&self.retention).evicted.contains(stream_id) {
             return Lookup::Evicted;
         }
         if !create {
@@ -269,7 +272,11 @@ impl EventHub {
                     envelope: published.clone(),
                     terminal,
                 },
-                self.limits.run_journal_capacity,
+                if kind == StreamKind::Exchange {
+                    self.limits.exchange_journal_capacity
+                } else {
+                    self.limits.run_journal_capacity
+                },
             );
             stream.fan_out(&EventItem::Event {
                 event: published.clone(),
@@ -288,25 +295,74 @@ impl EventHub {
         Some(published)
     }
 
-    /// 알림용 스트림에 발행한다(보관 없음). 스트림이 없으면(구독자 없음) 아무 일도 하지 않는다.
+    /// 알림용 스트림에 발행한다(보관 없음). `deliver`는 데스크톱 전달용으로 스트림 lock 안에서 불린다(막히지
+    /// 않아야 함). worktree는 감시가 스트림을 만들므로 스트림이 없으면(구독자 없음) 아무 일도 하지 않는다. 작업대
+    /// 스트림(040)은 구독자가 없어도 데스크톱 전달이 필요하므로 없으면 만든다. 제거 표식이 있는(닫힌 작업대)
+    /// 스트림이면 전달하지 않는다.
     pub fn publish_notification(
         &self,
         kind: StreamKind,
         key: &str,
         schema: &str,
         body: serde_json::Value,
+        deliver: &mut dyn FnMut(&EventEnvelope),
     ) {
         let stream_id = kind.stream_id(key);
-        let Lookup::Found(state) = self.lookup(&stream_id, kind, false) else {
-            return;
-        };
-        let mut stream = lock(&state);
-        if stream.removed {
+        let create = kind != StreamKind::Worktree;
+        loop {
+            let state = match self.lookup(&stream_id, kind, create) {
+                Lookup::Found(state) => state,
+                Lookup::Evicted | Lookup::Missing => return,
+            };
+            let mut stream = lock(&state);
+            if stream.removed {
+                // 구독 해지로 막 지워졌거나 닫혔다: 다시 찾는다(닫혔으면 제거 표식으로 `Evicted`).
+                continue;
+            }
+            stream.sequence += 1;
+            let published = envelope(&stream_id, &self.epoch, stream.sequence, schema, body);
+            stream.fan_out(&EventItem::Event {
+                event: published.clone(),
+            });
+            deliver(&published);
             return;
         }
-        stream.sequence += 1;
-        let published = envelope(&stream_id, &self.epoch, stream.sequence, schema, body);
-        stream.fan_out(&EventItem::Event { event: published });
+    }
+
+    /// 스트림을 지우고 제거 표식을 남긴다(작업대 닫힘, 040). 구독자에게는 `Gap(evicted)`를 보낸다. 스트림이
+    /// 아직 없어도 표식은 남겨, 닫힌 작업대를 cursor 0으로 구독하면 `Gap(evicted)`가 된다.
+    pub fn remove_stream(&self, kind: StreamKind, key: &str) {
+        let stream_id = kind.stream_id(key);
+        let removed = {
+            let mut streams = lock(&self.streams);
+            let mut retention = lock(&self.retention);
+            let removed = streams.remove(&stream_id).map(|entry| entry.state);
+            if !retention.evicted.contains(&stream_id) {
+                retention.evicted.insert(stream_id.clone());
+                retention.evicted_order.push_back(stream_id.clone());
+                while retention.evicted_order.len() > self.limits.max_tombstones {
+                    if let Some(old) = retention.evicted_order.pop_front() {
+                        retention.evicted.remove(&old);
+                    }
+                }
+            }
+            removed
+        };
+        if let Some(state) = removed {
+            let mut stream = lock(&state);
+            stream.removed = true;
+            let gap = EventItem::Gap {
+                gap: GapNotice {
+                    stream_id: stream.stream_id.clone(),
+                    epoch: self.epoch.clone(),
+                    reason: GapReason::Evicted,
+                    first_sequence: None,
+                    last_sequence: None,
+                },
+            };
+            stream.fan_out(&gap);
+            stream.subscribers.clear();
+        }
     }
 
     /// terminal이 된 run을 정리 대상에 올리고, 보관 run 수가 상한을 넘으면 가장 먼저 끝난 run부터 제거한다.
@@ -593,19 +649,42 @@ impl EventHub {
                     }
                 }
                 EventClass::Notification => {
-                    let canonical = self.acquire_watch(&key)?;
-                    subscription.watched.push(canonical.clone());
-                    let stream_id = kind.stream_id(&canonical.to_string_lossy());
-                    let Lookup::Found(state) = self.lookup(&stream_id, kind, true) else {
-                        continue;
+                    let stream_id = if kind == StreamKind::Worktree {
+                        let canonical = self.acquire_watch(&key)?;
+                        subscription.watched.push(canonical.clone());
+                        kind.stream_id(&canonical.to_string_lossy())
+                    } else {
+                        kind.stream_id(&key)
                     };
-                    let mut stream = lock(&state);
-                    stream.subscribers.push(subscriber(subscription.id));
-                    subscription
-                        .high_water
-                        .insert(stream_id.clone(), stream.sequence);
-                    drop(stream);
-                    subscription.registered.push(state);
+                    // 구독 해지로 막 지워진 스트림이면 다시 찾는다. 등록은 `removed`를 확인한 같은 lock 안에서.
+                    loop {
+                        let state = match self.lookup(&stream_id, kind, true) {
+                            Lookup::Found(state) => state,
+                            Lookup::Evicted | Lookup::Missing => {
+                                subscription.pending.push_back(EventItem::Gap {
+                                    gap: GapNotice {
+                                        stream_id: stream_id.clone(),
+                                        epoch: self.epoch.clone(),
+                                        reason: GapReason::Evicted,
+                                        first_sequence: None,
+                                        last_sequence: None,
+                                    },
+                                });
+                                break;
+                            }
+                        };
+                        let mut stream = lock(&state);
+                        if stream.removed {
+                            continue;
+                        }
+                        stream.subscribers.push(subscriber(subscription.id));
+                        subscription
+                            .high_water
+                            .insert(stream_id.clone(), stream.sequence);
+                        drop(stream);
+                        subscription.registered.push(state);
+                        break;
+                    }
                 }
             }
         }
@@ -619,13 +698,21 @@ impl EventHub {
         let mut streams = lock(&self.streams);
         let mut stream = lock(state);
         stream.unsubscribe(subscriber);
-        if stream.removed || stream.sequence != 0 || !stream.subscribers.is_empty() {
+        if stream.removed || !stream.subscribers.is_empty() {
             return;
         }
-        let idle_run = streams
-            .get(&stream.stream_id)
-            .is_some_and(|entry| entry.kind == StreamKind::Run && Arc::ptr_eq(&entry.state, state));
-        if idle_run {
+        // 발행 전 상태 복원용 스트림(run·교환)과 구독자가 없는 작업대 알림 스트림은 지운다. worktree는
+        // 감시 참조 수(`release_watch`)가 정리한다.
+        let sequence = stream.sequence;
+        let idle = streams.get(&stream.stream_id).is_some_and(|entry| {
+            Arc::ptr_eq(&entry.state, state)
+                && match entry.kind {
+                    StreamKind::Worktree => false,
+                    StreamKind::Bench => true,
+                    _ => sequence == 0,
+                }
+        });
+        if idle {
             streams.remove(&stream.stream_id);
             stream.removed = true;
         }
@@ -663,6 +750,7 @@ impl EventHub {
                     &key,
                     workbench_protocol::events::WORKTREE_CHANGED_V1,
                     body,
+                    &mut |_| {},
                 );
             }
         });
@@ -905,5 +993,80 @@ mod tests {
         let error = hub.subscribe(&no_scope, cursor("run:r", 0)).unwrap_err();
         assert_eq!(error.code, FaultCode::Forbidden);
         assert_eq!(hub.subscription_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn removed_bench_streams_gap_subscribers_and_tombstone_future_cursors() {
+        let hub = hub(EventHubLimits::default());
+        let principal = AuthenticatedPrincipal::desktop();
+        hub.publish_state(
+            StreamKind::Exchange,
+            "b1",
+            "exchange.status.v1",
+            json!({}),
+            false,
+            &mut |_| {},
+        );
+        let mut live = hub.subscribe(&principal, cursor("exchange:b1", 0)).unwrap();
+        assert!(matches!(
+            take(&mut live, 1).await[0],
+            EventItem::Event { .. }
+        ));
+
+        hub.remove_stream(StreamKind::Exchange, "b1");
+        hub.remove_stream(StreamKind::Bench, "b1");
+        let items = take(&mut live, 1).await;
+        assert!(matches!(&items[0], EventItem::Gap { gap } if gap.reason == GapReason::Evicted));
+
+        for stream in ["exchange:b1", "bench:b1"] {
+            let mut late = hub.subscribe(&principal, cursor(stream, 0)).unwrap();
+            let items = take(&mut late, 1).await;
+            assert!(
+                matches!(&items[0], EventItem::Gap { gap } if gap.reason == GapReason::Evicted),
+                "{stream}"
+            );
+        }
+        let mut delivered = 0;
+        hub.publish_notification(
+            StreamKind::Bench,
+            "b1",
+            "bench.titleRequested.v1",
+            json!({}),
+            &mut |_| delivered += 1,
+        );
+        assert_eq!(delivered, 0, "closed bench must not deliver");
+    }
+
+    #[tokio::test]
+    async fn bench_notifications_deliver_without_subscribers_and_idle_streams_are_dropped() {
+        let hub = hub(EventHubLimits::default());
+        let mut delivered = Vec::new();
+        hub.publish_notification(
+            StreamKind::Bench,
+            "b2",
+            "bench.titleRequested.v1",
+            json!({"title": "t"}),
+            &mut |envelope| delivered.push(envelope.stream_id.clone()),
+        );
+        assert_eq!(delivered, vec!["bench:b2".to_owned()]);
+
+        let before = hub.stream_count();
+        let subscription = hub
+            .subscribe(&AuthenticatedPrincipal::desktop(), cursor("bench:b2", 0))
+            .unwrap();
+        drop(subscription);
+        assert!(
+            hub.stream_count() < before + 1,
+            "idle bench stream is removed"
+        );
+        // 지워진 뒤에도 발행·전달은 계속된다.
+        hub.publish_notification(
+            StreamKind::Bench,
+            "b2",
+            "bench.titleRequested.v1",
+            json!({}),
+            &mut |envelope| delivered.push(envelope.stream_id.clone()),
+        );
+        assert_eq!(delivered.len(), 2);
     }
 }

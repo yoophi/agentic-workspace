@@ -23,7 +23,6 @@ use crate::{
         acp_agent_launch_factory::build_worker_request,
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
-        json_acp_session_store::JsonAcpSessionStore,
         mcp::{McpServerState, capability_registry::CapabilityPrincipal},
         tauri_run_event_sink::TauriRunEventSink,
     },
@@ -170,7 +169,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
             ))
             .map_err(|error| error.to_string())?;
         let run_request = build_worker_request(&request, env);
-        let session_store = JsonAcpSessionStore::from_app(&self.app)?;
+        let session_store = crate::infrastructure::acp_session_store_for(&self.app)?;
         let runner = AcpAgentRunner::new(
             ConfigurableAgentCatalog::from_env(),
             self.registry.permissions(),

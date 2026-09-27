@@ -308,6 +308,84 @@
         },
         "additionalProperties": false
       },
+      "BenchCloseInput": {
+        "type": "object",
+        "required": [
+          "benchId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BenchCloseOutput": {
+        "type": "object",
+        "required": [
+          "closed",
+          "cancelledRuns"
+        ],
+        "properties": {
+          "closed": {
+            "type": "boolean",
+            "description": "이 호출이 작업대를 닫았으면 true. 모르는 작업대·이미 닫힌 작업대는 false(멱등)."
+          },
+          "cancelledRuns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "닫으면서 취소한 소유 run."
+          }
+        }
+      },
+      "BenchOpenInput": {
+        "type": "object",
+        "required": [
+          "workingDirectory"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string",
+            "description": "작업대의 대상 Worktree. 서버가 실제 경로로 정규화한다."
+          }
+        },
+        "additionalProperties": false
+      },
+      "BenchOpenOutput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "workingDirectory"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string",
+            "description": "정규화된 실제 경로."
+          }
+        }
+      },
+      "BenchRequestTitleInput": {
+        "type": "object",
+        "description": "agent 전용(주체 run == `runId`). 창 제목은 데스크톱 표현 상태라 서버는 요청만 알린다(ADR 0007).",
+        "required": [
+          "runId",
+          "title"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "CallReply": {
         "oneOf": [
           {
@@ -1329,6 +1407,96 @@
                 "items": {
                   "$ref": "#/components/schemas/ProviderSessionDto"
                 }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_bench_open",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.open"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/BenchOpenOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_bench_close",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.close"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/BenchCloseOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_bench_requestTitle",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.requestTitle"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/TitleChangeResultDto"
               },
               "revision": {
                 "type": "integer",
@@ -2594,6 +2762,126 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_bench_open",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.open"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/BenchOpenInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_bench_close",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.close"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/BenchCloseInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_bench_requestTitle",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.requestTitle"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/BenchRequestTitleInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_system_describe",
             "required": [
               "protocolVersion",
@@ -3842,6 +4130,14 @@
         "maxLength": 128,
         "minLength": 1
       },
+      "IdempotencyScope": {
+        "type": "string",
+        "description": "command의 멱등 기록 범위(040, ADR core 0005). `durable`은 SQLite 변경 기록(재시작 뒤에도 같은 결과),\n`epoch`은 서버 세대 안에서 작업대별로 기억한다(작업대가 닫히면 사라짐).",
+        "enum": [
+          "durable",
+          "epoch"
+        ]
+      },
       "LifecycleStatusDto": {
         "type": "string",
         "enum": [
@@ -3883,6 +4179,17 @@
           "idempotent": {
             "type": "boolean",
             "description": "command면 멱등성 키가 필수라는 뜻. query는 항상 false."
+          },
+          "idempotencyScope": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/IdempotencyScope",
+                "description": "command만 있다(040)."
+              }
+            ]
           },
           "requiredScopes": {
             "type": "array",
@@ -4633,6 +4940,12 @@
           "worktree:read",
           "agent:read",
           "run:read",
+          "run:write",
+          "bench:read",
+          "bench:write",
+          "exchange:read",
+          "exchange:write",
+          "presentation:write",
           "system:describe"
         ]
       },
@@ -4665,7 +4978,8 @@
           "run",
           "worktree",
           "orchestration",
-          "exchange"
+          "exchange",
+          "bench"
         ]
       },
       "Subscription": {
@@ -4684,6 +4998,36 @@
         "type": "object",
         "description": "`system.describe` input. 필드가 없고 추가 필드는 거절한다.",
         "additionalProperties": false
+      },
+      "TitleChangeResultDto": {
+        "type": "object",
+        "description": "오늘 MCP 제목 도구의 `TitleChangeResult`와 같은 모양.",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "appliedTitle": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "code": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "ToolFileChangeDto": {
         "type": "object",

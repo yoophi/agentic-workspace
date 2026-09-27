@@ -1,0 +1,70 @@
+{
+  "name": "bench-open-close-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-1",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-2",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-2"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": true,
+            "cancelledRuns": []
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-3",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-3"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": false,
+            "cancelledRuns": []
+          }
+        }
+      }
+    }
+  ]
+}
