@@ -404,3 +404,9 @@ green·최종:
 - AW src-tauri `cargo test` (`final-aw-test-1.log`) 종료 0, 101·0·1·0 passed, filtered out 0.
 - AW src-tauri `cargo clippy --all-targets -D warnings` (`final-aw-clippy-1.log`) 종료 0.
 - 끝난 뒤 `fake_acp_permission_agent`·`agentic-workbench-server serve` 잔여 프로세스는 없다.
+
+## fork 결과 확인 (T034–T035, 메인 세션)
+
+- 로그 직접 확인: server 7/0, host owner 2/0(lint 수정 뒤), AW `cargo test` 102/0, clippy 두 대상 0. filtered out은 모두 0이다. 남은 서버·agent 프로세스는 없다.
+- lint 수정 뒤 host 전체 로그가 없어, 메인 세션이 `cargo test -p workbench-host`를 한 번 실행했다(`t035-host-full-after-lint-1.log`): 종료 0, 57 passed, filtered out 0.
+- T034에는 제품 red가 없다(구성 요소가 이미 있었음). mutation(`lease.release`가 작업대를 닫게 함)으로 시험이 잡아냄을 확인했다(fork 기록).
