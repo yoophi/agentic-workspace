@@ -5,7 +5,7 @@
 | 필드 | 설명 |
 |---|---|
 | `baseUrl` | 루프백 끝점 |
-| `token` | 짧은 데스크톱 자격 증명 — 창 출처와 **창 주체**(`desktop:window:<label>`)에 묶임 |
+| `token` | 짧은 데스크톱 자격 증명 — 창 출처와 **창 주체**(`desktop:window:<label>:<incarnation>`)에 묶임. 창이 닫히면 폐기 |
 | `expiresAt` | 만료 시각. 80% 지점에 갱신 |
 
 ## 창 경로 (WindowTransport)
@@ -47,7 +47,7 @@ stateDiagram-v2
 | `epoch` | 받은 세대 |
 | `appliedSequence` | 수신자에게 넘기기를 마친 마지막 순번 — 재연결 cursor |
 | `queue` | 받았지만 아직 넘기지 않은 프레임(수신자 0명·처리 중) |
-| `listeners` | 화면 수신자. 0명이면 유예 뒤 해제 |
+| `listeners` | 화면 수신자와 수신자별 `deliveredSequence`. `appliedSequence` = 최솟값. 0명이면 유예 뒤 해제 |
 | `state` | `connecting`(표 발급·hello 전) · `live` · `recovering`(gap 복구 중) |
 
 ## 창 작업대 (WindowBench)

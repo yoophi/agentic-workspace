@@ -4,7 +4,7 @@
 
 ## 1. 창별 데스크톱 주체
 
-- subject `desktop:window:<label>`, kind `desktop`, scope = 오늘 데스크톱 scope.
+- subject `desktop:window:<label>:<incarnation>`, kind `desktop`, scope = 오늘 데스크톱 scope. incarnation은 창 생성 때 만든 uuid로 창 수명 동안 고정이다. 창 `Destroyed`에서 incarnation과 그 주체로 발급한 토큰을 모두 폐기한다 — 같은 label로 다시 연 창은 새 incarnation이므로 옛 토큰(폐기 전이라도)이 새 작업대를 조작할 수 없다.
 - `get_workbench_connection`이 발급하는 토큰은 호출 창의 출처와 이 주체에 묶인다.
 - 세션 창의 작업대는 그 창의 주체가 연다(`desktop_benches::ensure`). 같은 창의 호환 경로 호출도 그 주체로 부른다.
 - 결과: 다른 창의 자격 증명으로 작업대 조작(`bench.*`, `run.*`, `exchange.*`, `orchestration.*`)·구독(`run:`·`exchange:`·`bench:`·`orchestration:`)은 서버의 소유 판정으로 거절된다(오늘 문구). 전역 데이터(프로젝트·prompt·목표·설정·Git·파일·agent 목록)는 창과 무관하다.
@@ -32,8 +32,8 @@
 
 - 스트림당 WebSocket 하나. 표 발급 cursor = `appliedSequence`(처음이면 호출자가 준 기준점, 없으면 0).
 - `hello` 뒤 `live`. 순번 ≤ `appliedSequence` 프레임은 버린다.
-- 수신자 콜백이 끝나야 `appliedSequence` 전진. 수신자 0명이면 큐에 보관(유예 뒤 해제).
-- gap 사유별 복구(research R8): 재생 스트림은 스냅샷(기준점) → 기준점 뒤 구독, 알림 스트림은 구독(hello) → 재조회, 세대 변경은 창 전체 재동기, 지연은 같은 cursor로 재연결.
+- 수신자 콜백은 동기(Promise를 기다리지 않음). 수신자마다 `deliveredSequence`, 스트림 cursor = 붙은 수신자 최솟값. 다시 받은 프레임은 아직 받지 않은 수신자에게만 넘긴다. 콜백 예외는 기록하고 그 수신자에게 넘긴 것으로 친다(무한 재시도·다른 수신자 중복 없음). 수신자 0명이면 큐에 보관(유예 뒤 해제).
+- gap 사유·스트림별 복구(research R8 대응표): run은 `run.replay` 스냅샷(기준점) → 기준점 뒤 구독, 교환·orchestration은 구독(hello) → 상태 스냅샷 → `revision` 이하 이벤트 버림(본문 `revision` 확인 뒤 확정), 알림은 구독 → 재조회, 세대 변경은 창 전체 재동기, 지연은 같은 cursor로 재연결.
 - 연결 종료(서버 닫음·오류)는 재연결 루프(backoff 250ms→10s, jitter).
 
 ## 6. 연결 상태 표시
