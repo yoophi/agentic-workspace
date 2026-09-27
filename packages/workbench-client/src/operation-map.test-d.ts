@@ -2,12 +2,19 @@ import { expectTypeOf, test } from "vitest";
 
 import type {
   AgentDescriptor,
+  AgentExchange,
+  AgentRun,
+  AgentRunRequest,
   AgentRunSettings,
+  BenchCloseOutput,
+  BenchOpenOutput,
+  BenchTitleRequested,
   CallReply,
   DescribeOutput,
   EventFrame,
   EventMap,
   EventSchemaId,
+  ExchangeRequested,
   GitCommitHistory,
   GitRemote,
   GitWorktree,
@@ -17,6 +24,7 @@ import type {
   Project,
   ProviderSession,
   SavedPrompt,
+  TitleChangeResult,
   WorktreeFileEntry,
   WorktreeTextFile,
 } from "./operation-map";
@@ -139,6 +147,31 @@ test("agent queries: catalog list and provider sessions with optional cwd", () =
   expectTypeOf<OperationMap["agent.listProviderSessions"]["output"]>().toEqualTypeOf<ProviderSession[]>();
   const withoutCwd: OperationMap["agent.listProviderSessions"]["input"] = { agentId: "codex" };
   void withoutCwd;
+});
+
+test("bench, run and exchange operations are typed (040)", () => {
+  expectTypeOf<OperationMap["bench.open"]["output"]>().toEqualTypeOf<BenchOpenOutput>();
+  expectTypeOf<OperationMap["bench.close"]["output"]>().toEqualTypeOf<BenchCloseOutput>();
+  expectTypeOf<OperationMap["bench.requestTitle"]["output"]>().toEqualTypeOf<TitleChangeResult>();
+  expectTypeOf<OperationMap["run.start"]["output"]>().toEqualTypeOf<AgentRun>();
+  expectTypeOf<OperationMap["run.start"]["input"]>().toHaveProperty("benchId");
+  expectTypeOf<OperationMap["run.start"]["input"]["request"]>().toEqualTypeOf<AgentRunRequest>();
+  expectTypeOf<OperationMap["exchange.send"]["output"]>().toEqualTypeOf<AgentExchange>();
+  expectTypeOf<OperationMap["exchange.list"]["output"]>().toEqualTypeOf<AgentExchange[]>();
+  // @ts-expect-error run.start의 output은 AgentRun이며 교환이 아니다
+  const wrongRun: OperationMap["run.start"]["output"] = {} as AgentExchange;
+  // @ts-expect-error exchange.list의 output은 배열이다
+  const wrongList: OperationMap["exchange.list"]["output"] = {} as AgentExchange;
+  void wrongRun;
+  void wrongList;
+});
+
+test("exchange and bench events carry typed bodies (040)", () => {
+  expectTypeOf<EventMap["exchange.status.v1"]["body"]>().toEqualTypeOf<AgentExchange>();
+  expectTypeOf<EventMap["exchange.requested.v1"]["body"]>().toEqualTypeOf<ExchangeRequested>();
+  expectTypeOf<EventMap["bench.titleRequested.v1"]["body"]>().toEqualTypeOf<BenchTitleRequested>();
+  // @ts-expect-error 교환 상태 본문에는 창 label이 없다(작업대 단위)
+  void ({} as EventMap["exchange.status.v1"]).body.windowLabel;
 });
 
 test("system.describe returns DescribeOutput", () => {

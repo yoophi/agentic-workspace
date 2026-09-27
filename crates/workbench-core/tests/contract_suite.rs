@@ -154,9 +154,9 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
         let steps = fixture.steps_with(&http_seed);
         let workbench: Arc<dyn Workbench> = http.runtime.clone();
         let harness = Harness::spawn(workbench).await;
-        let token = Harness::token_for(&principal);
+        let token = Harness::token_string(&principal);
         for (index, (request, expect)) in steps.iter().enumerate() {
-            let actual = harness.call(Some(token), request).await;
+            let actual = harness.call(Some(&token), request).await;
             fixtures::assert_matches(
                 &format!("{} [http #{index}]", fixture.name),
                 &actual,

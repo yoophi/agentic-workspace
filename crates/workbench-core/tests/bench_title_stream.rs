@@ -10,8 +10,8 @@ use serde_json::json;
 use support::{scripted_run_engine::RunScript, BenchHarness};
 use workbench_core::ports::desktop_bridge::DesktopDelivery;
 use workbench_protocol::{
-    events::BENCH_TITLE_REQUESTED_V1, AuthenticatedPrincipal, EventItem, OperationId,
-    StreamCursor, Subscription, Workbench,
+    events::BENCH_TITLE_REQUESTED_V1, AuthenticatedPrincipal, EventItem, OperationId, StreamCursor,
+    Subscription, Workbench,
 };
 
 fn titles(h: &BenchHarness, bench: &str) -> Vec<String> {

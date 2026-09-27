@@ -189,10 +189,11 @@ impl fmt::Display for PrincipalSubject {
 const AGENT_SUBJECT_PREFIX: &str = "agent:";
 
 /// agent principal의 scope: 교환 조회·쓰기와 표현 요청만(ADR 0006).
-pub const AGENT_SCOPES: [Scope; 3] = [
+pub const AGENT_SCOPES: [Scope; 4] = [
     Scope::ExchangeRead,
     Scope::ExchangeWrite,
     Scope::PresentationWrite,
+    Scope::SystemDescribe,
 ];
 
 /// 인증을 통과한 호출자. `Serialize`를 의도적으로 구현하지 않는다 — 입력으로 정체를 지정할 수 없어야 한다.
@@ -335,7 +336,8 @@ mod tests {
             vec![
                 Scope::ExchangeRead,
                 Scope::ExchangeWrite,
-                Scope::PresentationWrite
+                Scope::PresentationWrite,
+                Scope::SystemDescribe
             ]
         );
         assert_eq!(AuthenticatedPrincipal::desktop().agent_run_id(), None);

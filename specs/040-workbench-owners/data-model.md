@@ -37,7 +37,7 @@ stateDiagram-v2
 | 데스크톱 | `desktop` | `desktop` | 전체(20) |
 | 테스트 조회 전용 | `test` | `test:readonly` | `:read` 전부 + `system:describe` |
 | 테스트 다른 주체 | `test` | `test:<name>` | 데스크톱과 같음(교차 주체 재현용) |
-| agent(MCP) | `agent` | `agent:<runId>` | `exchange:read`, `exchange:write`, `presentation:write` |
+| agent(MCP) | `agent` | `agent:<runId>` | `exchange:read`, `exchange:write`, `presentation:write`, `system:describe`(구현 중 추가: 자기 계약 조회) |
 
 새 scope 6개: `run:write`, `bench:read`, `bench:write`, `exchange:read`, `exchange:write`, `presentation:write`(`:read`/`:write` 규칙상 `presentation:write`는 쓰기로 분류).
 

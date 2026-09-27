@@ -172,10 +172,10 @@ description: "Task list for introducing benches and migrating run/exchange comma
 
 ## Phase 6: User Story 4 - 계약 조회·생성 타입에 포함 (Priority: P4)
 
-- [ ] T057 [US4] `crates/workbench-protocol/src/openapi.rs`: 새 operation 18개 component·variant, 이벤트 DTO와 `EventBySchema` 3개 variant, golden 테스트 갱신
-- [ ] T058 [US4] describe fixture: 데스크톱 50개, readonly 조회 operation만, agent principal은 agent 전용 3개·교환 조회·`bench.requestTitle`만, `idempotencyScope` 표시, `eventSchemas` 추가분
-- [ ] T059 [US4] `pnpm run generate:contracts`; `packages/workbench-client/src/operation-map.ts`·`index.ts`에 alias(`Bench*`, `AgentRun`, `AgentExchange`, `EventMap` 키 추가), `operation-map.test-d.ts`에 `OperationMap["run.start"]`·`EventMap["exchange.status.v1"]` 판별·오용 `@ts-expect-error`, operation id 50개
-- [ ] T060 [US4] `pnpm --filter @yoophi/workbench-client check-types test`, drift 확인. 커밋 `feat(workbench-protocol): generate bench, run and exchange contracts (040 US4)`
+- [X] T057 [US4] `crates/workbench-protocol/src/openapi.rs`: 새 operation 18개 component·variant, 이벤트 DTO와 `EventBySchema` 3개 variant, golden 테스트 갱신
+- [X] T058 [US4] describe fixture: 데스크톱 50개, readonly 조회 operation만, agent principal은 agent 전용 3개·교환 조회·`bench.requestTitle`만, `idempotencyScope` 표시, `eventSchemas` 추가분
+- [X] T059 [US4] `pnpm run generate:contracts`; `packages/workbench-client/src/operation-map.ts`·`index.ts`에 alias(`Bench*`, `AgentRun`, `AgentExchange`, `EventMap` 키 추가), `operation-map.test-d.ts`에 `OperationMap["run.start"]`·`EventMap["exchange.status.v1"]` 판별·오용 `@ts-expect-error`, operation id 50개
+- [X] T060 [US4] `pnpm --filter @yoophi/workbench-client check-types test`, drift 확인. 커밋 `feat(workbench-protocol): generate bench, run and exchange contracts (040 US4)`
 
 ---
 
@@ -247,6 +247,8 @@ T030 epoch_idempotency.rs
 ---
 
 ## Notes
+
+- US4 (T057–T060): OpenAPI component·`EventBySchema` 3 variant는 앞 단계에서 이미 추가되어 golden만 재확인. agent describe를 위해 `AGENT_SCOPES`에 `system:describe`를 추가(data-model 반영) — scope 기준 필터라 agent describe에는 agent 전용 3개 외에 교환 쓰기·조회 4개(작업대 소유 검사로 실제로는 `forbidden`)와 `bench.requestTitle`·`system.describe`까지 9개, 이벤트 2개가 보인다. 단발 fixture HTTP 경로가 agent 토큰을 모르던 버그(`token_for`→`token_string`)를 수정. US3 커밋의 `bench_title_stream.rs` fmt 차이도 이 커밋에 포함.
 
 - [P] = 다른 파일, 미완료 의존 없음
 - 커밋은 논리 단위마다(Foundation, 각 US 끝, 문서). push·PR은 사용자 지시 후.

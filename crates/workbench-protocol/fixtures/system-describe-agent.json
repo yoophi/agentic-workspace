@@ -1,0 +1,110 @@
+{
+  "name": "system-describe-agent",
+  "principal": "agent:r1",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "system.describe",
+    "requestId": "r-system-describe-agent",
+    "input": {}
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "protocolVersion": 1,
+        "operations": [
+          {
+            "id": "bench.requestTitle",
+            "kind": "command",
+            "requiredScopes": [
+              "presentation:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.syncWorkspace",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.send",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.acknowledge",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.list",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.listPeers",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.sendFromRun",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.getForRun",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "system.describe",
+            "kind": "query",
+            "requiredScopes": [
+              "system:describe"
+            ]
+          }
+        ],
+        "eventSchemas": [
+          {
+            "schema": "exchange.requested.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "exchange.status.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          }
+        ]
+      }
+    },
+    "schemaPresent": true
+  },
+  "ignoreFields": [
+    "epoch"
+  ]
+}

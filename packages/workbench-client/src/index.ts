@@ -1,9 +1,19 @@
-// 037·038·039: 생성 타입과 OperationMap만 노출한다. 어떤 앱도 아직 이 패키지를 import하지 않는다.
+// 037–040: 생성 타입과 OperationMap만 노출한다. 어떤 앱도 아직 이 패키지를 import하지 않는다.
 // HTTP/WebSocket Adapter는 4단계(Desktop 전환)에서 추가된다.
 export type * from "./generated/workbench";
 export type {
   AgentDescriptor,
+  AgentExchange,
+  AgentPanelEndpoint,
+  AgentRun,
+  AgentRunRequest,
   AgentRunSettings,
+  AgentToolCandidateResponse,
+  AgentWorkspaceSyncResponse,
+  BenchCloseOutput,
+  BenchOpenInput,
+  BenchOpenOutput,
+  BenchTitleRequested,
   Call,
   CallReply,
   CallReplyByOperation,
@@ -15,6 +25,7 @@ export type {
   EventItem,
   EventMap,
   EventSchemaId,
+  ExchangeRequested,
   FaultCode,
   GapNotice,
   GapReason,
@@ -40,6 +51,7 @@ export type {
   SavedPrompt,
   Schemas,
   StreamCursor,
+  TitleChangeResult,
   WorkbenchFault,
   WorktreeChange,
   WorktreeChanged,
