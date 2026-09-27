@@ -72,14 +72,14 @@
 
 ### Tests for User Story 2
 
-- [ ] T020 [P] [US2] `crates/workbench-core/tests/http_ws_boundary_race.rs`: 표로 구독하는 순간에 발행을 주입 1,000회 이상 → 빠짐·중복 0(SC-003)
-- [ ] T021 [P] [US2] `crates/workbench-core/tests/http_tickets_http.rs`: 표 재사용 401, 만료 401(짧은 TTL 설정), 다른 Origin 403, 다른 주체 표로는 그 주체 권한만, 재연결(새 표 + 마지막 cursor) 이어 받기, 권한 없는 스트림은 연결 뒤 `fault` 프레임(오늘 문구)
+- [X] T020 [P] [US2] `crates/workbench-core/tests/http_ws_boundary_race.rs`: 표로 구독하는 순간에 발행을 주입 1,000회 이상 → 빠짐·중복 0(SC-003)
+- [X] T021 [P] [US2] `crates/workbench-core/tests/http_tickets_http.rs`: 표 재사용 401, 만료 401(짧은 TTL 설정), 다른 Origin 403, 다른 주체 표로는 그 주체 권한만, 재연결(새 표 + 마지막 cursor) 이어 받기, 권한 없는 스트림은 연결 뒤 `fault` 프레임(오늘 문구)
 
 ### Implementation for User Story 2
 
-- [ ] T022 [US2] `crates/workbench-server/src/routes/events.rs`: `POST /v1/event-tickets`(형식·고정 상한만), `GET /v1/events?ticket=`(Host·Origin → 표 take → upgrade → `hello` → `Workbench.events` → 프레임, `fault` 후 close, 수신 상한 64 KiB, 표 비기록)
-- [ ] T023 [US2] `crates/workbench-core/tests/support/http_harness.rs` WS 경로를 표 발급 → 연결로, `crates/workbench-core/tests/support/event_fixtures.rs` WS 실행기 적응(발급 fault는 경로 결과로), 이벤트 suite 통과(fixture 기대값 변경 없음)
-- [ ] T024 [US2] 039 contracts §6 대체 문서화(`specs/042-workbench-http/contracts/workbench-http.md` §4가 정본, `docs/workbench-seam.md` 이벤트 절 갱신), 커밋 `feat(workbench-server): ticketed WebSocket event subscriptions (042 US2)`
+- [X] T022 [US2] `crates/workbench-server/src/routes/events.rs`: `POST /v1/event-tickets`(형식·고정 상한만), `GET /v1/events?ticket=`(Host·Origin → 표 take → upgrade → `hello` → `Workbench.events` → 프레임, `fault` 후 close, 수신 상한 64 KiB, 표 비기록)
+- [X] T023 [US2] `crates/workbench-core/tests/support/http_harness.rs` WS 경로를 표 발급 → 연결로, `crates/workbench-core/tests/support/event_fixtures.rs` WS 실행기 적응(발급 fault는 경로 결과로), 이벤트 suite 통과(fixture 기대값 변경 없음)
+- [X] T024 [US2] 039 contracts §6 대체 문서화(`specs/042-workbench-http/contracts/workbench-http.md` §4가 정본, `docs/workbench-seam.md` 이벤트 절 갱신), 커밋 `feat(workbench-server): ticketed WebSocket event subscriptions (042 US2)`
 
 ---
 
@@ -183,3 +183,7 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T014·T015**: calls(분리 실행·drain·503·인증 우선)·handshake 경로. US1 게이트: `cargo test -p workbench-server -p workbench-core --all-targets --no-fail-fast` status=0(403 passed, 0 failed, 7 ignored), clippy 두 크레이트 status=0
 - **T018 공개 근거(사용자 검토 4)**: 변경 53개 operation별 증거 표 = `reviews/exposure-evidence.md`(영속 ledger 14 / 세대 멱등 39, 범위 Bench·Open·RunOwner·None, 공유 코드 경로와 대표 시험, 한계). 표 작성 중 대표 시험으로 덮이지 않던 경로에 시험 추가: ledger 경로 단절(`disconnected_ledger_write_retry_applies_once`, `TestHooks::pause_at` — 효과 뒤·ledger 확정 전, 멱등성 키로 식별), agent 주체 RunOwner 단절(`disconnected_agent_child_creation_retry_starts_one_child`)·재시작(`agent_orchestration_commands_are_rejected_after_restart_without_effect`), orchestration 파일 끊긴 쓰기(`legacy_json_store` 단위). 분리 실행 제거 변이: D-E·D-O·D-A 효과 2회·D-S 조기 반환 실패, D-L·D-R 통과(L 경로는 `spawn_blocking`+ledger 보호). 그 뒤 `ExposurePolicy::network_default()` = 전체
 - **US1 게이트(T018 뒤)**: `cargo test -p workbench-server -p workbench-core --all-targets --no-fail-fast` status=0(407 passed, 0 failed, 7 ignored), clippy 두 크레이트 status=0, `workbench-core --features test-hooks --lib` clippy status=0
+- **T020**: `http_ws_boundary_race.rs` status=0 — 발행 스레드가 도는 동안 표 구독 1,000회, 매번 cursor 다음부터 10개 연속·중복 0(12.4초). 경계 원자성은 039 hub lock이 보장하고 HTTP 경로는 판정을 더하지 않는다(변이 없음)
+- **T021**: `http_tickets.rs` status=0 — 재사용·임의 표·만료 401, 다른 Origin 403(표 소모), Origin 빠짐 403, 허용 밖 Origin 발급 403, cursor 1,025개 400, cursor 0개·scope 없는 주체는 연결 뒤 fault 프레임, 재연결 이어 받기, 표 비기록. 변이: `take`를 remove 대신 get → 재사용·Origin 두 시험 실패(`us2-m.log`)
+- **T022·T023**: events 경로와 harness 표 흐름(T016 때 적용). 이벤트 suite 통과, fixture 변경 없음
+- **T024**: `docs/workbench-seam.md` 네트워크 어댑터 절·이벤트 테스트 경로 갱신(039 §6 대체 명시)

@@ -50,7 +50,7 @@ flowchart LR
     end
     subgraph Tests["crates/workbench-core/tests"]
         Mem["in-memory: runtime.call 직접 호출"]
-        HTTP["http_harness: Axum POST /v1/calls (dev-dependency)"]
+        HTTP["http_harness: 운영 router(crates/workbench-server)를 임의 루프백 포트에 (042)"]
         Fx["crates/workbench-protocol/fixtures/*.json (128개)"]
     end
     TC --> Compat --> RT
@@ -86,7 +86,7 @@ flowchart LR
 - **한도**(`EventHubLimits`, `RuntimeAdapters.event_limits`로 주입): run당 512 · 보관 run 256(가장 먼저 끝난 run부터 제거) · 제거 표식 4,096 · 구독자 대기열 1,024 · 동시 구독 256(`rateLimited`) · 구독당 cursor 64(같은 스트림 중복 거절). 한도는 한 번이라도 발행된 run만 센다 — 시작 전 run을 기다리던 빈 스트림은 구독이 모두 떠나면 지운다.
 - **권한**: run은 `run:read`(신규), worktree는 `worktree:read`, 교환은 `exchange:read`, 작업대는 `bench:read`(040).
 - **계약 생성**: `EVENT_SCHEMAS` registry → `system.describe.eventSchemas`, OpenAPI `EventBySchema`(스키마 id ↔ typed 본문), TS `EventMap`. 본문은 원본 타입을 그대로 직렬화하고 protocol DTO는 미러다(wire parity 테스트).
-- **테스트 경로**: fixture 27개(`crates/workbench-protocol/fixtures/events/`)를 in-memory와 테스트 WebSocket(`GET /v1/events`)에서 실행해 결과를 비교한다.
+- **테스트 경로**: fixture(`crates/workbench-protocol/fixtures/events/`)를 in-memory와 운영 WebSocket 경로에서 실행해 결과를 비교한다. 042부터 WebSocket은 1회용 표(`POST /v1/event-tickets` → `GET /v1/events?ticket=`)로 연결하고 서버가 표의 cursor로 구독한다 — 039 contracts §6의 클라이언트 `subscribe` 프레임은 [042 contracts §4](../specs/042-workbench-http/contracts/workbench-http.md)로 대체됐다.
 
 ### 데스크톱 전달
 
@@ -186,6 +186,24 @@ sequenceDiagram
 ### 3단계 안내 (041 → HTTP/WS 어댑터)
 
 041로 2단계가 끝났다: command 인벤토리의 이연 항목이 0이고, 서버 상태를 바꾸는 모든 경로가 `Workbench.call`·`Workbench.events`를 거친다. 다음 단계는 같은 seam 위에 독립 HTTP/WS 서버 어댑터를 올리고(3단계), 프런트엔드를 그 클라이언트로 옮기고(4단계), standalone server 생명주기를 붙인 뒤(5단계), 데스크톱을 thin client로 줄이고 호환 어댑터를 지운다(8단계).
+
+## 네트워크 어댑터 (042, 3단계)
+
+계약 정본: [`specs/042-workbench-http/contracts/workbench-http.md`](../specs/042-workbench-http/contracts/workbench-http.md). 크레이트 `crates/workbench-server`는 `workbench-protocol`의 `Workbench` trait만 부르는 inbound 어댑터이고, 자격 증명 해석(`CredentialResolver`)·서버 정보(`ServerInfo`)는 포트로 주입받는다.
+
+```mermaid
+flowchart LR
+    Client["클라이언트 (WebView · agent · 테스트)"] -->|"bearer · Host/Origin 정확 일치"| Router["workbench-server router"]
+    Router -->|"POST /v1/calls"| Detached["분리 task (tokio::spawn)<br/>DetachedCalls로 추적"]
+    Detached --> WB["Workbench.call"]
+    Router -->|"POST /v1/event-tickets"| Tickets["EventTicketStore<br/>30초 · 1회용 · Origin 묶음"]
+    Router -->|"GET /v1/events?ticket="| WS["hello → Workbench.events → event/gap"]
+    Tickets -.원자적 take.-> WS
+```
+
+- **실행 수명**: 받아들인 호출은 연결과 무관하게 끝까지 실행된다. 종료 신호 뒤 새 호출은 `503`, `serve`는 받아들인 호출이 모두 끝난 뒤에만 반환한다(상한 없음, 경고 간격마다 기록).
+- **공개 범위**: `ExposurePolicy::network_default()` = 전체. operation별 중단·재시작·단절 근거는 [`reviews/exposure-evidence.md`](../specs/042-workbench-http/reviews/exposure-evidence.md).
+- **진행 중 재시도**: 세대 범위 command는 끝날 때까지 기다리고, ledger 경로(`run.start` 등)는 retryable `conflict` → 같은 키로 다시 시도한다.
 
 ## 호출 규칙
 
