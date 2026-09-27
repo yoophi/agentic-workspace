@@ -6,7 +6,7 @@
 
 ## Summary
 
-AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 전달·자식 run 기동·worktree 감시, 약 7,500줄)을 `workbench-core`로 옮기고, 소유를 창 label에서 작업대 묶임(메모리)으로 바꾼다. orchestration 화면 동작 18개(`orchestration.*` 17 + `run.replay`)와 MCP orchestration 도구 16개(agent 전용 operation 16)를 `Workbench.call`로 제공하고(operation 50 → 84), 묶임마다 새 id를 갖는 `orchestration:<bindingId>` 스트림을 연다. 저장소는 파일 하나이므로 **저장소 전체의 읽기-수정-쓰기를 `StorageCoordinator` aggregate lock 하나로 직렬화**하고(서로 다른 작업 영역의 동시 변경 보호), await가 낀 다단계 흐름은 작업 영역별 async lock으로 순서를 맞춘다(research R1·R2). agent 권한은 토큰 주장이 아니라 서버 상태로 판정한다(R7). run 스트림에 소유 작업대를 기록해 `run.replay`와 run 구독의 권한을 검사한다(R17). 040의 과도기 통로와 AW의 orchestration 후처리·창 닫힘 해제를 모두 없애 core·계약에서 창 label을 0으로 만든다(R14). 화면 코드는 바뀌지 않는다 — AW 호환 command가 `boundWindowLabel`을 다시 채운다(R11).
+AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 전달·자식 run 기동·worktree 감시, 약 7,500줄)을 `workbench-core`로 옮기고, 소유를 창 label에서 작업대 묶임(메모리)으로 바꾼다. orchestration 화면 동작 18개(`orchestration.*` 17 + `run.replay`)와 MCP orchestration 도구 16개(agent 전용 operation 16 + 역할 조회 1)를 `Workbench.call`로 제공하고(operation 50 → 85), 묶임마다 새 id를 갖는 `orchestration:<bindingId>` 스트림을 연다. 저장소는 파일 하나이므로 **저장소 전체의 읽기-수정-쓰기를 `StorageCoordinator` aggregate lock 하나로 직렬화**하고(서로 다른 작업 영역의 동시 변경 보호), operation 범위 lock은 두지 않고 같은 작업 영역의 교차는 `update` 안의 상태 조건으로 판정하며, 묶기·풀기만 binding mutex로 직렬화하고 await 경계(알림 전달·대기·엔진 호출·닫기)에서는 어떤 lock도 쥐지 않는다(research R1·R2, 설계 리뷰 반영). agent 권한은 토큰 주장이 아니라 서버 상태로 판정한다(R7). run 스트림에 소유 작업대를 기록해 `run.replay`와 run 구독의 권한을 검사한다(R17). 040의 과도기 통로와 AW의 orchestration 후처리·창 닫힘 해제를 모두 없애 core·계약에서 창 label을 0으로 만든다(R14). 화면 코드는 바뀌지 않는다 — AW 호환 command가 `boundWindowLabel`을 다시 채운다(R11).
 
 ## Technical Context
 
@@ -32,7 +32,7 @@ AW에 남은 orchestration(도메인·서비스·저장소·scheduler·알림 �
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Monorepo Boundary First**: PASS — 계약 `crates/workbench-protocol`(operation 34·DTO·scope·스트림), 구현 `crates/workbench-core`(orchestration domain/application/infrastructure, 묶임·scheduler·worktree 감시), 데스크톱 어댑터 `apps/agentic-workbench/src-tauri`(compat command, 전달, MCP transport), 생성물 `packages/workbench-client`. 앱 간 import 없음.
+- **Monorepo Boundary First**: PASS — 계약 `crates/workbench-protocol`(operation 35·DTO·scope·스트림), 구현 `crates/workbench-core`(orchestration domain/application/infrastructure, 묶임·scheduler·worktree 감시), 데스크톱 어댑터 `apps/agentic-workbench/src-tauri`(compat command, 전달, MCP transport), 생성물 `packages/workbench-client`. 앱 간 import 없음.
 - **Feature-Sliced Frontend Architecture**: PASS(N/A 목표) — 화면 변경 없음. 수신은 이미 삽입 경로(research 사실 요약).
 - **Hexagonal Tauri Backend Architecture**: PASS — orchestration 도메인은 core domain, 서비스는 core application, 저장·엔진 연동은 core infrastructure, 외부 효과는 core ports(`OrchestrationRepository`·`AgentWorker`·`DesktopBridge`·`RunLaunchDecorator`). AW command는 입력 변환 → `Workbench.call` → 출력·오류 변환만.
 - **Shared Core Before Shared UI**: PASS — 순수 core만 공유.
@@ -67,14 +67,14 @@ crates/workbench-protocol/src/
 ├── principal.rs                    # Scope::OrchestrationRead/Write, AGENT_SCOPES 확장
 ├── operations/orchestration.rs     # 신규: 입력·DTO(작업 영역·노드·세대·과제·보고·명령·알림·분배)
 ├── operations/run.rs               # run.replay 입력·RunReplayDto
-├── operations/mod.rs               # OPERATIONS 84, schema_for
+├── operations/mod.rs               # OPERATIONS 85, schema_for
 ├── events/mod.rs                   # Orchestration 구독 가능, scope orchestration:read
 └── openapi.rs                      # component·golden
 
 crates/workbench-core/src/
 ├── domain/agent_orchestration.rs           # AW에서 이동(boundWindowLabel 생략·무시)
 ├── ports/{orchestration_repository,agent_worker,coordinator_notification}.rs   # 이동, read/update 포트
-├── application/orchestration/              # 신규 모듈: service·command_service·scheduler·notification_dispatcher·binding·roles·runtime(작업 영역 lock)
+├── application/orchestration/              # 신규 모듈: service·command_service·scheduler·notification_dispatcher·binding(binding mutex)·roles·revision watch
 ├── application/handlers/orchestration/     # 데스크톱 18·agent 16 handler
 ├── application/handlers/run/               # run.replay
 ├── infrastructure/fs/orchestration_store.rs    # JsonOrchestrationRepository 이동 + aggregate lock
@@ -107,7 +107,7 @@ crates/workbench-core/docs/adr/0006-*.md, 0007-*.md
 
 ## 단계 (tasks 입력)
 
-1. **Foundation**: protocol scope·DTO·operation id·스트림 구독 가능화, core로 orchestration 도메인·포트·저장소 이동(+ aggregate lock, `read/update`), 묶임·역할·작업 영역 lock, run 스트림 소유 기록, 과도기 접근자 정리 준비. 저장소 동시성 테스트(R1)를 먼저 작성(red → green).
+1. **Foundation**: protocol scope·DTO·operation id·스트림 구독 가능화, core로 orchestration 도메인·포트·저장소 이동(+ aggregate lock, `read/update`), 묶임(binding mutex·입장권)·역할·revision watch, run 스트림 소유 기록, 작업대 닫기 hook async화, 과도기 접근자 정리 준비. 저장소 동시성 테스트(R1)를 먼저 작성(red → green).
 2. **US1**(데스크톱 18): 서비스 이동·창 label → 작업대 묶임, handler 18 + `run.replay`, 작업대 닫기 hook, AW compat 18(`boundWindowLabel` 재구성), fixture.
 3. **US2**(agent 16): 역할 판정, handler 16, `EngineAgentWorker`(자식 기동), MCP 도구 → `Workbench.call`, capability registry 축소, fixture.
 4. **US3**(스트림): 묶임 스트림 발행·구독 권한·데스크톱 전달(삽입 경로 하나), run 구독 권한 보강, 스트림 테스트.
