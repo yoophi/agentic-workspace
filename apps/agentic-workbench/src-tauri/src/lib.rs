@@ -10,16 +10,17 @@ use inbound::tauri_commands::{
     adopt_manual_orchestration_child, bind_main_coordinator_run, bootstrap_orchestration_workspace,
     cancel_agent_run, cancel_current_prompt_and_send_to_run, cancel_orchestration_task, clear_goal,
     collect_orchestration_reports, create_git_worktree, create_goal, create_project,
-    create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
-    delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings,
-    get_appearance_preferences, get_goal, get_orchestration_workspace, get_workbench_connection,
-    get_worktree_changes, get_worktree_commit_detail, get_worktree_commit_file_diff,
-    get_worktree_file_diff, get_worktree_git_graph, get_worktree_workspace_layout,
-    handoff_orchestration_coordinator, list_agent_exchanges, list_agent_tool_command_candidates,
-    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_orchestration_tasks,
-    list_projects, list_provider_sessions, list_recoverable_orchestration_workspaces,
-    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
-    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
+    create_saved_prompt, declare_network_delivery, delegate_orchestration_goal,
+    delete_git_worktree, delete_project, delete_saved_prompt, dispatch_orchestration_prompt,
+    ensure_window_bench, get_agent_run_settings, get_appearance_preferences, get_goal,
+    get_orchestration_workspace, get_workbench_connection, get_worktree_changes,
+    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
+    get_worktree_git_graph, get_worktree_workspace_layout, handoff_orchestration_coordinator,
+    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
+    list_git_remotes, list_git_worktrees, list_orchestration_tasks, list_projects,
+    list_provider_sessions, list_recoverable_orchestration_workspaces, list_saved_prompts,
+    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
+    open_settings_window, open_worktree_window, read_worktree_text_file,
     reassign_orchestration_task, record_goal_progress, recover_orchestration_workspace,
     replay_orchestration_runtime_events, respond_agent_permission, respond_orchestration_input,
     retry_orchestration_task, save_agent_run_settings, save_worktree_workspace_layout,
@@ -130,6 +131,8 @@ macro_rules! app_invoke_handler {
             dispatch_orchestration_prompt,
             recover_orchestration_workspace,
             get_workbench_connection,
+            ensure_window_bench,
+            declare_network_delivery,
             infrastructure::http_probe::report_http_probe
         ]
     };
@@ -210,7 +213,9 @@ macro_rules! app_invoke_handler {
             handoff_orchestration_coordinator,
             dispatch_orchestration_prompt,
             recover_orchestration_workspace,
-            get_workbench_connection
+            get_workbench_connection,
+            ensure_window_bench,
+            declare_network_delivery
         ]
     };
 }
@@ -293,6 +298,10 @@ pub fn run() {
             infrastructure::http_probe::write_diagnostic_file(&http);
             _app.manage(http);
             _app.manage(mcp_state);
+            // 043: 설정 파일로 만들어진 창도 창 주체를 등록한다(이벤트 루프 전이라 아직 호출이 없다).
+            for window in _app.webview_windows().values() {
+                infrastructure::window_lifecycle::adopt(_app.handle(), window);
+            }
 
             #[cfg(debug_assertions)]
             {
@@ -326,19 +335,14 @@ pub fn run() {
                 }
                 _ => {}
             }
-            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
+            // 세션 창 표현 상태 정리. 주체·토큰 폐기와 작업대 닫기(소유 run 취소)는 창별 처리기가 그 창의 incarnation으로
+            // 한다(043 `window_lifecycle`).
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
                     infrastructure::window_manager::forget_session_window(&label);
-                    let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
-                    tauri::async_runtime::spawn(async move {
-                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
-                        // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
-                        infrastructure::desktop_benches::close(&runtime, &label).await;
-                    });
                 }
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }

@@ -84,12 +84,16 @@ pub struct WorkbenchConnection {
     pub base_url: String,
     pub token: String,
     pub expires_at: String,
+    /// 043: 토큰이 묶인 창 incarnation(창 토큰일 때). 전달 선언·재연결이 같은 창인지 확인하는 데 쓴다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incarnation: Option<String>,
 }
 
 /// 기동한 어댑터. 종료 신호와 `serve` 완료 신호를 쥔다.
 pub struct WorkbenchHttpState {
     base_url: String,
     issuer: Arc<DesktopTokenIssuer>,
+    tickets: Arc<EventTicketStore>,
     shutdown: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     /// `serve`가 끝나면 `true`. 여러 종료 경로가 함께 기다릴 수 있다.
     served: tokio::sync::watch::Receiver<bool>,
@@ -118,6 +122,7 @@ impl WorkbenchHttpState {
             .local_addr()
             .context("failed to read the Workbench HTTP address")?;
         let issuer = Arc::new(DesktopTokenIssuer::default());
+        let tickets = Arc::new(EventTicketStore::default());
         let resolver = ChainResolver::new(vec![
             issuer.clone() as Arc<dyn CredentialResolver>,
             Arc::new(McpCapabilityResolver::new(assembly.mcp_registry)),
@@ -128,7 +133,7 @@ impl WorkbenchHttpState {
             origins: origin_policy(),
             access_log: Arc::new(StderrAccessLog),
             exposure: ExposurePolicy::network_default(),
-            tickets: Arc::new(EventTicketStore::default()),
+            tickets: tickets.clone(),
             body_limit: workbench_server::DEFAULT_BODY_LIMIT,
             drain_warn_after: assembly.drain_warn_after,
             body_read_timeout: workbench_server::DEFAULT_BODY_READ_TIMEOUT,
@@ -156,6 +161,7 @@ impl WorkbenchHttpState {
         Ok(Self {
             base_url: format!("http://{address}"),
             issuer,
+            tickets,
             shutdown: std::sync::Mutex::new(Some(shutdown_tx)),
             served: served_rx,
             http_calls,
@@ -167,15 +173,26 @@ impl WorkbenchHttpState {
         &self.base_url
     }
 
-    /// 호출한 창의 WebView 출처에 묶인 짧은 토큰. 허용 출처가 아니면 거절한다.
-    pub fn connection_for(&self, origin: &str) -> Result<WorkbenchConnection, String> {
+    /// 호출한 창의 WebView 출처와 창 주체에 묶인 짧은 토큰(043). 허용 출처가 아니면 거절한다.
+    pub fn connection_for(
+        &self,
+        origin: &str,
+        principal: AuthenticatedPrincipal,
+    ) -> Result<WorkbenchConnection, String> {
         if !WEBVIEW_ORIGINS.contains(&origin) {
             return Err(MESSAGE_ORIGIN_NOT_ALLOWED.to_owned());
         }
-        Ok(self.connection(
-            self.issuer
-                .issue(TokenOrigin::WebView(origin.to_owned()), DESKTOP_TOKEN_TTL),
-        ))
+        Ok(self.connection(self.issuer.issue_for(
+            principal,
+            TokenOrigin::WebView(origin.to_owned()),
+            DESKTOP_TOKEN_TTL,
+        )))
+    }
+
+    /// 창 `Destroyed`(043): 그 창 주체의 토큰과 아직 쓰지 않은 이벤트 표를 모두 지운다.
+    pub fn revoke_window(&self, subject: &workbench_protocol::PrincipalSubject) {
+        self.issuer.revoke_subject(subject);
+        self.tickets.revoke_subject(subject);
     }
 
     /// debug 스모크 전용(R12): 운영 발급기의 "Origin 없음" 토큰 — 브라우저 밖 진단 클라이언트용.
@@ -192,6 +209,7 @@ impl WorkbenchHttpState {
             base_url: self.base_url.clone(),
             token: issued.token,
             expires_at: issued.expires_at.to_rfc3339(),
+            incarnation: None,
         }
     }
 
@@ -259,9 +277,20 @@ pub struct WorkbenchHttp {
 }
 
 impl WorkbenchHttp {
-    pub fn connection_for(&self, origin: &str) -> Result<WorkbenchConnection, String> {
+    /// 창 `label`의 현재 incarnation 주체로 토큰을 발급한다(043). 등록이 없는 창(닫힘)은 거절한다.
+    pub fn connection_for(&self, origin: &str, label: &str) -> Result<WorkbenchConnection, String> {
+        let incarnation =
+            crate::infrastructure::window_principals::incarnation(label).ok_or_else(|| {
+                crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
+            })?;
+        let principal = AuthenticatedPrincipal::desktop_window(label, &incarnation);
         match &self.state {
-            Some(state) => state.connection_for(origin),
+            Some(state) => state
+                .connection_for(origin, principal)
+                .map(|mut connection| {
+                    connection.incarnation = Some(incarnation);
+                    connection
+                }),
             None => Err(format!(
                 "Workbench HTTP server is not running: {}",
                 self.start_error.as_deref().unwrap_or("not started")
@@ -404,8 +433,19 @@ mod tests {
             start_error: Some("address in use".into()),
             exit: ExitGate::default(),
         };
-        let error = http.connection_for("tauri://localhost").unwrap_err();
+        let label = format!("session-test-{}", uuid::Uuid::new_v4());
+        let incarnation = crate::infrastructure::window_principals::register(&label);
+        let error = http
+            .connection_for("tauri://localhost", &label)
+            .unwrap_err();
         assert!(error.contains("address in use"), "{error}");
+        crate::infrastructure::window_principals::retire(&label, &incarnation);
+        // 등록이 없는 창(닫힘)은 토큰을 받지 못한다.
+        assert_eq!(
+            http.connection_for("tauri://localhost", &label)
+                .unwrap_err(),
+            crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED
+        );
     }
 
     #[test]
@@ -485,8 +525,13 @@ mod tests {
         })
         .unwrap();
         let origin = "http://localhost:1420";
-        let connection = state.connection_for(origin).unwrap();
-        assert!(state.connection_for("https://evil.example").is_err());
+        let principal = AuthenticatedPrincipal::desktop_window("session-test", "inc-1");
+        let connection = state.connection_for(origin, principal.clone()).unwrap();
+        assert!(
+            state
+                .connection_for("https://evil.example", principal)
+                .is_err()
+        );
         let address = connection.base_url.trim_start_matches("http://").to_owned();
 
         // 받아들인 HTTP 호출: 요청을 보내고 효과 진입을 확인한 뒤 연결을 끊는다.
@@ -624,7 +669,12 @@ mod tests {
             })
             .unwrap();
             let origin = "http://localhost:1420";
-            let connection = state.connection_for(origin).unwrap();
+            let connection = state
+                .connection_for(
+                    origin,
+                    AuthenticatedPrincipal::desktop_window("session-test", "inc-1"),
+                )
+                .unwrap();
             let address = connection.base_url.trim_start_matches("http://").to_owned();
             let body = serde_json::to_vec(&CallRequest::query(
                 workbench_protocol::OperationId::ProjectList,

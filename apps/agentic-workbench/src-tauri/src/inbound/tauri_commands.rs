@@ -10,8 +10,7 @@ use workbench_core::{
     application::workbench_runtime::WorkbenchRuntime, infrastructure::event_hub::RunReplay,
 };
 use workbench_protocol::{
-    AuthenticatedPrincipal, EventItem, OperationId, StreamCursor, Subscription, Workbench,
-    events::StreamKind,
+    EventItem, OperationId, StreamCursor, Subscription, Workbench, events::StreamKind,
 };
 
 use crate::inbound::workbench_compat;
@@ -121,10 +120,11 @@ fn orchestration_fault_string(fault: &workbench_protocol::WorkbenchFault) -> Str
 
 async fn orchestration_call(
     app: &AppHandle,
+    window: &tauri::Window,
     operation: OperationId,
     input: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let runtime = workbench_runtime(app);
+    let caller = caller(app, window)?;
     let request = if matches!(
         workbench_protocol::operations::spec_for(operation).kind,
         workbench_protocol::OperationKind::Query
@@ -133,10 +133,7 @@ async fn orchestration_call(
     } else {
         workbench_compat::command_request(operation, input)
     };
-    match runtime
-        .call(workbench_compat::desktop_principal(), request)
-        .await
-    {
+    match caller.runtime.call(caller.principal.clone(), request).await {
         Ok(reply) => workbench_compat::decode_output(reply),
         Err(fault) => Err(orchestration_fault_string(&fault)),
     }
@@ -148,7 +145,7 @@ async fn orchestration_bench(
     window: &tauri::Window,
     hint: Option<&str>,
 ) -> Result<String, String> {
-    desktop_benches::ensure(&workbench_runtime(app), window.label(), hint).await
+    desktop_benches::ensure(&caller(app, window)?, window.label(), hint).await
 }
 
 /// core 작업 영역 DTO → 오늘 결과 형태. `bound`면 이 창 label을 채운다.
@@ -167,7 +164,7 @@ async fn bound_session(
     operation: OperationId,
     input: serde_json::Value,
 ) -> Result<serde_json::Value, String> {
-    let session = orchestration_call(app, operation, input).await?;
+    let session = orchestration_call(app, window, operation, input).await?;
     Ok(session_for_window(session, Some(window.label())))
 }
 
@@ -199,6 +196,7 @@ pub async fn get_orchestration_workspace(
     };
     let session = orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationGet,
         json!({ "benchId": bench }),
     )
@@ -226,6 +224,7 @@ pub async fn list_recoverable_orchestration_workspaces(
     let bench = orchestration_bench(&app, &window, Some(&input.worktree_path)).await?;
     let sessions = orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationListRecoverable,
         json!({ "benchId": bench, "worktreePath": input.worktree_path }),
     )
@@ -296,6 +295,7 @@ pub async fn delegate_orchestration_goal(
     let bench = orchestration_bench(&app, &window, None).await?;
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationDelegateGoal,
         json!({ "benchId": bench, "request": input }),
     )
@@ -340,6 +340,7 @@ pub async fn list_orchestration_tasks(
     let bench = orchestration_bench(&app, &window, None).await?;
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationListTasks,
         json!({ "benchId": bench, "generationId": input.generation_id }),
     )
@@ -357,6 +358,7 @@ pub async fn collect_orchestration_reports(
     };
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationCollectReports,
         json!({ "benchId": bench }),
     )
@@ -372,6 +374,7 @@ pub async fn send_orchestration_child_command(
     let bench = orchestration_bench(&app, &window, None).await?;
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationSendChildCommand,
         json!({ "benchId": bench, "input": input }),
     )
@@ -387,6 +390,7 @@ pub async fn respond_orchestration_input(
     let bench = orchestration_bench(&app, &window, None).await?;
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationRespondInput,
         json!({ "benchId": bench, "request": input }),
     )
@@ -420,6 +424,7 @@ pub async fn replay_orchestration_runtime_events(
     };
     let replay = orchestration_call(
         &app,
+        &window,
         OperationId::RunReplay,
         json!({ "benchId": bench, "runId": input.run_id, "afterSequence": input.after_sequence }),
     )
@@ -439,6 +444,7 @@ pub async fn dispatch_orchestration_prompt(
     let bench = orchestration_bench(&app, &window, None).await?;
     orchestration_call(
         &app,
+        &window,
         OperationId::OrchestrationDispatchPrompt,
         json!({ "benchId": bench, "request": input }),
     )
@@ -486,13 +492,11 @@ fn exchange_command_error(fault: &workbench_protocol::WorkbenchFault) -> String 
 
 async fn call_exchange<Out: serde::de::DeserializeOwned>(
     app: &AppHandle,
+    window: &tauri::Window,
     request: workbench_protocol::CallRequest,
 ) -> Result<Out, String> {
-    let runtime = workbench_runtime(app);
-    match runtime
-        .call(workbench_compat::desktop_principal(), request)
-        .await
-    {
+    let caller = caller(app, window)?;
+    match caller.runtime.call(caller.principal.clone(), request).await {
         Ok(reply) => workbench_compat::decode_output(reply),
         Err(fault) => Err(exchange_command_error(&fault)),
     }
@@ -511,11 +515,12 @@ pub async fn sync_agent_workspace(
     window: tauri::Window,
     request: AgentWorkspaceSyncRequest,
 ) -> Result<AgentWorkspaceSyncResponseDto, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     let bench =
         desktop_benches::ensure(&runtime, window.label(), Some(&request.worktree_path)).await?;
     call_exchange(
         &app,
+        &window,
         workbench_compat::command_request(
             OperationId::ExchangeSyncWorkspace,
             json!({ "benchId": bench, "request": request }),
@@ -533,6 +538,7 @@ pub async fn send_agent_exchange(
     let bench = desktop_benches::lookup(window.label()).ok_or_else(unregistered_workspace)?;
     call_exchange(
         &app,
+        &window,
         workbench_compat::command_request(
             OperationId::ExchangeSend,
             json!({ "benchId": bench, "request": request }),
@@ -552,6 +558,7 @@ pub async fn acknowledge_agent_exchange(
     })?;
     call_exchange(
         &app,
+        &window,
         workbench_compat::command_request(
             OperationId::ExchangeAcknowledge,
             json!({ "benchId": bench, "request": request }),
@@ -570,6 +577,7 @@ pub async fn list_agent_exchanges(
     };
     call_exchange(
         &app,
+        &window,
         workbench_compat::query_request(OperationId::ExchangeList, json!({ "benchId": bench })),
     )
     .await
@@ -636,11 +644,24 @@ fn workbench_runtime(app: &AppHandle) -> Arc<WorkbenchRuntime> {
     app.state::<Arc<WorkbenchRuntime>>().inner().clone()
 }
 
+/// 호환 경로 호출자: 호출한 창의 주체로 부른다(043 D2 — 네트워크 경로와 같은 창 주체, 작업대 소유가 창별로 갈린다).
+/// 창 등록이 없으면(닫힌 뒤 늦게 도는 command) 거절한다 — 새 주체를 만들지 않는다(`window_principals`).
+fn caller(app: &AppHandle, window: &tauri::Window) -> Result<workbench_compat::Caller, String> {
+    let principal =
+        crate::infrastructure::window_principals::current(window.label()).ok_or_else(|| {
+            crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
+        })?;
+    Ok(workbench_compat::Caller {
+        runtime: workbench_runtime(app),
+        principal,
+    })
+}
+
 // 037·038: 아래 command들은 `Workbench.call`을 거치는 호환 어댑터다. 시그니처·직렬화·오류 문구는 이전과 같다
 // (specs/038-workbench-domains/contracts/tauri-compat-commands.md). 저장소·업무 로직은 workbench-core에 있다.
 #[tauri::command]
-pub async fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
-    let runtime = workbench_runtime(&app);
+pub async fn list_projects(app: AppHandle, window: tauri::Window) -> Result<Vec<Project>, String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_projects",
         workbench_compat::call_list_projects(&runtime),
@@ -649,8 +670,12 @@ pub async fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
 }
 
 #[tauri::command]
-pub async fn create_project(app: AppHandle, input: ProjectInput) -> Result<Project, String> {
-    let runtime = workbench_runtime(&app);
+pub async fn create_project(
+    app: AppHandle,
+    window: tauri::Window,
+    input: ProjectInput,
+) -> Result<Project, String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "create_project",
         workbench_compat::call_create_project(&runtime, input),
@@ -661,10 +686,11 @@ pub async fn create_project(app: AppHandle, input: ProjectInput) -> Result<Proje
 #[tauri::command]
 pub async fn update_project(
     app: AppHandle,
+    window: tauri::Window,
     id: String,
     input: ProjectInput,
 ) -> Result<Project, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "update_project",
         workbench_compat::call_command(
@@ -677,8 +703,12 @@ pub async fn update_project(
 }
 
 #[tauri::command]
-pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
-    let runtime = workbench_runtime(&app);
+pub async fn delete_project(
+    app: AppHandle,
+    window: tauri::Window,
+    id: String,
+) -> Result<(), String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "delete_project",
         workbench_compat::call_command(
@@ -691,8 +721,11 @@ pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn list_saved_prompts(app: AppHandle) -> Result<Vec<SavedPrompt>, String> {
-    let runtime = workbench_runtime(&app);
+pub async fn list_saved_prompts(
+    app: AppHandle,
+    window: tauri::Window,
+) -> Result<Vec<SavedPrompt>, String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_saved_prompts",
         workbench_compat::call_query(&runtime, OperationId::SavedPromptList, json!({})),
@@ -703,9 +736,10 @@ pub async fn list_saved_prompts(app: AppHandle) -> Result<Vec<SavedPrompt>, Stri
 #[tauri::command]
 pub async fn create_saved_prompt(
     app: AppHandle,
+    window: tauri::Window,
     input: SavedPromptInput,
 ) -> Result<SavedPrompt, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "create_saved_prompt",
         workbench_compat::call_command(
@@ -720,10 +754,11 @@ pub async fn create_saved_prompt(
 #[tauri::command]
 pub async fn update_saved_prompt(
     app: AppHandle,
+    window: tauri::Window,
     id: String,
     input: SavedPromptInput,
 ) -> Result<SavedPrompt, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "update_saved_prompt",
         workbench_compat::call_command(
@@ -736,8 +771,12 @@ pub async fn update_saved_prompt(
 }
 
 #[tauri::command]
-pub async fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), String> {
-    let runtime = workbench_runtime(&app);
+pub async fn delete_saved_prompt(
+    app: AppHandle,
+    window: tauri::Window,
+    id: String,
+) -> Result<(), String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "delete_saved_prompt",
         workbench_compat::call_command(
@@ -752,9 +791,10 @@ pub async fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), Strin
 #[tauri::command]
 pub async fn get_goal(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<Option<ThreadGoal>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_goal",
         workbench_compat::call_query(
@@ -767,8 +807,12 @@ pub async fn get_goal(
 }
 
 #[tauri::command]
-pub async fn create_goal(app: AppHandle, input: GoalInput) -> Result<ThreadGoal, String> {
-    let runtime = workbench_runtime(&app);
+pub async fn create_goal(
+    app: AppHandle,
+    window: tauri::Window,
+    input: GoalInput,
+) -> Result<ThreadGoal, String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "create_goal",
         workbench_compat::call_command(
@@ -783,10 +827,11 @@ pub async fn create_goal(app: AppHandle, input: GoalInput) -> Result<ThreadGoal,
 #[tauri::command]
 pub async fn update_goal(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     input: GoalUpdateInput,
 ) -> Result<ThreadGoal, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "update_goal",
         workbench_compat::call_command(
@@ -799,8 +844,12 @@ pub async fn update_goal(
 }
 
 #[tauri::command]
-pub async fn clear_goal(app: AppHandle, working_directory: String) -> Result<(), String> {
-    let runtime = workbench_runtime(&app);
+pub async fn clear_goal(
+    app: AppHandle,
+    window: tauri::Window,
+    working_directory: String,
+) -> Result<(), String> {
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "clear_goal",
         workbench_compat::call_command(
@@ -815,10 +864,11 @@ pub async fn clear_goal(app: AppHandle, working_directory: String) -> Result<(),
 #[tauri::command]
 pub async fn record_goal_progress(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     input: GoalProgressInput,
 ) -> Result<ThreadGoal, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "record_goal_progress",
         workbench_compat::call_command(
@@ -833,9 +883,10 @@ pub async fn record_goal_progress(
 #[tauri::command]
 pub async fn get_agent_run_settings(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<Option<AgentRunSettings>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_agent_run_settings",
         workbench_compat::call_query(
@@ -850,9 +901,10 @@ pub async fn get_agent_run_settings(
 #[tauri::command]
 pub async fn save_agent_run_settings(
     app: AppHandle,
+    window: tauri::Window,
     settings: AgentRunSettings,
 ) -> Result<AgentRunSettings, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "save_agent_run_settings",
         workbench_compat::call_command(
@@ -889,9 +941,10 @@ pub fn save_worktree_workspace_layout(
 #[tauri::command]
 pub async fn list_git_remotes(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<Vec<GitRemote>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_git_remotes",
         workbench_compat::call_query(
@@ -906,9 +959,10 @@ pub async fn list_git_remotes(
 #[tauri::command]
 pub async fn list_git_branches(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<Vec<GitBranch>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_git_branches",
         workbench_compat::call_query(
@@ -923,10 +977,11 @@ pub async fn list_git_branches(
 #[tauri::command]
 pub async fn list_git_worktrees(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     include_status: Option<bool>,
 ) -> Result<Vec<GitWorktree>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_git_worktrees",
         workbench_compat::call_query(
@@ -941,9 +996,10 @@ pub async fn list_git_worktrees(
 #[tauri::command]
 pub async fn list_worktree_changes(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<Vec<WorktreeChange>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_worktree_changes",
         workbench_compat::call_query(
@@ -958,10 +1014,11 @@ pub async fn list_worktree_changes(
 #[tauri::command]
 pub async fn create_git_worktree(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     input: GitWorktreeCreateDraft,
 ) -> Result<(), String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "create_git_worktree",
         workbench_compat::call_command(
@@ -976,10 +1033,11 @@ pub async fn create_git_worktree(
 #[tauri::command]
 pub async fn delete_git_worktree(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     path: String,
 ) -> Result<(), String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "delete_git_worktree",
         workbench_compat::call_command(
@@ -994,9 +1052,10 @@ pub async fn delete_git_worktree(
 #[tauri::command]
 pub async fn get_worktree_changes(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
 ) -> Result<GitWorktreeChanges, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_worktree_changes",
         workbench_compat::call_query(
@@ -1011,10 +1070,11 @@ pub async fn get_worktree_changes(
 #[tauri::command]
 pub async fn get_worktree_file_diff(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     path: String,
 ) -> Result<GitWorktreeFileDiff, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_worktree_file_diff",
         workbench_compat::call_query(
@@ -1029,10 +1089,11 @@ pub async fn get_worktree_file_diff(
 #[tauri::command]
 pub async fn list_worktree_files(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     scope: Option<WorktreeFileListScope>,
 ) -> Result<Vec<WorktreeFileEntry>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_worktree_files",
         workbench_compat::call_query(
@@ -1047,10 +1108,11 @@ pub async fn list_worktree_files(
 #[tauri::command]
 pub async fn read_worktree_text_file(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     path: String,
 ) -> Result<WorktreeTextFile, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "read_worktree_text_file",
         workbench_compat::call_query(
@@ -1071,7 +1133,7 @@ pub async fn start_worktree_watcher(
 ) -> Result<(), String> {
     let window_label = window.label().to_string();
     let target_label = window_label.clone();
-    let runtime = workbench_runtime(&app);
+    let workbench_compat::Caller { runtime, principal } = caller(&app, &window)?;
     let requested = working_directory.clone();
     // 첫 구독자면 감시를 시작하며 내부에서 `git rev-parse`를 실행하므로 blocking pool에서 구독한다.
     let mut stream = run_blocking_command("start_worktree_watcher", move || {
@@ -1083,7 +1145,7 @@ pub async fn start_worktree_watcher(
             }],
         };
         runtime
-            .events(AuthenticatedPrincipal::desktop(), subscription)
+            .events(principal, subscription)
             .map_err(|fault| fault.message)
     })
     .await?;
@@ -1130,12 +1192,13 @@ pub fn stop_worktree_watcher(
 #[tauri::command]
 pub async fn list_worktree_git_history(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
     cursor: Option<String>,
 ) -> Result<GitCommitHistory, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_worktree_git_history",
         workbench_compat::call_query(
@@ -1150,12 +1213,13 @@ pub async fn list_worktree_git_history(
 #[tauri::command]
 pub async fn get_worktree_git_graph(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
     cursor: Option<String>,
 ) -> Result<GitCommitGraph, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_worktree_git_graph",
         workbench_compat::call_query(
@@ -1170,10 +1234,11 @@ pub async fn get_worktree_git_graph(
 #[tauri::command]
 pub async fn get_worktree_commit_detail(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     commit_hash: String,
 ) -> Result<GitCommitDetail, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_worktree_commit_detail",
         workbench_compat::call_query(
@@ -1188,11 +1253,12 @@ pub async fn get_worktree_commit_detail(
 #[tauri::command]
 pub async fn get_worktree_commit_file_diff(
     app: AppHandle,
+    window: tauri::Window,
     working_directory: String,
     commit_hash: String,
     path: String,
 ) -> Result<WorktreeGitFileDiff, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "get_worktree_commit_file_diff",
         workbench_compat::call_query(
@@ -1205,19 +1271,23 @@ pub async fn get_worktree_commit_file_diff(
 }
 
 #[tauri::command]
-pub async fn list_agents(app: AppHandle) -> Vec<AgentDescriptor> {
-    let runtime = workbench_runtime(&app);
+pub async fn list_agents(app: AppHandle, window: tauri::Window) -> Vec<AgentDescriptor> {
     // 오늘 command는 실패하지 않는 `Vec`를 돌려줬다(catalog 오류는 기본값). 시그니처를 유지하기 위해
-    // 호출이 실패하면 빈 목록을 돌려주고 오류는 perf 로그에 남긴다.
-    let result: Result<Vec<AgentDescriptor>, String> = log_async_command(
-        "list_agents",
-        workbench_compat::call_query(
-            &runtime,
-            OperationId::AgentList,
-            workbench_compat::agent_list_input(),
-        ),
-    )
-    .await;
+    // 호출이 실패하면 빈 목록을 돌려주고 오류는 perf 로그에 남긴다(닫힌 창의 늦은 호출 포함).
+    let result: Result<Vec<AgentDescriptor>, String> = match caller(&app, &window) {
+        Ok(runtime) => {
+            log_async_command(
+                "list_agents",
+                workbench_compat::call_query(
+                    &runtime,
+                    OperationId::AgentList,
+                    workbench_compat::agent_list_input(),
+                ),
+            )
+            .await
+        }
+        Err(error) => Err(error),
+    };
     result.unwrap_or_else(|error| {
         log_async_command_error("list_agents", &error);
         Vec::new()
@@ -1229,10 +1299,11 @@ pub async fn list_agents(app: AppHandle) -> Vec<AgentDescriptor> {
 #[tauri::command]
 pub async fn list_provider_sessions(
     app: AppHandle,
+    window: tauri::Window,
     agent_id: String,
     cwd: Option<String>,
 ) -> Result<Vec<ProviderSession>, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     log_async_command(
         "list_provider_sessions",
         workbench_compat::call_query(
@@ -1255,7 +1326,7 @@ pub fn open_worktree_window(
     window_manager::open_session_window(&app, &project_id, &project_name, &worktree_path, &mode)
 }
 
-/// 042: 이 창의 WebView 출처에 묶인 Workbench HTTP 연결 정보(짧은 토큰). 화면 전환은 4단계.
+/// 042·043: 이 창의 WebView 출처와 창 주체(incarnation)에 묶인 Workbench HTTP 연결 정보(짧은 토큰).
 #[tauri::command]
 pub fn get_workbench_connection(
     window: tauri::WebviewWindow,
@@ -1265,7 +1336,35 @@ pub fn get_workbench_connection(
     let origin = crate::infrastructure::workbench_http::origin_of(&url).ok_or_else(|| {
         crate::infrastructure::workbench_http::MESSAGE_ORIGIN_NOT_ALLOWED.to_owned()
     })?;
-    http.connection_for(&origin)
+    http.connection_for(&origin, window.label())
+}
+
+/// 043: 네트워크 경로 창이 자기 작업대 id를 얻는다(호환 경로가 창 label로 넣던 값). `open`이면 없을 때 연다(경로는 창의
+/// Worktree, 없으면 `hint`) — 호환 command의 `ensure`와 같다. `open`이 아니면 있을 때만 돌려준다(`lookup`, 없으면 `null`).
+/// 작업대는 이 창의 주체로 열린다(작업대 소유 = 창).
+#[tauri::command]
+pub async fn ensure_window_bench(
+    app: AppHandle,
+    window: tauri::Window,
+    open: bool,
+    hint: Option<String>,
+) -> Result<Option<String>, String> {
+    let caller = caller(&app, &window)?;
+    if !open {
+        return Ok(desktop_benches::lookup(window.label()));
+    }
+    desktop_benches::ensure(&caller, window.label(), hint.as_deref())
+        .await
+        .map(Some)
+}
+
+/// 043: 이 창(현재 incarnation)은 이벤트를 네트워크 구독으로 받는다 — 앱 내부 삽입 전달을 끈다(중복 금지, FR-007).
+#[tauri::command]
+pub fn declare_network_delivery(window: tauri::Window, incarnation: String) -> Result<(), String> {
+    crate::infrastructure::tauri_desktop_bridge::declare_network_delivery(
+        window.label(),
+        &incarnation,
+    )
 }
 
 #[tauri::command]
@@ -1342,7 +1441,7 @@ pub async fn start_agent_run(
     request: AgentRunRequest,
     panel_id: Option<String>,
 ) -> Result<AgentRun, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     let bench = desktop_benches::ensure(&runtime, window.label(), request.cwd.as_deref()).await?;
     workbench_compat::call_command(
         &runtime,
@@ -1358,7 +1457,7 @@ pub async fn list_agent_tool_command_candidates(
     window: tauri::Window,
     input: AgentToolCandidateQuery,
 ) -> Result<AgentToolCandidateResponse, String> {
-    let runtime = workbench_runtime(&app);
+    let runtime = caller(&app, &window)?;
     let bench = desktop_benches::ensure(
         &runtime,
         window.label(),
@@ -1387,7 +1486,7 @@ async fn run_prompt_command(
 ) -> Result<(), String> {
     let bench = bench_or_inactive(window)?;
     workbench_compat::call_command(
-        &workbench_runtime(app),
+        &caller(app, window)?,
         operation,
         json!({ "benchId": bench, "runId": run_id, "prompt": prompt }),
     )
@@ -1433,7 +1532,7 @@ pub async fn set_run_permission_mode(
 ) -> Result<(), String> {
     let bench = bench_or_inactive(&window)?;
     workbench_compat::call_command(
-        &workbench_runtime(&app),
+        &caller(&app, &window)?,
         OperationId::RunSetPermissionMode,
         json!({ "benchId": bench, "runId": run_id, "mode": permission_mode }),
     )
@@ -1451,7 +1550,7 @@ pub async fn cancel_agent_run(
         return Ok(());
     };
     workbench_compat::call_command(
-        &workbench_runtime(&app),
+        &caller(&app, &window)?,
         OperationId::RunCancel,
         json!({ "benchId": bench, "runId": run_id }),
     )
@@ -1469,7 +1568,7 @@ pub async fn respond_agent_permission(
     let bench = desktop_benches::lookup(window.label())
         .ok_or_else(|| format!("unknown or finished run: {run_id}"))?;
     workbench_compat::call_command(
-        &workbench_runtime(&app),
+        &caller(&app, &window)?,
         OperationId::RunRespondPermission,
         json!({
             "benchId": bench,

@@ -26,9 +26,11 @@ use super::tauri_commands::{
     GoalInput, GoalProgressInput, GoalUpdateInput, ProjectInput, SavedPromptInput,
 };
 
-/// 데스크톱 앱이 쓰는 고정 호출자. 3단계에서 토큰 기반으로 바뀐다.
-pub fn desktop_principal() -> AuthenticatedPrincipal {
-    AuthenticatedPrincipal::desktop()
+/// 호환 경로 호출자(043): 런타임과 호출한 창의 주체(`desktop:window:<label>:<incarnation>`, research R1·D2).
+#[derive(Clone)]
+pub struct Caller {
+    pub runtime: Arc<WorkbenchRuntime>,
+    pub principal: AuthenticatedPrincipal,
 }
 
 /// 조회 요청 봉투. 멱등성 키 없음.
@@ -67,10 +69,10 @@ pub fn decode_output<Out: DeserializeOwned>(reply: CallReply) -> Result<Out, Str
 }
 
 async fn dispatch<Out: DeserializeOwned>(
-    runtime: &Arc<WorkbenchRuntime>,
+    caller: &Caller,
     request: CallRequest,
 ) -> Result<Out, String> {
-    match runtime.call(desktop_principal(), request).await {
+    match caller.runtime.call(caller.principal.clone(), request).await {
         Ok(reply) => decode_output(reply),
         Err(fault) => Err(fault_to_string(&fault)),
     }
@@ -78,20 +80,20 @@ async fn dispatch<Out: DeserializeOwned>(
 
 /// 조회 command 공통 경로: `*Input → Value` 변환은 호출자가 한다.
 pub async fn call_query<Out: DeserializeOwned>(
-    runtime: &Arc<WorkbenchRuntime>,
+    caller: &Caller,
     operation: OperationId,
     input: Value,
 ) -> Result<Out, String> {
-    dispatch(runtime, query_request(operation, input)).await
+    dispatch(caller, query_request(operation, input)).await
 }
 
 /// 변경 command 공통 경로.
 pub async fn call_command<Out: DeserializeOwned>(
-    runtime: &Arc<WorkbenchRuntime>,
+    caller: &Caller,
     operation: OperationId,
     input: Value,
 ) -> Result<Out, String> {
-    dispatch(runtime, command_request(operation, input)).await
+    dispatch(caller, command_request(operation, input)).await
 }
 
 // ---- 040 US2: 교환 오류 ----
@@ -357,20 +359,17 @@ pub fn fault_to_string(fault: &WorkbenchFault) -> String {
     fault.message.clone()
 }
 
-pub async fn call_list_projects(runtime: &Arc<WorkbenchRuntime>) -> Result<Vec<Project>, String> {
+pub async fn call_list_projects(caller: &Caller) -> Result<Vec<Project>, String> {
     let request = list_projects_request(RequestId::random());
-    match runtime.call(desktop_principal(), request).await {
+    match caller.runtime.call(caller.principal.clone(), request).await {
         Ok(reply) => reply_to_projects(reply),
         Err(fault) => Err(fault_to_string(&fault)),
     }
 }
 
-pub async fn call_create_project(
-    runtime: &Arc<WorkbenchRuntime>,
-    input: ProjectInput,
-) -> Result<Project, String> {
+pub async fn call_create_project(caller: &Caller, input: ProjectInput) -> Result<Project, String> {
     let request = create_project_request(input, IdempotencyKey::random(), RequestId::random());
-    match runtime.call(desktop_principal(), request).await {
+    match caller.runtime.call(caller.principal.clone(), request).await {
         Ok(reply) => reply_to_project(reply),
         Err(fault) => Err(fault_to_string(&fault)),
     }

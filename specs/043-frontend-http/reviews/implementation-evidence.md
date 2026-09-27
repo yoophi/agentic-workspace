@@ -45,3 +45,37 @@ tasks.md에는 경로가 `crates/workbench-server/tests/`로 적혀 있다. 실�
   - (a) `after = 0`: `RetentionExceeded`이고 `first = 8`, `last = 11`이다. 한 건을 더 발행해도 구독이 `None`으로 **끝난다**. 등록된 수신자가 없어 송신자가 모두 사라지므로, 시간 대기 없이 결정적으로 단정된다.
   - (b) `after = lastSequence(11)`: 12(이미 발행됨)와 13(live)을 연속으로 받는다.
 - T009: hub 한도는 이미 `RuntimeAdapters.event_limits`와 `EventHub::new(epoch, EventHubLimits)`로 주입할 수 있다. **코드 변경 없음**이다. 시험 host(T016)도 이 경로를 쓴다.
+
+## T010–T015 AW 창 주체 조립 · 창 수명 경합 판단 (T050 증거 일부)
+
+`cd apps/agentic-workbench/src-tauri && CARGO_INCREMENTAL=0 cargo test` 종료 코드 0, 121 passed(기준선 117 + 새 시험 4).
+
+### 구성
+
+- `infrastructure/window_principals.rs`: 창 label마다 incarnation을 둔다.
+  - `register`는 창 생성 직전에만 부른다.
+  - `current`와 `incarnation`은 조회만 한다. **자동 생성하지 않는다.**
+  - `retire(label, incarnation)`은 **같은 incarnation일 때만** 지운다.
+- `infrastructure/window_lifecycle.rs`: 두 경로로 창을 등록한다.
+  - `build_tracked`: 등록 → 창 만들기(실패하면 거둬들임) → 창별 `on_window_event` 처리기.
+  - `adopt`: setup에서 설정 파일로 만든 `main` 창을 등록한다.
+  - 창별 처리기는 **자기 incarnation을 붙잡고** 다음 순서로 정리한다: 거둬들이기 → 토큰·표 폐기(`WorkbenchHttpState::revoke_window`) → 네트워크 전달 선언 해제 → (session 창) 작업대 닫기. 작업대 닫기는 연 창 주체로 한다.
+- 호환 command는 전부 `Caller { runtime, principal }`로 부른다(D2).
+  - 창 인자가 없던 command에는 `window` 인자를 더했다. Tauri가 주입하므로 화면 호출은 그대로다.
+  - 등록이 없는 창(닫힌 뒤 늦게 도는 command)은 `Window is no longer available.`로 거절한다. `list_agents`만 오늘 계약대로 빈 목록을 돌려준다.
+  - 운영 코드에 남은 공용 `AuthenticatedPrincipal::desktop()`은 0개다. 남은 두 곳은 시험 코드다.
+- 새 command:
+  - `ensure_window_bench(open, hint)`: `open=false`면 lookup이고 `null`일 수 있다.
+  - `declare_network_delivery(incarnation)`: 현재 incarnation일 때만 받는다.
+  - `get_workbench_connection`은 창 주체 토큰과 `incarnation`을 돌려준다.
+- 전달 표(`tauri_desktop_bridge`): 선언한 창의 현재 incarnation이면 삽입 전달을 건너뛴다. 창 제목 적용(`set_title`)은 표현 상태라 경로와 상관없이 앱이 한다. 화면 알림 삽입만 건너뛴다.
+
+### 경합 판단(사용자 지적: Destroyed 뒤 늦은 command, 같은 label 재개 창과 옛 정리의 엇갈림)
+
+| 경합 | 판단 | 근거·고정 |
+|---|---|---|
+| 닫힌 뒤 늦게 도는 command가 새 incarnation을 만듦 | **없앰** | 조회는 만들지 않는다. 시험 `window_principals::lookups_never_create_an_incarnation`과 `a_registered_window_keeps_its_principal_until_its_own_retire`(retire 뒤 `current == None`)으로 고정. `caller()`는 이 경우 거절한다 |
+| 같은 label로 새 창을 먼저 등록한 뒤 옛 창의 정리가 늦게 돌아 새 등록을 지움 | **없앰** | 정리는 전역 창 이벤트가 아니라 창별 처리기가 자기 incarnation으로 한다. 시험 `a_late_retire_of_the_old_incarnation_does_not_remove_the_reopened_window`, `tauri_desktop_bridge::only_the_current_incarnation_can_declare_and_skip_delivery`(옛 incarnation 선언 거절, 늦은 forget이 새 선언을 지우지 않음) |
+| 새 창 등록 뒤 옛 창의 command가 늦게 실행되어 새 창 주체로 풀림(승격) | **이론상 남음 — 작업대에 묶인 호출에는 해당 없음** | Tauri 2.11 async command는 `window`를 포함한 인자를 future 안에서 추출한다(`tauri-macros-2.6.3/src/command/wrapper.rs` `body_async`: `respond_async_serialized(async move { $path(#args?) })`). `Window`에는 label 말고 인스턴스 식별자가 없다. 그래서 수신 시점에 주체를 붙잡을 수 없다. 다만 session 창 label은 매번 새 id라 재사용되지 않는다(`window_manager::open_session_window` → `session_label(&new_session_id())`). 작업대에 묶인 호출(run·교환·orchestration·작업대)은 session 창에서만 나온다. label을 다시 쓰는 창은 `settings`와 `main`(설정 파일)이고, 이 창들의 호출은 작업대와 무관하다(`reviews/command-inventory.md`). 그래서 승격돼도 다른 창의 작업대에 닿지 않는다 |
+
+결정적 시험으로 고정한 것은 위 세 시험이다. 실제 창을 띄우는 순서 시험은 T050(창 닫기 수명)과 T054(앱 스모크)에서 한다.

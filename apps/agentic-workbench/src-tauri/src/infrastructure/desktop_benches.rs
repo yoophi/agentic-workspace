@@ -14,7 +14,9 @@ use std::{
 
 use serde_json::json;
 use workbench_core::application::workbench_runtime::WorkbenchRuntime;
-use workbench_protocol::{CallReply, OperationId, Workbench, operations::bench::BenchOpenOutput};
+use workbench_protocol::{
+    AuthenticatedPrincipal, CallReply, OperationId, Workbench, operations::bench::BenchOpenOutput,
+};
 
 use crate::inbound::workbench_compat;
 
@@ -52,7 +54,7 @@ pub fn label_for(bench_id: &str) -> Option<String> {
 
 /// 창의 작업대를 돌려주고, 없으면 연다. 경로는 창의 Worktree(없으면 `hint`: run 요청 `cwd`·교환 `worktreePath`).
 pub async fn ensure(
-    runtime: &Arc<WorkbenchRuntime>,
+    caller: &workbench_compat::Caller,
     label: &str,
     hint: Option<&str>,
 ) -> Result<String, String> {
@@ -72,7 +74,7 @@ pub async fn ensure(
         .filter(|path| !path.trim().is_empty())
         .ok_or_else(|| "A working directory is required to start agent work.".to_owned())?;
     let output: BenchOpenOutput = workbench_compat::call_command(
-        runtime,
+        caller,
         OperationId::BenchOpen,
         json!({ "workingDirectory": path }),
     )
@@ -87,8 +89,13 @@ pub async fn ensure(
     Ok(output.bench_id)
 }
 
-/// 창이 `Destroyed`될 때: 닫힌 창으로 표시 → 작업대 닫기(소유 run 취소·교환 삭제) → 대응 제거.
-pub async fn close(runtime: &Arc<WorkbenchRuntime>, label: &str) {
+/// 창이 `Destroyed`될 때: 닫힌 창으로 표시 → 작업대 닫기(소유 run 취소·교환 삭제) → 대응 제거. `principal`은 작업대를
+/// 연 창 주체다(043: 창 incarnation을 거둬들이기 전에 받아 둔 값 — 작업대는 연 주체만 닫을 수 있다).
+pub async fn close(
+    runtime: &Arc<WorkbenchRuntime>,
+    label: &str,
+    principal: AuthenticatedPrincipal,
+) {
     let lock = label_lock(label);
     let _guard = lock.lock().await;
     let bench = {
@@ -99,9 +106,7 @@ pub async fn close(runtime: &Arc<WorkbenchRuntime>, label: &str) {
     if let Some(bench) = &bench {
         let request =
             workbench_compat::command_request(OperationId::BenchClose, json!({ "benchId": bench }));
-        let result: Result<CallReply, _> = runtime
-            .call(workbench_compat::desktop_principal(), request)
-            .await;
+        let result: Result<CallReply, _> = runtime.call(principal, request).await;
         if let Err(fault) = result {
             eprintln!(
                 "[workbench] failed to close bench for window {label}: {}",
@@ -140,26 +145,39 @@ mod tests {
         (dir, runtime, work.to_string_lossy().into_owned())
     }
 
+    fn window(runtime: &Arc<WorkbenchRuntime>, label: &str) -> workbench_compat::Caller {
+        workbench_compat::Caller {
+            runtime: Arc::clone(runtime),
+            principal: AuthenticatedPrincipal::desktop_window(label, "inc-1"),
+        }
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ensure_opens_once_and_close_releases_the_window() {
         let (_dir, runtime, work) = runtime();
         let label = "session-test-ensure";
-        let first = ensure(&runtime, label, Some(&work)).await.unwrap();
-        let second = ensure(&runtime, label, Some(&work)).await.unwrap();
+        let first = ensure(&window(&runtime, label), label, Some(&work))
+            .await
+            .unwrap();
+        let second = ensure(&window(&runtime, label), label, Some(&work))
+            .await
+            .unwrap();
         assert_eq!(first, second);
         assert_eq!(lookup(label).as_deref(), Some(first.as_str()));
         assert_eq!(label_for(&first).as_deref(), Some(label));
 
-        close(&runtime, label).await;
+        close(&runtime, label, window(&runtime, label).principal).await;
         assert!(lookup(label).is_none());
         assert!(label_for(&first).is_none());
         assert!(
             runtime.benches().registry.is_empty(),
-            "bench closed on the server"
+            "bench closed on the server by the window principal that opened it"
         );
         // 닫힌 창에서는 다시 열지 않는다.
         assert_eq!(
-            ensure(&runtime, label, Some(&work)).await.unwrap_err(),
+            ensure(&window(&runtime, label), label, Some(&work))
+                .await
+                .unwrap_err(),
             MESSAGE_WINDOW_UNAVAILABLE
         );
     }
@@ -173,9 +191,11 @@ mod tests {
                 let runtime = Arc::clone(&runtime);
                 let label = label.clone();
                 let work = work.clone();
-                tokio::spawn(async move { ensure(&runtime, &label, Some(&work)).await })
+                tokio::spawn(
+                    async move { ensure(&window(&runtime, &label), &label, Some(&work)).await },
+                )
             };
-            close(&runtime, &label).await;
+            close(&runtime, &label, window(&runtime, &label).principal).await;
             let _ = opening.await.unwrap();
             assert!(lookup(&label).is_none(), "round {round}");
         }
@@ -185,6 +205,14 @@ mod tests {
     #[tokio::test]
     async fn ensure_without_any_path_is_rejected() {
         let (_dir, runtime, _work) = runtime();
-        assert!(ensure(&runtime, "session-test-nopath", None).await.is_err());
+        assert!(
+            ensure(
+                &window(&runtime, "session-test-nopath"),
+                "session-test-nopath",
+                None
+            )
+            .await
+            .is_err()
+        );
     }
 }
