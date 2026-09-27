@@ -18,9 +18,9 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ## Phase 1: Setup
 
-- [ ] T001 기준선 게이트 실행·기록(`pnpm -r test`, `pnpm -r typecheck`, `cargo test -p workbench-core -p workbench-server -p workbench-protocol --features test-hooks`, AW `cargo test`) — 로그·종료 코드를 `specs/043-frontend-http/reviews/baseline.md`에 기록
-- [ ] T002 호환 command 인벤토리 표 작성 — 저장소 함수 ↔ Tauri command ↔ Workbench operation ↔ 분류(서버 소유/데스크톱 표현) ↔ 호출 주체(창 주체 필요 여부, D2) 열, `specs/043-frontend-http/reviews/command-inventory.md`
-- [ ] T003 교환 상태 의미 확인(R8 "tasks 첫 단계에서 코드로 확인") — `AgentExchangeStatus` 전이(`Pending`·`Accepted`·ack 뒤)와 requested 이벤트 발행 시점을 `CORE/src/application/agent_exchange_service.rs`에서 확인해 `command-inventory.md`에 재조정 대상 상태를 확정 기록
+- [X] T001 기준선 게이트 실행·기록(`pnpm test`, `pnpm check-types`(루트 turbo 전체; 필터 실행과 구분해 기록), `cargo test -p workbench-core -p workbench-server -p workbench-protocol --features test-hooks`, AW `cargo test`) — 로그·종료 코드를 `specs/043-frontend-http/reviews/baseline.md`에 기록
+- [X] T002 호환 command 인벤토리 표 작성 — 저장소 함수 ↔ Tauri command ↔ Workbench operation ↔ 분류(서버 소유/데스크톱 표현) ↔ 호출 주체(창 주체 필요 여부, D2) 열, `specs/043-frontend-http/reviews/command-inventory.md`
+- [X] T003 교환 상태 의미 확인(R8 "tasks 첫 단계에서 코드로 확인") — `AgentExchangeStatus` 전이(`Pending`·`Accepted`·ack 뒤)와 requested 이벤트 발행 시점을 `CORE/src/application/agent_exchange_service.rs`에서 확인해 `command-inventory.md`에 재조정 대상 상태를 확정 기록
 
 ---
 
