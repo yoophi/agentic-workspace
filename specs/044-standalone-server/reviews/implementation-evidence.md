@@ -490,3 +490,125 @@ green·최종:
 - 최종 실행 `f3739-*`(clippy 수정 뒤): core 470/0, acp-agent-core 97/0, host 57/0, AW 102/0, AW clippy 0. filtered out은 모두 0이다.
 - fork가 돌리지 않은 `agentic-workbench-server`를 메인 세션이 실행했다: `cargo test -p agentic-workbench-server` 종료 0(7/0), clippy `-D warnings` 종료 0.
 - 디스크 여유가 4.6GB로 줄어, 재빌드로 복구 가능한 산출물을 정리했다(main 저장소 `target` 전체, 044 `target/release`). 정리 뒤 여유는 11GB다.
+
+## T040–T044 (fork, HEAD fd53701에서 시작)
+
+로그는 모두 `scratchpad/044/`에 있고, 검증마다 한 번 실행해 `*.status`에 종료 코드를 남겼다. `CARGO_INCREMENTAL=0`을 썼다.
+
+### T040 입구 판정
+
+- 시험 `crates/workbench-core/tests/drain_entry.rs`(6개, support 1개 포함):
+  - `OperationId::ALL`을 도는 표 시험: 비우는 중 N은 `draining`/`notApplied`로 거절한다. Q·C는 입구에서 `draining`을 받지 않는다(다른 fault는 허용).
+  - 정지 중 호출은 Q·C·N 모두 `unavailable`이다. 서버는 이것을 503으로 돌려준다.
+  - 이어 가기 표지가 없는 `run.sendPrompt`는 N이다.
+  - 대기 task 배정(K)의 양쪽을 본다:
+    - 비우기 전에 만든 `ready` task는 받는다.
+    - 끝난 task와 없는 task는 `draining`이고 launch는 0이다.
+- red `t040-red-1.log` 종료 101(**행동 red**): 3 failed, 3 passed.
+- 구현:
+  - 입구: `Workbench::call`이 `resolve_operation` 바로 뒤에 판정한다. `stopping`이면 `unavailable`, `draining`이고 N이면 `draining`을 돌려준다.
+  - 관문: `WorkGate.drain_started_at`을 둔다. 서빙에서 비우기로 넘어갈 때 기록하고, 유휴 비우기가 취소되면 지운다.
+  - K 판정: `agent_tools::ensure_assign_continues`가 본다. 조건은 `pending`·`ready` 상태이면서 `created_at`이 `drain_started_at`보다 이른 것이다. `ToolError("draining")`은 `FaultCode::Draining`으로 옮긴다.
+- green `t040-green-1.log` 종료 0: 6 passed, 0 filtered out.
+- red 뒤 부정 시험이 바뀌어("not ready" → "not waiting") 변이로 다시 확인했다. `t040-mutation-1.log` 종료 101: K 판정을 빼면 부정 시험이 실패한다. 원본을 복원했다.
+
+### T041 상태 기계·정지 세 방식
+
+- core `ServerControl`:
+  - 파생 값 `derive()`는 열린 작업대만 센다. 항목:
+    - 진행 중 task(`running`)
+    - 비우기 전 대기 task
+    - 대상 coordinator run이 살아 있는 미전달 알림(`pending`·`dispatching`·재시도 가능 `failed`)
+    - 미소비 교환: 데스크톱 임대가 있을 때만 센다. 없으면 `undeliverableExchanges`로 보고한다.
+    - ledger `pending`
+    - ledger `unknown`: `unresolvedOperations`로만 보고하고 **정지 판정에는 넣지 않는다**.
+  - 판정 `request_stop`:
+    - `default`: 활동이 있으면 `conflict`와 `details.activeWork`.
+    - `wait`: `draining{wait}` 뒤 열린 작업대마다 `spawn_notification_pass`를 부른다.
+    - `force`: 비우기로 새 작업을 막고 → `close_all` → `stopping`.
+  - `tick(idle_timeout)`: 유휴 시계, 유휴·wait 비우기의 정지 판정. `lease.acquire`는 유휴 비우기를 서빙으로 되돌린다.
+  - 정지 판정은 `WorkGate::try_stop_at(generation, …)`이다. 파생 값을 읽기 전의 활동 세대(예약 해제 수)가 그대로일 때만 `stopping`으로 넘어간다.
+  - `Workbench::call`은 C-call 예약을 잡는다. 대상은 조회와 서버 관리(`server.stop`·`lease.*`·`desktop.issueWindowToken`)를 뺀 모든 호출이다. 진행 중 호출과 그 호출이 만드는 파생 상태를 판정이 놓치지 않게 하려는 것이다.
+  - `server.status`는 모든 필드를 파생한다: `notYetDerived` = `[]`, `idleSince`, `failedExchangeDeliveries`(관문). `SqliteOperationLedger::count_by_state`를 운영 코드로 올렸다.
+- host:
+  - `lifecycle/monitor.rs`(20–100ms 판정 루프).
+  - `lifecycle/server.rs`: 감시 루프 또는 SIGTERM·SIGINT(= force, 30초 상한) → `host.shutdown()`(받은 호출 drain·쉬는 세션 취소) → 자기 인스턴스의 안내 파일 삭제.
+  - `lifecycle/stop.rs`: CLI `stop [--wait|--force]`. 종료 코드는 0, 5(blocker JSON을 stdout에), 1이다. 안내 파일이 사라질 때까지 기다린다.
+  - `serve`의 `--idle-timeout <sec>`(기본 600)와 `--log <file>`.
+- 시험 `crates/workbench-core/tests/server_stop.rs`(10개):
+  - 모든 필드 파생
+  - **ledger `unknown`만 있을 때**: `unresolvedOperations == 1`, `pendingOperations == 0`, `blocks_stop == false`이고 wait와 idle 모두 멈춘다.
+  - `default` 거절(busyRuns 1)
+  - wait 뒤 권한 응답 → 쉬는 세션이 살아 있어도 멈춘다.
+  - force
+  - 임대와 유휴 비우기
+  - 유휴 시계
+  - 미소비 교환: 임대가 없으면 `undeliverableExchanges`이고 막지 않는다. 데스크톱 임대가 있으면 전달까지 막는다.
+- red `t041-red-compile.log` 종료 101(**컴파일 red**): 구현 이전 소스에 `tick`·`stopped`가 없다.
+- 변이 `t041-mutation-unknown.log` 종료 101: `unknown`을 활동으로 세면 unknown 시험 2개가 실패한다. 원본을 복원했다.
+- green `t041-core-2.log` 종료 0: 10 passed, 0 filtered out.
+- 형태 시험을 갱신했다:
+  - `owner_principal.rs`: `server_status_derives_every_field`
+  - `window_tokens.rs`: `server_status_carries_the_instance_id_and_derives_every_field`
+- 감시 future가 `Send`가 아니었다(`tick`의 유휴 잠금이 await를 걸침). 블록으로 고쳤다(커밋 3e9162e).
+
+### T042 실제 경로 wait-stop
+
+- 시험 `crates/workbench-host/tests/wait_stop.rs`(5개). 실제 host 조립, HTTP `/v1/calls`, 실제 MCP `/mcp`, host 감시 루프를 쓴다.
+  - (a) 가짜 ACP agent 권한 대기.
+  - (b) 가짜 ACP agent `--end-turn-gate`, 교환 확인이 전송보다 먼저, `exchange-delivery:q1` + `continuation`.
+  - (c) 자식 결과(MCP) → coordinator 알림.
+  - (d) 동시 상한 1, 둘째 task K 배정(MCP).
+  - (e) 자식이 권한 대기로 바쁠 때 보낸 대기 자식 명령 → 비우기 뒤 전달 → 결과.
+- green `t042-3.log` 종료 0: 5 passed, 0 filtered out. 앞의 두 실패(`t042-1`은 컴파일 — 감시 future `Send`, `t042-2`는 전달 키 누락)는 시험·구현을 고친 뒤 다시 돌렸다.
+- 대조 변이(각각 한 번 실행 뒤 원본 복원, `grep -c MUTATION` = 0 확인):
+  - `t042-mutation-b-sendprompt.log` 종료 101: `run.sendPrompt`를 N으로 바꾸면 (b)가 "did not stop … (503, draining)"으로 실패.
+  - `t042-mutation-c-report.log` 종료 101: `orchestration.reportResult`를 N으로 바꾸면 (c)·(d)·(e)가 실패.
+  - `t042-mutation-d-assign.log` 종료 101: `assignChildTask`를 N으로 바꾸면 (d)가 실패.
+  - `t042-mutation-a-sessions.log` 종료 101: 세션 수를 활동으로 세면 (a)–(e)가 모두 "did not stop"으로 실패.
+
+### T043 043 소비자 코드의 교환 전달
+
+- 화면:
+  - `exchangeContinuation()`을 추가했다(`exchange-reconciler.ts`).
+  - `QueuedPrompt.exchangeRequestId`를 추가했다.
+  - 패널 대기열 전송이 `sendPromptToRun(…, continuation)`을 부른다.
+  - command 표의 `send_prompt_to_run`은 표지가 있을 때만 `continuation`을 싣는다.
+- 시험 host(`http_test_host`)에 추가한 것: 소유자 토큰(`tokens.owner`), `HOST_PERMISSION_ID`, 감시 루프.
+- 시험 `drain-exchange.itest.ts`: 원장 확인이 먼저 → wait-stop → 표지 없는 prompt는 거절 → 권한 응답 → `sendPromptToRun`(앱 transport) → `unavailable`(멈춤)까지 기다린다.
+- red `t043-red.log` 종료 1: 화면 변경 전 소스에서 `exchangeContinuation is not a function`이 난다(144행 — 확인·비우기·거절 단계까지는 통과했다).
+- green `t043-green-1.log` 종료 0.
+- 변이 `t043-mutation-no-continuation.log` 종료 1: command 표가 `continuation`을 빼면 "server is draining"으로 실패한다. 원본을 복원했다.
+- `http-transport.test.ts`에 표지 전달 단위 시험 1개를 추가했다(구현 뒤 추가).
+
+### T044 프로세스 시험
+
+- `apps/agentic-workbench-server/tests/process.rs`에 8개를 더했다:
+  - 유휴 정지와 안내 파일 삭제
+  - 활동이 있으면 유휴 정지 안 함 → turn이 끝나면 정지
+  - `stop` default는 종료 코드 5와 blocker JSON → `--wait` 대기 → 정지
+  - `--force`
+  - 비우는 중 N은 503 `draining`, Q는 응답
+  - ledger `unknown`만 남은 서버: idle과 wait 모두 정지
+  - SIGTERM은 force(기록 확인)
+- red `t044-red.log` 종료 101(**행동 red**, 구현 이전 소스): 새 시험 7 failed, 기존 5 passed. SIGTERM 시험은 red 뒤에 추가했다.
+- green `t044-green-1.log` 종료 0: 12 passed, 0 filtered out. SIGTERM 단독 실행은 `t044-sigterm.log` 종료 0.
+
+### 최종 실행
+
+- clippy `-D warnings`(core·host·server·agentic-workbench-server·protocol, test-hooks):
+  - `clippy-1`·`clippy-2` 종료 101: 시험의 `result_large_err`, 접을 수 있는 `if`.
+  - 고친 뒤 `clippy-3.log` 종료 0.
+  - AW `clippy-aw-1.log` 종료 0.
+- lint 수정 뒤 전체를 다시 돌렸다:
+  - `final-core.log` 종료 0: 59 target, 486 passed.
+  - `final-workbench-host.log` 종료 0: 8 target, 62 passed.
+  - `final-workbench-server.log` 종료 0: 18 passed.
+  - `final-agentic-workbench-server.log` 종료 0: 15 passed.
+  - `final-agentic-workbench.log` 종료 0: 102 passed.
+  - 모든 target의 filtered out은 0이다.
+- AW `pnpm test` `final-aw-test.log` 종료 0: 92 파일, 642 passed.
+- `check-types`: AW `final-aw-types.log`, workbench-client `final-wc-types.log` 모두 종료 0.
+- `test:integration`: AW `aw-itest-1.log` 종료 0(2 passed), workbench-client `wc-itest-1.log` 종료 0(7 passed).
+- 프로토콜 crate와 생성 TS는 바꾸지 않았다(`git diff fd53701 -- crates/workbench-protocol packages/workbench-client/src/generated`가 비어 있음). 그래서 drift 검사 대상이 아니다.
+- 잔여 프로세스(가짜 agent·서버·시험 host)는 없다. 디스크 여유는 7.8GB다.
