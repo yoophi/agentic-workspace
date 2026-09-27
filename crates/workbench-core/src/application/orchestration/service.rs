@@ -152,14 +152,14 @@ where
     pub fn bootstrap(
         &self,
         worktree_path: &str,
-        window_label: &str,
+        bench_id: &str,
         resume_workspace_id: Option<&str>,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
         if let Some(existing) = sessions
             .iter()
-            .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+            .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
         {
             if existing.worktree_path != worktree_path {
                 return Err(OrchestrationError::new(
@@ -181,23 +181,19 @@ where
                         "Recoverable orchestration workspace was not found.",
                     )
                 })?;
-            if existing.worktree_path != worktree_path || existing.bound_window_label.is_some() {
+            if existing.worktree_path != worktree_path || existing.bound_bench_id.is_some() {
                 return Err(OrchestrationError::new(
                     OrchestrationErrorCode::ScopeMismatch,
                     "The workspace cannot be bound to this window.",
                 ));
             }
-            existing.bound_window_label = Some(window_label.into());
+            existing.bound_bench_id = Some(bench_id.into());
             existing.revision += 1;
             existing.updated_at = now;
             existing.clone()
         } else {
-            let session = OrchestrationSession::new(
-                Uuid::new_v4().to_string(),
-                worktree_path,
-                window_label,
-                now,
-            );
+            let session =
+                OrchestrationSession::new(Uuid::new_v4().to_string(), worktree_path, bench_id, now);
             sessions.push(session.clone());
             session
         };
@@ -207,15 +203,15 @@ where
         Ok(session)
     }
 
-    pub fn get_for_window(
+    pub fn get_for_bench(
         &self,
-        window_label: &str,
+        bench_id: &str,
     ) -> Result<Option<OrchestrationSession>, OrchestrationError> {
         Ok(self
             .repository
             .snapshot()?
             .into_iter()
-            .find(|session| session.bound_window_label.as_deref() == Some(window_label)))
+            .find(|session| session.bound_bench_id.as_deref() == Some(bench_id)))
     }
 
     pub fn list_for_worktree(
@@ -238,7 +234,7 @@ where
             .list_for_worktree(worktree_path)?
             .into_iter()
             .filter(|session| {
-                session.bound_window_label.is_none()
+                session.bound_bench_id.is_none()
                     && (!session.tasks.is_empty()
                         || !session.generations.is_empty()
                         || session.nodes.len() > 1
@@ -249,15 +245,15 @@ where
         Ok(sessions)
     }
 
-    pub fn release_window(
+    pub fn release_bench(
         &self,
-        window_label: &str,
+        bench_id: &str,
     ) -> Result<Option<OrchestrationSession>, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
         let Some(session) = sessions
             .iter_mut()
-            .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+            .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
         else {
             return Ok(None);
         };
@@ -286,7 +282,7 @@ where
                 node.presentation_status = PresentationStatus::Background;
             }
         }
-        session.bound_window_label = None;
+        session.bound_bench_id = None;
         session.revision += 1;
         session.updated_at = now();
         let snapshot = session.clone();
@@ -296,21 +292,21 @@ where
 
     pub fn bind_main_run(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: BindMainRunRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
         let session = sessions
             .iter_mut()
-            .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+            .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
             .ok_or_else(|| {
                 OrchestrationError::new(
                     OrchestrationErrorCode::NotFound,
                     "Orchestration workspace is not bootstrapped.",
                 )
             })?;
-        session.assert_scope(window_label)?;
+        session.assert_scope(bench_id)?;
         if request.panel_id != MAIN_AGENT_NODE_ID {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::InvalidTopology,
@@ -322,7 +318,7 @@ where
             request.panel_id, request.run_id, request.state
         );
         if let Some(existing) = session.idempotency_records.iter().find(|record| {
-            record.actor_key == window_label
+            record.actor_key == bench_id
                 && record.operation == "bindMainRun"
                 && record.request_id == request.request_id
         }) {
@@ -429,7 +425,7 @@ where
         session.revision += 1;
         session.updated_at = now.clone();
         session.idempotency_records.push(IdempotencyRecord {
-            actor_key: window_label.into(),
+            actor_key: bench_id.into(),
             operation: "bindMainRun".into(),
             request_id: request.request_id,
             payload_fingerprint: fingerprint,
@@ -444,13 +440,13 @@ where
 
     pub fn create_child_task(
         &self,
-        window_label: &str,
+        bench_id: &str,
         generation_id: &str,
         request: CreateChildTaskRequest,
     ) -> Result<CreateChildTaskOutcome, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         if session.active_coordinator_generation_id.as_deref() != Some(generation_id) {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::Unauthorized,
@@ -626,12 +622,12 @@ where
 
     pub fn delegate_goal(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: DelegateGoalRequest,
     ) -> Result<DelegateGoalOutcome, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let generation_id = session
             .active_coordinator_generation_id
             .clone()
@@ -651,7 +647,7 @@ where
         }
         let fingerprint = request.goal.trim().to_string();
         if let Some(record) = session.idempotency_records.iter().find(|record| {
-            record.actor_key == window_label
+            record.actor_key == bench_id
                 && record.operation == "delegateGoal"
                 && record.request_id == request.request_id
         }) {
@@ -734,7 +730,7 @@ where
             updated_at: now.clone(),
         });
         session.idempotency_records.push(IdempotencyRecord {
-            actor_key: window_label.into(),
+            actor_key: bench_id.into(),
             operation: "delegateGoal".into(),
             request_id: request.request_id,
             payload_fingerprint: fingerprint,
@@ -756,13 +752,13 @@ where
 
     pub fn adopt_manual_child(
         &self,
-        window_label: &str,
+        bench_id: &str,
         panel_id: &str,
         title: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         if let Some(existing) = session.nodes.iter().find(|node| node.id == panel_id) {
             if existing.kind == crate::domain::agent_orchestration::AgentNodeKind::Child {
                 return Ok(session.clone());
@@ -803,14 +799,14 @@ where
 
     pub fn bind_child_run(
         &self,
-        window_label: &str,
+        bench_id: &str,
         task_id: &str,
         node_id: &str,
         run_id: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let now = now();
         let task = session
             .tasks
@@ -848,12 +844,12 @@ where
 
     pub fn report_task(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: ReportTaskRequest,
     ) -> Result<TaskReport, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         if let Some(existing) = session
             .reports
             .iter()
@@ -1018,10 +1014,10 @@ where
 
     pub fn list_child_tasks(
         &self,
-        window_label: &str,
+        bench_id: &str,
         generation_id: &str,
     ) -> Result<Vec<OrchestrationTask>, OrchestrationError> {
-        let session = self.get_for_window(window_label)?.ok_or_else(|| {
+        let session = self.get_for_bench(bench_id)?.ok_or_else(|| {
             OrchestrationError::new(
                 OrchestrationErrorCode::NotFound,
                 "Orchestration workspace is not bootstrapped.",
@@ -1036,13 +1032,13 @@ where
 
     pub fn collect_child_results(
         &self,
-        window_label: &str,
+        bench_id: &str,
         generation_id: &str,
         task_ids: &[String],
     ) -> Result<Vec<TaskReport>, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         if session.active_coordinator_generation_id.as_deref() != Some(generation_id) {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::Unauthorized,
@@ -1110,12 +1106,12 @@ where
 
     pub fn set_presentation(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: SetPresentationRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         if session.revision != request.expected_revision {
             return Err(revision_conflict());
         }
@@ -1132,7 +1128,7 @@ where
         }
         let fingerprint = format!("{}:{:?}", request.node_id, request.presentation_status);
         if let Some(record) = session.idempotency_records.iter().find(|record| {
-            record.actor_key == window_label
+            record.actor_key == bench_id
                 && record.operation == "setPresentation"
                 && record.request_id == request.request_id
         }) {
@@ -1155,7 +1151,7 @@ where
         let now = now();
         node.last_activity_at = Some(now.clone());
         session.idempotency_records.push(IdempotencyRecord {
-            actor_key: window_label.into(),
+            actor_key: bench_id.into(),
             operation: "setPresentation".into(),
             request_id: request.request_id,
             payload_fingerprint: fingerprint,
@@ -1172,12 +1168,12 @@ where
 
     pub fn record_prompt_dispatch(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: DispatchPromptRequest,
     ) -> Result<PromptDispatch, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let message = request.message.trim();
         if message.is_empty()
             || message.len() > crate::domain::agent_orchestration::MAX_PROMPT_BYTES
@@ -1200,7 +1196,7 @@ where
             )
         })?;
         if let Some(record) = session.idempotency_records.iter().find(|record| {
-            record.actor_key == window_label
+            record.actor_key == bench_id
                 && record.operation == "dispatchPrompt"
                 && record.request_id == request.request_id
         }) {
@@ -1264,7 +1260,7 @@ where
             updated_at: now.clone(),
         };
         session.idempotency_records.push(IdempotencyRecord {
-            actor_key: window_label.into(),
+            actor_key: bench_id.into(),
             operation: "dispatchPrompt".into(),
             request_id: request.request_id,
             payload_fingerprint: fingerprint,
@@ -1282,7 +1278,7 @@ where
 
     pub fn update_prompt_dispatch_target(
         &self,
-        window_label: &str,
+        bench_id: &str,
         dispatch_id: &str,
         request_id: &str,
         status: PromptDispatchTargetStatus,
@@ -1290,7 +1286,7 @@ where
     ) -> Result<PromptDispatch, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let dispatch = session
             .dispatches
             .iter_mut()
@@ -1325,7 +1321,7 @@ where
 
     pub fn respond_to_input(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: TaskActionRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let response = request
@@ -1339,7 +1335,7 @@ where
                     "An input response is required.",
                 )
             })?;
-        self.mutate_task(window_label, &request, "respondInput", |task, node, now| {
+        self.mutate_task(bench_id, &request, "respondInput", |task, node, now| {
             if task.status != TaskStatus::InputRequired {
                 return Err(OrchestrationError::new(
                     OrchestrationErrorCode::InvalidTransition,
@@ -1357,10 +1353,10 @@ where
 
     pub fn cancel_task(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: TaskActionRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        self.mutate_task(window_label, &request, "cancelTask", |task, node, now| {
+        self.mutate_task(bench_id, &request, "cancelTask", |task, node, now| {
             if task.status.is_terminal() {
                 return Ok(());
             }
@@ -1373,10 +1369,10 @@ where
 
     pub fn retry_task(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: TaskActionRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        self.mutate_task(window_label, &request, "retryTask", |task, node, now| {
+        self.mutate_task(bench_id, &request, "retryTask", |task, node, now| {
             if !matches!(task.status, TaskStatus::Failed | TaskStatus::Blocked) {
                 return Err(OrchestrationError::new(
                     OrchestrationErrorCode::InvalidTransition,
@@ -1396,7 +1392,7 @@ where
 
     pub fn reassign_task(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: TaskActionRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let target_node_id = request.target_node_id.clone().ok_or_else(|| {
@@ -1407,7 +1403,7 @@ where
         })?;
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         ensure_revision(session, request.expected_revision)?;
         let task_index = session
             .tasks
@@ -1451,12 +1447,12 @@ where
         }
         task.attempt += 1;
         task.failure = None;
-        persist_mutation(tx, &self.event_sink, window_label, "taskReassigned")
+        persist_mutation(tx, &self.event_sink, bench_id, "taskReassigned")
     }
 
     pub fn handoff_coordinator(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: CoordinatorHandoffRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
         if !request.confirmed {
@@ -1467,7 +1463,7 @@ where
         }
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         ensure_revision(session, request.expected_revision)?;
         let previous_id = session
             .active_coordinator_generation_id
@@ -1513,24 +1509,24 @@ where
             main.current_run_id = Some(request.successor_run_id);
             main.execution_status = ExecutionStatus::Active;
         }
-        persist_mutation(tx, &self.event_sink, window_label, "coordinatorHandoff")
+        persist_mutation(tx, &self.event_sink, bench_id, "coordinatorHandoff")
     }
 
     pub fn reconcile_runtime(
         &self,
-        window_label: &str,
+        bench_id: &str,
         live_run_ids: &[String],
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         reconcile_session_runtime(session, live_run_ids);
-        persist_mutation(tx, &self.event_sink, window_label, "runtimeReconciled")
+        persist_mutation(tx, &self.event_sink, bench_id, "runtimeReconciled")
     }
 
     pub fn fail_task_for_runtime(
         &self,
-        window_label: &str,
+        bench_id: &str,
         task_id: &str,
         node_id: &str,
         code: OrchestrationErrorCode,
@@ -1538,7 +1534,7 @@ where
     ) -> Result<OrchestrationSession, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let now = now();
         let task = session
             .tasks
@@ -1565,12 +1561,12 @@ where
             node.presentation_status = PresentationStatus::AttentionRequired;
             node.last_activity_at = Some(now);
         }
-        persist_mutation(tx, &self.event_sink, window_label, "runtimePolicyViolation")
+        persist_mutation(tx, &self.event_sink, bench_id, "runtimePolicyViolation")
     }
 
     fn mutate_task<F>(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: &TaskActionRequest,
         operation: &str,
         mutate: F,
@@ -1580,10 +1576,10 @@ where
     {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         ensure_revision(session, request.expected_revision)?;
         if let Some(record) = session.idempotency_records.iter().find(|record| {
-            record.actor_key == window_label
+            record.actor_key == bench_id
                 && record.operation == operation
                 && record.request_id == request.request_id
         }) {
@@ -1613,22 +1609,22 @@ where
             &now,
         )?;
         session.idempotency_records.push(IdempotencyRecord {
-            actor_key: window_label.into(),
+            actor_key: bench_id.into(),
             operation: operation.into(),
             request_id: request.request_id.clone(),
             payload_fingerprint: serde_json::to_string(request).unwrap_or_default(),
             result_ref: request.task_id.clone(),
             created_at: now,
         });
-        persist_mutation(tx, &self.event_sink, window_label, operation)
+        persist_mutation(tx, &self.event_sink, bench_id, operation)
     }
 
     fn emit_workspace_changed(&self, session: &OrchestrationSession, reason: &str) {
-        let Some(window_label) = session.bound_window_label.as_deref() else {
+        let Some(bench_id) = session.bound_bench_id.as_deref() else {
             return;
         };
         let _ = self.event_sink.emit(
-            window_label,
+            bench_id,
             OrchestrationEvent {
                 workspace_id: session.id.clone(),
                 revision: session.revision,
@@ -1678,20 +1674,20 @@ fn reconcile_session_runtime(session: &mut OrchestrationSession, live_run_ids: &
     }
 }
 
-fn session_for_window_mut<'a>(
+fn session_for_bench_mut<'a>(
     sessions: &'a mut [OrchestrationSession],
-    window_label: &str,
+    bench_id: &str,
 ) -> Result<&'a mut OrchestrationSession, OrchestrationError> {
     let session = sessions
         .iter_mut()
-        .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+        .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
         .ok_or_else(|| {
             OrchestrationError::new(
                 OrchestrationErrorCode::NotFound,
                 "Orchestration workspace is not bootstrapped.",
             )
         })?;
-    session.assert_scope(window_label)?;
+    session.assert_scope(bench_id)?;
     Ok(session)
 }
 
@@ -1749,20 +1745,20 @@ fn not_found(subject: &str) -> OrchestrationError {
 fn persist_mutation<T, E>(
     mut tx: T,
     event_sink: &E,
-    window_label: &str,
+    bench_id: &str,
     reason: &str,
 ) -> Result<OrchestrationSession, OrchestrationError>
 where
     T: OrchestrationTransaction,
     E: OrchestrationEventSink,
 {
-    let session = session_for_window_mut(tx.sessions(), window_label)?;
+    let session = session_for_bench_mut(tx.sessions(), bench_id)?;
     session.revision += 1;
     session.updated_at = now();
     let snapshot = session.clone();
     tx.commit()?;
     let _ = event_sink.emit(
-        window_label,
+        bench_id,
         OrchestrationEvent {
             workspace_id: snapshot.id.clone(),
             revision: snapshot.revision,
@@ -1799,13 +1795,10 @@ mod tests {
     impl OrchestrationEventSink for RecordingSink {
         fn emit(
             &self,
-            window_label: &str,
+            bench_id: &str,
             event: OrchestrationEvent,
         ) -> Result<(), OrchestrationError> {
-            self.0
-                .lock()
-                .unwrap()
-                .push((window_label.to_string(), event));
+            self.0.lock().unwrap().push((bench_id.to_string(), event));
             Ok(())
         }
     }
@@ -1883,7 +1876,7 @@ mod tests {
         );
         assert!(!error.message.trim().is_empty(), "a reason must be shown");
 
-        let stored = service.get_for_window("window-1").unwrap().unwrap();
+        let stored = service.get_for_bench("window-1").unwrap().unwrap();
         assert!(
             stored.tasks.is_empty(),
             "a rejected delegation must not create a task"
@@ -1950,7 +1943,7 @@ mod tests {
             )
             .expect("a rejected artifact must not drop the whole report");
 
-        let stored = service.get_for_window("window-1").unwrap().unwrap();
+        let stored = service.get_for_bench("window-1").unwrap().unwrap();
         let report = stored
             .reports
             .iter()
@@ -1991,7 +1984,7 @@ mod tests {
     }
 
     #[test]
-    fn bootstraps_window_scoped_workspaces_with_one_main() {
+    fn bootstraps_bench_scoped_workspaces_with_one_main() {
         let repository = MemoryRepository::default();
         let service = OrchestrationService::new(repository.clone(), RecordingSink::default());
 
@@ -2006,23 +1999,23 @@ mod tests {
         assert_eq!(first.main_node_id, MAIN_AGENT_NODE_ID);
         assert_eq!(first.nodes.len(), 1);
         assert_eq!(
-            service.get_for_window("window-1").unwrap().unwrap().id,
+            service.get_for_bench("window-1").unwrap().unwrap().id,
             first.id
         );
-        assert!(service.get_for_window("unknown").unwrap().is_none());
+        assert!(service.get_for_bench("unknown").unwrap().is_none());
     }
 
     #[test]
-    fn releases_lost_window_as_explicitly_recoverable_runtime_lost_work() {
+    fn releases_closed_bench_as_explicitly_recoverable_runtime_lost_work() {
         let (service, workspace, created) = service_with_running_child();
 
         let released = service
-            .release_window("window-1")
+            .release_bench("window-1")
             .unwrap()
             .expect("released workspace");
 
         assert_eq!(released.id, workspace.id);
-        assert_eq!(released.bound_window_label, None);
+        assert_eq!(released.bound_bench_id, None);
         assert_eq!(
             released
                 .nodes
@@ -2052,13 +2045,13 @@ mod tests {
             task.failure.as_ref().unwrap().code,
             OrchestrationErrorCode::RuntimeLost
         );
-        assert!(service.get_for_window("window-1").unwrap().is_none());
+        assert!(service.get_for_bench("window-1").unwrap().is_none());
         assert_eq!(service.list_recoverable("/repo").unwrap().len(), 1);
 
         let resumed = service
             .bootstrap("/repo", "window-2", Some(&released.id))
             .unwrap();
-        assert_eq!(resumed.bound_window_label.as_deref(), Some("window-2"));
+        assert_eq!(resumed.bound_bench_id.as_deref(), Some("window-2"));
         assert_eq!(resumed.tasks[0].status, TaskStatus::Blocked);
     }
 
@@ -2140,7 +2133,7 @@ mod tests {
             .create_child_task("window-1", &generation_id, request)
             .unwrap();
         assert_eq!(created.task_id, repeated.task_id);
-        let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+        let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
         let node = snapshot
             .nodes
             .iter()
@@ -2179,7 +2172,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            service.get_for_window("window-1").unwrap().unwrap().tasks[0].status,
+            service.get_for_bench("window-1").unwrap().unwrap().tasks[0].status,
             TaskStatus::Running
         );
         service
@@ -2201,7 +2194,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            service.get_for_window("window-1").unwrap().unwrap().tasks[0].status,
+            service.get_for_bench("window-1").unwrap().unwrap().tasks[0].status,
             TaskStatus::Completed
         );
     }
@@ -2277,7 +2270,7 @@ mod tests {
                 },
             )
             .unwrap();
-        let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+        let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
         assert_eq!(cancelled.tasks[0].status, TaskStatus::Cancelled);
         assert_eq!(snapshot.tasks[0].status, TaskStatus::Cancelled);
         assert_eq!(snapshot.tasks[0].latest_result_report_id, None);
@@ -2347,7 +2340,7 @@ mod tests {
             )
             .unwrap();
 
-        let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+        let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
         assert_eq!(snapshot.reports.len(), 1);
         assert_eq!(snapshot.tasks[0].status, TaskStatus::Running);
         assert!(snapshot.tasks[0].latest_result_report_id.is_none());
@@ -2379,7 +2372,7 @@ mod tests {
         let repeated = service.report_task("window-1", request.clone()).unwrap();
         assert_eq!(first.id, repeated.id);
 
-        let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+        let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
         assert_eq!(snapshot.reports.len(), 1);
         assert_eq!(snapshot.coordinator_notifications.len(), 1);
         assert_eq!(
@@ -2432,7 +2425,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(reports, vec![report]);
-        let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+        let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
         assert_eq!(
             snapshot.coordinator_notifications[0].status,
             CoordinatorNotificationStatus::Pending

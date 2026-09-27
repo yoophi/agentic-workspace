@@ -158,7 +158,7 @@ pub fn run() {
                                 repository,
                                 TauriOrchestrationEventSink::new(app),
                             )
-                            .release_window(&label);
+                            .release_bench(&label);
                         }
                     });
                 }

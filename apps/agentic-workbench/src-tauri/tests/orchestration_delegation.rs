@@ -107,7 +107,7 @@ fn delegates_three_direct_children_and_collects_structured_results() {
             .unwrap();
     }
 
-    let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
     assert_eq!(snapshot.nodes.len(), 4);
     assert!(
         snapshot
@@ -193,7 +193,7 @@ fn delegation_and_report_notification_stay_inside_their_measured_intervals() {
     }
     let assignment_elapsed = submitted_at.elapsed();
 
-    let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
     assert_eq!(
         snapshot
             .tasks
@@ -236,7 +236,7 @@ fn delegation_and_report_notification_stay_inside_their_measured_intervals() {
         .unwrap();
     let notification_elapsed = reported_at.elapsed();
 
-    let snapshot = service.get_for_window("window-1").unwrap().unwrap();
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
     let report = snapshot
         .reports
         .iter()

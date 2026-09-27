@@ -32,7 +32,7 @@ where
 
     pub async fn dispatch_pending(
         &self,
-        window_label: &str,
+        bench_id: &str,
     ) -> Result<Vec<CoordinatorNotification>, OrchestrationError> {
         let mut delivered = Vec::new();
         let mut reactivate_failed = true;
@@ -41,7 +41,7 @@ where
             let (notification_id, binding, snapshot) = {
                 let mut tx = self.repository.begin()?;
                 let sessions = tx.sessions();
-                let session = session_for_window_mut(sessions, window_label)?;
+                let session = session_for_bench_mut(sessions, bench_id)?;
                 supersede_stale_notifications(session);
                 if reactivate_failed {
                     for notification in &mut session.coordinator_notifications {
@@ -57,7 +57,7 @@ where
                     }
                     reactivate_failed = false;
                 }
-                let Some((notification_id, binding)) = next_delivery(session, window_label)? else {
+                let Some((notification_id, binding)) = next_delivery(session, bench_id)? else {
                     tx.commit()?;
                     break;
                 };
@@ -85,7 +85,7 @@ where
             let notification = {
                 let mut tx = self.repository.begin()?;
                 let sessions = tx.sessions();
-                let session = session_for_window_mut(sessions, window_label)?;
+                let session = session_for_bench_mut(sessions, bench_id)?;
                 let notification = {
                     let notification = session
                         .coordinator_notifications
@@ -140,11 +140,11 @@ where
 
     pub fn recover_interrupted(
         &self,
-        window_label: &str,
+        bench_id: &str,
     ) -> Result<Vec<CoordinatorNotification>, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let mut recovered = Vec::new();
         for notification in &mut session.coordinator_notifications {
             if notification.status == CoordinatorNotificationStatus::Dispatching {
@@ -168,7 +168,7 @@ where
 
 fn next_delivery(
     session: &OrchestrationSession,
-    window_label: &str,
+    bench_id: &str,
 ) -> Result<Option<(String, WorkerBinding)>, OrchestrationError> {
     let Some(active_generation_id) = session.active_coordinator_generation_id.as_deref() else {
         return Ok(None);
@@ -197,7 +197,7 @@ fn next_delivery(
         notification.id.clone(),
         WorkerBinding {
             workspace_id: session.id.clone(),
-            window_label: window_label.into(),
+            bench_id: bench_id.into(),
             node_id: MAIN_AGENT_NODE_ID.into(),
             task_id: notification.task_id.clone(),
             run_id: main_run_id,
@@ -226,15 +226,15 @@ fn supersede_stale_notifications(session: &mut OrchestrationSession) {
     }
 }
 
-fn session_for_window_mut<'a>(
+fn session_for_bench_mut<'a>(
     sessions: &'a mut [OrchestrationSession],
-    window_label: &str,
+    bench_id: &str,
 ) -> Result<&'a mut OrchestrationSession, OrchestrationError> {
     let session = sessions
         .iter_mut()
-        .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+        .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
         .ok_or_else(|| not_found("Orchestration workspace"))?;
-    session.assert_scope(window_label)?;
+    session.assert_scope(bench_id)?;
     Ok(session)
 }
 

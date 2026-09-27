@@ -174,7 +174,7 @@ pub fn get_orchestration_workspace(
 ) -> Result<Option<crate::domain::agent_orchestration::OrchestrationSession>, String> {
     let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)
 }
 
@@ -202,13 +202,11 @@ pub fn list_recoverable_orchestration_workspaces(
         .list_for_worktree(&worktree_path)
         .map_err(orchestration_error)?
         .into_iter()
-        .filter_map(|session| session.bound_window_label)
+        .filter_map(|session| session.bound_bench_id)
         .filter(|label| app.get_webview_window(label).is_none())
         .collect();
     for label in stale_window_labels {
-        service
-            .release_window(&label)
-            .map_err(orchestration_error)?;
+        service.release_bench(&label).map_err(orchestration_error)?;
     }
     service
         .list_recoverable(&worktree_path)
@@ -260,7 +258,7 @@ pub async fn delegate_orchestration_goal(
         .delegate_goal(window.label(), input)
         .map_err(orchestration_error)?;
     let snapshot = service
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
     let run_id = snapshot
@@ -323,7 +321,7 @@ pub fn collect_orchestration_reports(
     let repository = orchestration_repository(&app)?;
     Ok(
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-            .get_for_window(window.label())
+            .get_for_bench(window.label())
             .map_err(orchestration_error)?
             .map(|session| session.reports)
             .unwrap_or_default(),
@@ -401,7 +399,7 @@ pub async fn respond_orchestration_input(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
     )
-    .get_for_window(window.label())
+    .get_for_bench(window.label())
     .map_err(orchestration_error)?
     .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
     let input_report_id = snapshot
@@ -453,7 +451,7 @@ pub async fn cancel_orchestration_task(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
     )
-    .get_for_window(window.label())
+    .get_for_bench(window.label())
     .map_err(orchestration_error)?
     .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
     let task = snapshot.tasks.iter().find(|task| task.id == input.task_id);
@@ -491,7 +489,7 @@ pub async fn cancel_orchestration_task(
         .map_err(orchestration_error)?;
     let _ = mcp_state.orchestration_scheduler().release(&input.task_id);
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())
 }
@@ -575,7 +573,7 @@ async fn stop_existing_task_worker(
     task_id: &str,
 ) -> Result<(), String> {
     let Some(snapshot) = service
-        .get_for_window(window_label)
+        .get_for_bench(window_label)
         .map_err(orchestration_error)?
     else {
         return Ok(());
@@ -595,7 +593,7 @@ async fn stop_existing_task_worker(
     };
     let binding = WorkerBinding {
         workspace_id: snapshot.id.clone(),
-        window_label: window_label.into(),
+        bench_id: window_label.into(),
         node_id: node.id.clone(),
         task_id: task.id.clone(),
         run_id: run_id.clone(),
@@ -627,12 +625,12 @@ async fn launch_orchestration_task_for_ui(
         .map_err(orchestration_error)?
     {
         return service
-            .get_for_window(window_label)
+            .get_for_bench(window_label)
             .map_err(orchestration_error)?
             .ok_or_else(|| "Orchestration workspace is unavailable.".to_string());
     }
     let snapshot = service
-        .get_for_window(window_label)
+        .get_for_bench(window_label)
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
     let task = snapshot
@@ -654,7 +652,7 @@ async fn launch_orchestration_task_for_ui(
     let outcome = adapter
         .start_worker(WorkerAssignment {
             workspace_id: snapshot.id.clone(),
-            window_label: window_label.into(),
+            bench_id: window_label.into(),
             worktree_path: snapshot.worktree_path.clone(),
             node_id: node.id.clone(),
             task_id: task.id.clone(),
@@ -681,7 +679,7 @@ async fn launch_orchestration_task_for_ui(
             .bind_child_run(window_label, &task.id, &node.id, &run_id)
             .map_err(orchestration_error),
         StartWorkerOutcome::Queued { .. } => service
-            .get_for_window(window_label)
+            .get_for_bench(window_label)
             .map_err(orchestration_error)?
             .ok_or_else(|| "Orchestration workspace is unavailable.".to_string()),
         StartWorkerOutcome::Failed {
@@ -705,7 +703,7 @@ pub fn handoff_orchestration_coordinator(
     let previous_generation = {
         let repository = orchestration_repository(&app)?;
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
-            .get_for_window(window.label())
+            .get_for_bench(window.label())
             .map_err(orchestration_error)?
             .and_then(|session| session.active_coordinator_generation_id)
     };
@@ -769,7 +767,7 @@ pub async fn dispatch_orchestration_prompt(
         .record_prompt_dispatch(window.label(), input)
         .map_err(orchestration_error)?;
     let snapshot = service
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
 
@@ -869,7 +867,7 @@ pub async fn recover_orchestration_workspace(
         TauriOrchestrationEventSink::new(app.clone()),
     );
     let snapshot = service
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())?;
     let mut live_run_ids = Vec::new();
@@ -937,7 +935,7 @@ pub async fn recover_orchestration_workspace(
         );
     });
     service
-        .get_for_window(window.label())
+        .get_for_bench(window.label())
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())
 }
@@ -952,7 +950,7 @@ fn emit_orchestration_runtime_update(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
     );
-    if let Ok(Some(session)) = service.get_for_window(window_label) {
+    if let Ok(Some(session)) = service.get_for_bench(window_label) {
         let _ = TauriOrchestrationEventSink::new(app.clone()).emit(
             window_label,
             OrchestrationEvent {
@@ -1839,7 +1837,7 @@ pub(crate) fn resolve_agent_run_launch_principal(
     let repository = orchestration_repository(app)?;
     let session =
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
-            .get_for_window(window_label)
+            .get_for_bench(window_label)
             .map_err(orchestration_error)?;
     coordinator_principal_for_bound_session(panel_id, run_id, window_label, session.as_ref())
 }

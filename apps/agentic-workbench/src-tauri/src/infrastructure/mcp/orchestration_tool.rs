@@ -341,7 +341,7 @@ pub async fn handle_tool(
                 },
             ) {
                 Ok(outcome) => {
-                    let snapshot = match service.get_for_window(window_label) {
+                    let snapshot = match service.get_for_bench(window_label) {
                         Ok(Some(snapshot)) => snapshot,
                         Ok(None) => {
                             return tool_error(
@@ -401,7 +401,7 @@ pub async fn handle_tool(
                     let launch = adapter
                         .start_worker(WorkerAssignment {
                             workspace_id: snapshot.id.clone(),
-                            window_label: window_label.into(),
+                            bench_id: window_label.into(),
                             worktree_path: snapshot.worktree_path.clone(),
                             node_id: node.id.clone(),
                             task_id: task.id.clone(),
@@ -549,7 +549,7 @@ pub async fn handle_tool(
             let Some(task_id) = input.task_id.clone() else {
                 return tool_error("invalidInput", "taskId is required.", false);
             };
-            let snapshot = match service.get_for_window(window_label) {
+            let snapshot = match service.get_for_bench(window_label) {
                 Ok(Some(snapshot)) => snapshot,
                 Ok(None) => {
                     return tool_error(
@@ -589,7 +589,7 @@ pub async fn handle_tool(
                 ));
                 let binding = crate::ports::agent_worker::WorkerBinding {
                     workspace_id: snapshot.id.clone(),
-                    window_label: window_label.into(),
+                    bench_id: window_label.into(),
                     node_id: node.id.clone(),
                     task_id: task.id.clone(),
                     run_id: run_id.clone(),
@@ -746,7 +746,7 @@ pub async fn handle_tool(
             let Some(task_id) = principal.task_id.as_deref() else {
                 return tool_error("unknownTask", "No task is bound to this run.", false);
             };
-            match service.get_for_window(window_label) {
+            match service.get_for_bench(window_label) {
                 Ok(Some(session)) => {
                     match session.tasks.into_iter().find(|task| task.id == task_id) {
                         Some(task) => tool_success(json!(task)),
@@ -805,7 +805,7 @@ pub async fn handle_tool(
             ) {
                 Ok(report) => {
                     let notifications = service
-                        .get_for_window(window_label)
+                        .get_for_bench(window_label)
                         .ok()
                         .flatten()
                         .map(|session| {
@@ -875,7 +875,7 @@ fn emit_latest_runtime_event(
     window_label: &str,
     reason: &str,
 ) {
-    if let Ok(Some(session)) = service.get_for_window(window_label) {
+    if let Ok(Some(session)) = service.get_for_bench(window_label) {
         let _ = TauriOrchestrationEventSink::new(app.clone()).emit(
             window_label,
             OrchestrationEvent {
@@ -897,7 +897,7 @@ async fn launch_existing_task(
     window_label: &str,
     task_id: &str,
 ) -> Result<Value, OrchestrationError> {
-    let snapshot = service.get_for_window(window_label)?.ok_or_else(|| {
+    let snapshot = service.get_for_bench(window_label)?.ok_or_else(|| {
         OrchestrationError::new(
             crate::domain::agent_orchestration::OrchestrationErrorCode::NotFound,
             "Workspace is unavailable.",
@@ -949,7 +949,7 @@ async fn launch_existing_task(
     let launch = adapter
         .start_worker(WorkerAssignment {
             workspace_id: snapshot.id.clone(),
-            window_label: window_label.into(),
+            bench_id: window_label.into(),
             worktree_path: snapshot.worktree_path.clone(),
             node_id: node.id.clone(),
             task_id: task.id.clone(),

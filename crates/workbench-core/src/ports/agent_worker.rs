@@ -12,7 +12,7 @@ use crate::domain::agent_orchestration::{
 #[serde(rename_all = "camelCase")]
 pub struct WorkerAssignment {
     pub workspace_id: String,
-    pub window_label: String,
+    pub bench_id: String,
     pub worktree_path: String,
     pub node_id: String,
     pub task_id: String,
@@ -30,7 +30,7 @@ pub struct WorkerAssignment {
 #[serde(rename_all = "camelCase")]
 pub struct WorkerBinding {
     pub workspace_id: String,
-    pub window_label: String,
+    pub bench_id: String,
     pub node_id: String,
     pub task_id: String,
     pub run_id: String,

@@ -173,7 +173,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
             .mcp
             .launch_env_for_principal(CapabilityPrincipal::child(
                 assignment.workspace_id.clone(),
-                assignment.window_label.clone(),
+                assignment.bench_id.clone(),
                 assignment.node_id.clone(),
                 assignment.planned_run_id.clone(),
                 assignment.task_id.clone(),
@@ -185,7 +185,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
         let runtime = self.runtime();
         let bench = desktop_benches::ensure(
             &runtime,
-            &assignment.window_label,
+            &assignment.bench_id,
             Some(assignment.worktree_path.as_str()),
         )
         .await?;
@@ -224,7 +224,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
                 .active_session(&binding.run_id)
                 .await
                 .ok_or_else(|| format!("unknown or finished run: {}", binding.run_id))?;
-            let sink = self.sink(&binding.window_label);
+            let sink = self.sink(&binding.bench_id);
             let run_id = binding.run_id.clone();
             let message = message.trim().to_string();
             tokio::spawn(async move {
@@ -241,7 +241,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
         }
         SendPromptUseCase::new(self.registry.clone())
             .execute(
-                self.sink(&binding.window_label),
+                self.sink(&binding.bench_id),
                 binding.run_id.clone(),
                 message.into(),
             )
@@ -251,7 +251,7 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
 
     async fn interrupt(&self, binding: &WorkerBinding) -> Result<(), String> {
         CancelAgentRunUseCase::new(self.registry.clone())
-            .execute(self.sink(&binding.window_label), binding.run_id.clone())
+            .execute(self.sink(&binding.bench_id), binding.run_id.clone())
             .await;
         Ok(())
     }
@@ -272,13 +272,13 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
             .ok_or_else(|| format!("unknown or finished run: {}", binding.run_id))?;
         if delivery == PromptDelivery::Queue {
             session
-                .queue_prompt(self.sink(&binding.window_label), message.trim().to_string())
+                .queue_prompt(self.sink(&binding.bench_id), message.trim().to_string())
                 .await
                 .map(|_| ())
                 .map_err(|error| error.to_string())
         } else {
             session
-                .send_prompt(self.sink(&binding.window_label), message.trim().to_string())
+                .send_prompt(self.sink(&binding.bench_id), message.trim().to_string())
                 .await
                 .map(|_| ())
                 .map_err(|error| error.to_string())
@@ -287,13 +287,13 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
 
     async fn cancel(&self, binding: &WorkerBinding) -> Result<(), String> {
         CancelAgentRunUseCase::new(self.registry.clone())
-            .execute(self.sink(&binding.window_label), binding.run_id.clone())
+            .execute(self.sink(&binding.bench_id), binding.run_id.clone())
             .await;
         Ok(())
     }
 
     async fn is_active(&self, binding: &WorkerBinding) -> bool {
-        let Some(bench) = desktop_benches::lookup(&binding.window_label) else {
+        let Some(bench) = desktop_benches::lookup(&binding.bench_id) else {
             return false;
         };
         self.registry
@@ -349,7 +349,7 @@ where
             worktree_fingerprint,
         };
         let guard = WorktreeMutationGuard {
-            window_label: request.assignment.window_label.clone(),
+            window_label: request.assignment.bench_id.clone(),
             node_id: request.assignment.node_id.clone(),
             task_id: request.assignment.task_id.clone(),
             worktree_path: request.assignment.worktree_path.clone(),
@@ -502,7 +502,7 @@ mod tests {
     fn assignment(supports_read_only: bool) -> WorkerAssignment {
         WorkerAssignment {
             workspace_id: "workspace-1".into(),
-            window_label: "window-1".into(),
+            bench_id: "window-1".into(),
             worktree_path: std::env::current_dir()
                 .unwrap()
                 .to_string_lossy()
@@ -548,7 +548,7 @@ mod tests {
 
         let binding = WorkerBinding {
             workspace_id: "workspace-1".into(),
-            window_label: "window-1".into(),
+            bench_id: "window-1".into(),
             node_id: "child-1".into(),
             task_id: "task-1".into(),
             run_id: "run-1".into(),
@@ -583,7 +583,7 @@ mod tests {
         let adapter = AcpAgentWorkerAdapter::new(runtime.clone());
         let binding = WorkerBinding {
             workspace_id: "workspace-1".into(),
-            window_label: "window-1".into(),
+            bench_id: "window-1".into(),
             node_id: "main-agent-run".into(),
             task_id: "task-1".into(),
             run_id: "main-run".into(),

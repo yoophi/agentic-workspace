@@ -45,7 +45,7 @@ where
 
     pub async fn deliver(
         &self,
-        window_label: &str,
+        bench_id: &str,
         request: DeliverTaskCommandRequest,
     ) -> Result<TaskCommand, OrchestrationError> {
         validate_request(&request)?;
@@ -55,7 +55,7 @@ where
         let command = {
             let mut tx = self.repository.begin()?;
             let sessions = tx.sessions();
-            let session = session_for_window_mut(sessions, window_label)?;
+            let session = session_for_bench_mut(sessions, bench_id)?;
 
             if let Some(existing) = session
                 .commands
@@ -141,12 +141,12 @@ where
         let binding = {
             let mut tx = self.repository.begin()?;
             let sessions = tx.sessions();
-            let session = session_for_window_mut(sessions, window_label)?;
+            let session = session_for_bench_mut(sessions, bench_id)?;
             transition_command(session, &command.id, TaskCommandStatus::Dispatching, None)?;
             touch(session);
             let binding = WorkerBinding {
                 workspace_id: session.id.clone(),
-                window_label: window_label.into(),
+                bench_id: bench_id.into(),
                 node_id: command.node_id.clone(),
                 task_id: command.task_id.clone(),
                 run_id: command.run_id.clone(),
@@ -170,7 +170,7 @@ where
 
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let outcome = match delivery {
             Ok(receipt) if receipt.accepted => match accept_command(session, &command.id) {
                 Ok(()) => WorkerCommandOutcome {
@@ -226,11 +226,11 @@ where
     /// Reconciles interrupted dispatches without resending accepted commands.
     pub fn reconcile_pending(
         &self,
-        window_label: &str,
+        bench_id: &str,
     ) -> Result<Vec<TaskCommand>, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_window_mut(sessions, window_label)?;
+        let session = session_for_bench_mut(sessions, bench_id)?;
         let mut recovered = Vec::new();
         let mut changed = false;
         for command in &mut session.commands {
@@ -395,15 +395,15 @@ fn transition_command(
     command.transition(status, now())
 }
 
-fn session_for_window_mut<'a>(
+fn session_for_bench_mut<'a>(
     sessions: &'a mut [OrchestrationSession],
-    window_label: &str,
+    bench_id: &str,
 ) -> Result<&'a mut OrchestrationSession, OrchestrationError> {
     let session = sessions
         .iter_mut()
-        .find(|session| session.bound_window_label.as_deref() == Some(window_label))
+        .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
         .ok_or_else(|| not_found("Orchestration workspace"))?;
-    session.assert_scope(window_label)?;
+    session.assert_scope(bench_id)?;
     Ok(session)
 }
 

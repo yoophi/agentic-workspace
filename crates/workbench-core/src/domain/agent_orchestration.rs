@@ -1,4 +1,4 @@
-//! Worktree-window scoped orchestration domain.
+//! Worktree-bench scoped orchestration domain(041: 창 label 대신 작업대 묶임, 묶임은 메모리 상태).
 
 use std::collections::HashSet;
 
@@ -754,7 +754,10 @@ pub struct OrchestrationSession {
     pub schema_version: u32,
     pub id: String,
     pub worktree_path: String,
-    pub bound_window_label: Option<String>,
+    /// 041: 이 작업 영역이 지금 묶인 작업대(메모리 상태, research R3). 영속하지 않는다 — 옛 파일의
+    /// `boundWindowLabel`은 읽을 때 무시되고 쓸 때 생략된다(이전 빌드는 없으면 `None`으로 읽는다).
+    #[serde(skip)]
+    pub bound_bench_id: Option<String>,
     pub main_node_id: String,
     pub active_coordinator_generation_id: Option<String>,
     pub nodes: Vec<AgentNode>,
@@ -776,7 +779,7 @@ impl OrchestrationSession {
     pub fn new(
         id: impl Into<String>,
         worktree_path: impl Into<String>,
-        window_label: impl Into<String>,
+        bench_id: impl Into<String>,
         now: impl Into<String>,
     ) -> Self {
         let now = now.into();
@@ -784,7 +787,7 @@ impl OrchestrationSession {
             schema_version: ORCHESTRATION_SCHEMA_VERSION,
             id: id.into(),
             worktree_path: worktree_path.into(),
-            bound_window_label: Some(window_label.into()),
+            bound_bench_id: Some(bench_id.into()),
             main_node_id: MAIN_AGENT_NODE_ID.into(),
             active_coordinator_generation_id: None,
             nodes: vec![AgentNode::main(
@@ -843,8 +846,8 @@ impl OrchestrationSession {
         Ok(())
     }
 
-    pub fn assert_scope(&self, window_label: &str) -> Result<(), OrchestrationError> {
-        if self.bound_window_label.as_deref() != Some(window_label) {
+    pub fn assert_scope(&self, bench_id: &str) -> Result<(), OrchestrationError> {
+        if self.bound_bench_id.as_deref() != Some(bench_id) {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::ScopeMismatch,
                 "The orchestration session belongs to another window.",

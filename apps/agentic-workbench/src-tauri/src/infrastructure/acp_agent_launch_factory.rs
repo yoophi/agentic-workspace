@@ -71,7 +71,7 @@ mod tests {
         AgentWorkerLaunchRequest {
             assignment: WorkerAssignment {
                 workspace_id: "workspace-1".into(),
-                window_label: "window-1".into(),
+                bench_id: "window-1".into(),
                 worktree_path: "/repo".into(),
                 node_id: "child-1".into(),
                 task_id: "task-1".into(),
