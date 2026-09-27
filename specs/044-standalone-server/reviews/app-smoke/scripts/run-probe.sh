@@ -46,7 +46,10 @@ SPID=$(server_pid "$DATA"); echo "server-pid=$SPID" >> "$R/meta.txt"
 SERVER_TREE=" ${SPID:-none} $( [ -n "$SPID" ] && descendants "$SPID" | tr '\n' ' ') "
 APP_PIDS=""
 for p in $LAUNCH $(descendants "$LAUNCH"); do
-  case "$SERVER_TREE" in *" $p "*) ;; *) APP_PIDS="$APP_PIDS $p" ;; esac
+  case "$SERVER_TREE" in *" $p "*) continue ;; esac
+  # 확인하지 못한 서버(안내 파일 없음·시간 초과)도 앱 체인에서 뺀다 — 확인 안 된 서버는 끄지 않는다.
+  case "$(ps -o command= -p "$p" 2>/dev/null)" in *"agentic-workbench-server serve"*) echo "unverified-server-left=$p" >> "$R/meta.txt"; continue ;; esac
+  APP_PIDS="$APP_PIDS $p"
 done
 echo "app-pids=$APP_PIDS" >> "$R/meta.txt"
 echo "server-tree=$SERVER_TREE" >> "$R/meta.txt"

@@ -222,27 +222,6 @@ impl Server {
         self.rt.block_on(self.control.derive())
     }
 
-    /// 상한 안에 멈추는지 보면서, 멈추기 전 마지막 파생 결과를 돌려준다(정지 판정 근거 기록).
-    fn stops_within_observing(
-        &self,
-        bound: Duration,
-    ) -> (
-        bool,
-        Option<workbench_core::application::server_control::DerivedWork>,
-    ) {
-        let until = std::time::Instant::now() + bound;
-        let mut last = None;
-        while std::time::Instant::now() < until {
-            if self.stopped() {
-                assert_eq!(self.control.work_gate().state(), GateState::Stopping);
-                return (true, last);
-            }
-            last = Some(self.derived());
-            std::thread::sleep(Duration::from_millis(10));
-        }
-        (false, last)
-    }
-
     fn start_run(&self, bench: &str, run: &str, extra: Value) {
         let mut request = json!({ "goal": "g", "agentId": "codex", "runId": run });
         if let (Some(request), Some(extra)) = (request.as_object_mut(), extra.as_object()) {
@@ -671,19 +650,22 @@ fn a_waiting_task_without_an_assigner_is_deferred_and_reassigned_after_a_restart
             json!({ "requestId": "r0", "summary": "done" }),
         )
         .expect("first result");
-    let (stopped, last) = server.stops_within_observing(STOP_BOUND);
     assert!(
-        stopped,
-        "the server stops when nobody can assign the waiting task ({last:?})"
+        server.stops_within(STOP_BOUND),
+        "the server stops when nobody can assign the waiting task ({:?})",
+        server.derived()
     );
     assert_eq!(
         turn.entered(),
         1,
         "the coordinator had its notification turn and did not assign"
     );
-    let last = last.expect("derived before the stop");
+    // 정지 판정 뒤의 파생(관문은 `stopping`에 멈춰 있고 작업대는 host 종료 전까지 열려 있다) — 멈춘 근거다. 멈추기 전
+    // 표본은 쓰지 않는다(마지막 표본과 감시 루프의 판정 사이에 상태가 바뀔 수 있다).
+    let last = server.derived();
     assert_eq!(last.deferred_tasks, vec![second_id.clone()], "{last:?}");
     assert_eq!(last.queued_tasks, 0, "{last:?}");
+    assert_eq!(last.pending_notifications, 0, "{last:?}");
 
     let server = server.restart(limit, Some(RunScript::default()));
     let bench = server.open_bench();

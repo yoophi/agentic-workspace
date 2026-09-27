@@ -52,12 +52,25 @@ def respond(request_id, result):
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
 
 
+# 문 파일 대기의 상한(시험이 문을 만들기 전에 실패하면 agent가 영원히 남지 않게). 부모가 사라져도(launchd로 재부모화) 끝낸다.
+GATE_WAIT_LIMIT_SECONDS = 120
+PARENT = os.getppid()
+
+
+def wait_for_gate(path):
+    deadline = time.monotonic() + GATE_WAIT_LIMIT_SECONDS
+    while not os.path.exists(path):
+        if time.monotonic() > deadline or os.getppid() != PARENT:
+            log(f"gate-abandoned:{os.path.basename(path)}")
+            sys.exit(3)
+        time.sleep(0.02)
+
+
 def finish(prompt_id, stop_reason, reason=None):
     global pending_prompt
     log(f"{stop_reason}:{prompt_id}" if reason is None else f"cancelled:{prompt_id}:{reason}")
     if RESPOND_GATE and RESPOND_GATE_TEXT and RESPOND_GATE_TEXT in prompt_texts.get(prompt_id, ""):
-        while not os.path.exists(RESPOND_GATE):
-            time.sleep(0.02)
+        wait_for_gate(RESPOND_GATE)
     respond(prompt_id, {"stopReason": "end_turn" if stop_reason == "end_turn" else "cancelled"})
     if pending_prompt == prompt_id:
         pending_prompt = None
@@ -135,8 +148,8 @@ for line in sys.stdin:
         if "error" in message:
             finish(prompt_id, "cancelled", "permission-error")
         elif granted(message):
-            while END_TURN_GATE and not os.path.exists(END_TURN_GATE):
-                time.sleep(0.02)
+            if END_TURN_GATE:
+                wait_for_gate(END_TURN_GATE)
             finish(prompt_id, "end_turn")
         else:
             finish(prompt_id, "cancelled", "permission-refused")

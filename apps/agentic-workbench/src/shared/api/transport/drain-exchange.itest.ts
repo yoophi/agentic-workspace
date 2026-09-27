@@ -124,8 +124,11 @@ describe("real server: exchange delivery during a wait-stop through the 043 cons
     expect(status.activeWork.busyRuns).toBe(1);
     expect(status.activeWork.pendingExchanges).toBe(1);
 
-    // 이어 가기 표지가 없는 prompt는 비우는 중 새 작업이다(043 이전 전송 모양).
-    await expect(sendPromptToRun("r2", "a new prompt")).rejects.toBeDefined();
+    // 이어 가기 표지가 없는 prompt는 비우는 중 새 작업이다(043 이전 전송 모양). 쉬는 r1로 보내 "바쁜 run"이 거절 이유가 될 수
+    // 없게 하고, 거절이 비우기(draining) 때문임을 메시지로 단정한다.
+    await expect(sendPromptToRun("r1", "a new prompt")).rejects.toBe(
+      "server is draining; new work is not accepted.",
+    );
 
     await respond(bench, "r2");
     await vi.waitFor(
