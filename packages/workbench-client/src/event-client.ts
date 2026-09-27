@@ -10,6 +10,8 @@
 //   오면 처음부터(최대 `maxRecoveryAttempts`). `hello`만으로는 복구 성공으로 보지 않는다(042 hub는 등록 실패에도 hello를 보낸다).
 // - `epochChanged`: 알린 뒤(`onEpochChanged`) 새 세대의 처음부터 같은 절차. `evicted`: 스냅샷으로 재설정하고 끝낸다.
 // - `subscriberLagged`·`shutdown`·연결 끊김: 같은 cursor로 다시 연결한다(backoff 250ms → 10s, jitter).
+// - 복구 상태 불변식(서버 세대, 재연결 cursor `delivered`, 실제 반영 `applied`, 수신자 세대·제거, 소켓 종결 대 스냅샷 적용)과
+//   `await` 완료 × 사건 전이 표: specs/043-frontend-http/reviews/implementation-review.md "복구 설계의 최종 불변식과 전이 표".
 import type { EventEnvelope, EventFrame, GapNotice, StreamCursor } from "./operation-map";
 
 export interface EventConnectionPort {
@@ -33,7 +35,14 @@ export interface StreamListener {
   onEvent(event: EventEnvelope): void | Promise<void>;
   /** 스냅샷으로 상태를 다시 맞춘다(수신자 실패·보관 gap·세대 변경). `delivered`는 이 수신자가 반영을 마친 순번 —
    *  run처럼 스냅샷이 이벤트 목록이면 그 뒤만 다시 반영하면 된다. */
-  onReset?(snapshot: unknown, context: { delivered: number }): void | Promise<void>;
+  onReset?(snapshot: unknown, context: ResetContext): void | Promise<void>;
+}
+
+export interface ResetContext {
+  /** 이 수신자가 실제로 반영을 마친 순번(같은 서버 세대). run처럼 스냅샷이 이벤트 목록이면 그 뒤만 반영한다. */
+  delivered: number;
+  /** 재설정 중 순번 하나를 반영할 때마다 알린다. 재설정이 중간에 실패해도 재시도는 알린 순번 뒤부터 이어진다. */
+  markApplied(sequence: number): void;
 }
 
 export interface SnapshotSource {
@@ -455,6 +464,18 @@ export function createEventClient(options: EventClientOptions): EventClient {
       return run;
     }
 
+    /** 재설정 context. 반영 순번은 이 재설정을 시작한 서버 세대에서만 올린다(대체된 재설정의 반영도 실제 반영이다). */
+    resetContext(state: ListenerState, epoch: string): ResetContext {
+      return {
+        delivered: state.applied,
+        markApplied: (sequence) => {
+          if (this.epoch === epoch && !state.removed) {
+            state.applied = Math.max(state.applied, sequence);
+          }
+        },
+      };
+    }
+
     isStale(state: ListenerState, generation: number) {
       return state.removed || generation !== state.generation;
     }
@@ -484,7 +505,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
             // 스냅샷이 없는 스트림(알림): 실패한 이벤트는 건너뛴다 — 다음 알림이 다시 읽게 한다.
             state.queue.shift();
           } else {
-            await state.listener.onReset?.(data, { delivered: state.applied });
+            await state.listener.onReset?.(data, this.resetContext(state, epoch));
             if (this.epoch === epoch) {
               // 끝난 재설정은 세대가 지났어도 반영한 것이다(같은 서버 세대일 때만 — 옛 세대 순번은 새 세대에서 뜻이 없다).
               state.applied = Math.max(state.applied, coveredUpTo, snapshot.position?.(data) ?? 0);
@@ -505,6 +526,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
         }
         if (attempt + 1 >= maxRecoveryAttempts) {
           options.onStreamError?.(this.id, `listener resync failed: ${String(error)}`);
+          if (this.terminal) {
+            return; // 종결 스트림은 새 연결·재조회 계기가 없다: 예산을 다 쓰면 알리고 멈춘다
+          }
         }
         const delay = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * 2 ** attempt);
         setTimeout(() => void this.resetListener(state, attempt + 1), delay);
@@ -624,7 +648,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         }
       }
       void this.serialize(state, generation, async () => {
-        await state.listener.onReset?.(data, { delivered: state.applied });
+        await state.listener.onReset?.(data, this.resetContext(state, epoch));
         if (this.epoch === epoch) {
           state.applied = Math.max(state.applied, after, snapshot?.position?.(data) ?? 0);
         }

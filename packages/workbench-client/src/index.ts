@@ -74,5 +74,6 @@ export type {
   SnapshotSource,
   SocketLike,
   StreamListener,
+  ResetContext,
   SubscribeOptions,
 } from "./event-client";

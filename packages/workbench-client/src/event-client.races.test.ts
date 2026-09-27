@@ -508,3 +508,46 @@ describe("event client recovery reconnect cursor (Codex follow-up review 5)", ()
     client.close();
   });
 });
+
+describe("event client terminal retry budget (Codex follow-up review 9)", () => {
+  it("stops retrying a failing final snapshot on a terminal stream after the retry budget and reports it", async () => {
+    vi.useFakeTimers();
+    const hub = new FakeEventHub();
+    const errors: string[] = [];
+    const client = clientFor(hub, { maxRecoveryAttempts: 2, onStreamError: (_stream, error) => void errors.push(error) });
+    let resets = 0;
+    let loads = 0;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => undefined,
+        onReset: () => {
+          resets += 1;
+          throw new Error("always fails");
+        },
+      },
+      {
+        snapshot: {
+          load: async () => {
+            loads += 1;
+            return {};
+          },
+          passes: () => true,
+        },
+      },
+    );
+    hub.publish("s");
+    await vi.advanceTimersByTimeAsync(0);
+    hub.evict("s");
+    expect(client.debugDropSockets()).toBe(1); // 재연결 → evicted → 종결 복구
+    await vi.advanceTimersByTimeAsync(60_000);
+    const settledResets = resets;
+    const settledLoads = loads;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(resets).toBe(settledResets);
+    expect(loads).toBe(settledLoads);
+    expect(resets).toBeLessThanOrEqual(1 + 2); // 복구 적용 1회 + 재시도 예산 2회
+    expect(errors.some((error) => error.startsWith("listener resync failed"))).toBe(true);
+    client.close();
+  });
+});

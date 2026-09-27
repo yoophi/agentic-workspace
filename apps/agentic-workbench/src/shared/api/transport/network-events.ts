@@ -119,11 +119,12 @@ export function createNetworkEvents({ events, client }: NetworkEventsOptions) {
           streamId,
           {
             onEvent: (event) => callback(runPayload(runId, event)),
-            onReset: async (data, { delivered }) => {
+            onReset: async (data, { delivered, markApplied }) => {
               const replay = data as { events?: Array<{ sequence: number; event: unknown }>; epoch?: string };
               for (const item of replay.events ?? []) {
                 if (item.sequence > delivered) {
                   await callback({ runId, event: item.event, sequence: item.sequence, streamId });
+                  markApplied(item.sequence); // 중간에 실패해도 재시도가 이미 보인 출력을 반복하지 않는다
                 }
               }
             },
