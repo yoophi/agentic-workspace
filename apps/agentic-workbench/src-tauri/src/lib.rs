@@ -12,14 +12,14 @@ use inbound::tauri_commands::{
     collect_orchestration_reports, create_git_worktree, create_goal, create_project,
     create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
     delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings,
-    get_appearance_preferences, get_goal, get_orchestration_workspace, get_worktree_changes,
-    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
-    get_worktree_git_graph, get_worktree_workspace_layout, handoff_orchestration_coordinator,
-    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
-    list_git_remotes, list_git_worktrees, list_orchestration_tasks, list_projects,
-    list_provider_sessions, list_recoverable_orchestration_workspaces, list_saved_prompts,
-    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
-    open_settings_window, open_worktree_window, read_worktree_text_file,
+    get_appearance_preferences, get_goal, get_orchestration_workspace, get_workbench_connection,
+    get_worktree_changes, get_worktree_commit_detail, get_worktree_commit_file_diff,
+    get_worktree_file_diff, get_worktree_git_graph, get_worktree_workspace_layout,
+    handoff_orchestration_coordinator, list_agent_exchanges, list_agent_tool_command_candidates,
+    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_orchestration_tasks,
+    list_projects, list_provider_sessions, list_recoverable_orchestration_workspaces,
+    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
+    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
     reassign_orchestration_task, record_goal_progress, recover_orchestration_workspace,
     replay_orchestration_runtime_events, respond_agent_permission, respond_orchestration_input,
     retry_orchestration_task, save_agent_run_settings, save_worktree_workspace_layout,
@@ -30,7 +30,7 @@ use inbound::tauri_commands::{
 };
 use infrastructure::{
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-    mcp::McpServerState,
+    mcp::McpServerState, workbench_http,
 };
 use std::sync::Arc;
 use tauri::{
@@ -52,99 +52,12 @@ const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
 const BUILD_COMMIT_TAG: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_TAG");
 const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
-pub fn run() {
-    tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::init())
-        .menu(build_native_menu)
-        .on_menu_event(|app, event| {
-            if event.id() == ABOUT_MENU_ID {
-                show_about_dialog(app);
-            } else if event.id() == PREFERENCES_MENU_ID {
-                if let Err(error) = infrastructure::window_manager::open_settings_window(app) {
-                    show_error_dialog(app, "Could not open Settings", &error);
-                }
-            } else if let Ok(true) =
-                infrastructure::native_window_menu::focus_window_from_menu_event(
-                    app,
-                    event.id().as_ref(),
-                )
-            {
-                // Window focus menu events are handled by the native menu adapter.
-            }
-        })
-        .setup(|_app| {
-            // 037: 서버 런타임(Workbench)을 먼저 조립한다. 프로젝트 저장소는 이 런타임이 유일한 쓰기 주체다.
-            let app_data_dir = _app
-                .path()
-                .app_data_dir()
-                .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-            // 040: 데스크톱 포트(창 삽입 전달·run 시작 보강)를 주입한다. run 종료 후처리와 orchestration은 core가
-            // 소유한다(041).
-            let desktop_bridge = infrastructure::tauri_desktop_bridge::TauriDesktopBridge::new(
-                _app.handle().clone(),
-            );
-            let mut adapters = RuntimeAdapters::production();
-            adapters.desktop = Some(desktop_bridge.clone());
-            adapters.launch_decorator = Some(desktop_bridge.clone());
-            let workbench_runtime: Arc<WorkbenchRuntime> =
-                WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
-                    .map_err(|error| error.to_string())?;
-            _app.manage(workbench_runtime);
-
-            let appearance_repository =
-                JsonAppearancePreferencesRepository::from_app(_app.handle())?;
-            let appearance_service =
-                AppearancePreferencesService::bootstrap(appearance_repository)?;
-            _app.manage(appearance_service);
-
-            let mcp_state = McpServerState::start(_app.handle().clone())?;
-            desktop_bridge.bind_mcp(mcp_state.clone());
-            _app.manage(mcp_state);
-
-            #[cfg(debug_assertions)]
-            {
-                if infrastructure::devtools::should_open_devtools()
-                    && let Some(window) = _app.get_webview_window("main")
-                {
-                    window.open_devtools();
-                }
-            }
-
-            let _ = infrastructure::native_window_menu::sync_window_menu(_app.handle());
-
-            Ok(())
-        })
-        .on_window_event(|window, event| {
-            // 세션 창의 위치·크기를 Worktree별로 저장한다. 이동·리사이즈는 드래그 중 연속으로
-            // 들어오므로 간격을 두고 저장하고, 닫힐 때는 마지막 값을 반드시 기록한다.
-            match event {
-                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
-                    infrastructure::window_manager::save_session_window_bounds(window, false);
-                }
-                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
-                    infrastructure::window_manager::save_session_window_bounds(window, true);
-                }
-                _ => {}
-            }
-            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
-            if let WindowEvent::Destroyed = event {
-                let label = window.label().to_string();
-                if label.starts_with("session-") {
-                    infrastructure::window_manager::forget_session_window(&label);
-                    let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
-                    let watcher_state = window.state::<WorktreeWatcherState>();
-                    let _ = watcher_state.stop_for_window(&label);
-                    tauri::async_runtime::spawn(async move {
-                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
-                        // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
-                        infrastructure::desktop_benches::close(&runtime, &label).await;
-                    });
-                }
-                let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
-            }
-        })
-        .manage(WorktreeWatcherState::new())
-        .invoke_handler(tauri::generate_handler![
+/// 앱 command 목록. debug 빌드만 스모크 probe 보고 command를 더한다(042 R12·설계 리뷰 D3 — `generate_handler!`는
+/// 항목별 `cfg`를 받지 않는다). release에는 probe command가 없다.
+#[cfg(debug_assertions)]
+macro_rules! app_invoke_handler {
+    () => {
+        tauri::generate_handler![
             list_projects,
             create_project,
             update_project,
@@ -215,10 +128,284 @@ pub fn run() {
             reassign_orchestration_task,
             handoff_orchestration_coordinator,
             dispatch_orchestration_prompt,
-            recover_orchestration_workspace
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+            recover_orchestration_workspace,
+            get_workbench_connection,
+            infrastructure::http_probe::report_http_probe
+        ]
+    };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! app_invoke_handler {
+    () => {
+        tauri::generate_handler![
+            list_projects,
+            create_project,
+            update_project,
+            delete_project,
+            list_saved_prompts,
+            create_saved_prompt,
+            update_saved_prompt,
+            delete_saved_prompt,
+            get_goal,
+            create_goal,
+            update_goal,
+            clear_goal,
+            record_goal_progress,
+            get_agent_run_settings,
+            save_agent_run_settings,
+            get_appearance_preferences,
+            set_font_size_step,
+            adjust_font_size_step,
+            get_worktree_workspace_layout,
+            save_worktree_workspace_layout,
+            list_git_remotes,
+            list_git_branches,
+            list_git_worktrees,
+            list_worktree_changes,
+            create_git_worktree,
+            delete_git_worktree,
+            get_worktree_changes,
+            get_worktree_file_diff,
+            list_worktree_files,
+            read_worktree_text_file,
+            start_worktree_watcher,
+            stop_worktree_watcher,
+            list_worktree_git_history,
+            get_worktree_git_graph,
+            get_worktree_commit_detail,
+            get_worktree_commit_file_diff,
+            list_agents,
+            list_agent_tool_command_candidates,
+            list_provider_sessions,
+            open_external_url,
+            open_worktree_window,
+            open_settings_window,
+            start_agent_run,
+            cancel_agent_run,
+            send_prompt_to_run,
+            steer_prompt_to_run,
+            cancel_current_prompt_and_send_to_run,
+            set_run_permission_mode,
+            respond_agent_permission,
+            sync_agent_workspace,
+            send_agent_exchange,
+            acknowledge_agent_exchange,
+            list_agent_exchanges,
+            bootstrap_orchestration_workspace,
+            list_recoverable_orchestration_workspaces,
+            get_orchestration_workspace,
+            bind_main_coordinator_run,
+            delegate_orchestration_goal,
+            adopt_manual_orchestration_child,
+            list_orchestration_tasks,
+            collect_orchestration_reports,
+            set_orchestration_presentation,
+            replay_orchestration_runtime_events,
+            respond_orchestration_input,
+            send_orchestration_child_command,
+            cancel_orchestration_task,
+            retry_orchestration_task,
+            reassign_orchestration_task,
+            handoff_orchestration_coordinator,
+            dispatch_orchestration_prompt,
+            recover_orchestration_workspace,
+            get_workbench_connection
+        ]
+    };
+}
+
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .menu(build_native_menu)
+        .on_menu_event(|app, event| {
+            if event.id() == ABOUT_MENU_ID {
+                show_about_dialog(app);
+            } else if event.id() == PREFERENCES_MENU_ID {
+                if let Err(error) = infrastructure::window_manager::open_settings_window(app) {
+                    show_error_dialog(app, "Could not open Settings", &error);
+                }
+            } else if let Ok(true) =
+                infrastructure::native_window_menu::focus_window_from_menu_event(
+                    app,
+                    event.id().as_ref(),
+                )
+            {
+                // Window focus menu events are handled by the native menu adapter.
+            }
+        })
+        .setup(|_app| {
+            // 037: 서버 런타임(Workbench)을 먼저 조립한다. 프로젝트 저장소는 이 런타임이 유일한 쓰기 주체다.
+            let app_data_dir = _app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+            // 040: 데스크톱 포트(창 삽입 전달·run 시작 보강)를 주입한다. run 종료 후처리와 orchestration은 core가
+            // 소유한다(041).
+            let desktop_bridge = infrastructure::tauri_desktop_bridge::TauriDesktopBridge::new(
+                _app.handle().clone(),
+            );
+            let mut adapters = RuntimeAdapters::production();
+            adapters.desktop = Some(desktop_bridge.clone());
+            adapters.launch_decorator = Some(desktop_bridge.clone());
+            let workbench_runtime: Arc<WorkbenchRuntime> =
+                WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
+                    .map_err(|error| error.to_string())?;
+            let http_runtime = workbench_runtime.clone();
+            _app.manage(workbench_runtime);
+
+            let appearance_repository =
+                JsonAppearancePreferencesRepository::from_app(_app.handle())?;
+            let appearance_service =
+                AppearancePreferencesService::bootstrap(appearance_repository)?;
+            _app.manage(appearance_service);
+
+            let mcp_state = McpServerState::start(_app.handle().clone())?;
+            desktop_bridge.bind_mcp(mcp_state.clone());
+
+            // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
+            let (http_state, start_error) =
+                match workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
+                    workbench: http_runtime.clone() as Arc<dyn workbench_protocol::Workbench>,
+                    mcp_registry: mcp_state.capability_registry(),
+                    server_info: workbench_http::AwServerInfo {
+                        version: APP_VERSION.to_owned(),
+                        epoch: http_runtime.epoch().to_owned(),
+                    },
+                    drain_warn_after: workbench_http::default_drain_warn_after(),
+                }) {
+                    Ok(state) => {
+                        eprintln!("[workbench-http] listening on {}", state.base_url());
+                        (Some(Arc::new(state)), None)
+                    }
+                    Err(error) => {
+                        eprintln!("[workbench-http] failed to start: {error:#}");
+                        (None, Some(format!("{error:#}")))
+                    }
+                };
+            let http = workbench_http::WorkbenchHttp {
+                state: http_state,
+                start_error,
+                exit: workbench_http::ExitGate::default(),
+            };
+            #[cfg(debug_assertions)]
+            infrastructure::http_probe::write_diagnostic_file(&http);
+            _app.manage(http);
+            _app.manage(mcp_state);
+
+            #[cfg(debug_assertions)]
+            {
+                if infrastructure::devtools::should_open_devtools()
+                    && let Some(window) = _app.get_webview_window("main")
+                {
+                    window.open_devtools();
+                }
+            }
+
+            let _ = infrastructure::native_window_menu::sync_window_menu(_app.handle());
+
+            Ok(())
+        })
+        .on_page_load(|_webview, _payload| {
+            #[cfg(debug_assertions)]
+            infrastructure::http_probe::install_probe(
+                _webview,
+                matches!(_payload.event(), tauri::webview::PageLoadEvent::Finished),
+            );
+        })
+        .on_window_event(|window, event| {
+            // 세션 창의 위치·크기를 Worktree별로 저장한다. 이동·리사이즈는 드래그 중 연속으로
+            // 들어오므로 간격을 두고 저장하고, 닫힐 때는 마지막 값을 반드시 기록한다.
+            match event {
+                WindowEvent::Moved(_) | WindowEvent::Resized(_) => {
+                    infrastructure::window_manager::save_session_window_bounds(window, false);
+                }
+                WindowEvent::CloseRequested { .. } | WindowEvent::Destroyed => {
+                    infrastructure::window_manager::save_session_window_bounds(window, true);
+                }
+                _ => {}
+            }
+            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
+            if let WindowEvent::Destroyed = event {
+                let label = window.label().to_string();
+                if label.starts_with("session-") {
+                    infrastructure::window_manager::forget_session_window(&label);
+                    let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
+                    let watcher_state = window.state::<WorktreeWatcherState>();
+                    let _ = watcher_state.stop_for_window(&label);
+                    tauri::async_runtime::spawn(async move {
+                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
+                        // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
+                        infrastructure::desktop_benches::close(&runtime, &label).await;
+                    });
+                }
+                let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
+            }
+        })
+        .manage(WorktreeWatcherState::new())
+        .invoke_handler(app_invoke_handler!())
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(on_run_event);
+}
+
+/// 042 T033: 종료는 받아들인 HTTP·MCP 호출이 끝날 때까지 미룬다 — 신호만 보내고 곧바로 끝내면 분리 실행한 호출의
+/// 결과 기록이 프로세스와 함께 사라진다. 두 경로가 있다:
+/// - `ExitRequested`(창을 모두 닫음 등): 종료를 미루고 비동기로 drain한 뒤 같은 코드로 다시 종료한다.
+/// - `Exit`(macOS 앱 메뉴 Quit·terminate는 `ExitRequested` 없이 이것만 온다 — 042 스모크에서 확인): 이벤트 루프가
+///   끝나기 전에 그 자리에서 drain을 기다린다. drain은 tokio 작업자에서 돌므로 메인 스레드를 막아도 진행된다.
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    match event {
+        tauri::RunEvent::ExitRequested { api, code, .. } => {
+            let http = app.state::<workbench_http::WorkbenchHttp>();
+            match http.exit.on_exit_requested() {
+                workbench_http::ExitDecision::Exit => {}
+                workbench_http::ExitDecision::KeepWaiting => api.prevent_exit(),
+                workbench_http::ExitDecision::StartDrain => {
+                    api.prevent_exit();
+                    let app = app.clone();
+                    let state = http.state.clone();
+                    let mcp_calls = app.state::<McpServerState>().detached_calls();
+                    eprintln!(
+                        "[workbench-http] exit requested: closing new calls and draining accepted calls"
+                    );
+                    let runtime = app.state::<Arc<WorkbenchRuntime>>().inner().clone();
+                    tauri::async_runtime::spawn(async move {
+                        workbench_http::drain_for_exit(state, mcp_calls, async move {
+                            runtime.close_all_benches().await;
+                        })
+                        .await;
+                        eprintln!("[workbench-http] exit: accepted calls drained");
+                        app.state::<workbench_http::WorkbenchHttp>().exit.drained();
+                        app.exit(code.unwrap_or(0));
+                    });
+                }
+            }
+        }
+        tauri::RunEvent::Exit => {
+            let http = app.state::<workbench_http::WorkbenchHttp>();
+            if http.exit.is_drained() {
+                return;
+            }
+            eprintln!(
+                "[workbench-http] exit (event loop ending): closing new calls and draining accepted calls"
+            );
+            let state = http.state.clone();
+            let mcp_calls = app.state::<McpServerState>().detached_calls();
+            let runtime = app.state::<Arc<WorkbenchRuntime>>().inner().clone();
+            tauri::async_runtime::block_on(workbench_http::drain_for_exit(
+                state,
+                mcp_calls,
+                async move {
+                    runtime.close_all_benches().await;
+                },
+            ));
+            http.exit.drained();
+            eprintln!("[workbench-http] exit: accepted calls drained");
+        }
+        _ => {}
+    }
 }
 
 fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {

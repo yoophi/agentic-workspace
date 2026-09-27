@@ -80,8 +80,10 @@ dependencies = [
  "acp-agent-core",
  "agent-client-protocol",
  "anyhow",
+ "async-trait",
  "axum",
  "chrono",
+ "futures-util",
  "git-core",
  "libc",
  "objc2",
@@ -89,6 +91,7 @@ dependencies = [
  "percent-encoding",
  "serde",
  "serde_json",
+ "sha2",
  "shell-words",
  "tauri",
  "tauri-build",
@@ -99,6 +102,7 @@ dependencies = [
  "uuid",
  "workbench-core",
  "workbench-protocol",
+ "workbench-server",
 ]
 
 [[package]]
@@ -5623,6 +5627,7 @@ dependencies = [
  "walkdir",
  "workbench-core",
  "workbench-protocol",
+ "workbench-server",
 ]
 
 [[package]]
@@ -5636,6 +5641,27 @@ dependencies = [
  "thiserror 2.0.18",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "workbench-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "hyper",
+ "hyper-util",
+ "rand",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower",
+ "tower-http 0.5.2",
+ "uuid",
+ "workbench-protocol",
 ]
 
 [[package]]

@@ -1,0 +1,90 @@
+# 042 구현 리뷰
+
+## 1. OCR delegate-review (`--from 2e7f359 --to HEAD`, 46개 검토 대상 중 운영 코드 중심)
+
+| # | 등급 | 지적 | 조치 |
+|---|---|---|---|
+| O1 | Medium | 접근 기록이 클라이언트가 보낸 `requestId`·`operation`(인증 전 요청 포함)을 그대로 찍는다. 식별자는 길이만 검사하므로 개행·공백으로 기록 줄이나 필드(`status=200`)를 위조할 수 있다 | `AccessEntry::line`이 두 값을 따옴표로 감싸 escape. 단위 `client_supplied_values_cannot_forge_lines_or_fields` |
+| O2 | Medium | debug probe·진단 파일: 이미 있던 파일을 덮어쓰면 `mode(0o600)`가 적용되지 않아 기존 권한이 남는다(토큰 든 진단 파일) | 쓴 뒤 `set_permissions(0o600)` |
+| O3 | Medium | MCP `requestId`를 trim해 키를 만들어 도메인에서 다른 `" r1"`·`"r1"`이 같은 키로 합쳐질 수 있다 | 원래 값으로 키, 공백뿐인 값만 제외. 단위 `request_ids_are_compared_verbatim` |
+| O4 | 확인 | 열린 WebSocket이 graceful shutdown을 붙잡아 종료가 멈출 수 있는가 | 붙잡지 않음 — 회귀 시험 `http_tickets.rs` `shutdown_completes_with_open_subscriptions` 추가(통과) |
+
+확인만 하고 고치지 않은 것: `drain::accept`의 증가 뒤 재확인은 close와 경합해도 drain 뒤에 작업이 실행되지 않는다(두 번째 확인이 거절). `RunEvent::Exit`의 `block_on`은 메인 스레드를 막지만 drain은 tokio 작업자에서 돌고, 데스크톱 bridge의 `window.eval`은 전달만 하고 기다리지 않는다(루프 종료 중이면 오류를 버린다).
+
+## 2. Codex adversarial review (branch diff against main) — verdict: needs-attention
+
+| # | 등급 | 지적 | 조치 |
+|---|---|---|---|
+| C1 | High | 불완전·미인증 요청이 앱 종료를 무기한 막는다: `Bytes` 추출이 인증·수락보다 먼저이고 본문 읽기 제한 시간이 없으며, axum graceful shutdown은 그 연결을 기다린다(AW `Exit`는 메인 스레드에서 block_on) | (1) 인증을 먼저 하고 미인증은 본문을 읽지 않고 401 (2) 본문 읽기(`read_body`)는 종료 신호와 경합해 곧바로 `503`, 평상시 제한 시간 30초(`deadlineExceeded`) (3) serve를 직접 소유하는 연결 루프로 교체 — 종료 신호 뒤 연결마다 graceful, `connection_grace`(2초) 뒤 남은 연결 task를 abort·join해 소켓·router·`Workbench` 참조까지 해제. `axum::serve`는 연결 task를 detach해 future를 버려도 남는다(axum 0.7.9 `serve.rs:422`, 사용자 검토로 확인) (4) 받아들인 호출은 연결과 무관하게 추적기로 끝까지 drain |
+| C2 | Medium | 서버 종료가 upgrade된 WebSocket·구독을 정리하지 않는다(on_upgrade는 별도 task). 기존 시험은 종료 뒤 읽은 결과를 버렸다 | 구독을 별도 추적기(`subscriptions`)로 세고, 종료 신호에 루프·전송이 멈추고 close(1초 제한) 뒤 스트림·소켓을 놓는다. `serve`는 구독이 0이 된 뒤 반환. 약한 시험은 지우고 hub 구독 수·runtime 참조 수·소켓 close를 단정하는 시험으로 교체 |
+
+**수정 전 재현**(`http_shutdown_edges.rs`, 동작 없는 설정 항목만 추가한 상태): 5건 실패 — 미인증 본문·인증 본문·멈춘 헤더 종료가 3초 안에 끝나지 않음, 본문 제한 시간 없음, 종료 뒤 구독 3개 남음(`codex-before.log`).
+
+**수정 뒤**: 7건 통과 — 위 5건 + `accepted_calls_outlive_the_connection_grace`(유예 100ms < 받아들인 호출 600ms여도 serve는 호출·멱등 기록이 끝난 뒤 반환). 멈춘 요청 시험은 serve 반환만이 아니라 클라이언트 EOF/reset과 `Arc::strong_count(runtime)` 원복까지 단정한다. 본문 취소 시험은 유예(2초)보다 짧은 1초 제한.
+
+**보호 제거 변이**(각각 복원 후 재실행 통과):
+
+| 변이 | 결과 |
+|---|---|
+| M1 본문 읽기의 종료 분기 제거 | 인증된 멈춘 본문 시험 실패(미인증은 본문을 읽지 않으므로 통과 — 인증 우선이 별도 보호) |
+| M2 연결 task를 `JoinSet` 대신 detach(`tokio::spawn`, axum과 같은 함정) | 멈춘 헤더 시험 실패: "the server left the connection open" |
+| M3 WebSocket 루프·전송의 종료 분기 제거 | 구독 종료 시험 실패(종료가 끝나지 않음) |
+| M4 serve의 구독 drain 제거 | 구독 종료 시험 실패: runtime 참조가 남음 |
+
+### 게이트 중 드러난 회귀와 원인 — hello가 구독 등록보다 먼저였다
+
+수정 뒤 전체 게이트에서 이벤트 fixture `worktree-cursor-ignored [ws]`가 항목 0개로 **결정적으로** 실패했다(격리 10/10 실패, HEAD 5/5 통과). 조사 순서와 증거:
+
+1. hello→등록 경합인가: fixture가 쓰기 직전 hub 구독 수는 이미 1(`subs=1 > baseline=0`) — fixture의 준비 신호는 충족돼 있었다.
+2. 감시 시작 직후 틈(FSEvents 워밍업)인가: 진단용으로만 쓰기 전 1초를 두면 3/3 통과. 준비 확인 probe(앱 전용 임시 디렉터리 표지를 감시 callback이 받을 때까지 대기)를 실험했지만 준비가 매번 확인됐는데도 10/10 실패 — **가설 기각, probe는 최종 diff에서 제거**.
+3. 단계별 마지막 성공 지점: in-memory 회차는 원시 이벤트 → debounce → hub 발행까지 성공. ws 회차는 `a.txt`의 **원시 이벤트 자체가 없음** — 쓰기가 감시 시작보다 먼저였다.
+4. 원인: hub `subscribe`는 구독 수를 먼저 올리고(한도 예약, `event_hub/mod.rs:557`) 그 뒤 감시를 시작한다(`acquire_watch`, 694). 서버는 `Workbench.events` **전에** hello를 보냈다. fixture는 구독 수를 다른 task에서 폴링하므로 감시가 걸리기 전에 썼다. HEAD는 스케줄링 운으로 통과했고, 연결 task를 serve 루프가 소유하면서 interleaving이 바뀌어 드러났다. 실제 클라이언트에도 같은 결함이다 — hello를 받아도 구독 준비를 알 수 없어 재생 없는 알림 스트림의 변경을 잃는다.
+5. 수정: 구독을 등록한 **뒤** hello를 보낸다(hello = 구독 준비 완료 신호, 거절이면 hello 뒤 fault — 프레임 순서 유지). contracts §4 갱신. 임의 지연·기대값 축소 없음.
+6. 증거: 이벤트 suite 격리 20/20 통과. 새 회귀 시험 `http_tickets.rs` `hello_means_the_subscription_is_ready`(hello 직후 worktree 쓰기 → 알림 수신): 수정 10/10 통과, 변이(hello를 등록 전으로) 0/10 통과(10/10 실패).
+
+**게이트(수정 뒤, 각 한 번)**: `cargo fmt --all -- --check` 0 · `cargo clippy --workspace --all-targets -- -D warnings` 0 · `cargo test --workspace --all-targets --no-fail-fast` 0(742 passed, 0 failed, 7 ignored).
+
+## 3. OCR delegate-review 재실행 (`--from 2381d4f --to HEAD`, Codex 반영분 11개 파일)
+
+새 High/Medium 없음. 확인한 것: 종료 신호 뒤 `calls.close()`·`subscriptions.close()`가 graceful 신호보다 먼저, 구독 추적은 표 소모보다 먼저(종료 중이면 표를 쓰지 않고 `503`), `read_body`의 `Bytes::from_request`는 `DefaultBodyLimit`를 그대로 따른다(`http_security.rs` 413 통과), 유예 뒤 abort된 연결의 handler가 기다리던 분리 호출은 추적기로 끝까지 drain(`accepted_calls_outlive_the_connection_grace`), accept 오류는 50ms 뒤 재시도. 준비 확인 probe 실험은 원인과 무관해 최종 diff에 없다.
+
+## 4. Codex adversarial review 재실행 — verdict: needs-attention (C1·C2·hello 순서 확인됨)
+
+| # | 등급 | 지적 | 조치 |
+|---|---|---|---|
+| C3 | High | HTTP로 받아들인 `run.cancelAndSend`가 교체 prompt의 **사용자 권한 응답**을 기다리는 동안 Quit하면: 메인 스레드는 drain에 묶여 승인 UI가 안 뜨고, 수락이 닫혀 `run.respondPermission`·`run.cancel`이 못 들어와 호출과 종료가 서로 기다린다 | 종료 순서를 **수락 차단 → 진행 중 작업 해제 → drain**으로. 해제 = core `WorkbenchRuntime::close_all_benches()`(연 주체와 무관하게 열린 작업대를 모두 닫음 → 소유 run 취소 → acp-agent-core `cancel_run`이 run task abort·권한 대기 제거). AW `WorkbenchHttpState::shutdown(mcp_calls, release_work)`·`drain_for_exit`가 두 종료 경로(`ExitRequested`·`Exit`) 모두에서 이것을 부른다. 시간 제한·task 유기 없음 |
+
+**실제 경로 재현**(`crates/workbench-core/tests/acp_permission_exit.rs`): 실제 `AcpRunEngine`(acp-agent-core runner·`permission_flow`)과 최소 ACP agent(`tests/support/agents/fake_acp_permission_agent.py` — prompt마다 `session/request_permission`, `$/cancel_request`에 `cancelled`)를 `run.start`의 `agentCommand`로 띄운다. 첫 prompt가 권한을 기다리게 한 뒤 HTTP로 `run.cancelAndSend`를 받아들이고, 교체 prompt의 권한 요청(두 번째)까지 확인한다.
+- 수정 전 순서(수락만 닫고 drain): `exit_without_releasing_work_waits_forever` — 2초 뒤에도 serve 미완료(결함 재현). 정리로 작업대를 닫으면 끝난다.
+- 수정 뒤 순서: `exit_releases_permission_waits_then_drains` — 15초 제한 안에 종료, 받아들인 호출은 terminal 결과(`internal: ... ACP connection closed`)로 끝남(`calls.active() == 0`), run 소유 없음.
+- 멱등 처리 근거(과장 없이): 세대 멱등은 **성공만 기록**하고, 작업대 닫기는 그 작업대 범위의 기록을 지운다(`idempotency.drop_bench` — 계약). 그래서 끝난 뒤 같은 키 재시도는 `notFound`(작업대 없음)이며 교체 prompt를 다시 보내지 않는다 — 시험이 단정. 영속 ledger 기록은 없다(세대 범위 command).
+- `closing_all_benches_covers_every_owner`: 데스크톱과 다른 주체(HTTP 클라이언트)가 연 작업대의 run도 취소된다(창 표 기반 해제였다면 빠졌을 경로 — 처음 AW 창 표로 구현했다가 core API로 바꿈).
+
+**경합 검토**:
+- 받아들였지만 run 등록 전인 호출(`run.start` 진행 중): 작업대 닫기는 입장한 동작이 끝나기를 기다린 뒤 소유 run을 취소한다 — `bench_close_race.rs` `start_racing_with_close_never_leaves_runs_behind`(닫기 뒤 소유 run 0). `cancelAndSend`는 입장하지 않아 닫기를 막지 않는다 — `long_control_does_not_block_close`.
+- 취소 뒤 새 권한 대기: 권한 대기는 run task 안의 client read loop에서만 만들어지고 `cancel_run`이 그 task를 abort한다. 남은 대기는 `clear_run`이 지운다(acp-agent-core `cancel_run_clears_owner_and_permission_state_for_that_run`). 기다리던 prompt 응답은 연결 종료로 실패한다(실측).
+- `close_all`의 스냅샷 이후 새 작업대: 종료 전에 받아들인 `bench.open`이 스냅샷 뒤에 등록될 수 있다. 그 작업대에는 run이 생길 수 없다(새 호출은 이미 `503`, 클라이언트는 open 응답 전에 id를 모른다) — 권한 대기가 없어 drain을 막지 않는다. 남는 것은 메모리 속 빈 작업대이며 앱 종료와 함께 사라진다. 입증된 해악이 아니라 고치지 않았다 — 5단계 독립 서버 재조립 때 확인 항목.
+
+**게이트**: `cargo fmt --all -- --check` 0 · `cargo clippy --workspace --all-targets -- -D warnings` 0 · `cargo test --workspace --all-targets --no-fail-fast` 0(747 passed, 0 failed, 7 ignored).
+
+## 5. Codex adversarial review 최종 — verdict: approve
+
+"main 2e7f359 대비 재검토에서 출하를 막을 실질적 결함을 찾지 못했습니다." Codex는 읽기 전용 환경이라 `acp_permission_exit`를 재실행하지 못했다 — 최종 HEAD 전체 게이트(747 passed)에서 이 시험이 통과했다.
+
+## 6. CI에서 드러난 시험 가정 — terminal 결과와 가짜 agent의 권한 처리
+
+PR #205 첫 CI(run 36323437391, macos-15)에서 `exit_releases_permission_waits_then_drains`가 실패했다: 받아들인 `run.cancelAndSend`가 오류가 아니라 `Complete { output: Null }`로 끝났다. 로컬에서는 매번 `ACP connection closed` 오류였다.
+
+**원인은 미확정이다.** 그 CI 실행에는 agent 기록이 없어 `Complete`의 출처를 확인하지 못했다. 코드로 확인한 후보 두 가지:
+1. 권한 대기 제거(`clear_run`)로 client의 권한 대기가 닫히면 `permission_flow`가 오류를 돌려주고 client는 agent의 `session/request_permission`에 JSON-RPC **오류**로 응답한다(`client.rs` `handle_request`). 당시 가짜 agent는 권한 응답의 내용을 보지 않고 어떤 응답이든 `end_turn`으로 prompt를 끝냈다 — 오류를 승인처럼 처리하는 **가짜 agent 결함**이며, 그러면 교체 prompt가 정상 완료된다(유력하지만 미확인). 또 첫 prompt의 늦은 권한 응답이 교체 prompt를 끝낼 수도 있었다.
+2. agent가 취소 요청(`$/cancel_request`)에 교체 prompt를 `cancelled`로 먼저 답하는 경로.
+
+**가짜 agent 수정**: 권한 요청 id를 prompt id에 대응(끝난 prompt의 늦은 응답 무시), 승인(`selected` + allow)일 때만 `end_turn`, 오류·거절이면 `cancelled`. 모든 동작을 **응답을 보내기 전에** 기록·flush(`prompt:<id>`, `end_turn:<id>`, `cancelled:<id>:<cancel-request|permission-error|permission-refused>`).
+
+**시험 의미 수정(허용을 근거로 한정)**:
+- 정상 완료는 `Complete(Null)`이고 agent 기록에 교체 prompt의 `cancelled:<id>:<사유>`가 **있어야** 허용
+- 오류는 메시지가 `ACP connection closed`일 때만 허용
+- 두 경우 모두 prompt 2개 도달, 교체 prompt에 `end_turn` 없음(권한 승인 없이 끝남)
+- 유지한 핵심 단정: 두 번째 권한 요청 도달 → 종료 완료 → `calls.active() == 0` → run 소유 없음 → 같은 키 재시도 `notFound`(재실행 없음)
+
+**검증 범위**: 수정한 agent·시험으로 로컬 10/10, CPU 포화(`yes` × 12) 10/10 통과 — 20회 모두 연결 종료 경로(agent `cancelled` 기록 없음). **정상 완료 분기는 로컬에서 한 번도 재현되지 않아 이 반복으로 검증되지 않았다.** 그 분기의 대조 단정은 CI 등에서 그 경로가 나올 때만 실행된다. (앞선 반복 한 번은 헬퍼 이름이 `PathBuf` 바인딩에 가려 빌드가 실패한 채 이전 바이너리로 돌린 것이라 무효 — 이름을 `read_agent_log`로 바꾼 뒤 다시 실행.)

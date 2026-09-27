@@ -13,5 +13,7 @@ pub mod application;
 pub mod domain;
 pub mod infrastructure;
 pub mod ports;
+#[cfg(feature = "test-hooks")]
+pub mod testing;
 
 pub use workbench_protocol as protocol;

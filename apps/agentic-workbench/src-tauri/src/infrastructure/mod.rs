@@ -7,6 +7,8 @@ pub mod acp_agent_launch_factory;
 pub mod desktop_benches;
 #[cfg(debug_assertions)]
 pub mod devtools;
+#[cfg(debug_assertions)]
+pub mod http_probe;
 pub mod json_appearance_preferences_repository;
 pub mod json_session_window_state_repository;
 pub mod json_store;
@@ -16,3 +18,4 @@ pub mod native_window_menu;
 pub mod perf_log;
 pub mod tauri_desktop_bridge;
 pub mod window_manager;
+pub mod workbench_http;

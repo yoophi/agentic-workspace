@@ -14,6 +14,8 @@
 
 > 진행 상태(2026-09-27): **041(2b-2) 완료** — `specs/041-workbench-orchestration`. orchestration command 18개와 MCP orchestration 도구 16개가 `Workbench.call`(데스크톱 17 + `run.replay` + agent 17, operation 85)을 통과한다. 작업 영역은 창 label 대신 작업대에 묶이고(닫으면 복구 가능), 저장은 파일 전체 단일 경계, agent 역할은 서버 상태로 판정한다. `orchestration:<bindingId>` 스트림이 열렸고 run 구독·재생은 작업대 소유로 제한된다. 2단계가 끝났다 — 다음은 3단계 HTTP/WS 어댑터다. 세부는 [Workbench Seam — orchestration](workbench-seam.md#orchestration-041).
 
+> 진행 상태(2026-09-27): **042(3단계) 완료** — `specs/042-workbench-http`. 운영 HTTP/WS 어댑터 `crates/workbench-server`(protocol만 의존)가 생겼고 AW가 자기 런타임을 `127.0.0.1:<임의 포트>`로 연다. 데스크톱 짧은 토큰(창 출처 묶음)·MCP agent 토큰, 정확 Host·Origin, 30초 1회용 구독 표, 받아들인 호출의 분리 실행과 상한 없는 종료 drain을 갖췄고, 변경 operation 53개는 operation별 중단·재시작·단절 증거([증거 표](../specs/042-workbench-http/reviews/exposure-evidence.md)) 뒤에 공개했다. 계약·이벤트 suite는 운영 router로 돈다. 화면은 아직 Tauri 호환 command를 쓴다 — 다음은 4단계 프런트엔드 HTTP 전환(그 전에 배포 Origin `tauri://localhost` 실측). 세부는 [Workbench Seam — 네트워크 어댑터](workbench-seam.md#네트워크-어댑터-042-3단계).
+
 ## 결론
 
 권장 구조는 **로컬 우선 독립 AW 서버**다. 서버가 프로젝트·Git·파일 감시·ACP 에이전트·터미널 등 네이티브 프로세스와 영속 상태를 단독 소유하고, 데스크톱·TUI·CLI는 HTTP 요청과 클라이언트당 하나의 WebSocket 이벤트 스트림만 사용한다. Tauri는 서버의 배포·부트스트랩과 창·메뉴·다이얼로그 같은 데스크톱 고유 기능만 맡는다.

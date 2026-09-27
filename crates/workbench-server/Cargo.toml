@@ -1,0 +1,26 @@
+[package]
+name = "workbench-server"
+version = "0.1.0"
+edition = "2021"
+description = "Workbench HTTP/WebSocket 어댑터(042, 3단계): 계약(`Workbench` trait)을 루프백 네트워크로 연다."
+
+[dependencies]
+workbench-protocol = { path = "../workbench-protocol" }
+axum = { version = "0.7", features = ["ws"] }
+# serve: 연결 task를 직접 소유해 종료 때 해제를 보장한다(axum::serve는 연결을 detach한다).
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.5", features = ["cors", "limit"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net"] }
+futures-util = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+rand = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net", "test-util"] }

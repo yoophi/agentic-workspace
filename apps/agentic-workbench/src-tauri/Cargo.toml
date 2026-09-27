@@ -22,6 +22,7 @@ libc = "0.2"
 percent-encoding = "2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 shell-words = "1.1"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
@@ -32,9 +33,13 @@ git-core = { path = "../../../crates/git-core" }
 acp-agent-core = { path = "../../../crates/acp-agent-core" }
 workbench-core = { path = "../../../crates/workbench-core" }
 workbench-protocol = { path = "../../../crates/workbench-protocol" }
+workbench-server = { path = "../../../crates/workbench-server" }
 
 [dev-dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
 tempfile = "3"
+workbench-core = { path = "../../../crates/workbench-core", features = ["test-hooks"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

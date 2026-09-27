@@ -35,6 +35,9 @@ pub mod agent_exchange_tool;
 pub mod capability_registry;
 pub mod orchestration_tool;
 pub mod protocol;
+pub mod retry_identity;
+#[cfg(test)]
+mod retry_tests;
 pub mod title_tool;
 
 pub const AW_MCP_URL_ENV: &str = "AW_MCP_URL";
@@ -46,6 +49,8 @@ pub const AW_MCP_SERVER_NAME: &str = "agentic_workbench";
 pub struct McpServerState {
     base_url: String,
     capability_registry: CapabilityRegistry,
+    /// 042 R17: 받아들인 도구 호출. 연결과 무관하게 끝까지 실행되고, 앱 종료는 이것이 비기를 기다린다.
+    calls: std::sync::Arc<workbench_server::drain::DetachedCalls>,
 }
 
 #[derive(Clone)]
@@ -114,6 +119,7 @@ impl McpServerState {
         let server_state = Self {
             base_url: format!("http://{address}/mcp"),
             capability_registry: CapabilityRegistry::default(),
+            calls: std::sync::Arc::default(),
         };
         let router_state = McpRouterState {
             app,
@@ -147,6 +153,16 @@ impl McpServerState {
             token: self.capability_registry.issue(run_id),
             run_id: run_id.to_owned(),
         }
+    }
+
+    /// MCP 실행 토큰 레지스트리(042: Workbench HTTP 어댑터도 같은 토큰을 agent principal로 받는다).
+    pub fn capability_registry(&self) -> CapabilityRegistry {
+        self.capability_registry.clone()
+    }
+
+    /// 받아들인 도구 호출 추적기(앱 종료 drain용).
+    pub fn detached_calls(&self) -> std::sync::Arc<workbench_server::drain::DetachedCalls> {
+        std::sync::Arc::clone(&self.calls)
     }
 
     pub fn revoke_run_capability(&self, run_id: &str) {
@@ -241,13 +257,29 @@ async fn handle_post(
             JsonRpcResponse::result(id, result)
         }
         "tools/call" => {
-            let result = handle_tool_call(
-                &state,
-                principal.as_ref().expect("authenticated tool call"),
-                request.params,
-            )
-            .await;
-            JsonRpcResponse::result(id, result)
+            // 042 R17: 도구 호출은 서버 소유 task에서 실행한다 — agent 연결이 끊겨도 효과와 멱등 기록은 끝난다.
+            let Some(guard) = state.mcp_state.calls.accept() else {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(JsonRpcResponse::error(
+                        id,
+                        -32000,
+                        workbench_server::drain::MESSAGE_SHUTTING_DOWN,
+                    )),
+                )
+                    .into_response();
+            };
+            let principal = principal.expect("authenticated tool call");
+            let runtime = workbench_runtime(&state.app);
+            let rpc_id = id.clone();
+            match workbench_server::drain::spawn_accepted(guard, async move {
+                handle_tool_call(&runtime, &principal, request.params, rpc_id).await
+            })
+            .await
+            {
+                Ok(result) => JsonRpcResponse::result(id, result),
+                Err(_) => JsonRpcResponse::error(id, -32603, "tool call execution failed"),
+            }
         }
         method => JsonRpcResponse::error(id, -32601, format!("Unsupported MCP method: {method}")),
     };
@@ -263,10 +295,13 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-async fn handle_tool_call(
-    state: &McpRouterState,
+/// `tools/call` 한 건: 도구 → `Workbench.call`(agent principal). `AppHandle` 없이 runtime만 받아 시험에서 실제
+/// runtime으로 잰다(042 T027).
+pub(crate) async fn handle_tool_call(
+    runtime: &std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>,
     principal: &CapabilityPrincipal,
     params: Option<Value>,
+    rpc_id: Option<Value>,
 ) -> Value {
     let name = params
         .as_ref()
@@ -275,18 +310,12 @@ async fn handle_tool_call(
         .unwrap_or_default();
     if is_orchestration_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_orchestration_tool(
-            &workbench_runtime(&state.app),
-            principal,
-            name,
-            arguments,
-        )
-        .await;
+        return handle_orchestration_tool(runtime, principal, name, arguments, rpc_id.as_ref())
+            .await;
     }
     if is_exchange_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_exchange_tool(&workbench_runtime(&state.app), principal, name, arguments)
-            .await;
+        return handle_exchange_tool(runtime, principal, name, arguments, rpc_id.as_ref()).await;
     }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);
@@ -305,12 +334,17 @@ async fn handle_tool_call(
     }
     // 040 US3(ADR 0006·0007): 제목 요청은 agent principal로 `bench.requestTitle`을 부른다. 서버는 작업대 알림
     // 스트림에 발행하고, 데스크톱 bridge가 그 작업대의 창에 적용한다(네이티브 방송 없음).
-    let runtime = workbench_runtime(&state.app);
     let mut call = workbench_protocol::CallRequest::query(
         workbench_protocol::OperationId::BenchRequestTitle,
         serde_json::json!({ "runId": request.run_id, "title": request.title }),
     );
-    call.idempotency_key = Some(workbench_protocol::IdempotencyKey::random());
+    // 제목 도구에는 requestId가 없다: 같은 wire 요청(JSON-RPC id) 재전송만 식별하고, 새 id는 새 요청(같은 제목으로 수렴).
+    call.idempotency_key = Some(retry_identity::tool_idempotency_key(
+        &principal.run_id,
+        workbench_protocol::OperationId::BenchRequestTitle,
+        arguments,
+        rpc_id.as_ref(),
+    ));
     use workbench_protocol::Workbench as _;
     match runtime
         .call(
@@ -364,6 +398,7 @@ mod tests {
         McpServerState {
             base_url: "http://127.0.0.1:1/mcp".into(),
             capability_registry: CapabilityRegistry::default(),
+            calls: std::sync::Arc::default(),
         }
     }
 

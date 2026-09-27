@@ -8,8 +8,8 @@ use workbench_core::{
     domain::agent_exchange::{AgentExchangeDelivery, AgentExchangeError},
 };
 use workbench_protocol::{
-    AuthenticatedPrincipal, CallRequest, IdempotencyKey, OperationId, OperationKind, Workbench,
-    WorkbenchFault, operations::spec_for,
+    AuthenticatedPrincipal, CallRequest, OperationId, OperationKind, Workbench, WorkbenchFault,
+    operations::spec_for,
 };
 
 use crate::infrastructure::mcp::capability_registry::CapabilityPrincipal;
@@ -100,11 +100,14 @@ async fn call_as_agent(
     run_id: &str,
     operation: OperationId,
     input: Value,
+    rpc_id: Option<&Value>,
 ) -> Result<Value, AgentExchangeError> {
+    // 교환 요청의 `requestId`(`input.request.requestId`)로 재시도를 식별한다(`retry_identity`).
+    let key = matches!(spec_for(operation).kind, OperationKind::Command).then(|| {
+        super::retry_identity::tool_idempotency_key(run_id, operation, input.get("request"), rpc_id)
+    });
     let mut request = CallRequest::query(operation, input);
-    if matches!(spec_for(operation).kind, OperationKind::Command) {
-        request.idempotency_key = Some(IdempotencyKey::random());
-    }
+    request.idempotency_key = key;
     runtime
         .call(AuthenticatedPrincipal::agent(run_id), request)
         .await
@@ -129,6 +132,7 @@ pub async fn handle_tool(
     principal: &CapabilityPrincipal,
     name: &str,
     arguments: Option<&Value>,
+    rpc_id: Option<&Value>,
 ) -> Value {
     let result = match name {
         LIST_PEER_AGENTS_TOOL => {
@@ -144,6 +148,7 @@ pub async fn handle_tool(
                 &principal.run_id,
                 OperationId::ExchangeListPeers,
                 json!({ "runId": principal.run_id }),
+                rpc_id,
             )
             .await
         }
@@ -171,6 +176,7 @@ pub async fn handle_tool(
                         "delivery": request.delivery,
                     },
                 }),
+                rpc_id,
             )
             .await
         }
@@ -187,6 +193,7 @@ pub async fn handle_tool(
                 &principal.run_id,
                 OperationId::ExchangeGetForRun,
                 json!({ "runId": principal.run_id, "requestId": request.request_id }),
+                rpc_id,
             )
             .await
         }

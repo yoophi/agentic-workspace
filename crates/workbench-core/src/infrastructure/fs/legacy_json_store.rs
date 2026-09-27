@@ -162,3 +162,30 @@ fn sync_directory(path: &Path) {
         let _ = directory.sync_all();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 042 research R13: orchestration 작업 영역 쓰기가 중간에 끊기면(임시 파일만 남음) 이전 판이 그대로 읽히고,
+    /// 다음 저장은 정상이다. 본 파일이 깨졌다면 `.bak`에서 복구한다.
+    #[test]
+    fn interrupted_writes_leave_the_previous_version_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = dir.path().join("orchestration-sessions.json");
+        save_json(&store, "orchestration", &vec!["v1".to_owned()]).unwrap();
+
+        // rename 전에 끊긴 쓰기: 임시 파일만 반쯤 쓰여 있다.
+        fs::write(temp_path(&store), b"[\"v2\", \"trunc").unwrap();
+        let read: Vec<String> = load_json(&store, "orchestration").unwrap();
+        assert_eq!(read, vec!["v1".to_owned()]);
+        save_json(&store, "orchestration", &vec!["v2".to_owned()]).unwrap();
+        let read: Vec<String> = load_json(&store, "orchestration").unwrap();
+        assert_eq!(read, vec!["v2".to_owned()]);
+
+        // 본 파일 자체가 깨진 경우(비원자 매체): 직전 판 `.bak`에서 복구한다.
+        fs::write(&store, b"{broken").unwrap();
+        let read: Vec<String> = load_json(&store, "orchestration").unwrap();
+        assert_eq!(read, vec!["v1".to_owned()], "recovered from the backup");
+    }
+}
