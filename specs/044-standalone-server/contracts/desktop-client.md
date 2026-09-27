@@ -30,10 +30,10 @@ research R3·R6·R8·R11.
 | 사건 | 데스크톱이 서버에 하는 일 |
 |---|---|
 | 창 생성 | incarnation 발급(데스크톱), 토큰은 연결 때 발급 |
-| 사용자가 창을 닫음(R8 확정 신호) | `desktop.retireWindow{closeBench:true}` |
-| 앱 종료가 창을 걷어 냄 | `desktop.retireWindow{closeBench:false}`(상한 2초, 실패해도 종료) |
+| 사용자가 창을 닫음(그 창의 `CloseRequested`가 종료 의도보다 먼저 옴 — R8 관측: 빨간 버튼, Close Window 메뉴, 마지막 창 닫기) | `desktop.retireWindow{closeBench:true}` |
+| 앱 종료가 창을 걷어 냄(`CloseRequested` 없이 `Destroyed`, 또는 종료 의도 뒤 — R8 관측: Cmd+Q·Dock·AppleScript quit은 `Exit`만) | `desktop.retireWindow{closeBench:false}`(상한 2초, 실패해도 종료) |
 | 앱 종료 | `lease.release`. `close_all_benches`를 부르지 않는다 |
-| 앱 강제 종료 | 없음(임대 TTL로 서버가 거둠) |
+| 앱 강제 종료·`SIGTERM`(R8 관측: 이벤트 없음) | 없음(임대 TTL로 서버가 거둠) |
 
 ## 4. 화면
 

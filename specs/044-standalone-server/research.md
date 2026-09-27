@@ -293,7 +293,31 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
   - (f) 마지막 창 닫기
   - (g) `SIGTERM`
   - (h) 로그아웃·재시동(자동화가 어려우면 관측 불가로 기록)
-- **설계 방향(spike 결과로 확정)**:
+- **R8-spike 결과 (T002, 2026-09-28, macOS Apple Silicon, debug 번들 `AW Spike 044.app`, 043 코드 + 이벤트 로거)**. System Events·AppleScript로 자동화했고, 창 두 개(main + Settings)에서 실행했다. 로그는 세션 scratchpad `044/spike/`.
+
+  | 경로 | 관측한 순서 | 반복 |
+  |---|---|---|
+  | (a) 빨간 버튼(Settings, main 남음) | `settings CloseRequested` → `settings Destroyed` | 1 |
+  | (b1) 메뉴 `Window > Close Window` 클릭(Settings) | `settings CloseRequested` → `settings Destroyed`(main 남음) | 2 |
+  | (b2) Cmd+W 키 입력(System Events `keystroke`, Settings가 앞) | `settings CloseRequested` → `main CloseRequested` → 두 창 `Destroyed` → `ExitRequested` → `Exit`(**두 창 모두 닫힘**) | 3 + 가설 검사 2 |
+  | (c) 앱 메뉴 Quit(Cmd+Q) | `run Exit`**만**(창 이벤트 없음) | 1 |
+  | (d) Dock 메뉴 Quit | `run Exit`만 | 1 |
+  | (e) AppleScript `quit` | `run Exit`만 | 1 |
+  | (f) 마지막 창 빨간 버튼(main) | `main CloseRequested` → `main Destroyed` → `ExitRequested` → `Exit` | 1 |
+  | (g) `SIGTERM` | 이벤트 없음(기본 처리로 프로세스 종료) | 1 |
+  | (h) 로그아웃·재시동 | **관측 불가**(자동화하지 않음) | — |
+
+  - (b2)의 원인은 확인하지 못했다. 파일·Window 메뉴의 `close_window` 중복을 의심해 하나를 뺀 빌드로 다시 해 봤지만 결과가 같아 기각했다. 화면에 Cmd+W 처리기도 없다(검색 0건). 메뉴 항목 클릭은 한 창만 닫는다. 사람이 누른 Cmd+W에서도 같은지는 T046에서 확인한다(미확인 위험).
+  - (c)(d)(e)에서는 `Exit` 전에 창 이벤트가 오지 않았다. 따라서 **이 세 경로는 `CloseRequested`가 종료 신호보다 먼저 오지 않는다(관측)**. `Exit` 뒤에 창 이벤트가 오는지는 프로세스가 곧 끝나 로그에 없다. 종료 의도 표시가 `Exit`에서 서므로, 그 뒤의 `Destroyed`는 닫기 의도가 없어 작업대를 닫지 않는다.
+  - (f)는 사용자가 마지막 창을 닫은 경우다. `CloseRequested`가 먼저 오므로 창 닫기(작업대 닫기)로 판정하고, 그다음 앱이 끝난다.
+  - (g)는 앱 처리가 없다. 임대는 TTL로 거둬지고 작업대·run은 서버에 남는다. `close_all_benches`는 불리지 않는다.
+- **설계 확정(T003)**:
+  - 닫기 의도 = 그 창의 `CloseRequested`. 종료 의도 표시(`quitting`)가 선 뒤의 `CloseRequested`는 의도로 세지 않는다.
+  - 종료 의도는 `ExitRequested`·`RunEvent::Exit`에서 선다. (c)(d)(e)는 `Exit`만 오고 그 전에 창 이벤트가 없으므로 이것으로 충분하다(관측).
+  - `Destroyed`: 닫기 의도가 있으면 `retireWindow{closeBench:true}`, 없으면 `{closeBench:false}`.
+  - 외부 서버 모드의 `ExitRequested`·`Exit`는 `close_all_benches`를 부르지 않는다. 임대만 푼다(상한 2초).
+  - 검증 대상 종료 경로(T045): (c)·(d)·(e)·(g)는 run 지속. 대조(T046): (a)·(b1)·(f)는 그 창 작업대 닫힘, (b2)는 관측대로 두 창 작업대가 닫히는지 확인하고 위험 목록에 둔다.
+- **설계 방향(spike 결과로 확정, 위 "설계 확정"이 우선)**:
   - 작업대 닫기는 "사용자가 그 창을 닫으려 했다"는 신호가 있을 때만 한다. 앱 종료가 창을 걷어 낼 때는 토큰·표만 폐기한다(`desktop.retireWindow{closeBench:false}`).
   - 앱 종료 신호를 가장 이르게 잡는 지점을 경로마다 정한다. 후보: 앱 메뉴 Quit을 직접 처리하는 메뉴 항목, `ExitRequested`, `RunEvent::Exit`, macOS terminate 알림에 해당하는 tao/Tauri 신호.
   - spike에서 어떤 종료 경로가 종료 신호보다 먼저 `CloseRequested`를 내면, 그 경로에서는 `CloseRequested`만으로 창 닫기를 판정할 수 없다. 그 경로는 종료 의도를 먼저 세우는 수단(직접 처리 메뉴 항목, 더 이른 신호)을 구현해야 한다.
