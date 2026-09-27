@@ -239,3 +239,320 @@ fn an_unknown_storage_schema_is_refused_without_touching_the_data() {
     );
     assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
 }
+
+// --- 044 T044(research R7·R9·R10, contracts/server-lifecycle.md §1·§5·§6): 유휴 정지·정지 세 방식·비우기 입구 ---
+//
+// 활동 작업은 실제 turn이다: 가짜 ACP agent(`--end-turn-gate`)가 승인된 첫 prompt를 gate 파일이 생길 때까지 끝내지 않는다.
+// "상한 안에 멈추지 않음"은 동기화가 아니라 단정이다(상한 동안 서버가 살아 있고 안내 파일이 남아 있어야 한다).
+
+use serde_json::{Value, json};
+use workbench_host::lifecycle::{calls::call, descriptor::Descriptor};
+
+/// 이만큼 기다려도 멈추지 않으면 "멈추지 않는다"로 본다(`--idle-timeout 1`의 몇 배).
+const NOT_STOPPING_FOR: Duration = Duration::from_secs(3);
+const STOP_DEADLINE: Duration = Duration::from_secs(30);
+
+fn repo_path(relative: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(relative)
+}
+
+fn serve_with(data: &Path, extra: &[&str]) -> Child {
+    Command::new(BIN)
+        .args(["serve", "--data-dir"])
+        .arg(data)
+        .args(extra)
+        .arg("--log")
+        .arg(data.join("server.log"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn serve")
+}
+
+/// 서버를 띄우고 준비(안내 파일 + 신원 확인)까지 기다린다.
+fn start_server(cleanup: &Cleanup, data: &Path, extra: &[&str]) -> (Child, Descriptor) {
+    let child = serve_with(data, extra);
+    cleanup.track(child.id());
+    let mut ready = None;
+    wait_until(STOP_DEADLINE, "the server to be ready", || {
+        ready = read_descriptor(&server_dir(data))
+            .ok()
+            .flatten()
+            .filter(|descriptor| descriptor.pid == child.id() && verify(descriptor).is_ok());
+        ready.is_some()
+    });
+    (child, ready.unwrap())
+}
+
+fn stop_cli(data: &Path, mode: &[&str]) -> (i32, String) {
+    let output = Command::new(BIN)
+        .args(["stop", "--data-dir"])
+        .arg(data)
+        .args(mode)
+        .stdin(Stdio::null())
+        .output()
+        .expect("run stop");
+    (
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    )
+}
+
+fn owner(descriptor: &Descriptor, operation: &str, input: Value, command: bool) -> Value {
+    call(
+        &descriptor.base_url,
+        &descriptor.owner_token,
+        None,
+        operation,
+        input,
+        command,
+    )
+    .unwrap_or_else(|error| panic!("{operation}: {error:?}"))
+}
+
+fn status(descriptor: &Descriptor) -> Value {
+    owner(descriptor, "server.status", json!({}), false)
+}
+
+/// 프로세스가 스스로 끝날 때까지(상한) 기다리고 종료 코드를 돌려준다.
+fn wait_exit(child: &mut Child, what: &str) -> i32 {
+    let mut code = None;
+    wait_until(STOP_DEADLINE, what, || {
+        code = child
+            .try_wait()
+            .unwrap()
+            .map(|status| status.code().unwrap_or(-1));
+        code.is_some()
+    });
+    code.unwrap()
+}
+
+/// 상한 동안 서버가 살아 있고 안내 파일이 남아 있음을 단정한다.
+fn assert_keeps_serving(child: &mut Child, data: &Path, why: &str) {
+    let until = Instant::now() + NOT_STOPPING_FOR;
+    while Instant::now() < until {
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "the server stopped although {why}"
+        );
+        assert!(
+            read_descriptor(&server_dir(data)).unwrap().is_some(),
+            "{why}"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// 첫 turn이 `gate` 파일이 생길 때까지 끝나지 않는 run을 연다. busy run이 보일 때까지 기다린다.
+fn start_gated_run(descriptor: &Descriptor, work: &Path, gate: &Path) {
+    let bench = owner(
+        descriptor,
+        "bench.open",
+        json!({ "workingDirectory": work }),
+        true,
+    )["benchId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let agent = format!(
+        "python3 {} --end-turn-gate {} --log {}",
+        repo_path("crates/workbench-core/tests/support/agents/fake_acp_permission_agent.py")
+            .display(),
+        gate.display(),
+        work.join("agent.log").display()
+    );
+    owner(
+        descriptor,
+        "run.start",
+        json!({ "benchId": bench, "request": { "goal": "hold the turn", "agentId": "fake-acp",
+            "agentCommand": agent, "cwd": work, "runId": "r1", "autoAllow": true } }),
+        true,
+    );
+    wait_until(STOP_DEADLINE, "a busy run", || {
+        status(descriptor)["activeWork"]["busyRuns"] == 1
+    });
+}
+
+fn workspace() -> (tempfile::TempDir, PathBuf, PathBuf) {
+    let dir = tempfile::tempdir().unwrap();
+    let root = fs::canonicalize(dir.path()).unwrap();
+    let data = root.join("data");
+    let work = root.join("work");
+    fs::create_dir_all(&data).unwrap();
+    fs::create_dir_all(&work).unwrap();
+    (dir, data, work)
+}
+
+#[test]
+fn an_idle_server_stops_after_the_idle_timeout_and_removes_its_descriptor() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, _work) = workspace();
+    let (mut child, _) = start_server(&cleanup, &data, &["--idle-timeout", "1"]);
+    assert_eq!(wait_exit(&mut child, "the idle stop"), 0);
+    assert!(
+        read_descriptor(&server_dir(&data)).unwrap().is_none(),
+        "descriptor removed"
+    );
+}
+
+#[test]
+fn active_work_prevents_the_idle_stop_until_it_ends() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let gate = work.join("end-turn");
+    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", "1"]);
+    start_gated_run(&descriptor, &work, &gate);
+    assert_keeps_serving(&mut child, &data, "a turn is in progress");
+    fs::write(&gate, b"").unwrap();
+    // turn이 끝나면 세션은 살아 있어도(쉬는 세션) 유휴로 멈추고, 멈출 때 그 세션을 취소한다.
+    assert_eq!(wait_exit(&mut child, "the idle stop after the turn"), 0);
+    assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
+}
+
+#[test]
+fn default_stop_is_refused_with_exit_5_and_wait_stops_once_the_work_ends() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let gate = work.join("end-turn");
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &gate);
+
+    let (code, stdout) = stop_cli(&data, &[]);
+    assert_eq!(code, 5, "{stdout}");
+    let blockers: Value = serde_json::from_str(stdout.trim()).unwrap();
+    assert_eq!(blockers["activeWork"]["busyRuns"], 1, "{blockers}");
+    assert!(
+        child.try_wait().unwrap().is_none(),
+        "a refused default stop changes nothing"
+    );
+    assert_eq!(status(&descriptor)["state"], "serving");
+
+    let mut waiting = Command::new(BIN)
+        .args(["stop", "--data-dir"])
+        .arg(&data)
+        .arg("--wait")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    cleanup.track(waiting.id());
+    wait_until(STOP_DEADLINE, "draining", || {
+        status(&descriptor)["state"] == "drainingWait"
+    });
+    assert_keeps_serving(&mut child, &data, "the turn has not ended");
+    assert!(waiting.try_wait().unwrap().is_none(), "stop --wait waits");
+    fs::write(&gate, b"").unwrap();
+    assert_eq!(wait_exit(&mut child, "the wait stop"), 0);
+    assert_eq!(wait_exit(&mut waiting, "stop --wait to return"), 0);
+    assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
+}
+
+#[test]
+fn force_stops_a_server_with_active_work() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &work.join("never"));
+    let (code, stdout) = stop_cli(&data, &["--force"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(wait_exit(&mut child, "the forced stop"), 0);
+    assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
+}
+
+#[test]
+fn new_work_is_refused_while_draining() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let gate = work.join("end-turn");
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &gate);
+    let drained = owner(&descriptor, "server.stop", json!({ "mode": "wait" }), true);
+    assert_eq!(drained["state"], "drainingWait");
+    let refused = call(
+        &descriptor.base_url,
+        &descriptor.owner_token,
+        None,
+        "bench.open",
+        json!({ "workingDirectory": work }),
+        true,
+    )
+    .expect_err("N while draining");
+    match refused {
+        workbench_host::lifecycle::calls::CallError::Fault { status, code, .. } => {
+            assert_eq!((status, code.as_str()), (503, "draining"));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(
+        owner(&descriptor, "bench.list", json!({}), false).is_array(),
+        "Q still answers"
+    );
+    fs::write(&gate, b"").unwrap();
+    assert_eq!(wait_exit(&mut child, "the wait stop"), 0);
+}
+
+/// 이전 세대에서 적용 여부를 모르게 끝난 변경 하나를 ledger에 남긴다(다음 시작 복구가 `unknown`으로 닫는다).
+fn leave_interrupted_update(cleanup: &Cleanup, data: &Path) {
+    let (mut child, _) = start_server(cleanup, data, &[]);
+    assert_eq!(stop_cli(data, &[]).0, 0);
+    assert_eq!(wait_exit(&mut child, "the first server to stop"), 0);
+    let conn = rusqlite::Connection::open(data.join("workbench").join("ledger.sqlite")).unwrap();
+    conn.execute(
+        "INSERT INTO operation_ledger (execution_id, principal_kind, operation, contract_revision, idempotency_key,
+            input_fingerprint, aggregate, reserved_resource_id, state, result_json, revision, request_id,
+            created_at, updated_at, expires_at)
+         VALUES ('exec-interrupted', 'desktop', 'savedPrompt.update', 1, 'interrupted', 'fp', 'saved_prompts', NULL,
+            'pending', NULL, NULL, 'r-interrupted', '2026-09-28T00:00:00Z', '2026-09-28T00:00:00Z', NULL)",
+        [],
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_server_with_only_unknown_ledger_records_stops_when_idle() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, _work) = workspace();
+    leave_interrupted_update(&cleanup, &data);
+    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", "1"]);
+    let current = status(&descriptor);
+    assert_eq!(current["unresolvedOperations"], 1, "{current}");
+    assert_eq!(current["activeWork"]["pendingOperations"], 0, "{current}");
+    assert_eq!(
+        wait_exit(&mut child, "the idle stop with only unknown records"),
+        0
+    );
+    assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
+}
+
+#[test]
+fn a_server_with_only_unknown_ledger_records_stops_on_wait() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, _work) = workspace();
+    leave_interrupted_update(&cleanup, &data);
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    assert_eq!(status(&descriptor)["unresolvedOperations"], 1);
+    let (code, stdout) = stop_cli(&data, &["--wait"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(
+        wait_exit(&mut child, "the wait stop with only unknown records"),
+        0
+    );
+}
+
+#[test]
+fn sigterm_is_a_forced_stop_even_with_active_work() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &work.join("never"));
+    unsafe {
+        libc::kill(child.id() as i32, libc::SIGTERM);
+    }
+    assert_eq!(wait_exit(&mut child, "the SIGTERM stop"), 0);
+    assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
+    let log = fs::read_to_string(data.join("server.log")).unwrap();
+    assert!(log.contains("SIGTERM: force stop"), "{log}");
+}
