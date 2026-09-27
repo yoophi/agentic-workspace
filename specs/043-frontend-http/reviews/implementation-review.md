@@ -63,4 +63,23 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 | `bootstrap-transport.test.ts` O5(철회 호출, 철회 실패에도 호환 유지) | 1(동작 실패) | 0, 10 passed |
 | `tauri_desktop_bridge` O5 Rust | 101(컴파일 실패: 함수 없음. 동작 red가 아님) | 0 |
 
-회귀: workbench-client 61 tests·통합 7, AW 624 tests·통합 1, AW `tsc` 0. **O5 철회는 실제 앱에서 새로고침 + 기동 실패로 확인하지 않았다(미검증).**
+회귀: O1–O4 뒤에 workbench-client 61 tests·통합 7, AW 624 tests·통합 1, AW `tsc` 0. **O5 철회는 실제 앱에서 새로고침 + 기동 실패로 확인하지 않았다(미검증).**
+
+**정정**: 처음 기록은 위 회귀 수치를 O5까지 포함한 것처럼 적었다. 실제로 AW 전체 시험은 O5 변경 **전**에 돌렸고, O5 뒤에는 `bootstrap-transport` 시험과 `tsc`만 돌렸다. O5 커밋(`5f920d2`)은 직접 호출 가드(`no-direct-invoke.test.ts`)를 깨뜨렸다. 새 데스크톱 command `withdraw_network_delivery`가 허용 목록에 없었기 때문이다(아래 Codex 반영 뒤 전체 실행에서 발견, 종료 1). 허용 목록과 command 인벤토리에 넣어 고쳤다.
+
+## T057 Codex 적대적 구현 리뷰 (`/codex:adversarial-review --wait --base b682c6b`, OCR 반영 뒤 `5f920d2`)
+
+판정: needs-attention. High 2건:
+
+| # | 위치 | 문제(Codex 메모리 내 재현) | 조치 |
+|---|---|---|---|
+| C1 | `event-client.ts` `resetListener` | 재동기 두 개가 겹치면, 늦게 끝난 옛 스냅샷이 새 스냅샷 뒤에 적용된다(`onReset` 순서 `[2, 1]`). 교환 상태가 옛 `accepted`로 되돌아가고 `covered`도 옛 스냅샷으로 돌아간다. O1의 세대 검사는 `onEvent` 완료에만 있었다 | 수신자별 재동기 사슬(`serialize`)로 차례로 돌린다. 작업 시작·스냅샷 적재 뒤·`onReset` 뒤마다 세대·제거 여부를 확인하고, 옛 작업은 콜백·상태 변경 없이 끝낸다. hello 재동기와 gap 복구 재설정도 같은 사슬을 쓴다. 실패 재시도도 옛 세대면 멈춘다 |
+| C2 | 같은 파일 `completeRecovery`·`add` | gap 복구의 `onReset`을 기다리는 동안 합류한 수신자는 재설정 대상 목록에 없다. 버퍼는 전역 스냅샷 기준으로 걸러져 새 수신자가 스냅샷도, 지난 상태도 받지 못한 채 cursor만 전진한다 | 복구 중 합류하면 합류 cursor를 복구 기준점으로 두고 재설정 중 상태로 둔다. 복구가 끝나면 버퍼 전체를 대기열로 받고, 자기 스냅샷으로 재설정하며 걸러낸다(스냅샷 없는 스트림은 그대로 넘긴다) |
+
+시험(`event-client.races.test.ts`, 먼저 작성·실패 확인):
+| 시험 | red | green |
+|---|---|---|
+| C1 옛 스냅샷이 늦게 와도 새 스냅샷 뒤에 적용하지 않음 | 1: `expected 1 to be 2`. 직렬화 뒤에는 두 번째 적재가 첫 적재를 기다리므로, 처음 쓴 대기 조건("두 번째 적재 시작")이 성립하지 않았다. 대기 조건을 "재연결 hello 도착"으로 바꿨다. 바꾼 시험도 수정 전 코드(`git stash`)에서 `expected 1 to be 2`로 실패함을 확인했다 | 0 |
+| C2 복구 중 합류 수신자가 자기 스냅샷 뒤 live를 받음(보관 한도 2) | 1: `timed out waiting for B gets its own snapshot` | 0 |
+
+회귀(각 1회): workbench-client 63 tests(첫 실행은 시험 파일의 `Array.at` 타입 오류로 종료 1 → `[length - 1]`로 고침 → 0), 통합 7(0). AW 626 tests(첫 실행은 위 O5 가드 실패로 종료 1 → 고친 뒤 0), 통합 1(0).

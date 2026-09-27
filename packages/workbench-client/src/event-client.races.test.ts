@@ -157,3 +157,96 @@ describe("event client listener join while a ticket is pending", () => {
     client.close();
   });
 });
+
+describe("event client resync ordering (Codex implementation review)", () => {
+  it("never applies an older resync snapshot after a newer one, even when its load resolves last", async () => {
+    const hub = new FakeEventHub();
+    const client = clientFor(hub);
+    const firstLoad = deferred();
+    let loads = 0;
+    const applied: number[] = [];
+    let failOnce = true;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error("refetch failed");
+          }
+        },
+        onReset: (data) => void applied.push((data as { version: number }).version),
+      },
+      {
+        snapshot: {
+          load: async () => {
+            loads += 1;
+            if (loads === 1) {
+              await firstLoad.promise; // 첫 재동기(수신자 실패)의 응답이 늦는다
+              return { version: 1 };
+            }
+            return { version: 2 };
+          },
+          passes: () => true,
+        },
+        resyncOnReconnect: true,
+      },
+    );
+    hub.publish("s"); // 실패 → 재동기 1(보류)
+    await until(() => loads === 1, "first resync loading");
+    expect(client.debugDropSockets()).toBe(1); // 재연결 → 재동기 2
+    // 재연결 hello가 두 번째 재동기를 시작한다(직렬화 뒤에는 첫 적재가 끝나야 두 번째 적재가 돈다).
+    await until(() => hub.sockets.length === 2 && hub.sockets[1].readyState === 1, "reconnected");
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve();
+    }
+    firstLoad.resolve();
+    await until(() => applied.length > 0 && loads >= 2, "a snapshot applied");
+    for (let i = 0; i < 50; i += 1) {
+      await Promise.resolve();
+    }
+    expect(applied[applied.length - 1]).toBe(2);
+    expect(applied).not.toContain(1);
+    client.close();
+  });
+
+  it("gives a listener that joins during gap recovery its own snapshot before live events", async () => {
+    const hub = new FakeEventHub(2);
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s"); // 보관 한도 2: 1–3은 journal에서 빠진다
+    }
+    const client = clientFor(hub);
+    const snapshot = {
+      load: async () => ({ lastSequence: hub.lastSequence("s") }),
+      passes: (event: EventEnvelope, data: unknown) => event.sequence > (data as { lastSequence: number }).lastSequence,
+    };
+    const hold = deferred();
+    let aResets = 0;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => undefined,
+        onReset: async () => {
+          aResets += 1;
+          await hold.promise; // 복구의 onReset이 끝나기 전에 B가 합류한다
+        },
+      },
+      { snapshot },
+    );
+    await until(() => aResets === 1, "recovery resetting A");
+    const bResets: unknown[] = [];
+    const bEvents: number[] = [];
+    client.subscribe(
+      "s",
+      { onEvent: (event) => void bEvents.push(event.sequence), onReset: (data) => void bResets.push(data) },
+      { after: 0, snapshot },
+    );
+    hold.resolve();
+    await until(() => bResets.length === 1, "B gets its own snapshot");
+    hub.publish("s"); // 6
+    await until(() => bEvents.includes(6), "B receives live 6");
+    expect(bResets).toEqual([{ lastSequence: 5 }]);
+    expect(bEvents).toEqual([6]);
+    client.close();
+  });
+});

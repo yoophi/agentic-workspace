@@ -22,6 +22,7 @@ const DESKTOP_COMMANDS = new Set([
   "get_workbench_connection",
   "ensure_window_bench",
   "declare_network_delivery",
+  "withdraw_network_delivery",
   "start_worktree_watcher",
   "stop_worktree_watcher",
 ]);

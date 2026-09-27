@@ -47,7 +47,7 @@
 | settings-window-repository | open_settings_window | 창 열기 |
 | project 화면 | open_worktree_window | 창 열기 |
 | shared/api/external-url | open_external_url | 외부 URL |
-| (부팅) | get_workbench_connection, ensure_window_bench(신규), declare_network_delivery(신규) | 연결 정보·창 작업대·전달 선언 |
+| (부팅) | get_workbench_connection, ensure_window_bench(신규), declare_network_delivery(신규), withdraw_network_delivery(신규, OCR O5) | 연결 정보·창 작업대·전달 선언·호환 부팅 시 선언 철회 |
 | worktree 감시 | start_worktree_watcher / stop_worktree_watcher | 네트워크 경로에서는 `worktree:<path>` 구독으로 대체한다(구독이 감시를 시작함, 039). 호환 경로 창만 오늘 command를 쓴다 |
 
 ## 이벤트 (구독 대상)
