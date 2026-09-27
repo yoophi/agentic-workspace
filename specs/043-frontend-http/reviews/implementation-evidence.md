@@ -301,3 +301,16 @@ T027 범위를 정직하게 적는다:
 - **앱 진입점**: `main.tsx`가 렌더 전에 `bootstrapTransport()`로 창의 경로를 한 번 정하고, 모든 창에 `<ConnectionStatus />`를 둔다. 부팅은 연결 상태를 저장소로 알린다.
 - 이 시점부터 앱은 네트워크 경로로 부팅한다. **실제 앱에서 동작한다는 증거는 아직 없다** — T053·T054(개발·배포 출처 스모크)에서 확인한다.
 - `pnpm --filter @yoophi/agentic-workbench test` 종료 코드 0(622 tests), `tsc --noEmit` 0.
+
+## T049 · T050 · T051 · T052 창 수명·격리·부팅 대체 경로
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| 두 창 격리(TS 클라이언트, 실제 서버) | `npx vitest run --config vitest.integration.config.ts src/test/integration/window-isolation.integration.test.ts` | 0 | 창 B 토큰으로 창 A 작업대의 `exchange.list`·`orchestration.get`·`run.start`·`bench.close`는 모두 `forbidden`이다. 창 B의 `exchange:<A작업대>` 구독은 fault 프레임을 받아 스트림 오류(`bench belongs to another principal.`)가 된다. 창 A는 계속 조회할 수 있다 |
+| 창 닫기 정리 순서 | `cargo test --lib window_lifecycle` | 0 | session 창: 토큰·표 폐기 → 전달 선언 해제 → 연 창 주체로 작업대 닫기. 다른 창: 폐기 → 해제(작업대 없음) |
+| AW Rust 전체 | `cargo test` | 0 | 아래 합계 |
+| 끝점 기동 실패 주입(T052) | debug 빌드 `AW_WORKBENCH_HTTP_FAIL_START` | — | 기동을 실패로 두면 `get_workbench_connection`이 오류를 돌려준다. 이때 부팅이 호환 경로로 가는 것은 T051 시험(`connection info` 실패)이 확인한다. **실제 앱에서의 확인은 T054에서 한다** |
+
+- T050: `window_lifecycle::teardown`을 `Teardown` trait 주입으로 뽑아 Tauri 없이 순서를 고정했다. 운영은 `AppTeardown`이다.
+- 토큰 폐기 자체(폐기 뒤 401, 폐기 전 표 거절)는 T005(core `http_window_tokens`)가 운영 발급기로 확인한다.
+AW Rust 합계: 124 passed, 0 failed

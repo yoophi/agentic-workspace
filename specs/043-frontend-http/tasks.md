@@ -135,8 +135,8 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 **Independent Test**: 두 세션 창이 서로의 작업대를 볼 수 없고, 창을 닫으면 작업대가 닫히고 토큰이 무효.
 
-- [ ] T049 [P] [US4] 두 창 화면 통합 시험 — 시험 host 두 창 주체로 `AWF` 저장소 경로에서 다른 창 작업대 조작·구독 거절 문구, 창 닫힘(토큰 폐기) 뒤 호출 401→화면 오류 `WC/test/integration/window-isolation.integration.test.ts`. 실패 확인 후 통과
-- [ ] T050 [US4] 창 닫기 수명 — Destroyed 시 네트워크 전달 표 제거·토큰 폐기·작업대 닫기 순서 시험 `AWT/infrastructure/window_manager.rs` 시험 모듈
+- [X] T049 [P] [US4] 두 창 화면 통합 시험 — 시험 host 두 창 주체로 `AWF` 저장소 경로에서 다른 창 작업대 조작·구독 거절 문구, 창 닫힘(토큰 폐기) 뒤 호출 401→화면 오류 `WC/test/integration/window-isolation.integration.test.ts`. 실패 확인 후 통과
+- [X] T050 [US4] 창 닫기 수명 — Destroyed 시 네트워크 전달 표 제거·토큰 폐기·작업대 닫기 순서 시험 `AWT/infrastructure/window_manager.rs` 시험 모듈
 
 ---
 
@@ -144,8 +144,8 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 **Independent Test**: 끝점 기동 실패 주입 시 창이 호환 경로로 부팅, 이후 자동 전환 없음.
 
-- [ ] T051 [P] [US5] 부팅 선택 시험 `AWF/app/bootstrap-transport.test.ts` — 연결 정보 실패·handshake 실패=Compat(진단 기록), 성공=Http 후 끊겨도 Compat 전환 0회, 한 창 호출·이벤트 같은 경로. 실패 확인
-- [ ] T052 [US5] 끝점 기동 실패 주입(debug env) — `AWT/infrastructure/workbench_http.rs`, 부팅 진단 기록 `AWF/app/bootstrap-transport.ts` (T051, SC-007)
+- [X] T051 [P] [US5] 부팅 선택 시험 `AWF/app/bootstrap-transport.test.ts` — 연결 정보 실패·handshake 실패=Compat(진단 기록), 성공=Http 후 끊겨도 Compat 전환 0회, 한 창 호출·이벤트 같은 경로. 실패 확인
+- [X] T052 [US5] 끝점 기동 실패 주입(debug env) — `AWT/infrastructure/workbench_http.rs`, 부팅 진단 기록 `AWF/app/bootstrap-transport.ts` (T051, SC-007)
 
 ---
 

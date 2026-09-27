@@ -270,8 +270,17 @@ pub fn run() {
             desktop_bridge.bind_mcp(mcp_state.clone());
 
             // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
-            let (http_state, start_error) =
-                match workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
+            // 043 T052(debug 전용): 끝점 기동 실패를 주입해 창이 호환 경로로 부팅하는지 확인한다(SC-007).
+            #[cfg(debug_assertions)]
+            let injected_failure = std::env::var("AW_WORKBENCH_HTTP_FAIL_START").is_ok();
+            #[cfg(not(debug_assertions))]
+            let injected_failure = false;
+            let started = if injected_failure {
+                Err(anyhow::anyhow!(
+                    "injected start failure (AW_WORKBENCH_HTTP_FAIL_START)"
+                ))
+            } else {
+                workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
                     workbench: http_runtime.clone() as Arc<dyn workbench_protocol::Workbench>,
                     mcp_registry: mcp_state.capability_registry(),
                     server_info: workbench_http::AwServerInfo {
@@ -279,16 +288,18 @@ pub fn run() {
                         epoch: http_runtime.epoch().to_owned(),
                     },
                     drain_warn_after: workbench_http::default_drain_warn_after(),
-                }) {
-                    Ok(state) => {
-                        eprintln!("[workbench-http] listening on {}", state.base_url());
-                        (Some(Arc::new(state)), None)
-                    }
-                    Err(error) => {
-                        eprintln!("[workbench-http] failed to start: {error:#}");
-                        (None, Some(format!("{error:#}")))
-                    }
-                };
+                })
+            };
+            let (http_state, start_error) = match started {
+                Ok(state) => {
+                    eprintln!("[workbench-http] listening on {}", state.base_url());
+                    (Some(Arc::new(state)), None)
+                }
+                Err(error) => {
+                    eprintln!("[workbench-http] failed to start: {error:#}");
+                    (None, Some(format!("{error:#}")))
+                }
+            };
             let http = workbench_http::WorkbenchHttp {
                 state: http_state,
                 start_error,

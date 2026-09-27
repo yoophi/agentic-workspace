@@ -50,25 +50,125 @@ fn track(app: &AppHandle, window: &WebviewWindow, incarnation: String) {
     });
 }
 
-fn on_destroyed(
-    app: &AppHandle,
+/// 창 정리의 부작용(시험은 기록용 구현을 넣는다).
+pub trait Teardown {
+    fn revoke_credentials(&self, principal: &AuthenticatedPrincipal);
+    fn forget_network_delivery(&self, label: &str, incarnation: &str);
+    fn close_bench(&self, label: &str, principal: AuthenticatedPrincipal);
+}
+
+/// 창 `Destroyed`의 정리 순서(043 T050): 주체 거둬들이기(호출자가 이미 함) → 토큰·표 폐기(닫힌 창 자격 증명으로 더는
+/// 호출·구독 못 함) → 네트워크 전달 선언 해제 → (session 창) 작업대 닫기(연 창 주체로, 소유 run 취소).
+pub fn teardown(
     label: &str,
     incarnation: &str,
     principal: AuthenticatedPrincipal,
+    ops: &dyn Teardown,
 ) {
-    if let Some(http) = app.try_state::<WorkbenchHttp>() {
-        if let Some(state) = http.state.as_ref() {
-            state.revoke_window(&principal.subject);
+    ops.revoke_credentials(&principal);
+    ops.forget_network_delivery(label, incarnation);
+    if label.starts_with("session-") {
+        ops.close_bench(label, principal);
+    }
+}
+
+struct AppTeardown<'a> {
+    app: &'a AppHandle,
+}
+
+impl Teardown for AppTeardown<'_> {
+    fn revoke_credentials(&self, principal: &AuthenticatedPrincipal) {
+        if let Some(http) = self.app.try_state::<WorkbenchHttp>() {
+            if let Some(state) = http.state.as_ref() {
+                state.revoke_window(&principal.subject);
+            }
         }
     }
-    tauri_desktop_bridge::forget_network_delivery(label, incarnation);
-    if label.starts_with("session-") {
-        let runtime = app.state::<Arc<WorkbenchRuntime>>().inner().clone();
+
+    fn forget_network_delivery(&self, label: &str, incarnation: &str) {
+        tauri_desktop_bridge::forget_network_delivery(label, incarnation);
+    }
+
+    fn close_bench(&self, label: &str, principal: AuthenticatedPrincipal) {
+        let runtime = self.app.state::<Arc<WorkbenchRuntime>>().inner().clone();
         let label = label.to_owned();
         tauri::async_runtime::spawn(async move {
             // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005). 작업대를 연 창 주체로 닫는다.
             // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
             desktop_benches::close(&runtime, &label, principal).await;
         });
+    }
+}
+
+fn on_destroyed(
+    app: &AppHandle,
+    label: &str,
+    incarnation: &str,
+    principal: AuthenticatedPrincipal,
+) {
+    teardown(label, incarnation, principal, &AppTeardown { app });
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<String>>);
+
+    impl Teardown for Recording {
+        fn revoke_credentials(&self, principal: &AuthenticatedPrincipal) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("revoke {}", principal.subject));
+        }
+        fn forget_network_delivery(&self, label: &str, incarnation: &str) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("forget {label}:{incarnation}"));
+        }
+        fn close_bench(&self, label: &str, principal: AuthenticatedPrincipal) {
+            self.0
+                .lock()
+                .unwrap()
+                .push(format!("close {label} as {}", principal.subject));
+        }
+    }
+
+    #[test]
+    fn a_session_window_revokes_then_forgets_delivery_then_closes_its_bench_as_its_principal() {
+        let ops = Recording::default();
+        let principal = AuthenticatedPrincipal::desktop_window("session-1", "inc-1");
+        teardown("session-1", "inc-1", principal, &ops);
+        assert_eq!(
+            *ops.0.lock().unwrap(),
+            vec![
+                "revoke desktop:window:session-1:inc-1".to_owned(),
+                "forget session-1:inc-1".to_owned(),
+                "close session-1 as desktop:window:session-1:inc-1".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn other_windows_revoke_and_forget_but_have_no_bench() {
+        let ops = Recording::default();
+        teardown(
+            "settings",
+            "inc-9",
+            AuthenticatedPrincipal::desktop_window("settings", "inc-9"),
+            &ops,
+        );
+        assert_eq!(
+            *ops.0.lock().unwrap(),
+            vec![
+                "revoke desktop:window:settings:inc-9".to_owned(),
+                "forget settings:inc-9".to_owned()
+            ]
+        );
     }
 }
