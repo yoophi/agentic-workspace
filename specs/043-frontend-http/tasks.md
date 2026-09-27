@@ -59,16 +59,16 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ### 시험 먼저
 
-- [ ] T017 [P] [US1] 호출 클라이언트 시험 `WC/call-client.test.ts` — 결과 네 가지(ok·fault·notApplied·unknown): 보내기 전 연결 없음=notApplied(fetch 미호출), 보낸 뒤 fetch 실패·응답 파싱 실패·5xx 연결 끊김=unknown; unknown이고 같은 epoch면 같은 멱등성 키로 1회 재시도해 저장 결과, 새 epoch면 재전송 0회; 401이면 자격 증명 1회 갱신 후 재시도. 실패 확인
-- [ ] T018 [P] [US1] 자격 증명 수명 시험 `WC/connection.test.ts` — 80% 갱신, 8시간 가상 시계 동안 만료 실패 0(SC-006), 갱신 실패 시 backoff. 실패 확인
-- [ ] T019 [P] [US1] 오류 문구 시험 `WC/fault-string.test.ts` — 호환 층 `faultToString`과 같은 문자열(기존 compat 매퍼 표 재사용). 실패 확인
+- [X] T017 [P] [US1] 호출 클라이언트 시험 `WC/call-client.test.ts` — 결과 네 가지(ok·fault·notApplied·unknown): 보내기 전 연결 없음=notApplied(fetch 미호출), 보낸 뒤 fetch 실패·응답 파싱 실패·5xx 연결 끊김=unknown; unknown이고 같은 epoch면 같은 멱등성 키로 1회 재시도해 저장 결과, 새 epoch면 재전송 0회; 401이면 자격 증명 1회 갱신 후 재시도. 실패 확인
+- [X] T018 [P] [US1] 자격 증명 수명 시험 `WC/connection.test.ts` — 80% 갱신, 8시간 가상 시계 동안 만료 실패 0(SC-006), 갱신 실패 시 backoff. 실패 확인
+- [X] T019 [P] [US1] 오류 문구 시험 `WC/fault-string.test.ts` — 호환 층 `faultToString`과 같은 문자열(기존 compat 매퍼 표 재사용). 실패 확인
 - [ ] T020 [P] [US1] 저장소 동등성 시험 `AWF/entities/*/api/*.parity.test.ts`(모듈별, T002 표 전부) — 같은 입력에 CompatTransport(가짜 invoke)와 HttpTransport(가짜 Workbench 서버) 결과·오류 문구 동일. 실패 확인
 
 ### 구현
 
-- [ ] T021 [P] [US1] `WC/fault-string.ts` (T019)
-- [ ] T022 [US1] `WC/connection.ts` — 자격 증명 수명·상태·backoff (T018)
-- [ ] T023 [US1] `WC/call-client.ts` — `createWorkbenchClient`, 멱등성 키 생성, 세 결과, 같은 세대 재시도 (T017)
+- [X] T021 [P] [US1] `WC/fault-string.ts` (T019)
+- [X] T022 [US1] `WC/connection.ts` — 자격 증명 수명·상태·backoff (T018)
+- [X] T023 [US1] `WC/call-client.ts` — `createWorkbenchClient`, 멱등성 키 생성, 세 결과, 같은 세대 재시도 (T017)
 - [ ] T024 [US1] Transport 인터페이스·`CompatTransport`·`HttpTransport` — `AWF/shared/api/transport/`
 - [ ] T025 [US1] 저장소 모듈별 transport 경유로 이관(입출력 매퍼 포함) — `AWF/entities/*/api/*-repository.ts`, 모듈마다 T020 해당 시험 통과 후 커밋
 - [ ] T026 [US1] 부팅 경로 선택(R3, 창당 1회) — `AWF/app/bootstrap-transport.ts`, 앱 진입에서 transport 주입

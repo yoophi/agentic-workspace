@@ -89,3 +89,21 @@ tasks.md에는 경로가 `crates/workbench-server/tests/`로 적혀 있다. 실�
   - `host-window-a` 토큰으로 `project.list` 호출이 `{"kind":"complete","output":[]}`를 돌려준다.
   - stdin을 닫으면 프로세스가 끝난다.
 - dev-dependency tokio에 `io-std`·`io-util` 기능을 더했다. 이것은 example이 stdin을 읽기 위한 dev 전용 변경이다.
+
+## T017–T019 · T021–T023 호출 클라이언트·연결 수명·오류 문자열 (`packages/workbench-client/src`)
+
+| 단계 | 명령 | 종료 코드 | 의미 |
+|---|---|---|---|
+| red | `npx vitest run src/fault-string.test.ts` / `src/call-client.test.ts src/connection.test.ts` | 1 / 1 | 모듈이 없어 import 실패. 동작 증거 아님 |
+| green | `npx vitest run src/fault-string.test.ts src/call-client.test.ts src/connection.test.ts` | 0 | 23 passed(재발견·세대 경계 시험 포함) |
+| 패키지 | `pnpm --filter @yoophi/workbench-client test`, `check-types` | 0, 0 | — |
+| 변이: 재연결 때 끝점 재발견 제거 | `connection.attempt`가 실패 뒤 `fetchConnection` 없이 옛 URL로 handshake | 1 | 재시작 시험 3개 실패(새 끝점을 찾지 못함) |
+| 변이: 401 갱신 뒤 세대 확인 제거 | `sendOnce`의 `boundEpoch` 비교 삭제 | 1 | `does not resend an uncertain mutation when a 401 refresh moves it to a new epoch` 실패 |
+
+규칙(사용자 검토 반영):
+- **재연결**: 각 시도는 지금 끝점으로 handshake하고, 실패하면(401뿐 아니라 연결 거부 포함) `fetchConnection`으로 연결 정보를 다시 받아 새 끝점으로 handshake한다. 서버가 다른 포트로 다시 떠도 찾는다.
+- **자격 증명 갱신**: 갱신으로 `baseUrl`이 바뀌면 곧바로 handshake해 세대를 갱신하고 `epochChanged`를 알린다.
+- **변경의 시도별 세대 경계**: 첫 시도가 응답 유실이면 이후 모든 재시도는 처음 보낸 세대에 묶인다. 재연결 handshake의 세대가 다르면 재전송 0회다. 재시도 중 401 갱신으로 세대가 바뀌어도 재전송 0회다. 401 자체는 적용 전 거절이므로, 앞선 불확실 시도가 없는 첫 시도는 갱신 뒤 다시 보낸다.
+- **조회·변경 구분**: `OPERATION_KINDS: Record<OperationId, …>`(85개, 시험 host의 `system.describe`에서 뽑음). 누락이나 초과가 있으면 타입 검사가 실패한다. 실제 서버와의 대조는 통합 suite(T041)에서 한다.
+- **`faultToString`**: compat Rust와 같다. 교환은 `details.exchangeCode`가 있을 때만 JSON이다(계약 문서의 `?? code`는 compat 코드와 달라 T055에서 문서를 고친다).
+- **`onState`**: 구독 즉시 현재 상태를 한 번 알린다(화면 표시용). 처음 쓴 시험 기대값에 이 첫 알림이 빠져 있어 계약을 명시하는 쪽으로 고쳤다.

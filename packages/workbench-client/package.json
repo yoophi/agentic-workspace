@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Generated Workbench v1 contract types and the typed OperationMap for Agentic Workbench clients (037: types only; HTTP/WS adapter arrives in stage 4)",
+  "description": "Workbench v1 contract types, OperationMap, and the HTTP/WebSocket client for Agentic Workbench (043)",
   "exports": {
     ".": "./src/index.ts"
   },
