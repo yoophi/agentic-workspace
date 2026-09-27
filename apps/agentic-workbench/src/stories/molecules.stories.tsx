@@ -18,6 +18,7 @@ import {
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { ConnectionStatusView } from "@/shared/ui/connection-status";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock, CodeBlockCode, CodeBlockGroup } from "@/components/ui/code-block";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -479,4 +480,20 @@ export const WorkspacePanelSelectorStates: Story = {
       </div>
     );
   },
+};
+
+/** 043: 네트워크 경로 창의 연결 상태 표시(끊겼을 때만 보임). */
+export const WorkbenchConnectionStatus: Story = {
+  render: () => (
+    <div className="relative h-40 space-y-2 p-4 text-sm">
+      <p>connected: 표시 없음</p>
+      <ConnectionStatusView status="connected" />
+      <div className="relative h-12 [&>div]:static [&>div]:translate-x-0">
+        <ConnectionStatusView status="reconnecting" />
+      </div>
+      <div className="relative h-12 [&>div]:static [&>div]:translate-x-0">
+        <ConnectionStatusView status="disconnected" />
+      </div>
+    </div>
+  ),
 };

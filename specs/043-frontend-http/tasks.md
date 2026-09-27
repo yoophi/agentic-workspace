@@ -125,7 +125,7 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 - [X] T045 [US3] 보관 gap live-first 복구·버퍼·스트림별 스냅샷 병합 — `WC/event-client.ts` + 스냅샷 어댑터 `WC/snapshots.ts`(run.replay·orchestration.get·exchange.list) (T040·T041)
 - [X] T046 [US3] 세대 변경 재동기 — 창 전체 재조회·`ensure_window_bench` 재호출, 새 세대 자동 재전송 금지 확인 `AWF/app/bootstrap-transport.ts`, `AWF/shared/api/transport/http-transport.ts` (T042)
 - [X] T047 [US3] 교환 재조정 트리거 연결(구독 시작·gap 복구 스냅샷·같은 세대 재연결 뒤) — `AWF/features/agent-run/model/exchange-reconciler.ts` (T041·T043)
-- [ ] T048 [US3] 연결 상태 표시 위젯·story — `AWF/widgets/connection-status/`(ui, model, `*.stories.tsx`, 시험), 문구 외 기존 화면 불변
+- [X] T048 [US3] 연결 상태 표시 위젯·story — `AWF/widgets/connection-status/`(ui, model, `*.stories.tsx`, 시험), 문구 외 기존 화면 불변
 
 **Checkpoint**: US3 시험 전부 통과
 

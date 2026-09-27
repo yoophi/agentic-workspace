@@ -12,6 +12,7 @@ import {
 } from "@yoophi/workbench-client";
 
 import { compatTransport, setTransport } from "@/shared/api/transport";
+import { setConnectionStatus } from "@/shared/api/transport/connection-status";
 import { createHttpTransport } from "@/shared/api/transport/http-transport";
 import { createNetworkEvents } from "@/shared/api/transport/network-events";
 
@@ -82,6 +83,7 @@ export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapD
     onStreamError: (streamId, error) => log(`[workbench-client] stream ${streamId}: ${error}`),
   });
   connection.onEpochChanged(onEpochChanged);
+  connection.onState(setConnectionStatus);
   const events = createNetworkEvents({ events: eventClient, client });
   setTransport(
     createHttpTransport({ client, ensureWindowBench: deps.ensureWindowBench, windowLabel: deps.windowLabel(), events }),

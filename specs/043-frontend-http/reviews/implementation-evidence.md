@@ -291,3 +291,13 @@ T027 범위를 정직하게 적는다:
   - 효과 표식 뒤 host를 `SIGKILL`하고, 같은 데이터 디렉터리로 새 host를 다른 포트에 띄운다.
   - 클라이언트 결과는 `unknown/epochChanged`이고, 연결은 새 끝점·새 세대로 옮겨 가 있다.
   - 새 서버로 간 run.sendPrompt는 0건이다.
+
+## T048 연결 상태 표시 · 앱 진입점에서 네트워크 경로 켜기
+
+- `shared/api/transport/connection-status.ts`(상태 저장소)와 `shared/ui/connection-status.tsx`(표시)를 더했다. AW에는 widgets 계층이 없어 shared에 둔다.
+  - 표시는 `reconnecting`과 `disconnected`일 때만 보이고, 연결되면 아무것도 그리지 않는다(기존 배치·문구 불변).
+  - Storybook: `molecules.stories.tsx`의 `WorkbenchConnectionStatus`.
+- 시험 `shared/ui/connection-status.test.tsx`: 상태 전이에 따라 표시가 나타나고 사라진다.
+- **앱 진입점**: `main.tsx`가 렌더 전에 `bootstrapTransport()`로 창의 경로를 한 번 정하고, 모든 창에 `<ConnectionStatus />`를 둔다. 부팅은 연결 상태를 저장소로 알린다.
+- 이 시점부터 앱은 네트워크 경로로 부팅한다. **실제 앱에서 동작한다는 증거는 아직 없다** — T053·T054(개발·배포 출처 스모크)에서 확인한다.
+- `pnpm --filter @yoophi/agentic-workbench test` 종료 코드 0(622 tests), `tsc --noEmit` 0.
