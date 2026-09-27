@@ -465,6 +465,7 @@ pub async fn handle_tool(
             let task_id = input
                 .task_id
                 .ok_or_else(|| ToolError::new("invalidInput", "taskId is required.", false))?;
+            ensure_assign_continues(runtime, &bench, &task_id).await?;
             match runtime.scheduler().acquire(&task_id)? {
                 LeaseOutcome::Queued { position } => Ok(json!({
                     "taskId": task_id,
@@ -1022,5 +1023,42 @@ impl Drop for LaunchCleanup {
             rollback(Arc::clone(&runtime), bench, node_id, planned_run_id, state).await;
             let _ = runtime.scheduler().release(&task_id);
         });
+    }
+}
+
+/// 비우기 중 대기 task 배정의 이어 가기(K) 판정(044 T040, contracts/drain-classification.md): 대상이 이 작업대 세션의 아직
+/// 시작하지 않은 task(`pending`·`ready`)이고 비우기 시작 **전에** 만들어졌으면 받는다. 아니면 새 작업(N)과 같이 `draining`.
+/// 서빙 중이면 아무것도 보지 않는다.
+async fn ensure_assign_continues(
+    runtime: &OrchestrationRuntime,
+    bench: &str,
+    task_id: &str,
+) -> Result<(), ToolError> {
+    let gate = runtime.work_gate();
+    if !matches!(
+        gate.state(),
+        crate::application::work_gate::GateState::Draining(_)
+    ) {
+        return Ok(());
+    }
+    let refused = || {
+        ToolError::new(
+            "draining",
+            crate::application::drain::MESSAGE_DRAINING,
+            true,
+        )
+    };
+    let drain_started_at = gate.drain_started_at().ok_or_else(refused)?;
+    let session = runtime.get(bench).await?.ok_or_else(refused)?;
+    let waiting = session.tasks.iter().any(|task| {
+        task.id == task_id
+            && matches!(task.status, TaskStatus::Pending | TaskStatus::Ready)
+            && chrono::DateTime::parse_from_rfc3339(&task.created_at)
+                .is_ok_and(|created| created < drain_started_at)
+    });
+    if waiting {
+        Ok(())
+    } else {
+        Err(refused())
     }
 }

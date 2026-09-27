@@ -14,6 +14,7 @@ use workbench_protocol::{
 };
 
 pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for command operations.";
+use crate::application::drain::MESSAGE_STOPPING;
 
 use crate::{
     application::{
@@ -629,6 +630,25 @@ impl Workbench for WorkbenchRuntime {
 
         let operation =
             authorization::resolve_operation(&request.request_id, &principal, &request.operation)?;
+        // 비우기·정지 입구 판정(044 T040, research R7·R14): 정지 중이면 모든 새 호출을, 비우기 중이면 새 작업(N)을 입력을
+        // 보기 전에 거절한다. 이어 가기(K)는 handler가 조건을 본다(교환 전달·대기 task 배정). 조회·제어는 지나간다.
+        match self.work_gate.state() {
+            crate::application::work_gate::GateState::Stopping => {
+                return Err(WorkbenchFault::unavailable(
+                    request.request_id,
+                    MESSAGE_STOPPING,
+                ));
+            }
+            crate::application::work_gate::GateState::Draining(_)
+                if crate::application::drain::drain_class(operation)
+                    == crate::application::drain::DrainClass::NewWork =>
+            {
+                return Err(crate::application::drain::draining_fault(
+                    &request.request_id,
+                ));
+            }
+            _ => {}
+        }
         // 조회에 멱등성 키를 실어 보내는 것은 계약 위반이다(contracts §1 규칙 1). 조용히 무시하면 호출자가
         // 재시도 중복 제거가 되는 줄 오해한다.
         if matches!(spec_for(operation).kind, OperationKind::Query)

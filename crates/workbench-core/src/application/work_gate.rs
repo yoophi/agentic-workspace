@@ -151,6 +151,8 @@ pub const MESSAGE_STOPPING: &str = "server is stopping";
 #[derive(Default)]
 struct Inner {
     state: Option<GateState>,
+    /// 서빙에서 비우기로 넘어간 시각. 대기 task 배정(K)은 이보다 먼저 만든 task만 이어 가기로 받는다. 서빙으로 돌아가면 지운다.
+    drain_started_at: Option<chrono::DateTime<chrono::Utc>>,
     next_id: u64,
     reservations: HashMap<u64, (ReservationKind, Option<String>)>,
     busy: BTreeMap<String, usize>,
@@ -413,8 +415,17 @@ impl WorkGate {
         match inner.state() {
             GateState::Stopping => {}
             GateState::Draining(DrainMode::Wait) => {}
-            _ => inner.state = Some(GateState::Draining(mode)),
+            GateState::Draining(DrainMode::Idle) => inner.state = Some(GateState::Draining(mode)),
+            GateState::Serving => {
+                inner.drain_started_at = Some(chrono::Utc::now());
+                inner.state = Some(GateState::Draining(mode));
+            }
         }
+    }
+
+    /// 비우기 시작 시각(서빙 중이면 없음).
+    pub fn drain_started_at(&self) -> Option<chrono::DateTime<chrono::Utc>> {
+        self.lock().drain_started_at
     }
 
     /// 유휴 비우기를 취소하고 서빙으로 돌아간다(임대 획득). `Wait`·`stopping`은 돌아가지 않는다.
@@ -423,6 +434,7 @@ impl WorkGate {
         match inner.state() {
             GateState::Draining(DrainMode::Idle) => {
                 inner.state = Some(GateState::Serving);
+                inner.drain_started_at = None;
                 true
             }
             GateState::Serving => true,

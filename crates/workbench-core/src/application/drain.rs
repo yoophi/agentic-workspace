@@ -8,6 +8,7 @@ use workbench_protocol::{FaultCode, OperationId, RequestId, WorkbenchFault};
 use crate::application::work_gate::{GateState, WorkGate};
 
 pub const MESSAGE_DRAINING: &str = "server is draining; new work is not accepted.";
+pub const MESSAGE_STOPPING: &str = "server is stopping; no new calls are accepted.";
 
 /// 비우기 중 새 작업 거절(`draining`, 적용 안 됨).
 pub fn draining_fault(request_id: &RequestId) -> WorkbenchFault {
