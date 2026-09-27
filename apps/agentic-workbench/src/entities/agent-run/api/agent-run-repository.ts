@@ -1,4 +1,4 @@
-import { invoke } from "@/shared/api/transport";
+import { invoke, listen } from "@/shared/api/transport";
 
 import type {
   AgentDescriptor,
@@ -70,21 +70,25 @@ export async function respondAgentPermission(
   return invoke<void>("respond_agent_permission", { runId, permissionId, optionId });
 }
 
+/** 창의 run 이벤트(호환 경로: 창 삽입, 네트워크 경로: 창이 아는 run의 `run:<id>` 구독). */
+export const AGENT_RUN_EVENT = "agent-run-event";
+
 export function listenRunEvents(callback: (event: DeliveredRunEvent) => void) {
   let disposed = false;
-  const handleEnvelope = (envelope: DeliveredRunEvent) => {
-    if (disposed) {
-      return;
+  let unlisten: (() => void) | undefined;
+  void listen<DeliveredRunEvent>(AGENT_RUN_EVENT, (envelope) => {
+    if (!disposed) {
+      callback(envelope);
     }
-    callback(envelope);
-  };
-  const handleFallback = (event: Event) => {
-    handleEnvelope((event as CustomEvent<DeliveredRunEvent>).detail);
-  };
-  window.addEventListener("agent-run-event-fallback", handleFallback);
-
+  }).then((dispose) => {
+    if (disposed) {
+      dispose();
+    } else {
+      unlisten = dispose;
+    }
+  });
   return () => {
     disposed = true;
-    window.removeEventListener("agent-run-event-fallback", handleFallback);
+    unlisten?.();
   };
 }

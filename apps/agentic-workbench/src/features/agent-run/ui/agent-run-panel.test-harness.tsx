@@ -29,6 +29,13 @@ type AgentRunPanelHarness = {
 
 const activeHarnesses = new Set<AgentRunPanelHarness>();
 
+/** 043 T038: run 이벤트를 넣는 방법. 기본은 호환 경로의 창 삽입, 네트워크 경로 시험은 가짜 서버 스트림 발행으로 바꾼다. */
+let runEventEmitter: ((envelope: RunEventEnvelope) => void) | undefined;
+
+export function setRunEventEmitter(emitter: ((envelope: RunEventEnvelope) => void) | undefined) {
+  runEventEmitter = emitter;
+}
+
 installBrowserTestDoubles();
 
 export async function renderAgentRunPanel(
@@ -168,6 +175,10 @@ export async function renderAgentRunPanel(
     },
     emitRunEvent: async (envelope) => {
       await act(async () => {
+        if (runEventEmitter) {
+          runEventEmitter(envelope);
+          return;
+        }
         window.dispatchEvent(
           new CustomEvent<RunEventEnvelope>("agent-run-event-fallback", {
             detail: envelope,

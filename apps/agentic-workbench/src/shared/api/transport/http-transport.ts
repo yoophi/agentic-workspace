@@ -3,6 +3,7 @@
 import { faultToString, type WorkbenchClient } from "@yoophi/workbench-client";
 
 import { COMMANDS } from "./command-table";
+import { collectRunIds, type NetworkEvents } from "./network-events";
 import type { InvokeOptions, Transport } from "./transport";
 
 export const MESSAGE_NOT_APPLIED = "Workbench 서버에 연결되어 있지 않아 요청을 보내지 않았습니다.";
@@ -13,12 +14,48 @@ export interface HttpTransportOptions {
   /** `open`이면 없을 때 연다. 아니면 있을 때만(없으면 null). */
   ensureWindowBench: (open: boolean, hint?: string | null) => Promise<string | null>;
   windowLabel: string;
+  /** 네트워크 경로 이벤트. 호출 결과에서 알게 된 작업대·run·orchestration 묶임을 알린다. */
+  events?: NetworkEvents;
 }
 
 export function createHttpTransport(options: HttpTransportOptions): Transport {
-  const { client, ensureWindowBench, windowLabel } = options;
+  const { client, windowLabel, events } = options;
+
+  async function ensureWindowBench(open: boolean, hint?: string | null) {
+    const benchId = await options.ensureWindowBench(open, hint);
+    if (benchId) {
+      events?.noteBench(benchId);
+    }
+    return benchId;
+  }
+
+  function observe(args: Record<string, unknown>, output: unknown) {
+    if (!events) {
+      return;
+    }
+    const streamId = (output as { eventStreamId?: unknown } | null)?.eventStreamId;
+    if (typeof streamId === "string") {
+      events.noteOrchestrationStream(streamId);
+    }
+    const runIds = collectRunIds(args);
+    collectRunIds(output, runIds);
+    const started = (output as { id?: unknown; agentId?: unknown } | null) ?? null;
+    if (started && typeof started.id === "string" && typeof started.agentId === "string") {
+      runIds.add(started.id); // run.start 결과(AgentRun)
+    }
+    events.noteRuns(runIds);
+  }
 
   async function run(command: string, args: Record<string, unknown>, invokeOptions: InvokeOptions) {
+    // 네트워크 경로의 worktree 감시는 `worktree:<path>` 구독이다(구독이 서버 감시를 시작한다, 039).
+    if (command === "start_worktree_watcher" && events) {
+      events.watchWorktree(String(args.workingDirectory));
+      return null;
+    }
+    if (command === "stop_worktree_watcher" && events) {
+      events.unwatchWorktree();
+      return null;
+    }
     const spec = COMMANDS[command];
     if (!spec) {
       throw new Error(`${command} is not a server-owned command`);
@@ -44,6 +81,7 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
     );
     switch (outcome.kind) {
       case "ok":
+        observe(args, outcome.output);
         return spec.output ? spec.output(outcome.output, { windowLabel, args }) : outcome.output;
       case "fault":
         if (spec.onFault) {
@@ -66,5 +104,11 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
   return {
     kind: "http",
     invoke: (command, args = {}, invokeOptions = {}) => run(command, args, invokeOptions) as Promise<never>,
+    listen: (event, callback) => {
+      if (!events) {
+        return Promise.reject(new Error("network events are not configured"));
+      }
+      return events.listen(event, callback as (payload: unknown) => void | Promise<void>);
+    },
   };
 }

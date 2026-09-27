@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+
+const COMPAT_TRANSPORT_SOURCE = readFileSync(
+  new URL("../../../shared/api/transport/compat-transport.ts", import.meta.url),
+  "utf8",
+);
 import { describe, expect, it } from "vitest";
 
 const SOURCE = readFileSync(new URL("./agent-exchange-repository.ts", import.meta.url), "utf8");
@@ -15,6 +20,8 @@ describe("agent exchange repository", () => {
     }
     expect(SOURCE).toContain('"agent-exchange-requested"');
     expect(SOURCE).toContain('"agent-exchange-status"');
-    expect(SOURCE).toContain("fallback");
+    // 043: 창 삽입(`<event>-fallback`) 수신은 호환 transport가 맡고, 저장소는 창 transport의 listen을 쓴다.
+    expect(SOURCE).toContain("listen(");
+    expect(COMPAT_TRANSPORT_SOURCE).toContain("fallback: `${event}-fallback`");
   });
 });

@@ -7,6 +7,10 @@ import {
   findStaleFileSelection,
 } from "@yoophi/workspace-auto-refresh";
 
+const WORKTREE_CHANGE_INVALIDATION_SOURCE = readFileSync(
+  new URL("./worktree-change-invalidation.ts", import.meta.url),
+  "utf8",
+);
 const WORKTREE_WORKSPACE_PANEL_SOURCE = readFileSync(
   new URL("../ui/worktree-workspace-panel.tsx", import.meta.url),
   "utf8",
@@ -34,8 +38,12 @@ describe("workbench workspace auto refresh integration", () => {
   });
 
   it("invalidates Speckit file queries through the worktree watcher path", () => {
-    expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain("worktreeFileQueryKeys.speckit(worktree.path)");
+    // 043: 무효화 규칙은 `worktree-change-invalidation`으로 옮겼고(재연결 재조회 신호도 같은 경로), 패널이 그것을 부른다.
     expect(WORKTREE_WORKSPACE_PANEL_SOURCE).toContain(
+      "invalidateForWorktreeChange(queryClient, worktree.path, selectedTabRef.current, payload.kind)",
+    );
+    expect(WORKTREE_CHANGE_INVALIDATION_SOURCE).toContain("worktreeFileQueryKeys.speckit(path)");
+    expect(WORKTREE_CHANGE_INVALIDATION_SOURCE).toContain(
       'activeTab === "speckit" ? "active" : "none"',
     );
   });

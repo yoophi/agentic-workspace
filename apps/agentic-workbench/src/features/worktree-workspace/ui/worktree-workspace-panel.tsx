@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { useInfiniteQuery, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircleIcon,
@@ -102,6 +101,8 @@ import {
   type WorktreeChangedEvent,
   type StaleSelection,
 } from "@yoophi/workspace-auto-refresh";
+import { listen } from "@/shared/api/transport";
+import { invalidateForWorktreeChange } from "@/features/worktree-workspace/model/worktree-change-invalidation";
 import { annotationDialogComponents } from "@/features/worktree-workspace/ui/annotation-dialog-components";
 import {
   buildFileTreeRows,
@@ -258,40 +259,12 @@ export function WorktreeWorkspacePanel({
 
     // 선별 invalidation(contracts §5): 활성 탭에 필요한 query만 즉시 refetch
     // 대상으로 만들고, 비활성 query는 stale 표시만 남겨 다음 mount 때 갱신한다.
-    listen<WorktreeChangedEvent>(WORKTREE_CHANGED_EVENT, (event) => {
-      if (disposed || event.payload.workingDirectory !== worktree.path) {
+    listen<WorktreeChangedEvent>(WORKTREE_CHANGED_EVENT, (payload) => {
+      if (disposed || payload.workingDirectory !== worktree.path) {
         return;
       }
 
-      const activeTab = selectedTabRef.current;
-
-      // 파일 목록 전체 rescan(WalkDir)은 파일 트리가 화면에 있을 때만 즉시 필요하다.
-      void queryClient.invalidateQueries({
-        queryKey: worktreeFileQueryKeys.list(worktree.path),
-        refetchType: activeTab === "git" ? "none" : "active",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: worktreeFileQueryKeys.textFiles(worktree.path),
-        refetchType: activeTab === "git" ? "none" : "active",
-      });
-      void queryClient.invalidateQueries({
-        queryKey: worktreeFileQueryKeys.speckit(worktree.path),
-        refetchType: activeTab === "speckit" ? "active" : "none",
-      });
-      void queryClient.invalidateQueries({ queryKey: projectQueryKeys.worktreeChanges(worktree.path) });
-
-      if (event.payload.kind === "file") {
-        return;
-      }
-
-      void queryClient.invalidateQueries({ queryKey: worktreeGitQueryKeys.history(worktree.path) });
-      void queryClient.invalidateQueries({ queryKey: worktreeGitQueryKeys.graph(worktree.path) });
-      void queryClient.invalidateQueries({
-        queryKey: ["worktree-git", "commit-detail", worktree.path],
-      });
-      void queryClient.invalidateQueries({
-        queryKey: ["worktree-git", "file-diff", worktree.path],
-      });
+      invalidateForWorktreeChange(queryClient, worktree.path, selectedTabRef.current, payload.kind);
     })
       .then((dispose) => {
         unlisten = dispose;

@@ -82,7 +82,7 @@ describe("event client listener contract", () => {
     hub.publish("run:r1");
     await until(() => healthy.length === 3 && resets.length === 1, "healthy continues, flaky resets");
     hub.publish("run:r1");
-    await until(() => flaky.at(-1) === 4, "flaky resumes after reset");
+    await until(() => flaky[flaky.length - 1] === 4, "flaky resumes after reset");
     expect(healthy).toEqual([1, 2, 3, 4]);
     const baseline = (resets[0] as { lastSequence: number }).lastSequence;
     // 스냅샷이 포함한 순번은 다시 받지 않고, 그 뒤만 받는다(중복·누락 없음).
@@ -137,7 +137,7 @@ describe("event client listener contract", () => {
     await until(() => fast.length === 3 && slow.length === 1, "slow blocked on 2");
     hub.sockets[0].drop(); // 받았지만 반영 전(slow는 2 처리 중) 끊김
     await until(() => hub.sockets.length === 2 && hub.sockets[1].readyState === 1, "reconnected");
-    expect(hub.ticketRequests.at(-1)).toEqual([{ streamId: "run:r1", epoch: "epoch-1", afterSequence: 1 }]);
+    expect(hub.ticketRequests[hub.ticketRequests.length - 1]).toEqual([{ streamId: "run:r1", epoch: "epoch-1", afterSequence: 1 }]);
     gate.resolve();
     hub.publish("run:r1");
     await until(() => slow.length === 4 && fast.length === 4, "both caught up");

@@ -45,7 +45,7 @@ export class FakeEventHub {
     return log;
   }
 
-  publish(streamId: string, body: unknown = {}): EventEnvelope {
+  publish(streamId: string, body: unknown = {}, schema = "test.v1"): EventEnvelope {
     const log = this.log(streamId);
     log.sequence += 1;
     const event: EventEnvelope = {
@@ -53,7 +53,7 @@ export class FakeEventHub {
       streamId,
       epoch: this.epoch,
       sequence: log.sequence,
-      schema: "test.v1",
+      schema,
       occurredAt: "2026-09-28T00:00:00Z",
       body,
     };

@@ -31,8 +31,9 @@ export interface SocketLike {
 
 export interface StreamListener {
   onEvent(event: EventEnvelope): void | Promise<void>;
-  /** 스냅샷으로 상태를 다시 맞춘다(수신자 실패·보관 gap·세대 변경). */
-  onReset?(snapshot: unknown): void | Promise<void>;
+  /** 스냅샷으로 상태를 다시 맞춘다(수신자 실패·보관 gap·세대 변경). `delivered`는 이 수신자가 반영을 마친 순번 —
+   *  run처럼 스냅샷이 이벤트 목록이면 그 뒤만 다시 반영하면 된다. */
+  onReset?(snapshot: unknown, context: { delivered: number }): void | Promise<void>;
 }
 
 export interface SnapshotSource {
@@ -44,6 +45,9 @@ export interface SnapshotSource {
 export interface SubscribeOptions {
   after?: number;
   snapshot?: SnapshotSource;
+  /** 알림 스트림(worktree 등): 보관이 없어 끊긴 동안의 알림은 사라진다 — 다시 연결될 때마다 수신자를 스냅샷으로
+   *  재설정한다(재조회 신호). 첫 연결에서는 하지 않는다. */
+  resyncOnReconnect?: boolean;
 }
 
 export interface EventClientOptions {
@@ -67,7 +71,6 @@ export interface EventClient {
 
 const INITIAL_BACKOFF_MS = 250;
 const MAX_BACKOFF_MS = 10_000;
-const OPEN = 1;
 
 interface ListenerState {
   listener: StreamListener;
@@ -137,6 +140,8 @@ export function createEventClient(options: EventClientOptions): EventClient {
     recoveryAttempts = 0;
     terminal = false;
     snapshot: SnapshotSource | undefined;
+    resyncOnReconnect = false;
+    connections = 0;
     graceTimer: ReturnType<typeof setTimeout> | undefined;
     reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -293,6 +298,12 @@ export function createEventClient(options: EventClientOptions): EventClient {
       switch (frame.type) {
         case "hello":
           this.failures = 0;
+          this.connections += 1;
+          if (this.resyncOnReconnect && this.connections > 1 && !this.recovery) {
+            for (const state of this.listeners) {
+              void this.resetListener(state);
+            }
+          }
           if (this.recovery && !this.recovery.helloSeen) {
             this.recovery.helloSeen = true;
             void this.completeRecovery(this.recovery);
@@ -323,7 +334,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         return;
       }
       if (this.listeners.size === 0) {
-        const last = this.backlog.at(-1)?.sequence ?? this.cursorWhenEmpty;
+        const last = this.backlog[this.backlog.length - 1]?.sequence ?? this.cursorWhenEmpty;
         if (event.sequence > last) {
           this.backlog.push(event);
         }
@@ -382,7 +393,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           state.queue.shift();
         } else {
           const data = await this.snapshot.load();
-          await state.listener.onReset?.(data);
+          await state.listener.onReset?.(data, { delivered: state.delivered });
           const snapshot = this.snapshot;
           state.queue = state.queue.filter((event) => snapshot.passes(event, data));
           state.delivered = Math.max(state.delivered, coveredUpTo);
@@ -457,7 +468,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       await Promise.all(
         [...this.listeners].map(async (state) => {
           try {
-            await state.listener.onReset?.(data);
+            await state.listener.onReset?.(data, { delivered: state.delivered });
           } catch {
             // 재설정 실패: 그 수신자만 다시 재동기(아래 pump 전에 resetListener가 이어 받는다).
             state.queue = [];
@@ -494,6 +505,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
       if (!stream || stream.terminal) {
         stream = new Stream(streamId, subscribeOptions.after ?? 0, subscribeOptions.snapshot);
         streams.set(streamId, stream);
+      }
+      if (subscribeOptions.resyncOnReconnect) {
+        stream.resyncOnReconnect = true;
       }
       return stream.add(listener, subscribeOptions.after, subscribeOptions.snapshot);
     },

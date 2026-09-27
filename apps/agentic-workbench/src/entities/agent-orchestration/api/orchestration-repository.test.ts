@@ -1,4 +1,9 @@
 import { readFileSync } from "node:fs";
+
+const COMPAT_TRANSPORT_SOURCE = readFileSync(
+  new URL("../../../shared/api/transport/compat-transport.ts", import.meta.url),
+  "utf8",
+);
 import { describe, expect, it } from "vitest";
 
 import { parseOrchestrationError } from "./orchestration-repository";
@@ -37,7 +42,9 @@ describe("orchestration repository", () => {
     expect(SOURCE).toContain(
       '"orchestration-coordinator-notification-updated"',
     );
-    expect(SOURCE).toContain("fallback");
+    // 043: 창 삽입(`<event>-fallback`) 수신은 호환 transport가 맡고, 저장소는 창 transport의 listen을 쓴다.
+    expect(SOURCE).toContain("listen(");
+    expect(COMPAT_TRANSPORT_SOURCE).toContain("fallback: `${event}-fallback`");
   });
 
   it("normalizes typed backend errors", () => {

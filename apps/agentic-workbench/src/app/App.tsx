@@ -1,5 +1,5 @@
+import { listen } from "@/shared/api/transport";
 import { useEffect, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SettingsIcon } from "lucide-react";
@@ -35,7 +35,6 @@ import { buildProjectDashboard } from "@/entities/project/lib/dashboard-summary"
 import { markSessionRouteEntered } from "@/shared/lib/session-perf";
 import {
   MCP_WINDOW_TITLE_EVENT,
-  MCP_WINDOW_TITLE_FALLBACK_EVENT,
   type McpWindowTitleEvent,
 } from "@/shared/lib/workspace-window-title";
 import {
@@ -438,17 +437,18 @@ function ProjectWorktreeSessionRoute({
         setAgentWindowTitle(normalized);
       }
     };
-    const handleFallback = (event: Event) => {
-      const payload = (event as CustomEvent<McpWindowTitleEvent>).detail;
+    // 호환 경로: Tauri 제목 이벤트 + 창 삽입, 네트워크 경로: 작업대 스트림의 제목 요청(043 transport listen).
+    listen<McpWindowTitleEvent>(MCP_WINDOW_TITLE_EVENT, (payload) => {
       if (payload?.title) {
         applyTitle(payload.title);
       }
-    };
-
-    window.addEventListener(MCP_WINDOW_TITLE_FALLBACK_EVENT, handleFallback);
-    listen<McpWindowTitleEvent>(MCP_WINDOW_TITLE_EVENT, (event) => applyTitle(event.payload.title))
+    })
       .then((dispose) => {
-        unlisten = dispose;
+        if (disposed) {
+          dispose();
+        } else {
+          unlisten = dispose;
+        }
       })
       .catch((error) => {
         console.error("Failed to listen for MCP window title events", error);
@@ -457,7 +457,6 @@ function ProjectWorktreeSessionRoute({
     return () => {
       disposed = true;
       unlisten?.();
-      window.removeEventListener(MCP_WINDOW_TITLE_FALLBACK_EVENT, handleFallback);
     };
   }, [standalone]);
 

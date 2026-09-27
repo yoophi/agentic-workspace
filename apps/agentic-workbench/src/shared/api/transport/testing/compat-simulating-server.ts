@@ -5,10 +5,12 @@
 // details가 붙은 problem. 역변환의 정확성은 golden 사례 왕복 시험(`compat-simulating-server.test.ts`)이 지킨다.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 
-import { createConnection, createWorkbenchClient, type Connection } from "@yoophi/workbench-client";
+import { createConnection, createEventClient, createWorkbenchClient, type Connection } from "@yoophi/workbench-client";
+import { FakeEventHub } from "@yoophi/workbench-client/testing";
 
 import { COMMANDS } from "../command-table";
 import { createHttpTransport } from "../http-transport";
+import { createNetworkEvents } from "../network-events";
 import type { Transport } from "../transport";
 
 type Args = Record<string, unknown>;
@@ -139,6 +141,8 @@ export interface CompatSimulatingServer {
   baseUrl: string;
   transport: Transport;
   connection: Connection;
+  /** 이벤트 쪽 가짜 hub(042 cursor 규칙, 메모리 소켓). 시험은 여기에 발행해 네트워크 경로로 이벤트를 넣는다. */
+  hub: FakeEventHub;
   close(): Promise<void>;
 }
 
@@ -198,16 +202,23 @@ export async function startCompatSimulatingServer(
   await connection.start();
   const client = createWorkbenchClient({ connection });
   const benchId = options.benchId ?? "bench-test";
+  const hub = new FakeEventHub();
+  hub.epoch = "fake-epoch";
+  const eventClient = createEventClient({ connection, fetch: hub.fetch, openSocket: hub.openSocket as never });
+  const events = createNetworkEvents({ events: eventClient, client });
   const transport = createHttpTransport({
     client,
     ensureWindowBench: async () => benchId,
     windowLabel: options.windowLabel ?? "session-test",
+    events,
   });
   return {
     baseUrl,
     transport,
     connection,
+    hub,
     close: async () => {
+      eventClient.close();
       connection.close();
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -12,6 +12,7 @@ import type {
 import {
   cleanupAgentRunPanelTests,
   renderAgentRunPanel,
+  setRunEventEmitter,
   waitForAgentRunPanel,
 } from "./agent-run-panel.test-harness";
 import { compatTransport, setTransport } from "@/shared/api/transport";
@@ -129,11 +130,18 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
 
   afterAll(async () => {
     setTransport(compatTransport);
+    setRunEventEmitter(undefined);
     await server?.close();
   });
 
   beforeEach(() => {
     setTransport(path === "http" && server ? server.transport : compatTransport);
+    // 네트워크 경로의 run 이벤트는 창 삽입이 아니라 서버 스트림(`run:<id>`)으로 온다.
+    setRunEventEmitter(
+      path === "http" && server
+        ? (envelope) => void server?.hub.publish(`run:${envelope.runId}`, envelope.event, "run.event.v1")
+        : undefined,
+    );
   });
 
   it("reloads the worktree-scoped Codex model and effort selections", async () => {

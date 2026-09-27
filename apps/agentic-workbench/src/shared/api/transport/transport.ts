@@ -5,7 +5,12 @@ export interface InvokeOptions {
   idempotencyKey?: string;
 }
 
+/** 이벤트 수신자. 네트워크 경로는 Promise를 settle까지 기다려 반영 완료로 친다(research R7). */
+export type EventCallback<T> = (payload: T) => void | Promise<void>;
+
 export interface Transport {
   readonly kind: "compat" | "http";
   invoke<T>(command: string, args?: Record<string, unknown>, options?: InvokeOptions): Promise<T>;
+  /** 오늘과 같은 이벤트 이름·payload로 받는다. */
+  listen<T>(event: string, callback: EventCallback<T>): Promise<() => void>;
 }

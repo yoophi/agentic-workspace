@@ -84,7 +84,7 @@ describe("createEventClient basics", () => {
     client.subscribe("run:r1", second.listener);
     await until(() => second.seen.length === 5, "resubscribed from cursor 1");
     expect(second.seen).toEqual([2, 3, 4, 5, 6]);
-    expect(hub.ticketRequests.at(-1)).toEqual([{ streamId: "run:r1", epoch: "epoch-1", afterSequence: 1 }]);
+    expect(hub.ticketRequests[hub.ticketRequests.length - 1]).toEqual([{ streamId: "run:r1", epoch: "epoch-1", afterSequence: 1 }]);
     client.close();
   });
 

@@ -177,3 +177,25 @@ T027 범위를 정직하게 적는다:
   - 대기열 상한을 넘으면 소켓을 닫고, 다음 수신자가 붙을 때 cursor에서 다시 구독한다.
   - 마지막 수신자가 떠나고 유예가 지나면 소켓을 닫는다.
 - T032(전달 끄기 단위 시험)는 Foundational에서 Rust `tauri_desktop_bridge::only_the_current_incarnation_can_declare_and_skip_delivery`로 넣었다. T037(부팅의 전달 선언)은 `bootstrap-transport`에 있다(선언 실패 → 호환 경로, T051 시험).
+
+## T031 · T034 · T035(모델) 교환 원장·구독 이관·네트워크 이벤트 계층
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| 교환 원장 red→green | `npx vitest run src/features/agent-run/model/exchange-reconciler.test.ts` | 1 → 0 | 모듈 없음 → 7 passed |
+| 네트워크 이벤트 | `npx vitest run src/shared/api/transport/network-events.test.ts` | 1 → 0 | 첫 실패는 가짜 hub가 모든 이벤트를 `test.v1` schema로 발행해서다. schema를 받게 고친 뒤 2 passed |
+| 변이: 교환 `passes`를 항상 참(검토한 초안 상태) | — | 1 | `does not replay requested or status events older than the snapshot` 실패 |
+| 변이: worktree 재연결 재설정 끔(검토한 초안 상태) | — | 1 | `sends a full re-read signal after reconnecting …` 실패 |
+| 변이: 네트워크 창에 창 삽입으로 run 이벤트를 넣음 | `agent-run-panel.test.tsx -t "run-event contract"` | 1 | [http]에서 시간 초과 — 네트워크 창은 창 삽입을 받지 않는다(두 경로 중복 없음, SC-003 화면 측) |
+| AW 전체 / 패키지 | `pnpm test`, `tsc --noEmit` / `pnpm test`, `check-types` | 0, 0 / 0, 0 | 88 files / 616 tests / 6 files / 50 tests |
+
+사용자 검토 반영:
+- **교환 병합**: `exchangePasses`는 스냅샷에 같은 requestId가 있으면 스냅샷보다 늦은(`updatedAt`) 상태만 넘긴다. 요청 이벤트는 스냅샷에서 아직 `accepted`일 때만 넘긴다.
+  - 시험은 실제 보관 gap을 가짜 hub로 만든다(한도 3, 끊긴 동안 5건 발행). 스냅샷 로드를 붙잡아 둔 사이 버퍼에 옛 요청·옛 `accepted`·`delivered`를 쌓는다.
+  - x1이 스냅샷의 `delivered`에서 `accepted`로 되돌아가지 않고, x1 요청이 다시 넘어가지 않는 것을 단정한다.
+- **worktree 재조회**:
+  - 이벤트 클라이언트에 `resyncOnReconnect`(알림 스트림: 첫 연결 뒤 매 재연결 hello에서 스냅샷 재설정)를 더했다. worktree 구독은 재연결마다 `{kind: "git", reason: "resync"}`를 보낸다.
+  - 패널의 무효화 처리를 `features/worktree-workspace/model/worktree-change-invalidation.ts`로 뽑았고, 패널이 그 함수를 부른다.
+  - 시험은 재연결 뒤 이 신호가 실제 `QueryClient`에서 파일 목록·변경·Git 이력·그래프 query를 무효화하는 것까지 단정한다.
+- **소스 문자열 시험 4개 재지정**(App 제목, speckit 무효화, 교환·orchestration 저장소의 fallback): 검사하던 문자열이 옮겨 간 파일(호환 transport, 무효화 모델)을 보도록 대상만 바꿨고, 원래 검사 내용은 모두 유지했다.
+- **화면 이벤트 시험(T038 일부)**: `agent-run-panel` [http]의 run 이벤트는 가짜 서버 harness의 이벤트 계층으로 들어온다. 이 계층은 042 cursor 규칙을 흉내 내는 **메모리 hub 소켓**이고, 호출만 실제 HTTP다. 실제 WebSocket과 실제 042 서버의 조합은 T041 통합 suite가 맡는다.
