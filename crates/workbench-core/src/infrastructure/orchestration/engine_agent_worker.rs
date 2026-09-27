@@ -73,7 +73,10 @@ impl EngineAgentWorker {
                 },
             )?;
         }
-        let run = self
+        self.benches
+            .hub
+            .claim_run(&assignment.planned_run_id, &assignment.bench_id);
+        let run = match self
             .benches
             .engine
             .start(
@@ -82,7 +85,15 @@ impl EngineAgentWorker {
                 self.benches.run_sink(&assignment.bench_id),
             )
             .await
-            .map_err(|error| error.message)?;
+        {
+            Ok(run) => run,
+            Err(error) => {
+                self.benches
+                    .hub
+                    .release_run_claim(&assignment.planned_run_id, &assignment.bench_id);
+                return Err(error.message);
+            }
+        };
         drop(admission);
         Ok(run.id)
     }

@@ -1,35 +1,68 @@
-//! orchestration 갱신을 데스크톱에 전달하는 sink(041). 창 전달은 `DesktopBridge` 하나로만 한다(오늘의 전체 창 방송과
-//! 이중 전달을 없앤다, research R10). 묶임 스트림 발행은 US3에서 이 sink에 더한다.
+//! orchestration 갱신 sink(041 research R10). 작업 영역의 **현재 묶임** 스트림(`orchestration:<bindingId>`)에 발행하고,
+//! 같은 스트림 lock 안에서 데스크톱 창에 한 번 전달한다(오늘의 전체 창 방송과 이중 전달을 없앤다). 발행은 저장
+//! 성공 뒤·binding mutex 밖에서 일어나므로, 그 사이 묶임이 바뀌었으면(다른 작업대이거나 풀림) 버린다 — 새 묶임의
+//! 구독자는 `orchestration.get`으로 따라잡는다.
 
 use std::sync::Arc;
 
+use workbench_protocol::events::{StreamKind, ORCHESTRATION_WORKSPACE_UPDATED_V1};
+
 use crate::{
+    application::orchestration::binding::OrchestrationBindings,
     domain::agent_orchestration::OrchestrationError,
+    infrastructure::event_hub::EventHub,
     ports::{
         desktop_bridge::{DesktopBridge, DesktopDelivery},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
     },
 };
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct DeliveryOrchestrationSink {
+    hub: Arc<EventHub>,
+    bindings: Arc<OrchestrationBindings>,
     desktop: Option<Arc<dyn DesktopBridge>>,
 }
 
 impl DeliveryOrchestrationSink {
-    pub fn new(desktop: Option<Arc<dyn DesktopBridge>>) -> Self {
-        Self { desktop }
+    pub fn new(
+        hub: Arc<EventHub>,
+        bindings: Arc<OrchestrationBindings>,
+        desktop: Option<Arc<dyn DesktopBridge>>,
+    ) -> Self {
+        Self {
+            hub,
+            bindings,
+            desktop,
+        }
     }
 }
 
 impl OrchestrationEventSink for DeliveryOrchestrationSink {
     fn emit(&self, bench_id: &str, event: OrchestrationEvent) -> Result<(), OrchestrationError> {
-        if let Some(desktop) = &self.desktop {
-            desktop.deliver(DesktopDelivery::Orchestration {
-                bench_id: bench_id.to_owned(),
-                payload: serde_json::to_value(&event).unwrap_or_default(),
-            });
+        let Some(binding) = self.bindings.binding_of(&event.workspace_id) else {
+            return Ok(());
+        };
+        if binding.bench_id != bench_id {
+            return Ok(());
         }
+        let payload = serde_json::to_value(&event).unwrap_or_default();
+        let desktop = &self.desktop;
+        self.hub.publish_state(
+            StreamKind::Orchestration,
+            &binding.binding_id,
+            ORCHESTRATION_WORKSPACE_UPDATED_V1,
+            payload.clone(),
+            false,
+            &mut |_| {
+                if let Some(desktop) = desktop {
+                    desktop.deliver(DesktopDelivery::Orchestration {
+                        bench_id: bench_id.to_owned(),
+                        payload: payload.clone(),
+                    });
+                }
+            },
+        );
         Ok(())
     }
 }

@@ -52,7 +52,7 @@
 - [X] T013 core `application/orchestration/binding.rs`: `OrchestrationBindings`(workspace↔bench↔binding_id, 전역 std mutex = binding mutex), 묶기·풀기 API(클로저로 저장소 `update` 동반), 단위 테스트
 - [X] T014 [P] core `application/orchestration/roles.rs`: 역할 판정(coordinator = `activeCoordinatorGenerationId` 세대 Active + run 일치, 자식 = orchestration 기동 과제 시도의 `currentRunId`(Launching 포함), 수동 채택 자식 제외), 단위 테스트
 - [X] T015 [P] core `application/orchestration/revision_watch.rs`: 작업 영역 id별 `tokio::sync::watch<u64>`, `update`가 작업 영역을 바꾸면 알림
-- [ ] T016 core `infrastructure/event_hub/mod.rs`: run 스트림 소유 작업대 메타(첫 발행/대기 생성 시 기록, 스트림 제거 시 함께 삭제), 조회 함수, orchestration journal 256, 단위 테스트
+- [X] T016 core `infrastructure/event_hub/mod.rs`: run 스트림 소유 작업대 메타(첫 발행/대기 생성 시 기록, 스트림 제거 시 함께 삭제), 조회 함수, orchestration journal 256, 단위 테스트
 - [X] T017 core `application/bench_service.rs`: `BenchCloseHook`을 async(`Arc<dyn Fn(String) -> BoxFuture<'static, ()>>`)로 바꾸고 `finish_close`에서 await(소유 run 취소 뒤, 스트림 제거 전). 기존 교환 hook 적응, 테스트 통과
 - [ ] T018 core `tests/support`: 가짜 엔진에 orchestration 자식 기동·send·cancel(종료 이벤트 inline 발생 옵션) 지원, `BenchHarness`에 orchestration 헬퍼(bootstrap·bind·create task), fixture 실행기에 principal `agent:<run>` 역할 준비 단계
 
@@ -118,12 +118,12 @@
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T043 [P] [US3] core `tests/orchestration_stream.rs`: 묶임 스트림 순번, 다른 주체·agent 구독 거절, 모르는 id `notFound`, 작업대 닫기 → `Gap(evicted)`, 재묶임 → 새 `eventStreamId`, run 스트림 구독·`run.replay` 권한(허용 조건 1·2, 다른 작업대 거절, Evicted 형태), 다른 작업대 창 전달 0·같은 창 1회
+- [X] T043 [P] [US3] core `tests/orchestration_stream.rs`: 묶임 스트림 순번, 다른 주체·agent 구독 거절, 모르는 id `notFound`, 작업대 닫기 → `Gap(evicted)`, 재묶임 → 새 `eventStreamId`, run 스트림 구독·`run.replay` 권한(허용 조건 1·2, 다른 작업대 거절, Evicted 형태), 다른 작업대 창 전달 0·같은 창 1회
 
 ### Implementation for User Story 3
 
-- [ ] T044 [US3] core orchestration 발행: 서비스 `update` 뒤(변경된 작업 영역마다) `hub.publish`(`orchestration:<bindingId>`), 명령·알림 전달 단계·release 포함. 묶이지 않은 작업 영역은 발행 없음
-- [ ] T045 [US3] core `application/workbench_runtime.rs` `authorize_bench_streams` 확장: orchestration 스트림(묶임의 작업대 주체), run 스트림(R17, 발행 전 대기는 엔진 소유 등록된 run만)
+- [X] T044 [US3] core orchestration 발행: 서비스 `update` 뒤(변경된 작업 영역마다) `hub.publish`(`orchestration:<bindingId>`), 명령·알림 전달 단계·release 포함. 묶이지 않은 작업 영역은 발행 없음
+- [X] T045 [US3] core `application/workbench_runtime.rs` `authorize_bench_streams` 확장: orchestration 스트림(묶임의 작업대 주체), run 스트림(R17, 발행 전 대기는 엔진 소유 등록된 run만)
 - [ ] T046 [US3] core `ports/desktop_bridge.rs` `DesktopDelivery::Orchestration{bench_id, payload}`, AW `infrastructure/tauri_desktop_bridge.rs` 전달(`orchestration-workspace-updated-fallback` + reason별 상세 fallback, 한 번), AW `infrastructure/tauri_orchestration_event_sink.rs`·`ports/orchestration_event_sink.rs` 삭제(parity 테스트는 protocol DTO로 이동)
 - [ ] T047 [US3] 게이트·커밋 `feat(aw): open per-binding orchestration streams and authorize run replay by bench (041 US3)`
 
@@ -206,4 +206,7 @@ T019 fixture 생성 ∥ T020 출처 음성 테스트 ∥ T021 liveness ④⑤ �
   - (T015·T039) `RevisionWatch`는 `BoundOrchestrationRepository`의 commit이 저장 성공 뒤 바뀐 작업 영역만 알린다. `waitChildTasks`는 구독 → 읽기 → `timeout_at(changed())` 순서라 읽기와 대기 사이에 온 보고도 깨운다(poll 없음). 변이 검증: commit 알림을 끄면 `report_result_wakes_a_waiting_coordinator`·`concurrent_report_and_wait_never_miss_the_notification`이 실패함을 확인했다.
   - (T026·T039) handler는 `handlers/orchestration/mod.rs`(데스크톱 17 + `run.replay`)와 `handlers/orchestration/agent.rs`(agent 17)에 있다. agent 입력은 `{runId, arguments}`(오늘 도구 인자를 그대로 `arguments`에) — principal run ≠ `runId`면 `forbidden`, 역할 불일치 → `forbiddenActor`, 묶이지 않은 작업 영역 → `scopeMismatch`(`details.toolError`).
   - (T034·T035) `tests/orchestration_agent.rs`: ① Main 턴(가짜 엔진 `turn_hook`)이 `collectChildResults`·`waitChildTasks`를 불러도 교착 없음, ② 대기 중 `reportResult` → 5초 안에 깨어남, 보고·대기 동시 출발 42회 모두 놓침 없음, 첫 턴(`start_hook`) `getOwnTask`·`reportProgress` 허용.
+  - (T016·T045) run 소유 작업대는 hub `run_owners`에 둔다: `run.start`·자식 기동이 엔진 호출 전에 claim(실패 시 되돌림), 발행하는 sink가 확정(`assign_run_owner`), 보관 한도로 스트림이 제거될 때 함께 지운다. research R17의 "엔진에 소유가 등록된 run만 발행 전 대기"는 seam `events`가 동기라 엔진 async 조회 대신 이 claim으로 구현했다. 구독 권한은 주체 기준(스트림에 작업대 문맥이 없음), `run.replay`는 입력 작업대 기준(더 좁음). 이벤트 fixture 실행기는 언급된 run을 principal 작업대 소유로 등록하고(`unownedRuns`·`foreignRuns`로 예외), `stream-kind-not-available` → `orchestration-unknown-binding-not-found`, 새 `run-unowned-not-found`·`run-other-bench-forbidden`.
+  - (T027 보완, 사용자 점검) `run.replay`의 Evicted 판정은 응답 모양(`terminal && gapDetected && 빈 이벤트`) 추론 대신 hub 실제 제거 표식(`is_evicted`)으로 바꿨다. 테스트: 다른 작업대의 기동 중(소유 등록·미발행) run 재생·구독 거절, 보관 한도로 실제 제거된 run은 어느 작업대든 Evicted 형태. 정직한 기록: 옛 추론식으로 되돌려도 두 테스트는 통과한다 — 현재 hub에서는 미발행 run이 Missing(`terminal: false`)이라 모양이 겹치지 않기 때문이다. 이 변경은 두 상태가 우연히 구별되는 것에 기대지 않게 하는 구조적 수정이다.
+  - (T043·T044) `tests/orchestration_stream.rs`: 묶임 스트림 순번(재생 포함), 다른 주체·agent 거절·모르는 묶임 notFound, 이벤트마다 창 전달 1회, 작업대 닫기 → `Gap(evicted)`·닫힌 뒤 전달 0, 재개 → 새 `eventStreamId`, run 스트림 소유·복구 작업 영역 허용. 발행은 저장 뒤·binding mutex 밖이라 그 사이 묶임이 바뀌었으면 버린다(새 묶임은 `orchestration.get`으로 따라잡음). 작업대 닫기 release에는 마지막 이벤트를 두지 않는다 — 묶임이 풀리는 commit에서 스트림이 제거되어 구독자는 `Gap(evicted)`를 받는다(T028 설명의 "마지막 이벤트"는 두지 않음).
 

@@ -40,7 +40,6 @@ use crate::{
     domain::agent_orchestration::{
         OrchestrationError, OrchestrationErrorCode, OrchestrationSession, TaskCommandSource,
     },
-    ports::orchestration_repository::OrchestrationRepository,
 };
 
 /// 도메인 오류 → fault. 원본은 `details.orchestrationError`(compat이 오늘 JSON 문자열을 다시 만든다).
@@ -396,7 +395,8 @@ pub fn register(registry: &mut Registry, services: &Arc<BenchServices>, runtime:
     agent::register(registry, services, runtime);
 }
 
-/// `run.replay`(research R17): 작업대가 소유한 살아 있는 run이거나, 작업대에 묶인 작업 영역의 노드 run이면 허용.
+/// `run.replay`(research R17): 이 작업대가 소유한 run이거나(끝난 run 포함), 이 작업대에 묶인 작업 영역이 기록한
+/// run이면 허용.
 /// 보관 한도로 지운 run은 내용이 없으므로 소유 검사 없이 오늘 Evicted 형태를 돌려준다.
 fn register_run_replay(registry: &mut Registry, services: &Arc<BenchServices>, runtime: &Runtime) {
     let runtime: Runtime = Arc::clone(runtime);
@@ -407,8 +407,14 @@ fn register_run_replay(registry: &mut Registry, services: &Arc<BenchServices>, r
             async move {
                 let view = services.resolve(&ctx.request_id, &ctx.principal, &input.bench_id)?;
                 let replay = services.hub.replay_run(&input.run_id, input.after_sequence);
-                let evicted = replay.terminal && replay.gap_detected && replay.events.is_empty();
-                let owned = services.engine.owner_of(&input.run_id).await.as_deref() == Some(view.id.as_str());
+                // 보관 한도 제거는 hub의 실제 제거 표식으로만 판정한다 — 응답 모양(terminal·gap·빈 이벤트)으로 추론하면
+                // 미발행·미등록 run이나 구독 해지로 비워진 스트림과 섞일 수 있다.
+                let evicted = services
+                    .hub
+                    .is_evicted(&StreamKind::Run.stream_id(&input.run_id));
+                // 소유는 hub 기록(journal과 같은 수명)으로 본다 — 끝난 run도 journal이 남은 동안 재생할 수 있다(R17).
+                // 입력에 작업대가 있으므로 주체가 아니라 그 작업대 소유로 좁힌다(구독은 작업대 문맥이 없어 주체 기준).
+                let owned = services.hub.run_owner(&input.run_id).as_deref() == Some(view.id.as_str());
                 let allowed = evicted || owned || node_run_of_bound_workspace(&runtime, &view.id, &input.run_id);
                 if !allowed {
                     return Err(WorkbenchFault::new(
@@ -428,23 +434,5 @@ fn node_run_of_bound_workspace(
     bench_id: &str,
     run_id: &str,
 ) -> bool {
-    let Some(workspace_id) = runtime.bindings().workspace_of_bench(bench_id) else {
-        return false;
-    };
-    let Ok(sessions) = runtime.repository().snapshot() else {
-        return false;
-    };
-    sessions
-        .iter()
-        .find(|session| session.id == workspace_id)
-        .is_some_and(|session| {
-            session
-                .nodes
-                .iter()
-                .any(|node| node.current_run_id.as_deref() == Some(run_id))
-                || session
-                    .generations
-                    .iter()
-                    .any(|generation| generation.run_id == run_id)
-        })
+    runtime.bench_with_workspace_run(run_id).as_deref() == Some(bench_id)
 }

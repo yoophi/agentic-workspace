@@ -303,3 +303,131 @@ async fn ended_run_ids_cannot_be_reused_across_close_and_recover() {
         .unwrap_err();
     assert_eq!(foreign.code, FaultCode::Forbidden);
 }
+
+/// research R17: 다른 작업대가 기동 중인(소유 등록됐지만 아직 발행 전) run은 재생·구독할 수 없다. 응답 모양이
+/// 아니라 소유 기록으로 판정하므로 빈 기록이어도 거절된다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn live_unpublished_run_of_another_bench_is_not_replayable() {
+    let h = Arc::new(BenchHarness::new(RunScript {
+        start_delay_ms: 600,
+        ..RunScript::default()
+    }));
+    let a = h.open().await;
+    let other = AuthenticatedPrincipal::test_as("p2");
+    let b = h
+        .call(
+            &other,
+            OperationId::BenchOpen,
+            json!({ "workingDirectory": h.dir }),
+        )
+        .await
+        .unwrap()["benchId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let start = {
+        let (h, other, b) = (Arc::clone(&h), other.clone(), b.clone());
+        tokio::spawn(async move {
+            h.call(
+                &other,
+                OperationId::RunStart,
+                json!({ "benchId": b, "request": { "goal": "g", "agentId": "codex", "runId": "pending" } }),
+            )
+            .await
+        })
+    };
+    // 기동 지연 중: 소유는 등록됐고 발행은 아직 없다.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while h.rt.runtime.events_hub().run_owner("pending").is_none() {
+        assert!(std::time::Instant::now() < deadline, "claim never recorded");
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(!h.rt.runtime.events_hub().has_run_history("pending"));
+    let refused = h
+        .call(
+            &desktop(),
+            OperationId::RunReplay,
+            json!({ "benchId": a, "runId": "pending", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (refused.code, refused.message.as_str()),
+        (FaultCode::Forbidden, "run is owned by another bench.")
+    );
+    let subscribe = |principal: AuthenticatedPrincipal| {
+        workbench_protocol::Workbench::events(
+            h.rt.runtime.as_ref(),
+            principal,
+            workbench_protocol::Subscription {
+                cursors: vec![workbench_protocol::StreamCursor {
+                    stream_id: "run:pending".into(),
+                    epoch: h.rt.runtime.epoch().into(),
+                    after_sequence: 0,
+                }],
+            },
+        )
+    };
+    assert_eq!(
+        subscribe(desktop()).err().map(|f| f.code),
+        Some(FaultCode::Forbidden)
+    );
+    // 소유 주체는 발행 전에도 기다릴 수 있다.
+    assert!(subscribe(other.clone()).is_ok());
+    start.await.unwrap().unwrap();
+    let own = h
+        .call(
+            &other,
+            OperationId::RunReplay,
+            json!({ "benchId": b, "runId": "pending", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap();
+    assert!(!own["events"].as_array().unwrap().is_empty());
+}
+
+/// 보관 한도로 실제 제거된 run(hub 제거 표식)은 내용이 없으므로 소유와 관계없이 오늘의 Evicted 형태를 돌려준다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn retention_evicted_run_replays_as_evicted_for_any_bench() {
+    let h = BenchHarness::with(
+        |adapters| adapters.event_limits.max_retained_runs = 1,
+        RunScript::default(),
+    );
+    let owner = h.open().await;
+    let viewer = h.open().await;
+    h.start(&owner, "old").await.unwrap();
+    h.engine
+        .finish("old", &h.rt.runtime.benches().run_sink(&owner));
+    h.start(&owner, "new").await.unwrap();
+    h.engine
+        .finish("new", &h.rt.runtime.benches().run_sink(&owner));
+    assert!(h.rt.runtime.events_hub().is_evicted("run:old"));
+    assert_eq!(h.rt.runtime.events_hub().run_owner("old"), None);
+
+    let replay = h
+        .call(
+            &desktop(),
+            OperationId::RunReplay,
+            json!({ "benchId": viewer, "runId": "old", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            &replay["terminal"],
+            &replay["gapDetected"],
+            replay["events"].as_array().unwrap().len()
+        ),
+        (&json!(true), &json!(true), 0)
+    );
+    // 아직 보관 중인 run은 여전히 소유 작업대만.
+    let kept = h
+        .call(
+            &desktop(),
+            OperationId::RunReplay,
+            json!({ "benchId": viewer, "runId": "new", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(kept.code, FaultCode::Forbidden);
+}

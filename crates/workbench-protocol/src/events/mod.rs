@@ -52,8 +52,9 @@ impl StreamKind {
     }
 
     /// 구독을 여는 kind인지. orchestration은 041 US3에서 구독 권한 검사(묶임의 작업대 주체)와 함께 연다.
+    /// 041부터 모든 kind를 구독할 수 있다(orchestration은 묶임별 스트림). 권한은 seam `events` 진입점이 본다.
     pub fn is_subscribable(self) -> bool {
-        !matches!(self, StreamKind::Orchestration)
+        true
     }
 
     pub fn class(self) -> EventClass {
@@ -220,7 +221,7 @@ mod tests {
         assert!(StreamKind::Exchange.is_subscribable());
         assert_eq!(parse_stream_id("bench:b1"), Some((StreamKind::Bench, "b1")));
         assert_eq!(StreamKind::Bench.class(), EventClass::Notification);
-        assert!(!StreamKind::Orchestration.is_subscribable());
+        assert!(StreamKind::Orchestration.is_subscribable());
     }
 
     #[test]

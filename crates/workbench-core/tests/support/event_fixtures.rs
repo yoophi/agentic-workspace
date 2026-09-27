@@ -37,6 +37,7 @@ impl Limits {
                 .run_journal_capacity
                 .unwrap_or(base.run_journal_capacity),
             exchange_journal_capacity: base.exchange_journal_capacity,
+            orchestration_journal_capacity: base.orchestration_journal_capacity,
             max_retained_runs: self.max_retained_runs.unwrap_or(base.max_retained_runs),
             max_tombstones: self.max_tombstones.unwrap_or(base.max_tombstones),
             subscriber_queue: self.subscriber_queue.unwrap_or(base.subscriber_queue),
@@ -119,6 +120,37 @@ pub struct EventFixture {
     /// WebSocket 경로에서 재현할 수 없는 fixture(구독자 대기열 초과 등).
     #[serde(default)]
     pub in_memory_only: bool,
+    /// 041 research R17: fixture가 언급한 run은 기본으로 principal이 연 작업대 소유로 등록한다. 여기 적은 run은
+    /// 소유 등록을 하지 않고, `foreignRuns`는 다른 주체의 작업대 소유로 등록한다.
+    #[serde(default)]
+    pub unowned_runs: Vec<String>,
+    #[serde(default)]
+    pub foreign_runs: Vec<String>,
+}
+
+impl EventFixture {
+    /// fixture가 언급한 run id(구독·붙잡기 cursor, 발행 단계).
+    fn mentioned_runs(&self) -> Vec<String> {
+        let mut runs = Vec::new();
+        let mut note = |stream: &str| {
+            if let Some(run) = stream.strip_prefix("run:") {
+                if !runs.iter().any(|known: &String| known == run) {
+                    runs.push(run.to_owned());
+                }
+            }
+        };
+        for spec in &self.subscribe {
+            note(&spec.stream_id);
+        }
+        for step in self.setup.iter().chain(&self.after) {
+            match step {
+                Step::Publish { publish, .. } => note(publish),
+                Step::Hold { hold } => hold.iter().for_each(|spec| note(&spec.stream_id)),
+                _ => {}
+            }
+        }
+        runs
+    }
 }
 
 fn desktop() -> String {
@@ -177,6 +209,32 @@ impl Context {
             rt: TestRuntime::with_adapters(adapters),
             tmp: tempfile::tempdir().expect("tmp"),
             held: Vec::new(),
+        }
+    }
+
+    /// run 소유 등록(041 research R17). hub 발행은 작업대를 거치지 않으므로 여기서 등록한다.
+    pub fn own_runs(&self, fixture: &EventFixture, principal: &AuthenticatedPrincipal) {
+        let benches = self.rt.runtime.benches();
+        let dir = self.tmp.path().to_string_lossy().into_owned();
+        let open = |who: &AuthenticatedPrincipal| {
+            benches
+                .open(&workbench_protocol::RequestId::random(), who, &dir)
+                .expect("fixture bench")
+                .bench_id
+        };
+        let hub = self.rt.runtime.events_hub();
+        let mine = open(principal);
+        let theirs = open(&AuthenticatedPrincipal::test_as("other"));
+        for run in fixture.mentioned_runs() {
+            if fixture.unowned_runs.contains(&run) {
+                continue;
+            }
+            let bench = if fixture.foreign_runs.contains(&run) {
+                &theirs
+            } else {
+                &mine
+            };
+            hub.claim_run(&run, bench);
         }
     }
 
@@ -262,6 +320,7 @@ fn normalize_frame(frame: &EventFrame) -> Option<Value> {
 pub async fn run_in_memory(fixture: &EventFixture) -> (Outcome, Context) {
     let principal = fixture.principal();
     let mut ctx = Context::new(fixture);
+    ctx.own_runs(fixture, &principal);
     ctx.run_steps(&fixture.setup, &principal);
     let subscription = Subscription {
         cursors: ctx.cursors(&fixture.subscribe),
@@ -288,6 +347,7 @@ pub async fn run_in_memory(fixture: &EventFixture) -> (Outcome, Context) {
 pub async fn run_ws(fixture: &EventFixture) -> (Outcome, Context) {
     let principal = fixture.principal();
     let mut ctx = Context::new(fixture);
+    ctx.own_runs(fixture, &principal);
     ctx.run_steps(&fixture.setup, &principal);
     let workbench: Arc<dyn Workbench> = ctx.rt.runtime.clone();
     let harness = Harness::spawn(workbench).await;

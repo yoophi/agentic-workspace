@@ -128,9 +128,14 @@ impl OperationHandler for StartHandler {
                     }
                 }
                 let sink = services.run_sink(&bench_id);
+                // 소유 등록(research R17): 발행 전 run을 기다리는 구독도 소유 작업대로 판단한다.
+                services.hub.claim_run(&run_id, &bench_id);
                 match runtime.block_on(services.engine.start(request, &bench_id, sink)) {
                     Ok(run) => Ok(Applied::Ok(convert::<_, AgentRunDto>(&run))),
-                    Err(error) => Ok(Applied::Rejected(engine_fault(apply_ctx.request_id, error))),
+                    Err(error) => {
+                        services.hub.release_run_claim(&run_id, &bench_id);
+                        Ok(Applied::Rejected(engine_fault(apply_ctx.request_id, error)))
+                    }
                 }
             }),
             is_store_corrupt: |_: &WorkbenchFault| false,

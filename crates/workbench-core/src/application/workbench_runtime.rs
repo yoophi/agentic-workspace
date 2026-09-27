@@ -21,7 +21,7 @@ use crate::{
         bench_service::{BenchServices, MESSAGE_BENCH_FORBIDDEN, MESSAGE_BENCH_NOT_FOUND},
         epoch_idempotency::{EpochIdempotency, EpochIdempotencyLimits},
         orchestration::{
-            binding::OrchestrationBindings,
+            binding::{BindingChange, OrchestrationBindings},
             runtime::{OrchestrationConfig, OrchestrationRuntime, OrchestrationTerminalHook},
         },
         reconcilers::ReconcilerRegistry,
@@ -175,6 +175,11 @@ impl TestHooks {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CrashInjected(pub CrashPoint);
 
+/// 모르는 orchestration 묶임 스트림(041).
+pub const MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND: &str = "orchestration stream not found.";
+/// 소유가 등록되지 않은 run 스트림(041 research R17): 기동되지 않은 id는 기다릴 수 없다.
+pub const MESSAGE_RUN_STREAM_NOT_FOUND: &str = "run stream not found.";
+
 pub struct WorkbenchRuntime {
     paths: DataPaths,
     events: Arc<EventHub>,
@@ -251,12 +256,30 @@ impl WorkbenchRuntime {
             adapters.launch_decorator.clone(),
             Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
         ));
+        let bindings = Arc::new(OrchestrationBindings::default());
+        let repository = BoundOrchestrationRepository::new(
+            JsonOrchestrationRepository::from_paths(&paths),
+            Arc::clone(&bindings),
+        );
+        {
+            // 묶임이 풀리면 그 묶임의 스트림을 지운다(구독자에게 `Gap(evicted)`, research R10). commit 안에서 불리므로
+            // hub만 만진다.
+            let hub = Arc::clone(&events);
+            repository.set_observer(Arc::new(move |changes: &[BindingChange]| {
+                for change in changes {
+                    if let BindingChange::Unbound { binding, .. } = change {
+                        hub.remove_stream(StreamKind::Orchestration, &binding.binding_id);
+                    }
+                }
+            }));
+        }
         let orchestration = Arc::new(OrchestrationRuntime::new(
-            BoundOrchestrationRepository::new(
-                JsonOrchestrationRepository::from_paths(&paths),
-                Arc::new(OrchestrationBindings::default()),
+            repository,
+            DeliveryOrchestrationSink::new(
+                Arc::clone(&events),
+                Arc::clone(&bindings),
+                adapters.desktop.clone(),
             ),
-            DeliveryOrchestrationSink::new(adapters.desktop.clone()),
             Arc::clone(&benches),
             Arc::new(WorktreeGuards::default()),
             adapters.orchestration.clone(),
@@ -347,8 +370,17 @@ impl WorkbenchRuntime {
             let Some((kind, bench_id)) = parse_stream_id(&cursor.stream_id) else {
                 continue;
             };
-            if !matches!(kind, StreamKind::Exchange | StreamKind::Bench) {
-                continue;
+            match kind {
+                StreamKind::Exchange | StreamKind::Bench => {}
+                StreamKind::Orchestration => {
+                    self.authorize_orchestration_stream(principal, bench_id, &cursor.stream_id)?;
+                    continue;
+                }
+                StreamKind::Run => {
+                    self.authorize_run_stream(principal, bench_id, &cursor.stream_id)?;
+                    continue;
+                }
+                _ => continue,
             }
             match self.benches.registry.owner(bench_id) {
                 Some(owner) if owner == principal.subject => {}
@@ -370,6 +402,76 @@ impl WorkbenchRuntime {
             }
         }
         Ok(())
+    }
+
+    fn owns_bench(&self, principal: &AuthenticatedPrincipal, bench_id: &str) -> bool {
+        self.benches
+            .registry
+            .owner(bench_id)
+            .is_some_and(|owner| owner == principal.subject)
+    }
+
+    /// `orchestration:<bindingId>`(041): 그 묶임의 작업대를 연 주체만. 풀린 묶임(제거 표식)은 `Gap(evicted)`로 보낸다.
+    fn authorize_orchestration_stream(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        binding_id: &str,
+        stream_id: &str,
+    ) -> Result<(), WorkbenchFault> {
+        match self.orchestration.bindings().bench_of_binding(binding_id) {
+            Some(bench) if self.owns_bench(principal, &bench) => Ok(()),
+            Some(_) => Err(WorkbenchFault::new(
+                FaultCode::Forbidden,
+                RequestId::random(),
+                MESSAGE_BENCH_FORBIDDEN,
+            )),
+            None if self.events.is_evicted(stream_id) => Ok(()),
+            None => Err(WorkbenchFault::new(
+                FaultCode::NotFound,
+                RequestId::random(),
+                MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND,
+            )),
+        }
+    }
+
+    /// `run:<id>`(041 research R17): 소유 작업대를 연 주체, 또는 그 run이 주체 작업대에 지금 묶인 작업 영역의 노드
+    /// run이면 허용. 보관 한도로 제거된 run은 내용이 없어 `Gap(evicted)`로 보낸다. 소유가 등록되지 않은 run(발행 전
+    /// 기동도 안 된 id)은 기다릴 수 없다.
+    fn authorize_run_stream(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        run_id: &str,
+        stream_id: &str,
+    ) -> Result<(), WorkbenchFault> {
+        if self.events.is_evicted(stream_id) {
+            return Ok(());
+        }
+        let owner = self.events.run_owner(run_id);
+        if owner
+            .as_deref()
+            .is_some_and(|bench| self.owns_bench(principal, bench))
+        {
+            return Ok(());
+        }
+        if self
+            .orchestration
+            .bench_with_workspace_run(run_id)
+            .is_some_and(|bench| self.owns_bench(principal, &bench))
+        {
+            return Ok(());
+        }
+        Err(match owner {
+            Some(_) => WorkbenchFault::new(
+                FaultCode::Forbidden,
+                RequestId::random(),
+                crate::application::orchestration::runtime::MESSAGE_RUN_OWNED_BY_OTHER_BENCH,
+            ),
+            None => WorkbenchFault::new(
+                FaultCode::NotFound,
+                RequestId::random(),
+                MESSAGE_RUN_STREAM_NOT_FOUND,
+            ),
+        })
     }
 
     /// 이벤트 hub(039). 발행은 `publish_run`을, 구독은 `Workbench::events`를 쓴다.
@@ -563,9 +665,9 @@ mod tests {
         assert_eq!(fault.code, FaultCode::Forbidden);
     }
 
-    /// 039: `events`가 구독을 연다. 037의 `events_are_unsupported_in_037`를 대체한다(계약이 뒤집혔다).
+    /// 039: `events`가 구독을 연다. 041: orchestration 스트림은 묶임 id로 찾고, 모르는 묶임은 `notFound`다.
     #[tokio::test]
-    async fn events_reject_unknown_stream_kind_and_describe_carries_epoch() {
+    async fn events_reject_unknown_orchestration_binding_and_describe_carries_epoch() {
         let (_dir, runtime) = runtime();
         let fault = runtime
             .events(
@@ -579,7 +681,10 @@ mod tests {
                 },
             )
             .unwrap_err();
-        assert_eq!(fault.code, FaultCode::InvalidArgument);
+        assert_eq!(
+            (fault.code, fault.message.as_str()),
+            (FaultCode::NotFound, MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND)
+        );
         assert!(!runtime.epoch().is_empty());
     }
 

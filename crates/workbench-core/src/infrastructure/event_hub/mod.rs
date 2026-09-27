@@ -43,7 +43,6 @@ use stream::{
 use subscription::HubSubscription;
 
 pub const MESSAGE_CURSOR_AHEAD: &str = "cursor is ahead of the stream.";
-pub const MESSAGE_KIND_NOT_AVAILABLE: &str = "stream kind is not available yet.";
 pub const MESSAGE_CURSORS_REQUIRED: &str = "at least one cursor is required.";
 
 /// hub 한도(research R10). 테스트는 낮춘 값으로 overflow·정리를 재현한다.
@@ -52,6 +51,8 @@ pub struct EventHubLimits {
     pub run_journal_capacity: usize,
     /// 작업대별 교환 스트림 보관 수(040). 보관 run 수 계산에는 들지 않는다 — 작업대 수 상한이 묶는다.
     pub exchange_journal_capacity: usize,
+    /// 묶임별 orchestration 스트림 보관 수(041). 상태 복원용이라 짧게 둔다 — 늦은 구독자는 `orchestration.get`으로 따라잡는다.
+    pub orchestration_journal_capacity: usize,
     pub max_retained_runs: usize,
     pub max_tombstones: usize,
     pub subscriber_queue: usize,
@@ -64,6 +65,7 @@ impl Default for EventHubLimits {
         Self {
             run_journal_capacity: 512,
             exchange_journal_capacity: 512,
+            orchestration_journal_capacity: 256,
             max_retained_runs: 256,
             max_tombstones: 4_096,
             subscriber_queue: 1_024,
@@ -107,6 +109,9 @@ struct Retention {
     terminal_order: VecDeque<String>,
     evicted_order: VecDeque<String>,
     evicted: HashSet<String>,
+    /// run 스트림 id → 소유 작업대(041 research R17). 기동 때 claim하고, 보관 한도로 스트림이 제거될 때 함께
+    /// 지운다(journal과 같은 수명) — 끝난 run도 journal이 남아 있는 동안 재생·구독 권한을 판단할 수 있다.
+    run_owners: HashMap<String, String>,
 }
 
 enum Lookup {
@@ -272,10 +277,10 @@ impl EventHub {
                     envelope: published.clone(),
                     terminal,
                 },
-                if kind == StreamKind::Exchange {
-                    self.limits.exchange_journal_capacity
-                } else {
-                    self.limits.run_journal_capacity
+                match kind {
+                    StreamKind::Exchange => self.limits.exchange_journal_capacity,
+                    StreamKind::Orchestration => self.limits.orchestration_journal_capacity,
+                    _ => self.limits.run_journal_capacity,
                 },
             );
             stream.fan_out(&EventItem::Event {
@@ -385,6 +390,7 @@ impl EventHub {
                     victims.push(entry.state);
                     retention.published_runs -= 1;
                 }
+                retention.run_owners.remove(&victim);
                 retention.evicted.insert(victim.clone());
                 retention.evicted_order.push_back(victim);
                 while retention.evicted_order.len() > self.limits.max_tombstones {
@@ -410,6 +416,45 @@ impl EventHub {
             stream.fan_out(&gap);
             stream.subscribers.clear();
         }
+    }
+
+    /// run의 소유 작업대를 기록한다(041 research R17). 이미 있으면 그대로 둔다 — 첫 소유자가 이긴다(끝난 run id
+    /// 재사용은 `run.start`가 거절하므로 두 작업대가 같은 run을 claim하는 일은 없다).
+    pub fn claim_run(&self, run_id: &str, bench_id: &str) {
+        lock(&self.retention)
+            .run_owners
+            .entry(StreamKind::Run.stream_id(run_id))
+            .or_insert_with(|| bench_id.to_owned());
+    }
+
+    /// 발행하는 쪽(엔진이 run에 준 소유 작업대의 sink)이 소유를 확정한다. 같은 id로 두 작업대가 동시에 기동해
+    /// 먼저 claim한 쪽이 엔진에서 지면, 이긴 쪽의 첫 발행이 소유를 바로잡는다.
+    pub fn assign_run_owner(&self, run_id: &str, bench_id: &str) {
+        let stream_id = StreamKind::Run.stream_id(run_id);
+        let mut retention = lock(&self.retention);
+        if retention.run_owners.get(&stream_id).map(String::as_str) != Some(bench_id) {
+            retention.run_owners.insert(stream_id, bench_id.to_owned());
+        }
+    }
+
+    /// 기동 실패로 run이 생기지 않았으면 claim을 되돌린다(발행 이력이 있으면 두는데, 이력이 있는 run은 이미 소유가
+    /// 확정됐다).
+    pub fn release_run_claim(&self, run_id: &str, bench_id: &str) {
+        if self.has_run_history(run_id) {
+            return;
+        }
+        let stream_id = StreamKind::Run.stream_id(run_id);
+        let mut retention = lock(&self.retention);
+        if retention.run_owners.get(&stream_id).map(String::as_str) == Some(bench_id) {
+            retention.run_owners.remove(&stream_id);
+        }
+    }
+
+    pub fn run_owner(&self, run_id: &str) -> Option<String> {
+        lock(&self.retention)
+            .run_owners
+            .get(&StreamKind::Run.stream_id(run_id))
+            .cloned()
     }
 
     /// 호환 replay command용 run replay(research R5 표).
@@ -497,12 +542,6 @@ impl EventHub {
                     format!("invalid stream id: {}", cursor.stream_id),
                 ));
             };
-            if !kind.is_subscribable() {
-                return Err(fault(
-                    FaultCode::InvalidArgument,
-                    MESSAGE_KIND_NOT_AVAILABLE,
-                ));
-            }
             if !principal.has_scope(kind.required_scope()) {
                 return Err(WorkbenchFault::forbidden(
                     RequestId::random(),
@@ -993,10 +1032,6 @@ mod tests {
             .subscribe(&desktop, Subscription::default())
             .unwrap_err();
         assert_eq!(error.code, FaultCode::InvalidArgument);
-        let error = hub
-            .subscribe(&desktop, cursor("orchestration:w1", 0))
-            .unwrap_err();
-        assert_eq!(error.message, MESSAGE_KIND_NOT_AVAILABLE);
         publish(&hub, "r", 3);
         let error = hub.subscribe(&desktop, cursor("run:r", 9)).unwrap_err();
         assert_eq!(error.message, MESSAGE_CURSOR_AHEAD);

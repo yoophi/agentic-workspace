@@ -348,6 +348,14 @@
         ],
         "eventSchemas": [
           {
+            "schema": "orchestration.workspaceUpdated.v1",
+            "streamKind": "orchestration",
+            "class": "state",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
             "schema": "exchange.requested.v1",
             "streamKind": "exchange",
             "class": "state",

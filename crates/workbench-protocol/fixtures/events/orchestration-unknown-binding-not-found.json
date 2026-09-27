@@ -1,5 +1,5 @@
 {
-  "name": "stream-kind-not-available",
+  "name": "orchestration-unknown-binding-not-found",
   "subscribe": [
     {
       "streamId": "orchestration:w1",
@@ -8,8 +8,8 @@
   ],
   "expect": {
     "fault": {
-      "code": "invalidArgument",
-      "message": "stream kind is not available yet."
+      "code": "notFound",
+      "message": "orchestration stream not found."
     }
   }
 }

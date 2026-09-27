@@ -270,17 +270,22 @@ impl OrchestrationRuntime {
     /// 어떤 작업 영역(묶임과 무관)이라도 이 run을 노드·세대로 기록하고 있는가(research R18).
     pub fn references_run(&self, run_id: &str) -> bool {
         self.repository.snapshot().is_ok_and(|sessions| {
-            sessions.iter().any(|session| {
-                session
-                    .nodes
-                    .iter()
-                    .any(|node| node.current_run_id.as_deref() == Some(run_id))
-                    || session
-                        .generations
-                        .iter()
-                        .any(|generation| generation.run_id == run_id)
-            })
+            sessions
+                .iter()
+                .any(|session| session_records_run(session, run_id))
         })
+    }
+
+    /// 이 run을 기록한 작업 영역이 지금 묶인 작업대(research R17 허용 조건 2: 노드 `currentRunId`, 세대 `runId`, 과제
+    /// 명령·시도의 run id). 재생·구독 권한이 같은 규칙을 쓴다.
+    pub fn bench_with_workspace_run(&self, run_id: &str) -> Option<String> {
+        let sessions = self.repository.snapshot().ok()?;
+        sessions
+            .iter()
+            .find(|session| {
+                session.bound_bench_id.is_some() && session_records_run(session, run_id)
+            })
+            .and_then(|session| session.bound_bench_id.clone())
     }
 
     /// Main 패널 run을 띄우기 전 검사(오늘 AW `resolve_agent_run_launch_principal`의 문구 그대로). 작업대에 묶인
@@ -909,4 +914,24 @@ fn canonical_directory(path: &str) -> OrchestrationResult<String> {
         ));
     }
     Ok(canonical.to_string_lossy().to_string())
+}
+
+/// 작업 영역이 이 run을 노드·세대·과제 명령·보고(이전 시도 포함)로 기록하고 있는가.
+fn session_records_run(session: &OrchestrationSession, run_id: &str) -> bool {
+    session
+        .nodes
+        .iter()
+        .any(|node| node.current_run_id.as_deref() == Some(run_id))
+        || session
+            .generations
+            .iter()
+            .any(|generation| generation.run_id == run_id)
+        || session
+            .commands
+            .iter()
+            .any(|command| command.run_id == run_id)
+        || session
+            .reports
+            .iter()
+            .any(|report| report.reporter_run_id == run_id)
 }

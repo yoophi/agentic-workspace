@@ -62,6 +62,8 @@ impl RunEventSink for WorkbenchRunSink {
         let body = serde_json::to_value(&event).expect("run event serializes");
         let bench_id = &self.bench_id;
         let desktop = &self.desktop;
+        // 소유 확정(research R17): 이 sink의 작업대가 엔진이 준 소유자다. 기동 경로가 claim하지 않은 run도 여기서 남는다.
+        self.hub.assign_run_owner(run_id, bench_id);
         self.hub.publish_state(
             StreamKind::Run,
             run_id,

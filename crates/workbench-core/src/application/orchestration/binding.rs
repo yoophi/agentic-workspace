@@ -44,6 +44,14 @@ impl BindingTable {
         self.by_bench.get(bench_id).map(String::as_str)
     }
 
+    /// 묶임 id → 작업대(스트림 구독 권한). 작업대 수 상한(256) 안의 선형 탐색.
+    pub fn bench_of_binding(&self, binding_id: &str) -> Option<&str> {
+        self.by_workspace
+            .values()
+            .find(|binding| binding.binding_id == binding_id)
+            .map(|binding| binding.bench_id.as_str())
+    }
+
     /// 작업 영역의 묶임을 `bench_id`로 맞추고 변화를 돌려준다. 같은 작업대면 변화 없음(묶임 id 유지).
     pub fn set(&mut self, workspace_id: &str, bench_id: Option<&str>) -> Vec<BindingChange> {
         let current = self.by_workspace.get(workspace_id).cloned();
@@ -98,6 +106,10 @@ impl OrchestrationBindings {
 
     pub fn workspace_of_bench(&self, bench_id: &str) -> Option<String> {
         self.lock().workspace_of_bench(bench_id).map(str::to_owned)
+    }
+
+    pub fn bench_of_binding(&self, binding_id: &str) -> Option<String> {
+        self.lock().bench_of_binding(binding_id).map(str::to_owned)
     }
 }
 
