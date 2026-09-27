@@ -237,9 +237,30 @@
               "system:describe"
             ]
           }
+        ],
+        "eventSchemas": [
+          {
+            "schema": "run.event.v1",
+            "streamKind": "run",
+            "class": "state",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "schema": "worktree.changed.v1",
+            "streamKind": "worktree",
+            "class": "notification",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          }
         ]
       }
     },
     "schemaPresent": true
-  }
+  },
+  "ignoreFields": [
+    "epoch"
+  ]
 }

@@ -1,0 +1,20 @@
+{
+  "name": "run-unknown-cursor-positive-gap",
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 3
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "gap": {
+          "streamId": "run:r1",
+          "reason": "unknownStream"
+        }
+      }
+    ],
+    "end": true
+  }
+}

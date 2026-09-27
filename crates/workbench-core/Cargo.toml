@@ -15,6 +15,8 @@ acp-agent-core = { path = "../acp-agent-core" }
 anyhow = "1"
 walkdir = "2"
 async-trait = "0.1"
+futures-core = "0.3"
+notify = "6"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
@@ -26,7 +28,9 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 workbench-core = { path = ".", features = ["test-hooks"] }
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net"] }

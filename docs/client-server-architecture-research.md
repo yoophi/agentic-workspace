@@ -7,6 +7,8 @@
 > 진행 상태(2026-09-26): 1단계의 첫 세로 slice(1a)가 [Workbench Seam](workbench-seam.md)·`specs/037-workbench-seam`으로 완료됐다. `crates/workbench-protocol`·`crates/workbench-core`가 생겼고 `project.list`·`project.create`·`system.describe`가 `Workbench.call`을 통과하며, SQLite operation ledger(intent-first)와 계약 생성·drift 검사가 동작한다. 구현 중 확정된 두 가지 보완 — revision은 만료되지 않는 `aggregate_revision` 테이블에 별도 보존하고, 저장 파일 `.bak` 복구는 aggregate lock 안에서만 수행한다 — 는 이 문서의 §멱등성과 durability boundary·§저장 동시성 규칙을 구현 수준에서 구체화한 것이다. 나머지 Tauri command 이관은 038이다.
 >
 > 진행 상태(2026-09-27): **038(1b) 완료** — `specs/038-workbench-domains`. 서버 소유 상태·조회 command 29개(프로젝트 수정·삭제, saved prompt, goal, agent 실행 설정, Git·worktree·파일, agent catalog·provider 세션)가 `Workbench.call`을 통과해 operation은 32개가 됐다. 이벤트·창 정체에 묶인 32개(run 8·exchange 4·orchestration 18·watcher 2)는 2단계로 이연했고([ADR 0001](adr/0001-defer-event-bound-commands-to-stage-2.md)), 데스크톱 표현 상태 8개는 데스크톱에 남는다. ledger는 schema v2(예약은 `pending` 동안만 배타)로 올랐고, 외부 부작용(worktree 생성·삭제)은 종료 상태 규칙으로 재시작 판정한다. 71개 전체 분류는 [Workbench Seam — command 인벤토리](workbench-seam.md#command-인벤토리-71).
+>
+> 진행 상태(2026-09-27): **039(2a) 완료** — `specs/039-workbench-events`. `Workbench.events`가 동작한다: core `EventHub`가 run(상태 복원용, 메모리 journal + 서버 세대)·worktree(알림용) 스트림을 발행·구독하고, 구독 경계·gap·보관 한도를 fixture 27개(in-memory·테스트 WebSocket)로 고정했다. AW run 이벤트는 hub에서 순번을 받아 창에 삽입 경로 하나로 전달되고(live·replay 같은 순번), worktree watcher 2개는 구독 task가 됐다. 이벤트 스키마는 describe·OpenAPI `EventBySchema`·TS `EventMap`으로 생성된다. 창 정체 분해와 run·exchange·orchestration 30개 이관은 040(2b)이다. 세부는 [Workbench Seam — 이벤트 스트림](workbench-seam.md#이벤트-스트림-039).
 
 ## 결론
 

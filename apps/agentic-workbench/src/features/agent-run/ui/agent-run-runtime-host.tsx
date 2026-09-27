@@ -54,7 +54,8 @@ export function AgentRunRuntimeHost({
       };
       controller.applyLive({
         runId: envelope.runId,
-        sequence: controller.snapshot.lastSequence + 1,
+        // 039: 서버가 부여한 순번(live·replay 동일). 더 이상 추정하지 않는다.
+        sequence: envelope.sequence,
         event: envelope.event,
         terminal:
           event.type === "error" ||

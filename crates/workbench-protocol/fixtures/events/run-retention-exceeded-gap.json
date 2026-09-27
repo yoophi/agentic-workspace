@@ -1,0 +1,31 @@
+{
+  "name": "run-retention-exceeded-gap",
+  "limits": {
+    "runJournalCapacity": 8
+  },
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 20
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 2
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "gap": {
+          "streamId": "run:r1",
+          "reason": "retentionExceeded",
+          "firstSequence": 13,
+          "lastSequence": 20
+        }
+      }
+    ],
+    "end": true
+  }
+}

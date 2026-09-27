@@ -1,0 +1,81 @@
+{
+  "name": "run-replay-from-middle",
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 10
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 4
+    }
+  ],
+  "after": [
+    {
+      "publish": "run:r1",
+      "count": 2
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 5,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 6,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 7,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 8,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 9,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 10,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 11,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 12,
+          "schema": "run.event.v1"
+        }
+      }
+    ]
+  }
+}

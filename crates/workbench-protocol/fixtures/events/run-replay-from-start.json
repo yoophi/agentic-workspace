@@ -1,0 +1,54 @@
+{
+  "name": "run-replay-from-start",
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 5
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 1,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 2,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 3,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 4,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 5,
+          "schema": "run.event.v1"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "stream-forbidden-without-scope",
+  "principal": "noscope",
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "forbidden"
+    }
+  }
+}

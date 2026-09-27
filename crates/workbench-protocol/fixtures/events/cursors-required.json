@@ -1,0 +1,10 @@
+{
+  "name": "cursors-required",
+  "subscribe": [],
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "at least one cursor is required."
+    }
+  }
+}

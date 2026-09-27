@@ -1,0 +1,25 @@
+{
+  "name": "cursors-over-limit",
+  "limits": {
+    "maxCursors": 2
+  },
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    },
+    {
+      "streamId": "run:r2",
+      "afterSequence": 0
+    },
+    {
+      "streamId": "run:r3",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "invalidArgument"
+    }
+  }
+}

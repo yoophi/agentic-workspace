@@ -1,0 +1,30 @@
+{
+  "name": "run-subscriber-lagged-gap",
+  "limits": {
+    "subscriberQueue": 4
+  },
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "after": [
+    {
+      "publish": "run:r1",
+      "count": 10
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "gap": {
+          "streamId": "run:r1",
+          "reason": "subscriberLagged"
+        }
+      }
+    ],
+    "end": true
+  },
+  "inMemoryOnly": true
+}

@@ -34,7 +34,6 @@ use inbound::tauri_commands::{
 use infrastructure::{
     agent_session_registry::AppState,
     in_memory_agent_workspace_registry::InMemoryAgentWorkspaceRegistry,
-    in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
     json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
     tauri_orchestration_event_sink::TauriOrchestrationEventSink,
@@ -162,7 +161,6 @@ pub fn run() {
         })
         .manage(app_state)
         .manage(agent_workspace_registry)
-        .manage(InMemoryRuntimeEventJournal::default())
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![
             list_projects,

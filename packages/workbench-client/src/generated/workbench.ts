@@ -766,11 +766,54 @@ export interface components {
         DescribeOutput: {
             /** Format: int32 */
             protocolVersion: number;
+            /** @description 현재 서버 세대(039). 모든 이벤트·gap이 같은 값을 싣는다. */
+            epoch: string;
             operations: components["schemas"]["OperationDescriptor"][];
+            /** @description principal에게 허용되고 구독 가능한 이벤트 스키마(039). */
+            eventSchemas: components["schemas"]["EventSchemaDescriptor"][];
         };
         /** @enum {string} */
         Effect: "read" | "modify";
-        /** @description 공통 이벤트 봉투. 2단계에서 채운다. */
+        EventBySchema: {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "run.event.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["RunEventDto"];
+        } | {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "worktree.changed.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["WorktreeChangedDto"];
+        } | {
+            eventId: string;
+            streamId: string;
+            epoch: string;
+            /** @description 스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다. */
+            sequence: number;
+            /** @enum {string} */
+            schema: "orchestration.workspaceUpdated.v1";
+            occurredAt: string;
+            correlationId?: components["schemas"]["RequestId"];
+            body: components["schemas"]["OrchestrationEventDto"];
+        };
+        /**
+         * @description 상태 복원용(보관·replay) 또는 알림용(보관 없음, 구독 시작 이후만).
+         * @enum {string}
+         */
+        EventClass: "state" | "notification";
+        /** @description 공통 이벤트 봉투. `sequence`는 스트림 안에서 1부터 1씩 증가한다. */
         EventEnvelope: {
             eventId: string;
             streamId: string;
@@ -782,11 +825,70 @@ export interface components {
             correlationId?: null | components["schemas"]["RequestId"];
             body: unknown;
         };
+        /** @description 테스트 WebSocket(039)과 3단계 운영 WebSocket이 공유하는 프레임. */
+        EventFrame: {
+            /** Format: int32 */
+            protocolVersion: number;
+            epoch: string;
+            /** @enum {string} */
+            type: "hello";
+        } | {
+            cursors: components["schemas"]["StreamCursor"][];
+            /** @enum {string} */
+            type: "subscribe";
+        } | {
+            event: components["schemas"]["EventEnvelope"];
+            /** @enum {string} */
+            type: "event";
+        } | (components["schemas"]["GapNotice"] & {
+            /** @enum {string} */
+            type: "gap";
+        }) | {
+            fault: components["schemas"]["WorkbenchFault"];
+            /** @enum {string} */
+            type: "fault";
+        };
+        /** @description `EventStream`의 항목. */
+        EventItem: {
+            event: components["schemas"]["EventEnvelope"];
+            /** @enum {string} */
+            kind: "event";
+        } | {
+            gap: components["schemas"]["GapNotice"];
+            /** @enum {string} */
+            kind: "gap";
+        };
+        /** @description `system.describe.eventSchemas`의 항목. 구독 가능하고 principal에게 허용된 것만 나온다. */
+        EventSchemaDescriptor: {
+            schema: string;
+            streamKind: components["schemas"]["StreamKind"];
+            class: components["schemas"]["EventClass"];
+            requiredScopes: components["schemas"]["Scope"][];
+        };
         /**
          * @description 안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.
          * @enum {string}
          */
         FaultCode: "invalidArgument" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "interactionRequired" | "preconditionFailed" | "unsupportedProtocol" | "unsupportedSchema" | "rateLimited" | "draining" | "unavailable" | "deadlineExceeded" | "internal";
+        /** @description gap 신호. 받은 쪽은 상태를 다시 조회해 동기화한다. 해당 스트림에는 그 구독에서 더 이상 이벤트가 오지 않는다. */
+        GapNotice: {
+            streamId: string;
+            /** @description 현재 세대. */
+            epoch: string;
+            reason: components["schemas"]["GapReason"];
+            /**
+             * Format: int64
+             * @description 현재 보관 범위(있으면).
+             */
+            firstSequence?: number | null;
+            /** Format: int64 */
+            lastSequence?: number | null;
+        };
+        /**
+         * @description cursor 다음을 이어 붙일 수 없는 이유.
+         * @enum {string}
+         */
+        GapReason: "unknownStream" | "evicted" | "epochChanged" | "retentionExceeded" | "subscriberLagged" | "shutdown";
         GitBranchDto: {
             name: string;
             isCurrent: boolean;
@@ -976,6 +1078,8 @@ export interface components {
             tokenBudget?: number | null;
         };
         IdempotencyKey: string;
+        /** @enum {string} */
+        LifecycleStatusDto: "started" | "initialized" | "sessionCreated" | "promptSent" | "promptCompleted" | "steerPending" | "steerAccepted" | "steerRejected" | "cancelled" | "completed";
         /** @description operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다. */
         OperationDescriptor: {
             /** @description 예: `project.list` */
@@ -994,6 +1098,14 @@ export interface components {
         };
         /** @enum {string} */
         OperationKind: "query" | "command";
+        OrchestrationEventDto: {
+            workspaceId: string;
+            /** Format: int64 */
+            revision: number;
+            reason: string;
+            taskId?: string | null;
+            nodeId?: string | null;
+        };
         /**
          * @description mutation의 적용 여부. timeout·단절 뒤 같은 멱등성 키로 재확인할지 판단하는 근거다.
          * @enum {string}
@@ -1001,6 +1113,15 @@ export interface components {
         Outcome: "notApplied" | "applied" | "unknown";
         /** @enum {string} */
         PermissionMode: "default" | "auto" | "readOnly" | "plan" | "acceptEdits" | "dangerouslySkipAllPermissions";
+        PermissionOptionDto: {
+            name: string;
+            kind: string;
+            optionId: string;
+        };
+        PlanEntryDto: {
+            status: string;
+            content: string;
+        };
         /** @description `project.create` input. 정규화(trim 등)는 core의 `project_service`가 한다. */
         ProjectCreateInput: {
             name: string;
@@ -1042,7 +1163,89 @@ export interface components {
             branch?: string | null;
             source?: string | null;
         };
+        /** @enum {string} */
+        RalphLoopStatusDto: "started" | "completed" | "failed" | "stopped";
         RequestId: string;
+        RunEventDto: {
+            status: components["schemas"]["LifecycleStatusDto"];
+            message: string;
+            /** @enum {string} */
+            type: "lifecycle";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "agentMessage";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "thought";
+        } | {
+            entries: components["schemas"]["PlanEntryDto"][];
+            /** @enum {string} */
+            type: "plan";
+        } | {
+            toolCallId?: string | null;
+            status: string;
+            title: string;
+            locations: string[];
+            fileChanges?: components["schemas"]["ToolFileChangeDto"][];
+            /** @enum {string} */
+            type: "tool";
+        } | {
+            /** Format: int64 */
+            used: number;
+            /** Format: int64 */
+            size: number;
+            /** @enum {string} */
+            type: "usage";
+        } | {
+            threadStatus?: string | null;
+            title?: string | null;
+            updatedAt?: string | null;
+            /** @enum {string} */
+            type: "sessionInfo";
+        } | {
+            permissionId?: string | null;
+            title: string;
+            input?: Record<string, never> | null;
+            options: components["schemas"]["PermissionOptionDto"][];
+            selected?: string | null;
+            requiresResponse: boolean;
+            /** @enum {string} */
+            type: "permission";
+        } | {
+            operation: string;
+            path: string;
+            /** @enum {string} */
+            type: "fileSystem";
+        } | {
+            operation: string;
+            terminalId?: string | null;
+            message: string;
+            /** @enum {string} */
+            type: "terminal";
+        } | {
+            message: string;
+            /** @enum {string} */
+            type: "diagnostic";
+        } | {
+            /** Format: int64 */
+            iteration: number;
+            /** Format: int64 */
+            maxIterations: number;
+            status: components["schemas"]["RalphLoopStatusDto"];
+            /** @enum {string} */
+            type: "ralphLoop";
+        } | {
+            method: string;
+            payload: Record<string, never>;
+            /** @enum {string} */
+            type: "raw";
+        } | {
+            message: string;
+            /** @enum {string} */
+            type: "error";
+        };
         SavedPromptCreateInput: {
             label: string;
             prompt: string;
@@ -1066,20 +1269,43 @@ export interface components {
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}
          */
-        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "system:describe";
-        /** @description stream별 재연결 cursor. 정본 §WebSocket, replay 계약. 037은 시그니처만 둔다. */
+        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "system:describe";
+        /**
+         * @description stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).
+         *     알림용 스트림(`worktree:*`)은 `afterSequence`를 보지 않고 live부터 전달한다.
+         */
         StreamCursor: {
             streamId: string;
             epoch: string;
             /** Format: int64 */
             afterSequence: number;
         };
-        /** @description 이벤트 구독 요청. 037은 `events`가 항상 `unsupportedSchema`를 돌려준다. */
+        /**
+         * @description 스트림 식별자 `<kind>:<key>`의 kind.
+         * @enum {string}
+         */
+        StreamKind: "run" | "worktree" | "orchestration" | "exchange";
+        /** @description 이벤트 구독 요청. cursor는 1–64개. */
         Subscription: {
             cursors?: components["schemas"]["StreamCursor"][];
         };
         /** @description `system.describe` input. 필드가 없고 추가 필드는 거절한다. */
         SystemDescribeInput: Record<string, never>;
+        ToolFileChangeDto: {
+            path: string;
+            oldPath?: string | null;
+            kind: components["schemas"]["ToolFileChangeKindDto"];
+            status: components["schemas"]["ToolFileChangeStatusDto"];
+            diff?: string | null;
+            content?: string | null;
+            binary: boolean;
+            truncated: boolean;
+            message?: string | null;
+        };
+        /** @enum {string} */
+        ToolFileChangeKindDto: "added" | "modified" | "deleted" | "renamed" | "unknown";
+        /** @enum {string} */
+        ToolFileChangeStatusDto: "inProgress" | "completed" | "failed" | "unavailable";
         /** @description 호출 실패. `message`는 사람이 읽는 한 문장이며 코드나 스택을 담지 않는다. */
         WorkbenchFault: {
             code: components["schemas"]["FaultCode"];
@@ -1098,8 +1324,19 @@ export interface components {
             content?: string | null;
             truncated: boolean;
         };
+        /**
+         * @description `git`: `.git` 메타데이터(브랜치·index 등) 변경. `file`: 작업 트리 파일 변경.
+         * @enum {string}
+         */
+        WorktreeChangeKindDto: "file" | "git";
         /** @enum {string} */
         WorktreeChangeType: "added" | "modified" | "deleted" | "renamed" | "untracked";
+        WorktreeChangedDto: {
+            workingDirectory: string;
+            /** @description debounce 창 안의 대표 변경 경로. */
+            changedPath: string;
+            kind: components["schemas"]["WorktreeChangeKindDto"];
+        };
         WorktreeFileEntryDto: {
             name: string;
             path: string;

@@ -47,7 +47,11 @@ pub struct OperationDescriptor {
 #[serde(rename_all = "camelCase")]
 pub struct DescribeOutput {
     pub protocol_version: u16,
+    /// 현재 서버 세대(039). 모든 이벤트·gap이 같은 값을 싣는다.
+    pub epoch: String,
     pub operations: Vec<OperationDescriptor>,
+    /// principal에게 허용되고 구독 가능한 이벤트 스키마(039).
+    pub event_schemas: Vec<crate::events::EventSchemaDescriptor>,
 }
 
 #[cfg(test)]

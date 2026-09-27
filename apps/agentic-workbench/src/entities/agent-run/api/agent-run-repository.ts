@@ -8,8 +8,8 @@ import type {
   AgentToolCommandCandidateQuery,
   AgentToolCommandCandidateResponse,
   PermissionMode,
+  DeliveredRunEvent,
   ProviderSession,
-  RunEventEnvelope,
 } from "@/entities/agent-run/model/types";
 
 export async function listAgents() {
@@ -70,16 +70,16 @@ export async function respondAgentPermission(
   return invoke<void>("respond_agent_permission", { runId, permissionId, optionId });
 }
 
-export function listenRunEvents(callback: (event: RunEventEnvelope) => void) {
+export function listenRunEvents(callback: (event: DeliveredRunEvent) => void) {
   let disposed = false;
-  const handleEnvelope = (envelope: RunEventEnvelope) => {
+  const handleEnvelope = (envelope: DeliveredRunEvent) => {
     if (disposed) {
       return;
     }
     callback(envelope);
   };
   const handleFallback = (event: Event) => {
-    handleEnvelope((event as CustomEvent<RunEventEnvelope>).detail);
+    handleEnvelope((event as CustomEvent<DeliveredRunEvent>).detail);
   };
   window.addEventListener("agent-run-event-fallback", handleFallback);
 

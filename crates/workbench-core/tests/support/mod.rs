@@ -2,6 +2,7 @@
 // 통합 테스트 crate는 lib의 crate-level allow를 상속하지 않는다. WorkbenchFault는 wire DTO라 Box로 감싸지 않는다.
 #![allow(clippy::result_large_err)]
 
+pub mod event_fixtures;
 pub mod fixtures;
 pub mod git_repo;
 pub mod http_harness;
@@ -71,6 +72,7 @@ pub fn stub_adapters(
     RuntimeAdapters {
         agent_catalog: Arc::new(StubCatalog(agents)),
         provider_sessions: Arc::new(StubProviderSessions(sessions)),
+        event_limits: workbench_core::infrastructure::event_hub::EventHubLimits::default(),
     }
 }
 

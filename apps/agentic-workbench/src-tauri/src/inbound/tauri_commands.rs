@@ -6,10 +6,14 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
-use workbench_core::application::{
-    agent_run_settings_service, workbench_runtime::WorkbenchRuntime,
+use workbench_core::{
+    application::{agent_run_settings_service, workbench_runtime::WorkbenchRuntime},
+    infrastructure::event_hub::RunReplay,
 };
-use workbench_protocol::OperationId;
+use workbench_protocol::{
+    AuthenticatedPrincipal, EventItem, OperationId, StreamCursor, Subscription, Workbench,
+    events::StreamKind,
+};
 
 use crate::inbound::workbench_compat;
 use crate::{
@@ -69,11 +73,9 @@ use crate::{
         acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
-        fs_worktree_watcher::{WorktreeWatchHandle, watch_worktree},
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
-        in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
         json_acp_session_store::JsonAcpSessionStore,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
@@ -89,7 +91,6 @@ use crate::{
         agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
         permission::PermissionDecision,
-        runtime_event_journal::{RuntimeEventJournal, RuntimeEventSnapshot},
     },
 };
 
@@ -750,10 +751,13 @@ pub struct ReplayRuntimeEventsInput {
 
 #[tauri::command]
 pub fn replay_orchestration_runtime_events(
-    journal: State<'_, InMemoryRuntimeEventJournal>,
+    app: AppHandle,
     input: ReplayRuntimeEventsInput,
-) -> RuntimeEventSnapshot {
-    journal.replay(&input.run_id, input.after_sequence)
+) -> RunReplay {
+    // 039: run journal은 core 이벤트 hub에 있다. 응답 형태는 오늘의 `RuntimeEventSnapshot`과 같다.
+    workbench_runtime(&app)
+        .events_hub()
+        .replay_run(&input.run_id, input.after_sequence)
 }
 
 #[tauri::command]
@@ -968,8 +972,9 @@ fn emit_orchestration_runtime_update(
     }
 }
 
+/// 창별 worktree 구독 task(039 US3). task를 abort하면 구독 스트림이 drop되어 hub의 감시 참조 수가 내려간다.
 pub struct WorktreeWatcherState {
-    handles: Mutex<HashMap<String, WorktreeWatchHandle>>,
+    handles: Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 }
 
 fn exchange_error(error: crate::domain::agent_exchange::AgentExchangeError) -> String {
@@ -1064,7 +1069,9 @@ impl WorktreeWatcherState {
             .handles
             .lock()
             .map_err(|error| format!("Failed to lock worktree watcher state: {error}"))?;
-        handles.remove(window_label);
+        if let Some(task) = handles.remove(window_label) {
+            task.abort();
+        }
         Ok(())
     }
 }
@@ -1546,25 +1553,52 @@ pub async fn start_worktree_watcher(
 ) -> Result<(), String> {
     let window_label = window.label().to_string();
     let target_label = window_label.clone();
-    let event_app = app.clone();
-    // watcher 시작은 내부에서 `git rev-parse`를 실행하므로 blocking pool에서 수행한다.
-    let handle = run_blocking_command("start_worktree_watcher", move || {
-        watch_worktree(working_directory, move |event| {
-            if let Err(error) =
-                event_app.emit_to(target_label.as_str(), WORKTREE_CHANGED_EVENT, event)
-            {
-                eprintln!("Failed to emit worktree change event: {error}");
-            }
-        })
+    let runtime = workbench_runtime(&app);
+    let requested = working_directory.clone();
+    // 첫 구독자면 감시를 시작하며 내부에서 `git rev-parse`를 실행하므로 blocking pool에서 구독한다.
+    let mut stream = run_blocking_command("start_worktree_watcher", move || {
+        let subscription = Subscription {
+            cursors: vec![StreamCursor {
+                stream_id: StreamKind::Worktree.stream_id(&working_directory),
+                epoch: runtime.epoch().to_owned(),
+                after_sequence: 0,
+            }],
+        };
+        runtime
+            .events(AuthenticatedPrincipal::desktop(), subscription)
+            .map_err(|fault| fault.message)
     })
     .await?;
+    let task = tauri::async_runtime::spawn(async move {
+        while let Some(item) = stream.next_item().await {
+            let EventItem::Event { event } = item else {
+                continue;
+            };
+            if let Err(error) = app.emit_to(
+                target_label.as_str(),
+                WORKTREE_CHANGED_EVENT,
+                worktree_changed_payload(event.body, &requested),
+            ) {
+                eprintln!("Failed to emit worktree change event: {error}");
+            }
+        }
+    });
     let mut handles = state
         .handles
         .lock()
         .map_err(|error| format!("Failed to lock worktree watcher state: {error}"))?;
-
-    handles.insert(window_label, handle);
+    if let Some(previous) = handles.insert(window_label, task) {
+        previous.abort();
+    }
     Ok(())
+}
+
+/// 스트림은 실제 경로로 공유되지만 화면은 자신이 넘긴 경로 문자열로 이벤트를 거른다: `workingDirectory`를 되돌린다.
+fn worktree_changed_payload(mut body: serde_json::Value, requested: &str) -> serde_json::Value {
+    if let Some(object) = body.as_object_mut() {
+        object.insert("workingDirectory".into(), requested.into());
+    }
+    body
 }
 
 #[tauri::command]

@@ -1,3 +1,6 @@
+//! worktree 파일·Git 변경 감시(AW `fs_worktree_watcher.rs`에서 이동, 039 US3). 500ms trailing debounce와 File/Git 분류는
+//! 그대로다. 감시 하나는 hub가 실제 경로별 참조 수로 공유한다.
+
 use std::{
     path::{Path, PathBuf},
     process::Command,
@@ -9,11 +12,12 @@ use std::{
 use notify::{Config, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 
-use crate::infrastructure::{WORKSPACE_EXCLUDED_DIRS, perf_log};
+use super::WORKSPACE_EXCLUDED_DIRS;
+use crate::infrastructure::{event_hub::StartWatch, perf};
 
 const WORKTREE_EVENT_DEBOUNCE: Duration = Duration::from_millis(500);
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorktreeChangedEvent {
     pub working_directory: String,
@@ -69,7 +73,7 @@ pub fn watch_worktree(
     // drop되면 channel disconnect로 thread도 종료된다.
     thread::spawn(move || {
         run_debounce_loop(receiver, WORKTREE_EVENT_DEBOUNCE, move |change| {
-            perf_log::log_watcher("emit", &format!("kind={:?}", change.kind));
+            perf::log_watcher("emit", &format!("kind={:?}", change.kind));
             notify(WorktreeChangedEvent {
                 working_directory: worktree_for_event.clone(),
                 changed_path: change.changed_path,
@@ -245,10 +249,10 @@ fn git_metadata_paths(worktree_root: &Path) -> Vec<PathBuf> {
     }
 
     for argument in ["--git-dir", "--git-common-dir"] {
-        if let Some(path) = git_rev_parse_path(worktree_root, argument)
-            && !paths.contains(&path)
-        {
-            paths.push(path);
+        if let Some(path) = git_rev_parse_path(worktree_root, argument) {
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
         }
     }
 
@@ -280,11 +284,21 @@ fn git_rev_parse_path(worktree_root: &Path, argument: &str) -> Option<PathBuf> {
     })
 }
 
+/// hub에 주입할 감시 시작 함수. 본문은 `WorktreeChangedEvent` JSON(`workingDirectory`는 실제 경로).
+pub fn start_watch() -> StartWatch {
+    std::sync::Arc::new(|path, notify| {
+        let handle = watch_worktree(path.to_string_lossy().into_owned(), move |event| {
+            notify(serde_json::to_value(event).expect("worktree event serializes"));
+        })?;
+        Ok(Box::new(handle) as Box<dyn Send>)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use std::{sync::mpsc, thread, time::Duration};
 
-    use super::{EventClass, WorktreeChangeKind, classify_event, run_debounce_loop};
+    use super::{classify_event, run_debounce_loop, EventClass, WorktreeChangeKind};
 
     fn git_paths() -> Vec<std::path::PathBuf> {
         vec!["/repo/.git".into()]

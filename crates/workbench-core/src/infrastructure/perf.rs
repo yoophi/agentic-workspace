@@ -13,3 +13,9 @@ pub fn log_git(name: &str, run: Duration) {
         eprintln!("perf kind=git name={name} run_ms={}", run.as_millis());
     }
 }
+
+pub fn log_watcher(name: &str, extra: &str) {
+    if enabled() {
+        eprintln!("perf kind=watcher name={name} {extra}");
+    }
+}

@@ -1,0 +1,39 @@
+{
+  "name": "run-replay-at-end",
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 10
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 10
+    }
+  ],
+  "after": [
+    {
+      "publish": "run:r1",
+      "count": 2
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 11,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 12,
+          "schema": "run.event.v1"
+        }
+      }
+    ]
+  }
+}

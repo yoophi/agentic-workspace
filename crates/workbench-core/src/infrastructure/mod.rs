@@ -1,4 +1,5 @@
 pub mod data_paths;
+pub mod event_hub;
 pub mod fs;
 pub mod git;
 pub mod json_agent_run_settings_repository;

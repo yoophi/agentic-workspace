@@ -19,8 +19,12 @@ use utoipa::{
 use crate::{
     call::OperationId,
     descriptor::OperationKind,
+    events::{EventSchemaSpec, EVENT_SCHEMAS},
     operations::{OperationSpec, OPERATIONS},
 };
+
+/// 스키마 id ↔ typed 본문 봉투의 판별 union(039). 본문 DTO가 있는 `EVENT_SCHEMAS`만 싣는다.
+pub const EVENT_BY_SCHEMA: &str = "EventBySchema";
 
 #[derive(OpenApi)]
 #[openapi(
@@ -115,6 +119,24 @@ use crate::{
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
         crate::workbench::EventEnvelope,
+        crate::workbench::GapReason,
+        crate::workbench::GapNotice,
+        crate::workbench::EventItem,
+        crate::events::EventClass,
+        crate::events::StreamKind,
+        crate::events::EventSchemaDescriptor,
+        crate::events::EventFrame,
+        crate::events::run::RunEventDto,
+        crate::events::run::LifecycleStatusDto,
+        crate::events::run::RalphLoopStatusDto,
+        crate::events::run::PlanEntryDto,
+        crate::events::run::ToolFileChangeDto,
+        crate::events::run::ToolFileChangeKindDto,
+        crate::events::run::ToolFileChangeStatusDto,
+        crate::events::run::PermissionOptionDto,
+        crate::events::worktree::WorktreeChangedDto,
+        crate::events::worktree::WorktreeChangeKindDto,
+        crate::events::orchestration::OrchestrationEventDto,
     ))
 )]
 struct ApiDoc;
@@ -269,6 +291,32 @@ fn reply_variant(spec: &OperationSpec) -> RefOr<Schema> {
     RefOr::T(Schema::Object(object.build()))
 }
 
+/// `EventBySchema` variant: `EventEnvelope`의 필드 + `schema` 리터럴 + typed `body`.
+fn event_variant(spec: &EventSchemaSpec, body_schema: &str) -> RefOr<Schema> {
+    let string = || ObjectBuilder::new().schema_type(Type::String);
+    let object = ObjectBuilder::new()
+        .title(Some(format!("Event_{}", spec.schema.replace('.', "_"))))
+        .property("eventId", string())
+        .property("streamId", string())
+        .property("epoch", string())
+        .property(
+            "sequence",
+            integer("스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다."),
+        )
+        .property("schema", string().enum_values(Some([spec.schema])))
+        .property("occurredAt", string())
+        .property("correlationId", Ref::from_schema_name("RequestId"))
+        .property("body", Ref::from_schema_name(body_schema))
+        .required("eventId")
+        .required("streamId")
+        .required("epoch")
+        .required("sequence")
+        .required("schema")
+        .required("occurredAt")
+        .required("body");
+    RefOr::T(Schema::Object(object.build()))
+}
+
 fn one_of(variants: impl IntoIterator<Item = RefOr<Schema>>) -> RefOr<Schema> {
     let mut builder = OneOfBuilder::new();
     for variant in variants {
@@ -333,6 +381,13 @@ pub fn build_openapi() -> openapi::OpenApi {
     components.schemas.insert(
         CALL_REPLY_BY_OPERATION_SCHEMA.to_owned(),
         one_of(OPERATIONS.iter().map(reply_variant)),
+    );
+    components.schemas.insert(
+        EVENT_BY_SCHEMA.to_owned(),
+        one_of(EVENT_SCHEMAS.iter().filter_map(|spec| {
+            spec.body_schema
+                .map(|body_schema| event_variant(spec, body_schema))
+        })),
     );
     doc.paths
         .paths
@@ -477,5 +532,49 @@ mod tests {
             render_openapi(),
             "openapi drift: `pnpm run generate:contracts`를 실행하세요."
         );
+    }
+
+    #[test]
+    fn event_by_schema_correlates_schema_id_with_typed_body() {
+        let doc = doc_json();
+        let variants = doc["components"]["schemas"][EVENT_BY_SCHEMA]["oneOf"]
+            .as_array()
+            .expect("EventBySchema oneOf");
+        let pairs: Vec<(String, String)> = variants
+            .iter()
+            .map(|variant| {
+                (
+                    variant["properties"]["schema"]["enum"][0]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    variant["properties"]["body"]["$ref"]
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("run.event.v1", "#/components/schemas/RunEventDto"),
+                (
+                    "worktree.changed.v1",
+                    "#/components/schemas/WorktreeChangedDto"
+                ),
+                (
+                    "orchestration.workspaceUpdated.v1",
+                    "#/components/schemas/OrchestrationEventDto"
+                ),
+            ]
+            .map(|(schema, body)| (schema.to_owned(), body.to_owned()))
+        );
+        for name in ["EventFrame", "GapNotice", "EventItem", "RunEventDto"] {
+            assert!(
+                doc["components"]["schemas"][name].is_object(),
+                "{name} component"
+            );
+        }
     }
 }

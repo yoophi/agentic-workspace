@@ -3,11 +3,13 @@
 
 use std::sync::Arc;
 
+use acp_agent_core::domain::events::{LifecycleStatus, RunEvent};
 use async_trait::async_trait;
 use chrono::Utc;
 use workbench_protocol::{
-    operations::spec_for, AuthenticatedPrincipal, CallReply, CallRequest, EventStream,
-    OperationKind, Subscription, Workbench, WorkbenchFault, PROTOCOL_VERSION,
+    events::StreamKind, operations::spec_for, AuthenticatedPrincipal, CallReply, CallRequest,
+    EventEnvelope, EventStream, OperationKind, Subscription, Workbench, WorkbenchFault,
+    PROTOCOL_VERSION,
 };
 
 pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for command operations.";
@@ -19,6 +21,7 @@ use crate::{
         registry::{CallContext, Registry},
     },
     domain::project_error::ProjectError,
+    infrastructure::event_hub::{EventHub, EventHubLimits},
     infrastructure::{
         data_paths::DataPaths,
         sqlite_ledger::SqliteOperationLedger,
@@ -26,6 +29,7 @@ use crate::{
     },
     ports::{
         agent_catalog_reader::AgentCatalogReader,
+        event_publisher::RunEventPublisher,
         operation_ledger::{LedgerError, OperationLedger},
         provider_session_repository::ProviderSessionRepository,
     },
@@ -36,6 +40,8 @@ use crate::{
 pub struct RuntimeAdapters {
     pub agent_catalog: Arc<dyn AgentCatalogReader>,
     pub provider_sessions: Arc<dyn ProviderSessionRepository>,
+    /// 이벤트 hub 한도(039). 테스트는 낮춘 값으로 overflow·정리를 재현한다.
+    pub event_limits: EventHubLimits,
 }
 
 impl RuntimeAdapters {
@@ -48,6 +54,7 @@ impl RuntimeAdapters {
             provider_sessions: Arc::new(
                 crate::infrastructure::fs::provider_session_repository::FsProviderSessionRepository::new(),
             ),
+            event_limits: EventHubLimits::default(),
         }
     }
 }
@@ -132,6 +139,7 @@ pub struct CrashInjected(pub CrashPoint);
 
 pub struct WorkbenchRuntime {
     paths: DataPaths,
+    events: Arc<EventHub>,
     ledger: Arc<SqliteOperationLedger>,
     coordinator: Arc<StorageCoordinator>,
     registry: Registry,
@@ -159,12 +167,21 @@ impl WorkbenchRuntime {
             coordinator.set_revision_of(aggregate, ledger.current_revision(aggregate)?);
         }
 
+        // 세대: 기동마다 새로 만든다. 모든 이벤트·gap·describe가 같은 값을 싣는다(ADR core 0002).
+        let epoch = uuid::Uuid::new_v4().to_string();
+        let events = EventHub::with_watcher(
+            epoch.clone(),
+            adapters.event_limits,
+            Some(crate::infrastructure::fs::worktree_watcher::start_watch()),
+        );
+
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
             Arc::clone(&ledger),
             Arc::clone(&coordinator),
             Arc::clone(&hooks),
             &adapters,
+            &epoch,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -176,12 +193,22 @@ impl WorkbenchRuntime {
 
         Ok(Arc::new(Self {
             paths,
+            events,
             ledger,
             coordinator,
             registry,
             reconcilers,
             hooks,
         }))
+    }
+
+    /// 이벤트 hub(039). 발행은 `publish_run`을, 구독은 `Workbench::events`를 쓴다.
+    pub fn events_hub(&self) -> &Arc<EventHub> {
+        &self.events
+    }
+
+    pub fn epoch(&self) -> &str {
+        self.events.epoch()
     }
 
     pub fn reconcilers(&self) -> &ReconcilerRegistry {
@@ -264,13 +291,42 @@ impl Workbench for WorkbenchRuntime {
 
     fn events(
         &self,
-        _principal: AuthenticatedPrincipal,
-        _request: Subscription,
+        principal: AuthenticatedPrincipal,
+        request: Subscription,
     ) -> Result<EventStream, WorkbenchFault> {
-        Err(WorkbenchFault::events_unsupported(
-            workbench_protocol::RequestId::random(),
-        ))
+        self.events.subscribe(&principal, request)
     }
+}
+
+impl RunEventPublisher for WorkbenchRuntime {
+    fn publish_run(
+        &self,
+        run_id: &str,
+        event: &RunEvent,
+        terminal: bool,
+        deliver: &mut dyn FnMut(&EventEnvelope),
+    ) -> Option<EventEnvelope> {
+        let body = serde_json::to_value(event).expect("run event serializes");
+        self.events.publish_state(
+            StreamKind::Run,
+            run_id,
+            workbench_protocol::events::RUN_EVENT_V1,
+            body,
+            terminal,
+            deliver,
+        )
+    }
+}
+
+/// 오늘과 같은 terminal 판정: `Lifecycle Completed | Cancelled`.
+pub fn is_terminal_run_event(event: &RunEvent) -> bool {
+    matches!(
+        event,
+        RunEvent::Lifecycle {
+            status: LifecycleStatus::Completed | LifecycleStatus::Cancelled,
+            ..
+        }
+    )
 }
 
 #[cfg(test)]
@@ -336,13 +392,24 @@ mod tests {
         assert_eq!(fault.code, FaultCode::Forbidden);
     }
 
+    /// 039: `events`가 구독을 연다. 037의 `events_are_unsupported_in_037`를 대체한다(계약이 뒤집혔다).
     #[tokio::test]
-    async fn events_are_unsupported_in_037() {
+    async fn events_reject_unknown_stream_kind_and_describe_carries_epoch() {
         let (_dir, runtime) = runtime();
         let fault = runtime
-            .events(AuthenticatedPrincipal::desktop(), Subscription::default())
+            .events(
+                AuthenticatedPrincipal::desktop(),
+                Subscription {
+                    cursors: vec![workbench_protocol::StreamCursor {
+                        stream_id: "orchestration:w1".into(),
+                        epoch: runtime.epoch().into(),
+                        after_sequence: 0,
+                    }],
+                },
+            )
             .unwrap_err();
-        assert_eq!(fault.code, FaultCode::UnsupportedSchema);
+        assert_eq!(fault.code, FaultCode::InvalidArgument);
+        assert!(!runtime.epoch().is_empty());
     }
 
     #[tokio::test]

@@ -56,5 +56,23 @@ export type Call = <K extends OperationId>(
   input: OperationMap[K]["input"],
 ) => Promise<OperationMap[K]["output"]>;
 
+// 039: 이벤트 계약. `EventBySchema`는 스키마 id ↔ typed 본문의 판별 union이다.
+export type EventEnvelope = Schemas["EventEnvelope"];
+export type EventFrame = Schemas["EventFrame"];
+export type EventItem = Schemas["EventItem"];
+export type GapNotice = Schemas["GapNotice"];
+export type GapReason = Schemas["GapReason"];
+export type StreamCursor = Schemas["StreamCursor"];
+export type RunEvent = Schemas["RunEventDto"];
+export type WorktreeChanged = Schemas["WorktreeChangedDto"];
+export type OrchestrationWorkspaceUpdated = Schemas["OrchestrationEventDto"];
+export type EventBySchema = Schemas["EventBySchema"];
+export type EventSchemaId = EventBySchema["schema"];
+
+/** 스키마 id로 typed 봉투를 찾는다. 구독에서 받은 `EventEnvelope`는 `schema`로 좁힌 뒤 이 타입으로 읽는다. */
+export type EventMap = {
+  [K in EventSchemaId]: Extract<EventBySchema, { schema: K }>;
+};
+
 export const PROTOCOL_VERSION = 1 as const;
 export const CALLS_PATH = "/v1/calls" as const;

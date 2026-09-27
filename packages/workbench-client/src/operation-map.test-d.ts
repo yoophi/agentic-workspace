@@ -5,6 +5,9 @@ import type {
   AgentRunSettings,
   CallReply,
   DescribeOutput,
+  EventFrame,
+  EventMap,
+  EventSchemaId,
   GitCommitHistory,
   GitRemote,
   GitWorktree,
@@ -142,4 +145,37 @@ test("mismatched output types are compile errors", () => {
 test("generic CallReply output is unconstrained JSON and Accepted uses camelCase", () => {
   expectTypeOf<Extract<CallReply, { kind: "complete" }>["output"]>().toBeUnknown();
   expectTypeOf<Extract<CallReply, { kind: "accepted" }>>().toHaveProperty("executionId");
+});
+
+test("event schema ids correlate with typed bodies (039)", () => {
+  expectTypeOf<EventSchemaId>().toEqualTypeOf<
+    "run.event.v1" | "worktree.changed.v1" | "orchestration.workspaceUpdated.v1"
+  >();
+
+  const run = {} as EventMap["run.event.v1"];
+  if (run.body.type === "agentMessage") {
+    expectTypeOf(run.body.text).toEqualTypeOf<string>();
+  }
+  expectTypeOf<EventMap["worktree.changed.v1"]["body"]["kind"]>().toEqualTypeOf<
+    "file" | "git"
+  >();
+  // @ts-expect-error worktree 알림 본문에는 run 이벤트의 `type`이 없다
+  void ({} as EventMap["worktree.changed.v1"]).body.type;
+  expectTypeOf<EventMap["orchestration.workspaceUpdated.v1"]["body"]["revision"]>().toEqualTypeOf<number>();
+});
+
+test("event frames discriminate on type (039)", () => {
+  const frame = {} as EventFrame;
+  if (frame.type === "hello") {
+    expectTypeOf(frame.epoch).toEqualTypeOf<string>();
+  } else if (frame.type === "gap") {
+    expectTypeOf(frame.reason).toEqualTypeOf<
+      | "unknownStream"
+      | "evicted"
+      | "epochChanged"
+      | "retentionExceeded"
+      | "subscriberLagged"
+      | "shutdown"
+    >();
+  }
 });
