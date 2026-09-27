@@ -48,6 +48,8 @@ export interface SubscribeOptions {
   /** 알림 스트림(worktree 등): 보관이 없어 끊긴 동안의 알림은 사라진다 — 다시 연결될 때마다 수신자를 스냅샷으로
    *  재설정한다(재조회 신호). 첫 연결에서는 하지 않는다. */
   resyncOnReconnect?: boolean;
+  /** 첫 연결(hello)에서도 스냅샷으로 재설정한다 — 구독 전에 일어난 일을 맞춘다(교환 재조정 등). */
+  resyncOnStart?: boolean;
 }
 
 export interface EventClientOptions {
@@ -141,6 +143,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
     terminal = false;
     snapshot: SnapshotSource | undefined;
     resyncOnReconnect = false;
+    resyncOnStart = false;
     connections = 0;
     graceTimer: ReturnType<typeof setTimeout> | undefined;
     reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -299,7 +302,10 @@ export function createEventClient(options: EventClientOptions): EventClient {
         case "hello":
           this.failures = 0;
           this.connections += 1;
-          if (this.resyncOnReconnect && this.connections > 1 && !this.recovery) {
+          if (
+            !this.recovery &&
+            ((this.resyncOnReconnect && this.connections > 1) || (this.resyncOnStart && this.connections === 1))
+          ) {
             for (const state of this.listeners) {
               void this.resetListener(state);
             }
@@ -508,6 +514,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
       if (subscribeOptions.resyncOnReconnect) {
         stream.resyncOnReconnect = true;
+      }
+      if (subscribeOptions.resyncOnStart) {
+        stream.resyncOnStart = true;
       }
       return stream.add(listener, subscribeOptions.after, subscribeOptions.snapshot);
     },

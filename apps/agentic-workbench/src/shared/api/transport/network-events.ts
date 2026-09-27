@@ -150,7 +150,9 @@ export function createNetworkEvents({ events, client }: NetworkEventsOptions) {
             }
           },
         },
-        { snapshot: exchangeSnapshot },
+        // 교환 재조정 트리거(R8·T047): 구독 시작(구독 전에 요청된 교환), 같은 세대 재연결(끊긴 사이·확인 실패 뒤),
+        // 보관 gap·수신자 재동기(이벤트 클라이언트 복구 절차). 모두 스냅샷의 확인 전 교환을 원장으로 다시 맞춘다.
+        { snapshot: exchangeSnapshot, resyncOnStart: true, resyncOnReconnect: true },
       ]);
     }
     if (
