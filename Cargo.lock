@@ -5639,6 +5639,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "workbench-server"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "futures-util",
+ "rand",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tower-http 0.5.2",
+ "uuid",
+ "workbench-protocol",
+]
+
+[[package]]
 name = "writeable"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

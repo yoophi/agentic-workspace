@@ -23,19 +23,19 @@
 
 ## Phase 1: Setup
 
-- [ ] T001 기준선 기록: `cargo test --workspace --all-targets --no-fail-fast`·`cargo clippy --workspace --all-targets -D warnings`·`pnpm run check-types`·`pnpm run test`를 한 번씩 실행해 종료 코드·통과 수를 이 파일 Notes에 적는다
-- [ ] T002 `crates/workbench-server/Cargo.toml` 신설(workbench-protocol, axum 0.7 `ws`, tower-http 0.5 `cors`·`limit`, tokio, sha2, uuid, serde, serde_json, base64 — lock에 있는 버전만), 루트 `Cargo.toml` workspace members 등록, `src/lib.rs` 빈 모듈 골격, `cargo check -p workbench-server` 통과
+- [X] T001 기준선 기록: `cargo test --workspace --all-targets --no-fail-fast`·`cargo clippy --workspace --all-targets -D warnings`·`pnpm run check-types`·`pnpm run test`를 한 번씩 실행해 종료 코드·통과 수를 이 파일 Notes에 적는다
+- [X] T002 `crates/workbench-server/Cargo.toml` 신설(workbench-protocol, axum 0.7 `ws`, tower-http 0.5 `cors`·`limit`, tokio, sha2, uuid, serde, serde_json, base64 — lock에 있는 버전만), 루트 `Cargo.toml` workspace members 등록, `src/lib.rs` 빈 모듈 골격, `cargo check -p workbench-server` 통과
 
 ---
 
 ## Phase 2: Foundational (모든 스토리의 선행)
 
-- [ ] T003 [P] `crates/workbench-server/src/origin.rs`: `OriginPolicy`(허용 출처 목록 정확 일치, `null` 거절, Origin 없음 = 통과 판정 분리), `HostPolicy`(`127.0.0.1:<port>`·`localhost:<port>` 정확 일치). 단위 테스트: 접두사·접미사·대소문자·포트 차이·`null`·빈 값
-- [ ] T004 [P] `crates/workbench-server/src/auth.rs`: 포트 `CredentialResolver { fn resolve(&self, bearer: &str, origin: Option<&str>) -> Option<AuthenticatedPrincipal> }`, `DesktopTokenIssuer`(256비트 무작위 URL-safe base64, SHA-256 해시 키 저장, 출처·클라이언트 인스턴스 묶음, TTL 15분·진단 10분, 상한 256, 발급 때 만료 정리), 합성 resolver(`ChainResolver`). 단위 테스트: 만료, 다른 Origin, Origin 없는 데스크톱 토큰 거절, 진단 토큰은 Origin 있으면 거절, 원문 미보관
-- [ ] T005 [P] `crates/workbench-server/src/tickets.rs`: `EventTicketStore`(256비트, TTL 30초, 1회용 원자적 `take`, principal·cursor·Origin 묶음, 상한 1,024, 고정 cursor 상한 1,024 — 설계 리뷰 D1). 단위 테스트: 재사용·만료·Origin 불일치·동시 take 두 번 중 하나만 성공
-- [ ] T006 [P] `crates/workbench-server/src/access_log.rs`: `AccessLog` sink trait(`requestId, operation, principalKind, status, latencyMs`), stderr 구현, 테스트용 수집 구현. URI query·헤더·본문 비기록
-- [ ] T007 `crates/workbench-server/src/lib.rs`: `ServerConfig{resolver, server_info, origins, access_log, exposure}`, `build_router(workbench, config)`, `serve(listener, router, shutdown)`, problem 응답(오늘 harness 형식, `AW-Protocol-Version` 헤더), Host·Origin 미들웨어, `DefaultBodyLimit` 1 MiB, `GET /health/live`. `ExposurePolicy`(공개 operation 집합; 공개 안 된 operation은 `403` `"operation is not exposed over the network."`) — 시작 값은 **조회 32개만**
-- [ ] T008 `crates/workbench-server/src/handshake.rs`: 포트 `ServerInfo{server_version, server_epoch(), storage_schema_version}`, 협상(교집합 없음 `409` `"protocol version is not supported."` + details), `contractHash` = OpenAPI JSON SHA-256, `instanceId`(프로세스 uuid)
+- [X] T003 [P] `crates/workbench-server/src/origin.rs`: `OriginPolicy`(허용 출처 목록 정확 일치, `null` 거절, Origin 없음 = 통과 판정 분리), `HostPolicy`(`127.0.0.1:<port>`·`localhost:<port>` 정확 일치). 단위 테스트: 접두사·접미사·대소문자·포트 차이·`null`·빈 값
+- [X] T004 [P] `crates/workbench-server/src/auth.rs`: 포트 `CredentialResolver { fn resolve(&self, bearer: &str, origin: Option<&str>) -> Option<AuthenticatedPrincipal> }`, `DesktopTokenIssuer`(256비트 무작위 URL-safe base64, SHA-256 해시 키 저장, 출처·클라이언트 인스턴스 묶음, TTL 15분·진단 10분, 상한 256, 발급 때 만료 정리), 합성 resolver(`ChainResolver`). 단위 테스트: 만료, 다른 Origin, Origin 없는 데스크톱 토큰 거절, 진단 토큰은 Origin 있으면 거절, 원문 미보관
+- [X] T005 [P] `crates/workbench-server/src/tickets.rs`: `EventTicketStore`(256비트, TTL 30초, 1회용 원자적 `take`, principal·cursor·Origin 묶음, 상한 1,024, 고정 cursor 상한 1,024 — 설계 리뷰 D1). 단위 테스트: 재사용·만료·Origin 불일치·동시 take 두 번 중 하나만 성공
+- [X] T006 [P] `crates/workbench-server/src/access_log.rs`: `AccessLog` sink trait(`requestId, operation, principalKind, status, latencyMs`), stderr 구현, 테스트용 수집 구현. URI query·헤더·본문 비기록
+- [X] T007 `crates/workbench-server/src/lib.rs`: `ServerConfig{resolver, server_info, origins, access_log, exposure}`, `build_router(workbench, config)`, `serve(listener, router, shutdown)`, problem 응답(오늘 harness 형식, `AW-Protocol-Version` 헤더), Host·Origin 미들웨어, `DefaultBodyLimit` 1 MiB, `GET /health/live`. `ExposurePolicy`(공개 operation 집합; 공개 안 된 operation은 `403` `"operation is not exposed over the network."`) — 시작 값은 **조회 32개만**
+- [X] T008 `crates/workbench-server/src/handshake.rs`: 포트 `ServerInfo{server_version, server_epoch(), storage_schema_version}`, 협상(교집합 없음 `409` `"protocol version is not supported."` + details), `contractHash` = OpenAPI JSON SHA-256, `instanceId`(프로세스 uuid)
 
 ---
 
@@ -165,3 +165,10 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 ## Notes
 
 - [P] = 다른 파일, 미완료 의존 없음
+
+### 실행 기록
+
+- **T001 기준선**(main 2e7f359 위 worktree, 각 명령 한 번, 원 명령 종료 코드): `cargo test --workspace --all-targets --no-fail-fast` status=0(661 passed, 0 failed, 7 ignored) · `cargo clippy --workspace --all-targets -- -D warnings` status=0 · `pnpm install` status=0 · `pnpm run check-types` status=0 · `pnpm run test` status=0
+- **T002**: `crates/workbench-server` 신설, Cargo.lock 변화는 이 패키지 추가뿐
+- **T003–T008**: `cargo test -p workbench-server` status=0(단위 13), `cargo clippy -p workbench-server --all-targets -- -D warnings` status=0
+- **시험 우선 편차**: `routes/calls.rs`·`handshake.rs`·`events.rs` 골격을 router 골격(T007)과 함께 먼저 작성했다. 그래서 US1·US2 시험의 "실패 확인"은 구현 전 실행 대신 변이로 입증한다 — T018 분리 실행 제거 변이(T009 실패), 경로 제거·표 원자성 제거 변이(해당 시험 실패). 결과는 각 작업 기록에 적는다
