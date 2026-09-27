@@ -68,9 +68,33 @@
 
 **Rationale**: `@yoophi/agent-client`의 `RunEventEnvelope`(hushline 공유)를 바꾸지 않고 AW에서 확장 타입을 둔다. 패널은 추가 필드를 무시한다.
 
-## R7. 프론트 변경 범위
+## R7. 프론트 변경 범위 — 재수화 중 live 버퍼링 (Codex 리뷰 반영, 2026-09-27)
 
-**Decision**: `entities/agent-run/model`에 `DeliveredRunEvent = RunEventEnvelope & { sequence: number; epoch: string; streamId: string; eventId: string }`, `listenRunEvents`의 콜백 타입을 그것으로. `agent-run-runtime-host.tsx`는 `sequence: envelope.sequence`를 쓴다. `terminal` 계산(오류 포함)은 오늘 화면 동작이므로 유지한다. 컨트롤러 reducer(`applyLiveRuntimeEvent`의 `sequence <= lastSequence` 무시)는 이미 중복 제거를 하므로 바꾸지 않는다. vitest로 "hydrate 도중 live 끼어들기" 시나리오를 추가한다.
+**문제**(오늘 reducer 그대로 두면): 데스크톱은 hub 구독을 쓰지 않으므로(ADR 0003) hub의 replay/live 동기화가 화면 재수화를 보호하지 않는다. cursor 0으로 replay를 요청해 서버가 1–10을 capture한 뒤 응답 전에 live 11이 오면, `applyLiveRuntimeEvent`가 `lastSequence`를 11로 올리고 이어 도착한 snapshot(`lastSequence` 10)은 `applyRuntimeSnapshot`의 `snapshot.lastSequence < state.lastSequence` 규칙에 걸려 **통째로 버려진다**. 1–10이 gap 표시 없이 사라진다. 서버 번호를 실어도 이 경합은 남는다.
+
+**Decision**: 컨트롤러가 재수화가 끝날 때까지 live 이벤트를 **버퍼링**한다.
+
+| 컨트롤러 상태 | live 이벤트 처리 |
+|---|---|
+| `idle`·`loading`(재수화 전·중) | 적용하지 않고 `pendingLive`에 보관(같은 `sequence`는 한 번만) |
+| snapshot 도착(`applySnapshot`) | ① snapshot 이벤트 중 `sequence > lastSequence`를 적용 ② `pendingLive`를 `sequence` 오름차순으로 정렬해 `sequence <= lastSequence`는 버리고, `sequence == lastSequence + 1`이면 적용 ③ 그보다 크면(빈틈) 나머지는 적용하되 상태를 `gap`으로 표시 ④ 버퍼 비움 |
+| `ready`·`gap` | 바로 적용. `sequence <= lastSequence`는 무시(중복), `sequence > lastSequence + 1`이면 적용하고 `gap`으로 표시 |
+| 재수화 실패(`markRuntimeLost`) | 버퍼의 이벤트를 위 ②③ 규칙으로 적용하되 상태는 `runtimeLost` 유지(유실 표시가 우선) |
+
+- snapshot을 버리는 규칙(`snapshot.lastSequence < state.lastSequence`)은 버퍼링으로 재수화 중에는 도달하지 않는다. 재수화가 아닌 경로에서 오래된 snapshot이 오는 경우를 위해 남겨 둔다.
+- 버퍼 크기는 run당 journal 보관 한도(512)를 상한으로 둔다. 넘치면 가장 오래된 것부터 버리고 drain 때 빈틈으로 `gap` 표시된다.
+- `terminal` 계산(오류 포함)은 오늘 화면 동작이므로 유지한다.
+- 변경 파일: `features/agent-run/model/agent-run-controller.ts`(버퍼·drain·gap 규칙, 순수 함수로 분리), `agent-run-runtime-host.tsx`(`sequence: envelope.sequence`), `entities/agent-run/model/types.ts`(`DeliveredRunEvent`), `entities/agent-run/api/agent-run-repository.ts`(콜백 타입).
+
+**Regression tests**(vitest, `agent-run-controller.test.ts`):
+1. `loading` 중 live 11 도착 → snapshot(1–10, last 10) → 최종 `events` = 1–11 순서, `lastSequence` 11, 상태 `ready`.
+2. `loading` 중 live 12·11(역순) 도착 → snapshot(1–10) → 1–12 순서.
+3. `loading` 중 live 10·11 도착(10은 snapshot에도 있음) → 10은 한 번만.
+4. `loading` 중 live 13 도착 → snapshot(1–10) → 1–10, 13 적용, 상태 `gap`.
+5. `ready`에서 live 12(`lastSequence` 10) → 적용, 상태 `gap`.
+6. 재수화 실패 → 버퍼의 이벤트 적용, 상태 `runtimeLost`.
+
+**Alternatives**: 데스크톱을 hub 구독자로 바꿔 서버 쪽 동기화를 쓰기 — 창↔run 연결을 정해야 해 2b 범위(ADR 0003). replay 응답에 high-water를 싣고 그 이하 live를 버리는 방식 — 버퍼링과 같은 효과지만 응답 전 도착한 live를 어딘가 보관해야 하는 점은 같다.
 
 ## R8. run 이벤트 본문 계약
 

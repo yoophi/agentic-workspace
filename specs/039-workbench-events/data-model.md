@@ -83,7 +83,21 @@ StreamState
 | `entities/agent-run/model/types.ts` | `DeliveredRunEvent = RunEventEnvelope & {sequence, epoch, streamId, eventId}` |
 | `entities/agent-run/api/agent-run-repository.ts` | `listenRunEvents` 콜백 타입만 `DeliveredRunEvent` |
 | `features/agent-run/ui/agent-run-runtime-host.tsx` | `sequence: envelope.sequence` |
-| `features/agent-run/model/*.test.ts` | hydrate 도중 live 끼어들기 테스트 |
+| `features/agent-run/model/agent-run-controller.ts` | **재수화 중 live 버퍼링**(research R7): 상태에 `pendingLive: SequencedRuntimeEvent[]`(run당 ≤ 512) 추가. `idle`·`loading`에서는 버퍼에만 넣고, `applySnapshot`이 snapshot 적용 뒤 버퍼를 `sequence` 순으로 drain(중복 제거·빈틈이면 `gap`). `ready`·`gap`에서 `sequence > lastSequence + 1`이면 적용 후 `gap`. 재수화 실패 시 버퍼를 적용하고 `runtimeLost` 유지 |
+| `features/agent-run/model/agent-run-controller.test.ts` | research R7 regression 6건(특히 "replay 응답 전 live 11 도착 → 1–11 모두 반영") |
+
+### 컨트롤러 상태 전이
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> loading : markLoading (live는 pendingLive에 보관)
+    loading --> ready : applySnapshot → snapshot 적용 → pendingLive drain(연속)
+    loading --> gap : snapshot.gapDetected 또는 drain 중 빈틈
+    loading --> runtimeLost : replay 실패 → pendingLive 적용
+    ready --> gap : live sequence > lastSequence + 1
+    ready --> ready : live sequence == lastSequence + 1 (중복은 무시)
+```
 
 ## 5. TypeScript 생성 (`packages/workbench-client`)
 
