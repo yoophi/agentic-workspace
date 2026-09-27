@@ -274,3 +274,23 @@ G1–N2에서 교대 회귀가 반복된 원인은 한 cursor에 여러 의미�
 | N2 적재 실패 경로 | 기존 N2 수정 위에서 작성해 처음부터 통과했다 | 0 | N2의 종결 멈춤을 끔 → 1(`expected 72 to be 12`) |
 
 회귀(각 1회, 종료 0): workbench-client 73 tests·통합 7, AW 634 tests·통합 1.
+
+## T057 Codex 후속 집중 리뷰 11 (`--wait --base 4f4f939`, 대상 `af4a0b2`)
+
+판정: **approve**, No material findings. Codex는 전이 표와 코드를 칸마다 대조해, 열거된 기존 지적(C1–P1)의 재발 경로가 막혀 있다고 판단했다. P1과 N2의 적용·적재 실패 경로는 메모리 실행으로 확인했다. 정식 Vitest는 그 환경의 읽기 전용 제한(임시 디렉터리 생성 불가)으로 돌리지 못했다. 정식 실행 근거는 이 저장소의 최종 게이트다.
+
+**리뷰 증거의 위치**: 주 리뷰 증거는 전체 변경 Codex 리뷰(`5f920d2` 기준, C1·C2)다. 후속 1–11은 이벤트 클라이언트 수정만 따로 본 집중 리뷰다.
+
+| 후속 | 대상 커밋 | 판정 | 지적 |
+|---|---|---|---|
+| 1 | `4f4f939` | needs-attention | F1, F2 |
+| 2 | `a637adc` | needs-attention | G1 |
+| 3 | `23d9859` | needs-attention | H1, H2 |
+| 4 | `f60edc6` | needs-attention | I1 |
+| 5 | `5cd115c` | needs-attention | J1 |
+| 6 | `a553aa0` | needs-attention | K1, K2 |
+| 7 | `4d621f5` | needs-attention | L1 |
+| 8 | `ed29063` | needs-attention | M1 |
+| 9 | `34ad088` | needs-attention | N1, N2 |
+| 10 | `90ffeea` | needs-attention | P1 |
+| 11 | `af4a0b2` | **approve** | 없음 |
