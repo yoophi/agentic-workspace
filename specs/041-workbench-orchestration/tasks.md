@@ -149,7 +149,7 @@
 - [X] T053 [US5] `crates/workbench-protocol/src/openapi.rs`: 새 component·operation variant, golden 갱신
 - [X] T054 [US5] describe fixture 3개 재생성(scratchpad `gen_describe.py`: 데스크톱 85, readonly, agent)
 - [X] T055 [US5] `pnpm run generate:contracts`, `packages/workbench-client/src/operation-map.ts`·`index.ts` alias(`OrchestrationSession`·`OrchestrationTask`·`RunReplay` 등), `operation-map.test-d.ts`(`OperationMap["orchestration.bootstrap"]`·`EventMap["orchestration.workspaceUpdated.v1"]`·오용 `@ts-expect-error`, id union 85)
-- [ ] T056 [US5] check-types·client test·drift, 커밋 `feat(workbench-protocol): generate orchestration contracts (041 US5)`
+- [X] T056 [US5] check-types·client test·drift, 커밋 `feat(workbench-protocol): generate orchestration contracts (041 US5)`
 
 ---
 
@@ -157,9 +157,9 @@
 
 - [X] T057 [P] `docs/workbench-seam.md`: 인벤토리(이관 63, 이연 0, 유지 8), "orchestration (041)" 절(묶임·저장 경계·lock 규칙·역할·스트림·재생 권한, Mermaid), 2단계 완료·3단계 안내, ADR 링크. `docs/client-server-architecture-research.md` 진행 각주 "041(2b-2) 완료"
 - [X] T058 [P] core ADR `crates/workbench-core/docs/adr/0006-orchestration-store-is-one-serialized-aggregate.md`, `0007-agent-orchestration-roles-come-from-server-state.md`
-- [ ] T059 전체 게이트(quickstart §1·§2), 결과 Notes
-- [ ] T060 앱 스모크(quickstart §3): 가능한 항목만 수행, UI 항목은 리뷰어 수동으로 정직하게 기록
-- [ ] T061 SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad), 커밋 `docs(aw): record 041 orchestration migration status`
+- [X] T059 전체 게이트(quickstart §1·§2), 결과 Notes
+- [X] T060 앱 스모크(quickstart §3): 가능한 항목만 수행, UI 항목은 리뷰어 수동으로 정직하게 기록
+- [X] T061 SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad), 커밋 `docs(aw): record 041 orchestration migration status`
 
 ---
 
@@ -215,4 +215,8 @@ T019 fixture 생성 ∥ T020 출처 음성 테스트 ∥ T021 liveness ④⑤ �
   - (T019·T033, 사용자 점검 뒤 보강) 계약 fixture `orchestration-*` 53개가 in-memory·HTTP 공통으로 **operation 35개 전부**(데스크톱 17 + `run.replay` + agent 17)의 정상 경로와 권한 거절(다른 주체·readonly·agent의 데스크톱 호출, 자식의 coordinator 도구, 이전 세대 coordinator, 묶이지 않은 작업 영역, run 불일치)을 부른다(생성기 scratchpad `gen_041_fixtures.py` 그룹 desktop·agent·desktop-full·agent-full). runner 보강: 숫자 자리표시자 `{{#name}}`, 조건 대기 `until{pointer, equals, timeoutMs}`(보고가 일으킨 백그라운드 알림 전달이 끝나 revision이 안정된 뒤 읽음 — 불가능한 조건으로 바꾸면 제한 시간 실패함을 확인), 서버 생성 uuid의 **일대일** 가림(`{{uuid#N}}`, 같은 id는 같은 자리표시자, 요청 입력의 uuid는 그대로 — 참조 뒤바뀜·id 교환·사용자 값 차이를 잡는 단위 테스트 `generated_id_masking_keeps_identity_and_user_values`). 경로 비교에서 뺀 값은 두 가지뿐이고 이유를 fixture에 적었다: 보고 응답의 `notifications`(백그라운드 전달과 경합 — 전달은 liveness ①②가 본다), 묶이지 않은 작업 영역 fixture의 `cancelledRuns` 순서(무작위 run id 정렬 — 남은 run 0은 liveness ④가 본다). 부수 수정: `bench.close`의 `cancelledRuns`를 정렬해 결정적으로, `run.replay`는 소유 기록·발행 이력 모두 없는 run에 계약대로 Missing 형태.
   - (T021·T048) `tests/orchestration_liveness.rs`: ③ 살아 있는 자식 취소(가짜 엔진이 취소 안에서 종료 이벤트 inline) 교착 없음, ④ 느린 자식 기동 중 작업대 닫기 → 제한 시간 안 완료·남은 run 0·복구 가능, worktree 변경 자식 → `readOnlyViolation` 실패(오늘 문구), 동시 실행 한도 초과 → 대기 → 결과 보고의 `nextReadyTaskId` → 배정 진행. T020의 음성 테스트는 `orchestration_flow.rs`·`orchestration_stream.rs`에 있다(별도 파일로 두지 않음).
   - (T058) core ADR 0006(저장소 = 직렬화된 aggregate, 작업 영역 범위 lock 없음), 0007(역할은 서버 상태). (T057) `docs/workbench-seam.md` orchestration 절·인벤토리 이관 63/이연 0/유지 8·3단계 안내, research 진행 각주.
+  - (T059, 2026-09-27, 한 번 실행·원 명령 종료 코드 기록) `cargo fmt --all -- --check` 0, `cargo clippy --workspace --all-targets -D warnings` 0, `cargo test --workspace --all-targets --no-fail-fast` 0(656 passed / 0 failed / 7 ignored, 기준선 626), `cargo check --release`(AW) 0, `pnpm run generate:contracts` 0 + drift `git diff --exit-code` 0, `pnpm run check-types` 0, `pnpm run test` 0. 경계(quickstart §2): 화면·acp-agent-core·agent-client diff 0, core·protocol의 창 label 언급은 주석과 옛 파일 호환 테스트뿐, AW 과도기 통로 grep 0건.
+  - (T060) 앱 스모크(quickstart §3 표 1–5)는 **수행하지 않았다** — GUI 조작이 필요해 이 환경에서 실행할 수 없다. 리뷰어 수동 확인 항목으로 남긴다. 대신 같은 흐름을 core 테스트가 덮는다: 1(`main_runs_are_prebound_with_a_planned_id_then_launched`·`delegating_a_goal_prompts_the_coordinator_run`), 2(fixture `orchestration-{cancel,retry,reassign}-task-ok`·`dispatch-prompt-ok`), 3(`orchestration_stream.rs`·`workspaces_are_bound_to_benches_and_isolated`), 4(`closing_a_bench_makes_the_workspace_recoverable_by_another_bench`·liveness ④), 5(`bindings_live_in_memory_and_survive_a_reload`). 화면 수신 코드가 창 payload의 추가 필드(`sequence` 등)를 무시하는지는 수동 확인 대상이다.
+  - (T061 SC 증거) SC-001: 인벤토리 이관 63·이연 0(`docs/workbench-seam.md`). SC-002: 경계 grep, 040 과도기 접근자·AW 통로 삭제. SC-003: 계약 fixture 53개 × 두 경로(operation 35개 전부) + 이벤트 fixture(`orchestration-unknown-binding-not-found`, run 소유 fixture 2개) — 경로 비교에서 뺀 값 두 가지와 이유는 위 T019 메모. SC-004: 거절 fixture·`orchestration_agent.rs`·`orchestration_flow.rs`(외부 run·계획 id·끝난 id). SC-005: `orchestration_concurrency.rs`. SC-006: 이벤트마다 그 작업대 창에 정확히 1회, 닫힌 작업대 창 0회(`orchestration_stream.rs`) — 두 창 동시 진행의 실제 화면 확인은 T060 수동 항목. SC-007: AW orchestration 테스트는 core로 옮겼고(서비스·명령·알림·scheduler 단위 테스트, `orchestration_delegation.rs`), 바뀐 기대값은 창 label → 작업대 id 입력뿐이며 행동 변경은 아래에 적었다. SC-008: 화면 diff 0, 문구는 core에 바이트 동일로 옮김(수동 확인은 T060).
+  - (spec 대비 어긋난 점·행동 변경) ① R18 계획 id(화면이 Main을 띄우기 전에 묶음) — research R18 (b). ② `recover`의 작업 영역 없음은 오늘처럼 평문(도메인 JSON 아님). ③ `run.replay`: 작업대가 없는 창·거절은 compat가 Missing 형태로(누수 차단). ④ `bench.close`의 `cancelledRuns` 정렬. ⑤ run 스트림 구독은 소유 작업대를 연 **주체** 기준(스트림에 작업대 문맥이 없음), `run.replay`는 입력 작업대 기준. ⑥ release(작업대 닫기)에는 마지막 orchestration 이벤트가 없다 — 스트림 제거로 구독자는 `Gap(evicted)`.
 
