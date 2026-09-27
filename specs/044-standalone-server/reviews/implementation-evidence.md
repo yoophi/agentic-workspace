@@ -328,3 +328,9 @@ green·최종:
 - `bootstrapTransport`가 예외로 끝나면 이제 연결 실패 화면을 그린다. 043은 예외여도 App을 그렸다. 정상 경로에서는 예외가 없다.
 - 호환 command의 external 오류 문구는 Tauri command 시험 틀이 없어 Rust 단위 시험으로 고정하지 않았다. 상수 `MESSAGE_EXTERNAL_UNAVAILABLE` 하나로 만든다.
 - `EmbeddedOwnership`의 안내 파일은 HTTP 기동에 실패하면 쓰지 않는다(잠금은 유지).
+
+## fork 결과 확인 (T028–T033, 메인 세션)
+
+- 최종 로그를 직접 확인했다. AW `cargo test` 101 passed(lint 수정 뒤 재실행), clippy·fmt는 첫 실행 실패(101·1) 뒤 수정해 0, AW vitest 641, 두 통합 suite, check-types, AW build, Storybook build는 모두 0이다. filtered out은 모두 0이다.
+- lint 수정 커밋 `e04eb49`이 host 코드(`lifecycle/server.rs`, `tests/owner_calls.rs`)를 건드렸다. 그런데 host 시험 로그는 수정 전의 `final-host-test-1.log`뿐이었다. 그래서 메인 세션이 `cargo test -p workbench-host`를 한 번 다시 실행했다(`t033-host-after-lint-1.log`): 종료 0, 55 passed, filtered out 0.
+- 범위(fork 보고대로): T033 통합 시험이 붙는 대상은 시험 host 프로세스다. 데스크톱이 실제로 띄우는 `agentic-workbench-server` 바이너리 연결은 실제 앱 스모크(T036·T045–T047)에서 확인한다. 실제 창·종료 동작은 아직 미확인이다.
