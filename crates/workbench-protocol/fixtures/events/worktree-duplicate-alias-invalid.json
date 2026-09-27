@@ -1,0 +1,19 @@
+{
+  "name": "worktree-duplicate-alias-invalid",
+  "subscribe": [
+    {
+      "streamId": "worktree:{{tmp}}",
+      "afterSequence": 0
+    },
+    {
+      "streamId": "worktree:{{tmp}}/",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "duplicate stream in subscription: worktree:{{tmp}}/"
+    }
+  }
+}

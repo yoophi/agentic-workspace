@@ -87,6 +87,11 @@ impl StreamState {
             .retain(|subscriber| subscriber.offer(&stream_id, item.clone()));
     }
 
+    /// 발행 전(순번 0) 빈 스트림이 마지막 구독 해지로 지워졌는지. 이런 스트림을 쥔 발행·구독은 map에서 다시 찾는다.
+    pub fn is_idle_removed(&self) -> bool {
+        self.removed && self.sequence == 0
+    }
+
     pub fn unsubscribe(&mut self, id: u64) {
         self.subscribers.retain(|subscriber| subscriber.id != id);
     }

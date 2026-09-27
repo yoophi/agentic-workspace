@@ -9,6 +9,7 @@
 | 검사 | 실패 |
 |---|---|
 | cursor 수 1–64 | `invalidArgument` |
+| 같은 스트림 중복(worktree는 실제 경로 기준, 별칭 포함) | `invalidArgument`("duplicate stream in subscription: <streamId>") |
 | `streamId` 형식 `<kind>:<key>`, kind ∈ {run, worktree} | `invalidArgument`("stream kind is not available yet." — orchestration·exchange) |
 | kind의 scope(`run:read`/`worktree:read`) | `forbidden` |
 | 같은 세대에서 `afterSequence > last` | `invalidArgument`("cursor is ahead of the stream.") |
@@ -24,7 +25,7 @@ fault가 없으면 스트림은 cursor마다 research R2 표대로 replay/gap을
 3. 스트림 사이의 순서는 약속하지 않는다.
 4. gap을 받은 스트림에는 그 구독에서 더 이상 이벤트가 오지 않는다(새로 구독해야 한다). `subscriberLagged`는 구독 전체를 닫는다.
 5. 구독 중인 run 스트림이 보관 한도로 제거되면 그 스트림에 `Gap(evicted)`가 오고, 구독의 다른 스트림은 계속된다. 제거된 run id로 늦게 들어온 발행은 버려진다(순번이 1부터 다시 시작하지 않는다).
-6. **알 수 없는 run과 제거된 run은 구별된다**: 제거 표식이 있으면 `Gap(evicted)`, 없고 cursor 0이면 시작 전 run으로 보고 live를 기다린다. 표식 상한(4,096)을 넘어 오래된 run은 다시 "알 수 없음"이 된다. 이전 세대 run은 cursor가 있으면 `Gap(epochChanged)`, cursor 0이면 알 수 없는 run과 같다(run 목록의 정본은 2b).
+6. **알 수 없는 run과 제거된 run은 구별된다**: 제거 표식이 있으면 `Gap(evicted)`, 없고 cursor 0이면 시작 전 run으로 보고 live를 기다린다. 표식 상한(4,096)을 넘어 오래된 run은 다시 "알 수 없음"이 된다. 이전 세대 run은 cursor가 있으면 `Gap(epochChanged)`, cursor 0이면 알 수 없는 run과 같다(run 목록의 정본은 2b). 시작 전 run을 기다리던 구독이 모두 떠나면 그 빈 스트림은 지워지고, 보관 run 수에는 한 번이라도 발행된 run만 센다(리뷰 반영).
 
 ## 3. 스트림 종류
 
@@ -60,4 +61,4 @@ fault가 없으면 스트림은 cursor마다 research R2 표대로 replay/gap을
 }
 ```
 
-필수 fixture: 처음부터·중간·끝·unknown(0)·unknown(>0)·**제거된 run(cursor 0과 >0, 새 컨트롤러 재수화 포함, 구독 중 제거, 제거 뒤 늦은 발행)**·retention 초과·epoch 불일치·ahead·forbidden(readonly가 아닌 거부 시나리오는 scope 없는 principal로)·kind 미지원·cursor 수 초과·lag(test-hooks로 대기열 4)·worktree 알림 묶음·worktree 두 구독자. 두 경로(in-memory, WS)에서 같은 결과.
+필수 fixture: 처음부터·중간·끝·unknown(0)·unknown(>0)·**제거된 run(cursor 0과 >0, 새 컨트롤러 재수화 포함, 구독 중 제거, 제거 뒤 늦은 발행)**·retention 초과·epoch 불일치·ahead·forbidden(readonly가 아닌 거부 시나리오는 scope 없는 principal로)·kind 미지원·cursor 수 초과·lag(test-hooks로 대기열 4)·worktree 알림 묶음·worktree 두 구독자·같은 스트림 중복(run, worktree 별칭). 두 경로(in-memory, WS)에서 같은 결과.

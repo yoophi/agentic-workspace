@@ -100,10 +100,7 @@ impl Stream for HubSubscription {
 impl Drop for HubSubscription {
     fn drop(&mut self) {
         for stream in &self.registered {
-            stream
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .unsubscribe(self.id);
+            self.hub.unsubscribe(stream, self.id);
         }
         for path in &self.watched {
             self.hub.release_watch(path);

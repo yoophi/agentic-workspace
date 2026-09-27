@@ -97,6 +97,9 @@ struct StreamEntry {
 
 #[derive(Default)]
 struct Retention {
+    /// 한 번이라도 발행된 run 스트림 수. 보관 한도는 이 수로 센다 — 발행 전 run을 기다리는 구독이 만든 빈 스트림은
+    /// 세지 않는다(구독이 모두 떠나면 지워진다).
+    published_runs: usize,
     /// terminal이 된 순서의 run 스트림 id.
     terminal_order: VecDeque<String>,
     evicted_order: VecDeque<String>,
@@ -197,6 +200,11 @@ impl EventHub {
         self.subscriptions.load(Ordering::SeqCst)
     }
 
+    /// map에 있는 스트림 수(진단·테스트).
+    pub fn stream_count(&self) -> usize {
+        lock(&self.streams).len()
+    }
+
     /// 돌고 있는 worktree 감시 수(진단·테스트).
     pub fn watcher_count(&self) -> usize {
         lock(&self.watchers).len()
@@ -237,16 +245,20 @@ impl EventHub {
         deliver: &mut dyn FnMut(&EventEnvelope),
     ) -> Option<EventEnvelope> {
         let stream_id = kind.stream_id(key);
-        let state = match self.lookup(&stream_id, kind, true) {
-            Lookup::Found(state) => state,
-            Lookup::Evicted | Lookup::Missing => {
-                eprintln!("[workbench] dropped event for evicted stream {stream_id}");
-                return None;
-            }
-        };
-        let (published, newly_terminal) = {
+        let (published, first, newly_terminal) = loop {
+            let state = match self.lookup(&stream_id, kind, true) {
+                Lookup::Found(state) => state,
+                Lookup::Evicted | Lookup::Missing => {
+                    eprintln!("[workbench] dropped event for evicted stream {stream_id}");
+                    return None;
+                }
+            };
             let mut stream = lock(&state);
             if stream.removed {
+                if stream.is_idle_removed() {
+                    // 발행 전 빈 스트림이 마지막 구독 해지로 막 지워졌다: map에서 새로 찾는다(순번은 1부터 그대로).
+                    continue;
+                }
                 eprintln!("[workbench] dropped event for evicted stream {stream_id}");
                 return None;
             }
@@ -265,8 +277,11 @@ impl EventHub {
             deliver(&published);
             let newly_terminal = terminal && !stream.terminal;
             stream.terminal |= terminal;
-            (published, newly_terminal)
+            break (published, stream.sequence == 1, newly_terminal);
         };
+        if first && kind == StreamKind::Run {
+            lock(&self.retention).published_runs += 1;
+        }
         if newly_terminal {
             self.retire(&stream_id);
         }
@@ -301,17 +316,13 @@ impl EventHub {
             let mut retention = lock(&self.retention);
             retention.terminal_order.push_back(stream_id.to_owned());
             let mut victims = Vec::new();
-            let mut run_count = streams
-                .values()
-                .filter(|entry| entry.kind == StreamKind::Run)
-                .count();
-            while run_count > self.limits.max_retained_runs {
+            while retention.published_runs > self.limits.max_retained_runs {
                 let Some(victim) = retention.terminal_order.pop_front() else {
                     break;
                 };
                 if let Some(entry) = streams.remove(&victim) {
                     victims.push(entry.state);
-                    run_count -= 1;
+                    retention.published_runs -= 1;
                 }
                 retention.evicted.insert(victim.clone());
                 retention.evicted_order.push_back(victim);
@@ -411,6 +422,7 @@ impl EventHub {
         }
         // 권한·형식은 등록 전에 전부 검사한다(일부만 등록된 채 실패하지 않게).
         let mut parsed = Vec::with_capacity(cursors.len());
+        let mut seen = HashSet::with_capacity(cursors.len());
         for cursor in &cursors {
             let Some((kind, key)) = parse_stream_id(&cursor.stream_id) else {
                 return Err(fault(
@@ -428,6 +440,19 @@ impl EventHub {
                 return Err(WorkbenchFault::forbidden(
                     RequestId::random(),
                     &cursor.stream_id,
+                ));
+            }
+            // 같은 스트림을 두 번 등록하면 replay·live가 두 번 온다. worktree는 실제 경로로 비교한다(별칭 포함).
+            let effective = match kind.class() {
+                EventClass::State => cursor.stream_id.clone(),
+                EventClass::Notification => std::fs::canonicalize(key)
+                    .map(|path| kind.stream_id(&path.to_string_lossy()))
+                    .unwrap_or_else(|_| cursor.stream_id.clone()),
+            };
+            if !seen.insert(effective) {
+                return Err(fault(
+                    FaultCode::InvalidArgument,
+                    format!("duplicate stream in subscription: {}", cursor.stream_id),
                 ));
             }
             parsed.push((kind, key.to_owned(), cursor.clone()));
@@ -478,79 +503,93 @@ impl EventHub {
                             last_sequence: last,
                         },
                     };
-                    let state = match self.lookup(&stream_id, kind, cursor.after_sequence == 0) {
-                        Lookup::Evicted => {
+                    // 발행 전 빈 스트림이 다른 구독의 해지로 막 지워졌으면(`is_idle_removed`) map에서 다시 찾는다.
+                    loop {
+                        let state = match self.lookup(&stream_id, kind, cursor.after_sequence == 0)
+                        {
+                            Lookup::Evicted => {
+                                subscription
+                                    .pending
+                                    .push_back(gap(GapReason::Evicted, None, None));
+                                break;
+                            }
+                            Lookup::Missing => {
+                                let decision = decide_missing(
+                                    cursor.after_sequence,
+                                    &cursor.epoch,
+                                    &self.epoch,
+                                );
+                                if let CursorDecision::Gap {
+                                    reason,
+                                    first,
+                                    last,
+                                } = decision
+                                {
+                                    subscription.pending.push_back(gap(reason, first, last));
+                                }
+                                break;
+                            }
+                            Lookup::Found(state) => state,
+                        };
+                        let mut stream = lock(&state);
+                        if stream.is_idle_removed() {
+                            continue;
+                        }
+                        if stream.removed {
                             subscription
                                 .pending
                                 .push_back(gap(GapReason::Evicted, None, None));
-                            continue;
+                            break;
                         }
-                        Lookup::Missing => {
-                            let decision =
-                                decide_missing(cursor.after_sequence, &cursor.epoch, &self.epoch);
-                            if let CursorDecision::Gap {
+                        let decision = decide_existing(
+                            cursor.after_sequence,
+                            &cursor.epoch,
+                            &self.epoch,
+                            stream.first_retained(),
+                            stream.sequence,
+                        );
+                        match decision {
+                            CursorDecision::Ahead => {
+                                return Err(fault(
+                                    FaultCode::InvalidArgument,
+                                    MESSAGE_CURSOR_AHEAD,
+                                ));
+                            }
+                            CursorDecision::Gap {
                                 reason,
                                 first,
                                 last,
-                            } = decision
-                            {
+                            } => {
                                 subscription.pending.push_back(gap(reason, first, last));
                             }
-                            continue;
-                        }
-                        Lookup::Found(state) => state,
-                    };
-                    let mut stream = lock(&state);
-                    if stream.removed {
-                        subscription
-                            .pending
-                            .push_back(gap(GapReason::Evicted, None, None));
-                        continue;
-                    }
-                    let decision = decide_existing(
-                        cursor.after_sequence,
-                        &cursor.epoch,
-                        &self.epoch,
-                        stream.first_retained(),
-                        stream.sequence,
-                    );
-                    match decision {
-                        CursorDecision::Ahead => {
-                            return Err(fault(FaultCode::InvalidArgument, MESSAGE_CURSOR_AHEAD));
-                        }
-                        CursorDecision::Gap {
-                            reason,
-                            first,
-                            last,
-                        } => {
-                            subscription.pending.push_back(gap(reason, first, last));
-                        }
-                        CursorDecision::Replay { after } => {
-                            // 수신자 먼저 → 기준점 → replay 복사. 모두 같은 lock 안.
-                            stream.subscribers.push(subscriber(subscription.id));
-                            let high_water = stream.sequence;
-                            subscription
-                                .high_water
-                                .insert(stream_id.clone(), high_water);
-                            for entry in stream.journal.iter().filter(|entry| {
-                                entry.envelope.sequence > after
-                                    && entry.envelope.sequence <= high_water
-                            }) {
-                                subscription.pending.push_back(EventItem::Event {
-                                    event: entry.envelope.clone(),
-                                });
+                            CursorDecision::Replay { after } => {
+                                // 수신자 먼저 → 기준점 → replay 복사. 모두 같은 lock 안.
+                                stream.subscribers.push(subscriber(subscription.id));
+                                let high_water = stream.sequence;
+                                subscription
+                                    .high_water
+                                    .insert(stream_id.clone(), high_water);
+                                for entry in stream.journal.iter().filter(|entry| {
+                                    entry.envelope.sequence > after
+                                        && entry.envelope.sequence <= high_water
+                                }) {
+                                    subscription.pending.push_back(EventItem::Event {
+                                        event: entry.envelope.clone(),
+                                    });
+                                }
+                                drop(stream);
+                                subscription.registered.push(state);
                             }
-                            drop(stream);
-                            subscription.registered.push(state);
+                            CursorDecision::Live => {
+                                stream.subscribers.push(subscriber(subscription.id));
+                                subscription
+                                    .high_water
+                                    .insert(stream_id.clone(), stream.sequence);
+                                drop(stream);
+                                subscription.registered.push(state);
+                            }
                         }
-                        CursorDecision::Live => {
-                            stream.subscribers.push(subscriber(subscription.id));
-                            subscription
-                                .high_water
-                                .insert(stream_id.clone(), stream.sequence);
-                            drop(stream);
-                            subscription.registered.push(state);
-                        }
+                        break;
                     }
                 }
                 EventClass::Notification => {
@@ -571,6 +610,25 @@ impl EventHub {
             }
         }
         Ok(EventStream::new(subscription))
+    }
+
+    /// 구독 하나를 스트림에서 해제한다. 발행 전(순번 0) run 스트림에서 마지막 구독자가 떠나면 map에서 지운다 —
+    /// 없는 run을 기다리던 구독이 빈 스트림을 남겨 메모리와 보관 한도를 잠식하지 않게. `streams` → 스트림 순으로
+    /// 잡아 같은 스트림을 찾은 발행·구독과 직렬화하고, 이미 스트림을 쥔 쪽은 `is_idle_removed`로 다시 찾는다.
+    fn unsubscribe(&self, state: &Arc<Mutex<StreamState>>, subscriber: u64) {
+        let mut streams = lock(&self.streams);
+        let mut stream = lock(state);
+        stream.unsubscribe(subscriber);
+        if stream.removed || stream.sequence != 0 || !stream.subscribers.is_empty() {
+            return;
+        }
+        let idle_run = streams
+            .get(&stream.stream_id)
+            .is_some_and(|entry| entry.kind == StreamKind::Run && Arc::ptr_eq(&entry.state, state));
+        if idle_run {
+            streams.remove(&stream.stream_id);
+            stream.removed = true;
+        }
     }
 
     fn subscription_closed(&self) {

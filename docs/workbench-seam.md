@@ -82,10 +82,10 @@ flowchart LR
 - **세대**: 기동마다 새 `epoch`(uuid). journal은 메모리에만 있다 — [core ADR 0002](../crates/workbench-core/docs/adr/0002-event-journal-is-in-memory-with-server-epoch.md). `afterSequence == 0`은 세대를 보지 않는다.
 - **구독 순서**: 한 스트림의 발행(순번 부여 → journal → 구독자 fan-out → 데스크톱 전달)과 구독(등록 → 기준점 → replay 복사)이 **같은 스트림 lock** 안에서 끝난다. 그래서 replay와 live 사이에 빈틈·중복이 없다(race test 1,000회). lock 순서는 `streams` → 스트림 → `retention`이고, 제거는 스트림 lock을 놓은 뒤 한다.
 - **gap**: 이어 붙일 수 없으면 `GapNotice{reason}`을 보내고 그 스트림 전달을 멈춘다 — `unknownStream`(없는 스트림, cursor > 0), `evicted`(보관 한도로 지운 run, 제거 표식 4,096개), `epochChanged`, `retentionExceeded`, `subscriberLagged`(대기열 1,024 초과 시 구독 전체 종료), `shutdown`. cursor가 스트림 끝보다 앞서면 `invalidArgument`.
-- **한도**(`EventHubLimits`, `RuntimeAdapters.event_limits`로 주입): run당 512 · 보관 run 256(가장 먼저 끝난 run부터 제거) · 제거 표식 4,096 · 구독자 대기열 1,024 · 동시 구독 256(`rateLimited`) · 구독당 cursor 64.
+- **한도**(`EventHubLimits`, `RuntimeAdapters.event_limits`로 주입): run당 512 · 보관 run 256(가장 먼저 끝난 run부터 제거) · 제거 표식 4,096 · 구독자 대기열 1,024 · 동시 구독 256(`rateLimited`) · 구독당 cursor 64(같은 스트림 중복 거절). 한도는 한 번이라도 발행된 run만 센다 — 시작 전 run을 기다리던 빈 스트림은 구독이 모두 떠나면 지운다.
 - **권한**: run은 `run:read`(신규), worktree는 `worktree:read`.
 - **계약 생성**: `EVENT_SCHEMAS` registry → `system.describe.eventSchemas`, OpenAPI `EventBySchema`(스키마 id ↔ typed 본문), TS `EventMap`. 본문은 원본 타입을 그대로 직렬화하고 protocol DTO는 미러다(wire parity 테스트).
-- **테스트 경로**: fixture 25개(`crates/workbench-protocol/fixtures/events/`)를 in-memory와 테스트 WebSocket(`GET /v1/events`)에서 실행해 결과를 비교한다.
+- **테스트 경로**: fixture 27개(`crates/workbench-protocol/fixtures/events/`)를 in-memory와 테스트 WebSocket(`GET /v1/events`)에서 실행해 결과를 비교한다.
 
 ### 데스크톱 전달
 
