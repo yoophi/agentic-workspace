@@ -324,3 +324,51 @@ describe("event client resync liveness (Codex follow-up review)", () => {
     client.close();
   });
 });
+
+describe("event client recovery isolation (Codex follow-up review 2)", () => {
+  it("keeps delivering to other listeners when a joiner's recovery reset never settles and the joiner leaves", async () => {
+    const hub = new FakeEventHub(2);
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s");
+    }
+    const client = clientFor(hub);
+    const snapshot = {
+      load: async () => ({ lastSequence: hub.lastSequence("s") }),
+      passes: (event: EventEnvelope, data: unknown) => event.sequence > (data as { lastSequence: number }).lastSequence,
+    };
+    const holdLoad = deferred();
+    let loads = 0;
+    const aEvents: number[] = [];
+    client.subscribe(
+      "s",
+      { onEvent: (event) => void aEvents.push(event.sequence), onReset: () => undefined },
+      {
+        snapshot: {
+          load: async () => {
+            loads += 1;
+            if (loads === 1) {
+              await holdLoad.promise; // 복구 적재 중에 B가 합류한다
+            }
+            return snapshot.load();
+          },
+          passes: snapshot.passes,
+        },
+      },
+    );
+    await until(() => loads === 1, "recovery loading");
+    const unsubscribeB = client.subscribe(
+      "s",
+      { onEvent: () => undefined, onReset: () => new Promise<void>(() => undefined) }, // 끝나지 않는 재설정
+      { snapshot },
+    );
+    holdLoad.resolve();
+    for (let i = 0; i < 50; i += 1) {
+      await Promise.resolve();
+    }
+    unsubscribeB();
+    hub.publish("s"); // 6
+    await until(() => aEvents.includes(6), "A keeps receiving live events");
+    expect(client.debugCursor("s")).toBe(6);
+    client.close();
+  });
+});

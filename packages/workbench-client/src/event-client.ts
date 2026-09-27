@@ -544,54 +544,45 @@ export function createEventClient(options: EventClientOptions): EventClient {
         return; // 그 사이 새 gap으로 절차가 다시 시작됐다
       }
       const snapshot = this.snapshot;
-      // 복구 스냅샷을 모든 수신자에 적용한다. 적용을 기다리는 동안 합류한 수신자에게도 같은 스냅샷을 적용한다(종결 복구 포함).
-      const reset = new Set<ListenerState>();
-      let batch = [...this.listeners];
-      while (batch.length > 0) {
-        for (const state of batch) {
-          reset.add(state);
-        }
-        await Promise.all(batch.map((state) => this.applyRecoverySnapshot(state, recovery, data)));
-        if (this.recovery !== recovery) {
-          return;
-        }
-        batch = [...this.listeners].filter((state) => !reset.has(state));
-      }
-      if (this.recovery !== recovery) {
-        return;
-      }
+      const pending = recovery.buffer.filter((event) => (snapshot ? snapshot.passes(event, data) : true));
+      // 복구 완료는 어떤 수신자의 onReset도 기다리지 않는다: 수신자마다 버퍼를 대기열에 먼저 받고(그 뒤 live는 이어 붙는다),
+      // 스냅샷 적용은 수신자별 사슬에서 돈다. 한 수신자의 재설정이 끝나지 않거나 그 수신자가 떠나도 다른 수신자는 막히지 않는다.
       this.recovery = undefined;
       this.recoveryAttempts = 0;
-      const pending = recovery.buffer.filter((event) => (snapshot ? snapshot.passes(event, data) : true));
+      // gap 기준점까지는 스트림에 있었다: 그보다 앞선 cursor로 합류하는 수신자는 다시 구독해 자기 스냅샷을 받는다.
+      this.highest = Math.max(this.highest, recovery.after);
       if (recovery.terminal) {
         this.terminal = true;
       } else {
         this.cursorWhenEmpty = recovery.after;
       }
-      this.distribute(pending);
+      for (const state of this.listeners) {
+        this.applyRecoverySnapshot(state, recovery.after, data, pending);
+      }
     }
 
-    applyRecoverySnapshot(state: ListenerState, recovery: Recovery, data: unknown): Promise<void> {
+    applyRecoverySnapshot(state: ListenerState, after: number, data: unknown, pending: EventEnvelope[]) {
       const snapshot = this.snapshot;
       state.resetting = true;
       state.generation += 1;
       const generation = state.generation;
-      return this.serialize(state, generation, async () => {
+      state.covered = undefined;
+      state.queue = pending.slice();
+      state.delivered = Math.max(after, 0);
+      state.lastQueued = pending.length > 0 ? pending[pending.length - 1].sequence : state.delivered;
+      void this.serialize(state, generation, async () => {
         await state.listener.onReset?.(data, { delivered: state.delivered });
         if (this.isStale(state, generation)) {
           return;
         }
         state.covered = snapshot ? (event) => !snapshot.passes(event, data) : undefined;
-        state.queue = [];
-        state.delivered = state.lastQueued = Math.max(recovery.after, 0);
         state.resetting = false;
+        void this.pump(state);
       }).catch(() => {
         if (this.isStale(state, generation)) {
           return;
         }
-        // 재설정 실패: 그 수신자만 다시 재동기한다.
-        state.queue = [];
-        state.delivered = state.lastQueued = recovery.after;
+        // 재설정 실패: 그 수신자만 다시 재동기한다(대기열은 그 재동기가 스냅샷 기준으로 거른다).
         state.resetting = false;
         void this.resetListener(state);
       });
