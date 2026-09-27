@@ -94,8 +94,8 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ### 구현
 
-- [ ] T033 [US2] `WC/event-client.ts` — 스트림 상태·수신자 큐·settle 대기·부분 실패 재동기 hook(스트림별 스냅샷 함수 주입) (T029·T030)
-- [ ] T034 [US2] 화면 구독 이관 — run·교환 requested/status·bench 알림·orchestration·Worktree 구독 함수를 transport 경유로(`AWF/entities/agent-run/api/agent-exchange-repository.ts` 등 `listen*` 전부), 수신자는 Promise 반환 유지
+- [X] T033 [US2] `WC/event-client.ts` — 스트림 상태·수신자 큐·settle 대기·부분 실패 재동기 hook(스트림별 스냅샷 함수 주입) (T029·T030)
+- [X] T034 [US2] 화면 구독 이관 — run·교환 requested/status·bench 알림·orchestration·Worktree 구독 함수를 transport 경유로(`AWF/entities/agent-run/api/agent-exchange-repository.ts` 등 `listen*` 전부), 수신자는 Promise 반환 유지
 - [X] T035 [US2] 교환 원장·재조정 모듈 `AWF/features/agent-run/model/exchange-reconciler.ts`, `worktree-agent-run-area.tsx` 교환 수신자를 재조정 경유로 교체 (T031)
 - [X] T036 [US2] 교환 prompt run 전송에 멱등성 키 `exchange-delivery:<requestId>` 도출 — `AWF/features/agent-run/ui/agent-run-panel.tsx`의 external prompt 전송 경로와 run 호출 저장소
 - [X] T037 [US2] 네트워크 창 부팅 시 `declare_network_delivery` 호출 — `AWF/app/bootstrap-transport.ts` (T032)
@@ -113,18 +113,18 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ### 시험 먼저
 
-- [ ] T039 [P] [US3] 재연결 시험 `WC/event-client.reconnect.test.ts` — 가짜 WS 서버로 강제 끊김 100회 이상(받았지만 반영 전 끊김, 수신자 교체 중 끊김 포함) 누락·중복 0(SC-004), backoff 250ms→10s jitter(가상 시계), `subscriberLagged` 같은 cursor 재연결. 실패 확인
-- [ ] T040 [P] [US3] gap 복구 시험 `WC/event-client.gap.test.ts` — 보관 gap: gap `lastSequence`로 새 표→버퍼→스냅샷→스트림별 필터(run 순번, orchestration `revision`, 교환 `requestId`+`updatedAt`)→live; 복구 중 새 gap 재시작·3회 상한; hello만으로 성공 판정 안 함; `epochChanged` 전체 재동기 hook. 실패 확인
+- [X] T039 [P] [US3] 재연결 시험 `WC/event-client.reconnect.test.ts` — 가짜 WS 서버로 강제 끊김 100회 이상(받았지만 반영 전 끊김, 수신자 교체 중 끊김 포함) 누락·중복 0(SC-004), backoff 250ms→10s jitter(가상 시계), `subscriberLagged` 같은 cursor 재연결. 실패 확인
+- [X] T040 [P] [US3] gap 복구 시험 `WC/event-client.gap.test.ts` — 보관 gap: gap `lastSequence`로 새 표→버퍼→스냅샷→스트림별 필터(run 순번, orchestration `revision`, 교환 `requestId`+`updatedAt`)→live; 복구 중 새 gap 재시작·3회 상한; hello만으로 성공 판정 안 함; `epochChanged` 전체 재동기 hook. 실패 확인
 - [ ] T041 [US3] **실제 042 hub 통합 suite** `WC/test/integration/retention-recovery.integration.test.ts` — vitest globalSetup이 `cargo run -p workbench-core --example http_test_host --features test-hooks`를 띄우고(stdout JSON 대기), 실제 `createEventClient`·`createWorkbenchClient`로 orchestration·교환·run 스트림 보관 한도 초과를 유발해 복구 뒤 변경 누락 0(SC-004c), 교환 요청 유실 뒤 재조정으로 ack 1회. 실패 확인. `WC/vitest.integration.config.ts`, `package.json` script `test:integration`
 - [ ] T042 [P] [US3] 응답 유실 시험(실제 서버) `WC/test/integration/call-retry.integration.test.ts` — 시험 host에서 응답 전 연결 끊김 주입(test-hooks), 같은 세대 재시도 효과 1회, host 재기동(새 epoch) 뒤 자동 재전송 0(SC-004b). 실패 확인
 - [X] T043 [P] [US3] 교환 agent 전달 1회 시험 `CORE/tests/exchange_delivery_once.rs` — 가짜 ACP agent prompt 수로: 같은 `exchange-delivery:<requestId>` 키 run 전송 두 번 → agent 1회(SC-004d 서버 측 근거). 실패 확인
 
 ### 구현
 
-- [ ] T044 [US3] 재연결 루프·backoff·`subscriberLagged` 처리 — `WC/event-client.ts`, `WC/connection.ts` (T039)
-- [ ] T045 [US3] 보관 gap live-first 복구·버퍼·스트림별 스냅샷 병합 — `WC/event-client.ts` + 스냅샷 어댑터 `WC/snapshots.ts`(run.replay·orchestration.get·exchange.list) (T040·T041)
+- [X] T044 [US3] 재연결 루프·backoff·`subscriberLagged` 처리 — `WC/event-client.ts`, `WC/connection.ts` (T039)
+- [X] T045 [US3] 보관 gap live-first 복구·버퍼·스트림별 스냅샷 병합 — `WC/event-client.ts` + 스냅샷 어댑터 `WC/snapshots.ts`(run.replay·orchestration.get·exchange.list) (T040·T041)
 - [ ] T046 [US3] 세대 변경 재동기 — 창 전체 재조회·`ensure_window_bench` 재호출, 새 세대 자동 재전송 금지 확인 `AWF/app/bootstrap-transport.ts`, `AWF/shared/api/transport/http-transport.ts` (T042)
-- [ ] T047 [US3] 교환 재조정 트리거 연결(구독 시작·gap 복구 스냅샷·같은 세대 재연결 뒤) — `AWF/features/agent-run/model/exchange-reconciler.ts` (T041·T043)
+- [X] T047 [US3] 교환 재조정 트리거 연결(구독 시작·gap 복구 스냅샷·같은 세대 재연결 뒤) — `AWF/features/agent-run/model/exchange-reconciler.ts` (T041·T043)
 - [ ] T048 [US3] 연결 상태 표시 위젯·story — `AWF/widgets/connection-status/`(ui, model, `*.stories.tsx`, 시험), 문구 외 기존 화면 불변
 
 **Checkpoint**: US3 시험 전부 통과
