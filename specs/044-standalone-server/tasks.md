@@ -37,10 +37,10 @@
 - [X] T011 `crates/workbench-core/src/application/work_gate.rs`: 잠금 G 아래 서버 상태·활동 예약 표(A-turn·X-deliver·T-start·N-notify·C-call, drop 해제 guard)·교환 소비 표·기동 토큰 표·정지 판정. `WorkbenchRuntime`에 연결(`active_work()`, 상태 조회)
 - [X] T012 엔진 실행 수명 계약: `crates/workbench-core/src/infrastructure/run/acp_run_engine.rs`의 `send_prompt`(세션 `send_prompt` future를 직접 spawn)·`queue_prompt`·`steer`·`send_and_wait`에 A-turn guard. `crates/workbench-core/src/testing/scripted_run_engine.rs`도 같은 계약
 - [X] T013 `acp-agent-core` 선택 인자: `crates/acp-agent-core/src/application/start_agent_run.rs`와 runner에 활동 guard 공급자(초기 prompt 순서·Ralph 반복을 순서 끝까지 덮음)와 `start_gate`(준비 뒤 실행 허용) 선택 인자 추가. 넘기지 않으면 오늘과 같다. T010 green. **소비자 검증**: `cargo test -p acp-agent-core`, ask-code·hushline `src-tauri` `cargo test`·`cargo check` 기록
-- [ ] T014 [P] 조립 이동: `crates/workbench-host/src/assembly.rs`(런타임 `bootstrap_with` + HTTP 상태: 발급기·표·resolver·출처 정책 + MCP)에 AW `workbench_http.rs`·`lib.rs` 조립을 옮긴다. `WorkbenchHttpState`의 `tauri::async_runtime::spawn`을 tokio로
-- [ ] T015 [P] MCP 이동: `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/*` → `crates/workbench-host/src/mcp/`(런타임 직접 주입, `AppHandle` 제거). MCP 시험도 함께 옮겨 green
-- [ ] T016 `crates/workbench-host/src/launch.rs` `McpLaunchDecorator`(창 무관 MCP 연결 주입)와 no-op 데스크톱 브리지. 기존 run.start MCP 주입 시험 green
-- [ ] T017 시험 host `crates/workbench-core/examples/http_test_host.rs`를 host 조립으로 바꾸고(가짜 엔진 `test-hooks` 유지), 043 통합 suite(`pnpm --filter @yoophi/workbench-client test:integration`) green 기록
+- [X] T014 [P] 조립 이동: `crates/workbench-host/src/assembly.rs`(런타임 `bootstrap_with` + HTTP 상태: 발급기·표·resolver·출처 정책 + MCP)에 AW `workbench_http.rs`·`lib.rs` 조립을 옮긴다. `WorkbenchHttpState`의 `tauri::async_runtime::spawn`을 tokio로
+- [X] T015 [P] MCP 이동: `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/*` → `crates/workbench-host/src/mcp/`(런타임 직접 주입, `AppHandle` 제거). MCP 시험도 함께 옮겨 green
+- [X] T016 `crates/workbench-host/src/launch.rs` `McpLaunchDecorator`(창 무관 MCP 연결 주입)와 no-op 데스크톱 브리지. 기존 run.start MCP 주입 시험 green
+- [X] T017 시험 host `crates/workbench-core/examples/http_test_host.rs`를 host 조립으로 바꾸고(가짜 엔진 `test-hooks` 유지), 043 통합 suite(`pnpm --filter @yoophi/workbench-client test:integration`) green 기록
 
 ---
 

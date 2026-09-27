@@ -117,3 +117,35 @@
 - `exchange_delivery_acp` 실패: 결정적 재현(`race-repro-red-1.log`, 변경을 stash한 기준에서 `race-repro-base-red-1.log`) 두 로그 모두 `exchange_delivery_acp.rs:62`에서 실패했다. 수정 뒤 `race-fix-green-1.log`는 2 passed다. 전체 `t013-wc-all-3.log`는 441 passed, 0 failed다. 모두 직접 확인했다.
 - **남은 기존 제품 결함(추적)**: 앞 prompt의 완료 로그 직후(응답 처리 중) 보낸 `run.sendPrompt`는 세션 in-flight 잠금을 한 번만 시도해 거절되고, Error 이벤트만 남기고 버려진다. `SendPromptUseCase`도 같다. 044 이전부터 있던 동작이다. 교환 전달(K)은 엔진 대기열 경로라 이 경쟁을 피한다(R7·R14). 일반 `sendPrompt`의 이 경쟁은 이 증분에서 고치지 않는다. 구현 리뷰에서 다시 보고, 후속 추적 항목으로 둔다.
 - `cargo fmt`: fork 커밋에 남은 서식 차이 3개 파일(`bench_close_idempotency.rs`, `operations/mod.rs`, `principal.rs`)을 정리했다.
+
+## T014–T017 조립·MCP를 `workbench-host`로, 창 무관 MCP 주입, 시험 host
+
+- **이동(동작 보존)**:
+  - AW `src-tauri`의 MCP 모듈 전체(`infrastructure/mcp/*`)와 `domain/mcp_title_control.rs`, `acp_agent_launch_factory.rs` → `crates/workbench-host/src/{mcp/*, mcp/title_control.rs, launch.rs}`(`git mv`, 이력 유지).
+  - `workbench_http.rs`의 Tauri 무관 부분(출처 목록, MCP resolver, 발급기·표, `WorkbenchHttpState`, `ExitGate`, drain) → `crates/workbench-host/src/http.rs`.
+  - AW `workbench_http.rs`에는 재노출과 Tauri에 묶인 부분(`origin_of(tauri::Url)`, 창 incarnation으로 토큰을 발급하는 `WorkbenchHttp`)만 남았다.
+  - `tauri::async_runtime::spawn`은 호출자가 넘기는 tokio 핸들(`spawner`)로 바꿨다. AW는 `tauri::async_runtime::handle().inner()`를 넘긴다.
+- **조립**: `workbench_host::assembly::{assemble, assemble_core}`는 런타임 → MCP(`McpLaunchDecorator` 묶음) → HTTP 순이다. AW `lib.rs`가 이것을 쓴다. 043 동작은 그대로다: 창 주체·토큰·compat command·Tauri 브리지의 창 삽입 전달을 유지하고, 기동 실패 주입은 `HttpStart::Fail`로 한다.
+- **시험 수 대조**: 옮긴 파일들의 시험은 이동 전 40개다(`e8ef04a` 기준 파일별 셈). 이동 뒤 host `src` 38개와 AW `workbench_http.rs` 2개(Tauri URL·창 등록 의존)를 합치면 40개다. AW Rust 시험은 125 → 87로, 옮긴 38개만큼 줄었다.
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| T016 red | `cargo test -p workbench-host --test mcp_launch` | 101 | 컴파일 red(`workbench_host::assembly`·`mcp` 없음). 첫 실행은 시험 엔진 편집 스크립트의 패턴 불일치로 `start_requests`도 없었다(재편집 뒤 다시 red) |
+| T016 green | 같음 | 0 | 1 passed, 0 filtered out |
+| T016 변이 | `assemble_core`에서 decorator 설치를 뺌 | 101 | `MCP env injected` 단정에서 실패. 복원 확인 |
+| host 전체 | `cargo test -p workbench-host --features test-hooks` | 0 | 39 passed(단위 38 + 통합 1) |
+| core | `cargo test -p workbench-core --features test-hooks` | 0 | 441 passed |
+| AW Rust | `cargo test -p agentic-workbench` | 0 | 87 passed |
+| clippy | `cargo clippy -p workbench-host -p workbench-core -p agentic-workbench -p agentic-workbench-server --all-targets --features workbench-host/test-hooks -- -D warnings` | 0 | — |
+| fmt | `cargo fmt --all -- --check` | 0 | — |
+| 통합(TS) | `pnpm --filter @yoophi/workbench-client test:integration` | 0 | 7 passed(시험 host는 host crate 예제로 빌드) |
+| AW 화면 | `pnpm --filter @yoophi/agentic-workbench test` / `test:integration` | 0 / 0 | 634 / 1 passed |
+| 타입 | `pnpm run check-types` | 0 | — |
+
+- 세 Rust 대상의 모든 `test result` 줄이 `0 filtered out`이다(확인 결과 0이 아닌 것 0건).
+
+**설계와 다른 점(이유)**:
+1. 시험 host를 `crates/workbench-core/examples`에서 `crates/workbench-host/examples/http_test_host.rs`로 옮겼다. core가 host에 의존하면 순환이 된다. 예제 이름이 같아 바이너리 경로(`target/debug/examples/http_test_host`)는 그대로다. `global-setup.ts`의 빌드 명령만 `-p workbench-host --example http_test_host --features test-hooks`로 바꿨다. host crate에 `test-hooks` feature(→ core `test-hooks`)를 더했다.
+2. 시험 host는 런타임·MCP만 host 조립(`assemble_core`)으로 만든다. HTTP router는 오늘처럼 시험 전용 설정(고정 창 토큰 `StaticResolver`, 빈 출처 정책, 작은 journal 한도)을 쓴다. TS 통합 시험이 고정 토큰에 기대기 때문이다.
+3. `McpLaunchDecorator`는 옛 Tauri decorator의 "작업대에 창이 있어야 함"(`MESSAGE_WINDOW_UNAVAILABLE`) 검사를 하지 않는다(R2 의도). embedded 모드에서 창을 닫으면 작업대가 닫히므로, 닫힌 창의 run.start는 작업대 조회에서 먼저 거절된다.
+4. 시험 엔진(`ScriptedRunEngine`, `test-hooks`)에 `start_requests`(받은 시작 요청 기록)를 더했다.

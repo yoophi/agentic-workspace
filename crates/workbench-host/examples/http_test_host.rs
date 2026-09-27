@@ -1,4 +1,4 @@
-//! 043 T016: TS 통합 시험(`packages/workbench-client` `test:integration`)용 시험 host. 운영 router(`workbench-server`)와
+//! 043 T016(044 T017: `workbench-core`에서 옮김 — 런타임·MCP는 host 조립 `assemble_core`를 쓴다): TS 통합 시험(`packages/workbench-client` `test:integration`)용 시험 host. 운영 router(`workbench-server`)와
 //! 실제 `WorkbenchRuntime`·event hub를 루프백에 띄운다. 다른 점은 셋이다: 가짜 run 엔진(`ScriptedRunEngine`, prompt마다
 //! run 이벤트 하나), 낮춘 journal 보관 한도(보관 초과 복구 시험), 창 주체 두 개에 묶인 고정 토큰. 시험 전용 operation은
 //! 없다 — 시나리오는 운영 operation(교환 전송·orchestration 변경·run prompt)으로 만든다.
@@ -12,14 +12,14 @@ use std::{sync::Arc, time::Duration};
 
 use tokio::io::AsyncReadExt;
 use workbench_core::{
-    application::workbench_runtime::{RuntimeAdapters, WorkbenchRuntime},
-    infrastructure::{data_paths::DataPaths, event_hub::EventHubLimits},
+    application::workbench_runtime::RuntimeAdapters,
+    infrastructure::event_hub::EventHubLimits,
     testing::scripted_run_engine::{RunScript, ScriptedRunEngine},
 };
 use workbench_protocol::{AuthenticatedPrincipal, Workbench};
 use workbench_server::{
-    access_log::StderrAccessLog, auth::StaticResolver, handshake::ServerInfo, origin::OriginPolicy,
-    tickets::EventTicketStore, ExposurePolicy, ServerConfig,
+    ExposurePolicy, ServerConfig, access_log::StderrAccessLog, auth::StaticResolver,
+    handshake::ServerInfo, origin::OriginPolicy, tickets::EventTicketStore,
 };
 
 const TOKEN_WINDOW_A: &str = "host-window-a";
@@ -72,8 +72,12 @@ async fn main() {
         orchestration_journal_capacity: capacity,
         ..EventHubLimits::default()
     };
-    let runtime = WorkbenchRuntime::bootstrap_with(DataPaths::new(&data_dir), adapters)
-        .expect("bootstrap runtime");
+    let (runtime, _mcp) = workbench_host::assembly::assemble_core(
+        data_dir.clone(),
+        adapters,
+        &tokio::runtime::Handle::current(),
+    )
+    .expect("bootstrap runtime");
     let epoch = runtime.epoch().to_owned();
 
     let listener = workbench_server::bind_loopback().await.expect("bind");
