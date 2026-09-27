@@ -30,7 +30,12 @@ export interface components {
     schemas: {
         /** @enum {string} */
         AccessPolicyDto: "readOnly";
-        /** @description 유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다. */
+        /**
+         * @description 유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다.
+         *
+         *     `null`인 수는 아직 파생하지 않은 값이다(0 = 없음이 아니다). 어떤 필드가 그런지는 [`ServerStatusOutput::not_yet_derived`]에
+         *     싣는다. 정지 판정은 모르는 값을 활동 작업으로 본다([`ActiveWorkDto::blocks_stop`]).
+         */
         ActiveWorkDto: {
             /**
              * Format: int64
@@ -38,27 +43,27 @@ export interface components {
              */
             busyRuns: number;
             /** Format: int64 */
-            orchestrationTasks: number;
+            orchestrationTasks?: number | null;
             /**
              * Format: int64
              * @description 비우기 시작 전에 만든 대기 task(K로 배정 가능).
              */
-            queuedTasks: number;
+            queuedTasks?: number | null;
             /**
              * Format: int64
              * @description 전달 prompt가 소비되지 않은 교환(데스크톱 임대가 있을 때만 셈).
              */
-            pendingExchanges: number;
+            pendingExchanges?: number | null;
             /**
              * Format: int64
              * @description 저장된 미전달 coordinator 알림(대상 coordinator run이 살아 있음).
              */
-            pendingNotifications: number;
+            pendingNotifications?: number | null;
             /**
              * Format: int64
              * @description 이 프로세스가 적용 중인 ledger `pending`.
              */
-            pendingOperations: number;
+            pendingOperations?: number | null;
             /**
              * Format: int64
              * @description 받아들인 분리 호출(HTTP·MCP).
@@ -3237,14 +3242,19 @@ export interface components {
             leases: number;
             /**
              * Format: int64
-             * @description 이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님).
+             * @description 이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님). `null` = 아직 파생하지 않음.
              */
-            unresolvedOperations: number;
-            /** @description 임대가 없어 전달할 클라이언트가 없는 미소비 교환. */
-            undeliverableExchanges: string[];
-            /** @description 엔진 대기열 전달이 run 종료로 실패한 교환. */
-            failedExchangeDeliveries: string[];
+            unresolvedOperations?: number | null;
+            /** @description 임대가 없어 전달할 클라이언트가 없는 미소비 교환. `null` = 아직 파생하지 않음. */
+            undeliverableExchanges?: string[] | null;
+            /** @description 엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음. */
+            failedExchangeDeliveries?: string[] | null;
             idleSince?: string | null;
+            /**
+             * @description 이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의
+             *     `null`·부재는 "없음"이 아니라 "모름"이다. 모두 파생하면 빈 배열.
+             */
+            notYetDerived: string[];
         };
         ServerStopInput: {
             mode: components["schemas"]["StopModeDto"];

@@ -60,14 +60,9 @@
       },
       "ActiveWorkDto": {
         "type": "object",
-        "description": "유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다.",
+        "description": "유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다.\n\n`null`인 수는 아직 파생하지 않은 값이다(0 = 없음이 아니다). 어떤 필드가 그런지는 [`ServerStatusOutput::not_yet_derived`]에\n싣는다. 정지 판정은 모르는 값을 활동 작업으로 본다([`ActiveWorkDto::blocks_stop`]).",
         "required": [
           "busyRuns",
-          "orchestrationTasks",
-          "queuedTasks",
-          "pendingExchanges",
-          "pendingNotifications",
-          "pendingOperations",
           "acceptedCalls",
           "reservations"
         ],
@@ -79,30 +74,45 @@
             "minimum": 0
           },
           "orchestrationTasks": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "minimum": 0
           },
           "queuedTasks": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "비우기 시작 전에 만든 대기 task(K로 배정 가능).",
             "minimum": 0
           },
           "pendingExchanges": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "전달 prompt가 소비되지 않은 교환(데스크톱 임대가 있을 때만 셈).",
             "minimum": 0
           },
           "pendingNotifications": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "저장된 미전달 coordinator 알림(대상 coordinator run이 살아 있음).",
             "minimum": 0
           },
           "pendingOperations": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
             "description": "이 프로세스가 적용 중인 ledger `pending`.",
             "minimum": 0
@@ -11813,9 +11823,7 @@
           "activeWork",
           "idleRuns",
           "leases",
-          "unresolvedOperations",
-          "undeliverableExchanges",
-          "failedExchangeDeliveries"
+          "notYetDerived"
         ],
         "properties": {
           "state": {
@@ -11842,30 +11850,46 @@
             "minimum": 0
           },
           "unresolvedOperations": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int64",
-            "description": "이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님).",
+            "description": "이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님). `null` = 아직 파생하지 않음.",
             "minimum": 0
           },
           "undeliverableExchanges": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string"
             },
-            "description": "임대가 없어 전달할 클라이언트가 없는 미소비 교환."
+            "description": "임대가 없어 전달할 클라이언트가 없는 미소비 교환. `null` = 아직 파생하지 않음."
           },
           "failedExchangeDeliveries": {
-            "type": "array",
+            "type": [
+              "array",
+              "null"
+            ],
             "items": {
               "type": "string"
             },
-            "description": "엔진 대기열 전달이 run 종료로 실패한 교환."
+            "description": "엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음."
           },
           "idleSince": {
             "type": [
               "string",
               "null"
             ]
+          },
+          "notYetDerived": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의\n`null`·부재는 \"없음\"이 아니라 \"모름\"이다. 모두 파생하면 빈 배열."
           }
         }
       },

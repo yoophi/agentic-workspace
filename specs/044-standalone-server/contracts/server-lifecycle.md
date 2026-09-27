@@ -60,7 +60,7 @@ research R4–R6·R9·R10.
 
 | operation | 종류 | 권한 | 입력 → 출력 |
 |---|---|---|---|
-| `server.status` | query | 소유자 | `{}` → `{state, instanceId, serverEpoch, activeWork{busyRuns, orchestrationTasks, queuedTasks, pendingExchanges, pendingOperations, acceptedCalls}, idleRuns, leases, unresolvedOperations, undeliverableExchanges, idleSince?}` |
+| `server.status` | query | 소유자 | `{}` → `{state, instanceId, serverEpoch, activeWork{busyRuns, orchestrationTasks, queuedTasks, pendingExchanges, pendingNotifications, pendingOperations, acceptedCalls, reservations}, idleRuns, leases, unresolvedOperations, undeliverableExchanges, failedExchangeDeliveries, idleSince?, notYetDerived}`. 아직 파생하지 않는 수·목록은 `null`(0/빈 배열 아님)이고 그 JSON 경로를 `notYetDerived`에 싣는다. 정지 판정은 `null`을 활동 작업으로 본다(`ActiveWorkDto::blocks_stop`) |
 | `server.stop` | command | 소유자 | `{mode: "default"\|"wait"\|"force"}` → `{state}`. `default`는 활성 작업이 있으면 `conflict`와 `details.activeWork` |
 | `lease.acquire` | command | 소유자 | `{clientKind: "desktop"\|"cli"\|"test", clientId}` → `{leaseId, ttlSeconds}` |
 | `lease.renew` | command | 소유자 | `{leaseId}` → `{ttlSeconds}`. 모르는 임대는 `notFound` |
