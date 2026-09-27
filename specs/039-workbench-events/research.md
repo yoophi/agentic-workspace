@@ -1,0 +1,132 @@
+# Research: 039 이벤트 모델 통합 (2a)
+
+결정은 spec Clarifications(Q1–Q9)와 ADR 4건을 전제로 한다. 아래는 plan 수준 결정이다. 코드 사실은 2026-09-27 조사 기준(main `4cb6be5`).
+
+## 사실 요약(조사)
+
+| 항목 | 오늘 |
+|---|---|
+| run journal | AW `infrastructure/in_memory_runtime_event_journal.rs`. run id별 `last_sequence += 1`, run당 512개, run journal은 삭제되지 않음(`remove` 미사용). `lib.rs`에서 `.manage` |
+| run 발행 | AW `TauriRunEventSink::emit`이 journal에 append(반환값 버림) → `window.emit`(Tauri, 전체 방송) + `window.eval`(삽입). sink 생성처 8곳(`tauri_commands.rs` 7, `acp_agent_worker_adapter.rs` 1), 전부 `with_target(label)` |
+| run 수신 | 화면은 삽입 경로(`agent-run-event-fallback`)만 들음. `agent-run-runtime-host.tsx`가 `sequence = lastSequence + 1` 추정, `agent-run-panel.tsx`는 `{runId, event}`만 사용. 타입 `RunEventEnvelope`는 공유 패키지 `@yoophi/agent-client`(hushline도 사용) |
+| run replay | `replay_orchestration_runtime_events` command(2b 이연 대상)가 journal `replay` 결과 `RuntimeEventSnapshot`을 그대로 반환 |
+| worktree 감시 | AW `fs_worktree_watcher.rs`(notify recursive, 500ms trailing debounce, File/Git 분류, `git rev-parse`로 git 경로). `WorktreeWatcherState.handles: HashMap<창 label, handle>`, 같은 창 재시작은 교체, 창 파괴 시 `stop_for_window`. payload `workingDirectory`는 **호출자가 준 문자열 그대로**이고 화면이 이 값으로 필터한다 |
+| protocol | `StreamCursor`·`Subscription`·`EventEnvelope` 타입만 있고 `EventStream`은 빈 struct, `WorkbenchRuntime::events`는 항상 `unsupportedSchema` |
+| Tauri emit | 2.11.6 `WebviewWindow`는 `Emitter` 기본 구현 → `manager().emit`(전체 방송). 창 지정은 `emit_to`뿐 |
+
+## R1. `EventStream`의 형태
+
+**Decision**: protocol의 `EventStream`을 `futures_core::Stream<Item = EventItem>`을 감싼 타입으로 바꾼다. `EventItem = Event(EventEnvelope) | Gap(GapNotice)`. 스트림이 끝나는 경우(구독자 대기열 초과, 서버 종료)는 마지막에 `Gap`(reason 포함)을 내고 종료한다. `Workbench::events`는 동기 함수로 유지한다 — 구독 등록·기준점·replay 복사가 한 lock 안에서 끝나므로 await가 필요 없다. `EventStream`을 drop하면 구독이 해제된다(`Drop`에서 hub unsubscribe).
+
+**Rationale**: protocol crate에 tokio를 들이지 않고(`futures-core`만) HTTP·Tauri·in-memory Adapter가 같은 타입을 소비한다. drop 기반 해제는 창 닫힘·WS 종료·테스트 종료를 한 규칙으로 처리한다.
+
+**Alternatives**: async `events` + `tokio::mpsc::Receiver` 노출 — protocol에 tokio 의존, Adapter가 수신 타입에 묶임.
+
+## R2. 구독 조정자 — "한 lock" 구현
+
+**Decision**: core `infrastructure/event_hub`(가칭 `EventHub`)가 스트림마다 `Mutex<StreamState>`를 둔다. `publish`와 `subscribe`는 **같은 스트림 lock**을 잡는다.
+
+- `publish(stream, schema, body)`: lock → `sequence += 1` → (상태 복원용이면) journal push·한도 적용 → 등록된 구독자 대기열에 `try_send` → unlock. 가득 찬 구독자는 overflow로 표시하고 목록에서 뺀다(발행자는 기다리지 않음).
+- `subscribe(cursors)`: 권한·입력 검증 → 스트림마다 lock → 구독자 대기열 등록(수신자 먼저) → high-water = 현재 `sequence` capture → cursor 판정(아래) → `after < seq <= high-water` 구간을 대기열 **앞쪽**에 넣을 replay 목록으로 복사 → unlock. 반환 스트림은 replay 목록을 먼저 내고, 이후 대기열에서 `sequence > high-water`인 것만 낸다(중복 제거).
+
+한 lock 안에서 등록과 capture가 일어나므로 capture와 등록 사이에 발행이 끼어들 수 없다. 정본 Ordering 3의 "수신자 먼저 → high-water → replay → drain"을 그대로 따르되, 중복 제거 필터는 방어적으로 유지한다.
+
+**Cursor 판정**(상태 복원용 스트림):
+
+| 조건 | 결과 |
+|---|---|
+| 스트림 없음 + `after == 0` | 빈 replay, live 대기(시작 전 run 미리 구독) |
+| 스트림 없음 + `after > 0` | `Gap(reason=unknownStream)` |
+| `epoch ≠ 현재` | `Gap(reason=epochChanged)` |
+| `after > last` (같은 세대) | `invalidArgument`("cursor is ahead of the stream.") |
+| `after + 1 < first_retained` | `Gap(reason=retentionExceeded)` |
+| 그 외 | replay `after+1..=last` |
+
+알림용 스트림은 cursor를 보지 않고 항상 live부터(ADR core 0003). cursor에 `afterSequence`가 있어도 무시한다.
+
+**Rationale**: `tokio::broadcast`는 lag 시 cursor를 앞당기므로(정본 경고) 구독자별 bounded mpsc + `try_send`로 overflow를 명시적 gap으로 바꾼다.
+
+**Alternatives**: receiver-first를 lock 없이(atomic high-water) — 구현이 복잡하고 race test가 더 어렵다.
+
+## R3. 세대와 계약 조회
+
+**Decision**: `WorkbenchRuntime::bootstrap`이 `uuid v4`로 세대를 만든다(`epoch`). `system.describe` 출력에 `epoch`와 `eventSchemas`(principal에게 허용된 것만: `schema`, `streamKind`, `class`, `requiredScopes`)를 추가한다(additive, `PROTOCOL_VERSION` 1 유지). 모든 `EventEnvelope.epoch`와 `GapNotice.epoch`는 이 값이다.
+
+## R4. 스트림 식별자와 권한
+
+**Decision**: 스트림 식별자는 `<kind>:<key>` 문자열. 039가 구독을 여는 kind는 `run`(key = run id)과 `worktree`(key = 호출자가 준 경로 → hub가 `canonicalize`한 실제 경로로 정규화). `orchestration`·`exchange`는 이름만 예약한다(구독 시 `invalidArgument` "stream kind is not available yet."). 권한: `run` → 신설 `run:read`, `worktree` → `worktree:read`. Scope가 14개가 되고 데스크톱·조회 전용 호출자 모두 두 scope를 갖는다. 허용되지 않은 kind는 1단계와 같은 `forbidden`.
+
+## R5. run journal 이동
+
+**Decision**: AW `InMemoryRuntimeEventJournal`·`ports/runtime_event_journal.rs`를 삭제하고 hub의 상태 복원용 스트림이 journal을 겸한다. 한도: run당 512(오늘 값), 보관 run 수 상한 256(ADR core 0002, Q8). 상한 초과 시 **terminal로 표시된 run 중 terminal이 가장 먼저 된 것**부터 스트림째 제거한다. 진행 중 run은 제거하지 않으므로 상한을 일시적으로 넘을 수 있다. terminal 판정은 오늘과 같다(`Lifecycle Completed | Cancelled`).
+
+`replay_orchestration_runtime_events`(2b 이연 command)는 hub의 run replay를 읽어 **오늘과 같은 `RuntimeEventSnapshot` 형태**로 돌려준다(화면 hydrate 코드 불변). `gapDetected` 의미도 같다(unknown + after>0, 또는 보관 범위 밖).
+
+## R6. 데스크톱 run 전달
+
+**Decision**: `TauriRunEventSink::emit`은 `runtime.events_hub().publish_run(run_id, &event, terminal)`을 호출해 `EventEnvelope`를 돌려받고, **삽입 경로만으로** 대상 창에 보낸다(ADR 0003·0004). 삽입 payload는 공유 타입 `RunEventEnvelope {runId, event}`의 **상위집합**이다: `{runId, event, sequence, epoch, streamId, eventId}`. Tauri `agent-run-event` 발행과 `target_label = None` 분기(도달 불가)는 제거한다. 창이 없으면 전달하지 않는다(오늘도 그 창의 listener가 없다). worktree guard 검증 등 sink의 부수 로직은 그대로 둔다.
+
+**Rationale**: `@yoophi/agent-client`의 `RunEventEnvelope`(hushline 공유)를 바꾸지 않고 AW에서 확장 타입을 둔다. 패널은 추가 필드를 무시한다.
+
+## R7. 프론트 변경 범위
+
+**Decision**: `entities/agent-run/model`에 `DeliveredRunEvent = RunEventEnvelope & { sequence: number; epoch: string; streamId: string; eventId: string }`, `listenRunEvents`의 콜백 타입을 그것으로. `agent-run-runtime-host.tsx`는 `sequence: envelope.sequence`를 쓴다. `terminal` 계산(오류 포함)은 오늘 화면 동작이므로 유지한다. 컨트롤러 reducer(`applyLiveRuntimeEvent`의 `sequence <= lastSequence` 무시)는 이미 중복 제거를 하므로 바꾸지 않는다. vitest로 "hydrate 도중 live 끼어들기" 시나리오를 추가한다.
+
+## R8. run 이벤트 본문 계약
+
+**Decision**: protocol `events/run.rs`에 `RunEventDto`(acp-agent-core `RunEvent` 14 variant, `#[serde(tag = "type", rename_all = "camelCase")]` 등 원본 serde 속성 그대로)와 보조 DTO(`LifecycleStatus` 등)를 둔다. hub는 본문을 원본 `RunEvent`의 `serde_json::to_value`로 저장·전달하고, DTO는 스키마 생성과 wire 동일성 테스트(core, 모든 variant)에만 쓴다. 스키마 이름 `run.event.v1`, 분류 상태 복원용.
+
+## R9. worktree 스트림
+
+**Decision**: AW `fs_worktree_watcher.rs`를 core `infrastructure/fs/worktree_watcher.rs`로 옮긴다(`notify` 의존 core로 이동, perf 로그는 core `infrastructure::perf`). hub는 실제 경로별 **참조 수**를 두어 첫 구독에서 `watch_worktree`를 시작하고 마지막 구독 drop에서 handle을 버린다(감시 thread 종료). 감시 콜백이 `publish(worktree:<canonical>, "worktree.changed.v1", body)`를 부른다. 본문은 `{workingDirectory: <canonical>, changedPath, kind}`. 분류 알림용(보관 없음).
+
+**AW 호환**: `start_worktree_watcher(window, working_directory)`는 `runtime.events(desktop, Subscription{cursors:[worktree:<wd>]})`를 blocking pool에서 호출하고, 반환 스트림을 소비하는 task를 띄워 이벤트마다 본문 `workingDirectory`를 **그 창이 준 원래 문자열로 바꿔** `emit_to(label, "workspace://worktree-changed")`한다(화면 필터 호환). task handle을 `WorktreeWatcherState`에 창 label로 저장(교체 시 기존 task abort → 스트림 drop). `stop_worktree_watcher`·창 파괴는 abort. 감시 시작 실패 문구(`Cannot watch missing worktree path: …`)는 fault message로 그대로 전달한다.
+
+## R10. 한도 기본값
+
+| 한도 | 값 | 초과 시 |
+|---|---|---|
+| run당 보관 | 512 | 오래된 것부터 버림(오늘과 같음) |
+| 보관 run 수 | 256 | 가장 먼저 terminal이 된 run 제거 |
+| 구독자 대기열 | 1,024 항목 | 그 구독을 `Gap(reason=subscriberLagged)`로 닫음 |
+| 동시 구독 수 | 256 | `events`가 `rateLimited` |
+| 구독 하나의 cursor 수 | 64 | `invalidArgument` |
+
+run 이벤트는 초당 수십 건(스트리밍 토큰 단위 메시지)이므로 1,024는 화면이 수 초 멈춰도 견딘다. 값은 상수로 두고 test-hooks로 낮춰 overflow를 시험한다.
+
+## R11. 테스트 HTTP WebSocket
+
+**Decision**: 037 `http_harness`에 `GET /v1/events`(WebSocket upgrade, bearer 헤더 인증)를 추가한다. dev-dependency: `axum` `ws` feature, `tokio-tungstenite`. 프레임(JSON text):
+
+| 방향 | 프레임 |
+|---|---|
+| server → client | `{"type":"hello","protocolVersion":1,"epoch":…}` |
+| client → server | `{"type":"subscribe","cursors":[StreamCursor…]}`(첫 프레임, 한 번) |
+| server → client | `{"type":"event","event":EventEnvelope}` · `{"type":"gap",…GapNotice}` · `{"type":"fault","fault":WorkbenchFault}`(뒤이어 close) |
+
+프레임 타입은 protocol `EventFrame`(oneOf)로 정의해 OpenAPI component로 내보낸다. 3단계 운영 Adapter가 같은 프레임을 쓰고 ticket 인증만 추가한다.
+
+## R12. 계약 생성
+
+**Decision**: OpenAPI components에 `EventEnvelope`(기존), `GapNotice`, `EventItem`, `EventFrame`, `EventSchemaDescriptor`, 그리고 `EventBySchema` oneOf(variant마다 `schema` 단일값 enum + typed `body`)를 registry(`events::EVENT_SCHEMAS`)에서 조립한다. 039 variant: `run.event.v1`(RunEventDto), `worktree.changed.v1`(WorktreeChangedDto), 2b 예약 `orchestration.workspaceUpdated.v1`(OrchestrationEventDto: workspaceId·revision·reason·taskId?·nodeId? — AW 타입이 작아 지금 정의). exchange 본문(`AgentExchange` 등)은 AW 도메인 타입이 크고 2b에서 core로 옮겨질 때 미러를 만든다 — 039는 이름·분류만 registry에 둔다(`body` 스키마 없이 describe에만). TS: `EventMap = { [K in EventSchemaId]: Extract<EventBySchema, {schema: K}>["body"] }`와 test-d.
+
+## R13. 지연 측정(SC-006)
+
+**Decision**: core `tests/event_latency.rs`(#[ignore])에서 `publish_run` p95와 구독자 수신까지 p95를 측정한다(1,000회). 기준선은 AW 오늘 경로의 journal append(동일 크기 `Value`). 삽입(`window.eval`) 비용은 변하지 않으므로 측정 대상에서 뺀다.
+
+## R14. race test(SC-001)
+
+**Decision**: `tests/event_subscription_race.rs`: 발행 thread가 한 run 스트림에 연속 발행하는 동안 1,000회 `subscribe(cursor=임의 k)` → 각 구독에서 처음 N개를 받아 `k+1, k+2, …`로 연속인지 확인. 대기열 overflow·epoch·retention fixture는 in-memory와 WS 경로 공통 fixture(`crates/workbench-protocol/fixtures/events/*.json`)로 실행한다.
+
+## R15. 파일 경로 정규화
+
+worktree kind는 hub에서 `std::fs::canonicalize`. 실패(없음)면 fault `notFound`("Cannot watch missing worktree path: …" — 오늘 문구). 같은 실제 경로의 서로 다른 표기(끝 `/`, 심볼릭 링크)는 같은 스트림이다.
+
+## 정리: 의존성 변화
+
+| crate/package | 추가 | 제거 |
+|---|---|---|
+| `workbench-protocol` | `futures-core` | — |
+| `workbench-core` | `notify`(AW에서 이동) | — |
+| `workbench-core` dev | `axum` `ws` feature, `tokio-tungstenite`, `futures-util` | — |
+| `apps/agentic-workbench/src-tauri` | — | `notify`(사용처가 `fs_worktree_watcher.rs` 하나뿐임을 확인) |
