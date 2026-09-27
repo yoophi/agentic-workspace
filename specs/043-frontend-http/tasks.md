@@ -45,7 +45,7 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 - [X] T013 `get_workbench_connection`이 창 주체 토큰·incarnation·epoch·만료 반환 — `AWT/infrastructure/workbench_http.rs`
 - [X] T014 새 command `ensure_window_bench`, `declare_network_delivery`(incarnation 키) — `AWT/inbound/tauri_commands.rs`, `AWT/lib.rs` invoke handler 등록
 - [X] T015 네트워크 전달 창 표(incarnation 키, 해당 창은 앱 내부 이벤트 전달 건너뜀) — `AWT/infrastructure/tauri_desktop_bridge.rs` + 단위 시험
-- [ ] T016 시험 host `CORE/examples/http_test_host.rs` — 운영 router·hub(작은 보관 한도), 고정 토큰·창 주체 두 개, 가짜 run engine(test-hooks), 시작 시 `{baseUrl, tokens}`를 stdout 한 줄 JSON, 종료는 stdin EOF. 시험 조작용 debug operation(보관 한도 초과 유발·교환 요청 발행)은 test-hooks 전용
+- [X] T016 시험 host `CORE/examples/http_test_host.rs` — 운영 router·hub(작은 보관 한도), 고정 토큰·창 주체 두 개, 가짜 run engine(test-hooks), 시작 시 `{baseUrl, tokens}`를 stdout 한 줄 JSON, 종료는 stdin EOF. 시험 조작용 debug operation(보관 한도 초과 유발·교환 요청 발행)은 test-hooks 전용
 
 **Checkpoint**: T004–T006 통과, compat 경로 회귀 없음
 

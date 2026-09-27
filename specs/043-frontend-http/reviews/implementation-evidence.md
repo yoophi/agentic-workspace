@@ -79,3 +79,13 @@ tasks.md에는 경로가 `crates/workbench-server/tests/`로 적혀 있다. 실�
 | 새 창 등록 뒤 옛 창의 command가 늦게 실행되어 새 창 주체로 풀림(승격) | **이론상 남음 — 작업대에 묶인 호출에는 해당 없음** | Tauri 2.11 async command는 `window`를 포함한 인자를 future 안에서 추출한다(`tauri-macros-2.6.3/src/command/wrapper.rs` `body_async`: `respond_async_serialized(async move { $path(#args?) })`). `Window`에는 label 말고 인스턴스 식별자가 없다. 그래서 수신 시점에 주체를 붙잡을 수 없다. 다만 session 창 label은 매번 새 id라 재사용되지 않는다(`window_manager::open_session_window` → `session_label(&new_session_id())`). 작업대에 묶인 호출(run·교환·orchestration·작업대)은 session 창에서만 나온다. label을 다시 쓰는 창은 `settings`와 `main`(설정 파일)이고, 이 창들의 호출은 작업대와 무관하다(`reviews/command-inventory.md`). 그래서 승격돼도 다른 창의 작업대에 닿지 않는다 |
 
 결정적 시험으로 고정한 것은 위 세 시험이다. 실제 창을 띄우는 순서 시험은 T050(창 닫기 수명)과 T054(앱 스모크)에서 한다.
+
+## T016 시험 host (`crates/workbench-core/examples/http_test_host.rs`, `required-features = ["test-hooks"]`)
+
+- 구성: 운영 router, 실제 런타임과 hub, 가짜 run 엔진(prompt마다 run 이벤트 하나), journal 보관 한도 4(`HOST_JOURNAL_CAPACITY`), 창 주체 두 개에 묶인 고정 토큰.
+- 시험 전용 operation은 없다. 시나리오는 운영 operation으로 만든다.
+- 수동 확인:
+  - 준비되면 JSON 한 줄을 출력한다.
+  - `host-window-a` 토큰으로 `project.list` 호출이 `{"kind":"complete","output":[]}`를 돌려준다.
+  - stdin을 닫으면 프로세스가 끝난다.
+- dev-dependency tokio에 `io-std`·`io-util` 기능을 더했다. 이것은 example이 stdin을 읽기 위한 dev 전용 변경이다.
