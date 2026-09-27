@@ -99,7 +99,7 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 - [X] T035 [US2] 교환 원장·재조정 모듈 `AWF/features/agent-run/model/exchange-reconciler.ts`, `worktree-agent-run-area.tsx` 교환 수신자를 재조정 경유로 교체 (T031)
 - [X] T036 [US2] 교환 prompt run 전송에 멱등성 키 `exchange-delivery:<requestId>` 도출 — `AWF/features/agent-run/ui/agent-run-panel.tsx`의 external prompt 전송 경로와 run 호출 저장소
 - [X] T037 [US2] 네트워크 창 부팅 시 `declare_network_delivery` 호출 — `AWF/app/bootstrap-transport.ts` (T032)
-- [ ] T038 [US2] 화면 통합(HttpTransport) — 기존 `worktree-agent-run-area.test.tsx` 등 이벤트 화면 시험을 HttpTransport(가짜 WS 서버)로도 실행, 추가로 orchestration 수신자 Promise 거절·동기 예외·수신자 교체 중 도착 시 화면이 스냅샷으로 복구되는 시나리오
+- [X] T038 [US2] 화면 통합(HttpTransport) — 기존 `worktree-agent-run-area.test.tsx` 등 이벤트 화면 시험을 HttpTransport(가짜 WS 서버)로도 실행, 추가로 orchestration 수신자 Promise 거절·동기 예외·수신자 교체 중 도착 시 화면이 스냅샷으로 복구되는 시나리오
 
 **Checkpoint**: US1+US2로 네트워크 창 전체 동작(끊김 없는 조건)
 

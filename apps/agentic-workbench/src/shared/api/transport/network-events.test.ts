@@ -18,6 +18,7 @@ import {
   createNetworkEvents,
   EXCHANGE_REQUESTED_EVENT,
   EXCHANGE_STATUS_EVENT,
+  ORCHESTRATION_WORKSPACE_UPDATED_EVENT,
   WORKTREE_CHANGED_EVENT,
 } from "./network-events";
 
@@ -233,6 +234,64 @@ describe("network events — exchange reconciliation triggers (T047)", () => {
     await vi.waitFor(() => expect(listCalls).toHaveLength(2)); // 구독 시작 재조정이 수신자마다 스냅샷을 부른다
     await vi.waitFor(() => expect(acknowledge).toHaveBeenCalledTimes(1));
     expect(route.mock.calls).toEqual([["x0"]]);
+    events.close();
+  });
+});
+
+describe("network events — orchestration listeners that refetch asynchronously (T038)", () => {
+  it("resyncs only the failing listener through a revision signal while the other keeps receiving", async () => {
+    const hub = new FakeEventHub();
+    let revision = 1;
+    const client: WorkbenchClient = {
+      call: vi.fn(async (operation: string) => {
+        if (operation === "orchestration.get") {
+          return { kind: "ok", output: { id: "ws1", revision }, revision: undefined } as CallOutcome<unknown>;
+        }
+        throw new Error(`unexpected ${operation}`);
+      }) as never,
+    };
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    // 화면 수신자(worktree-agent-run-area)와 같은 모양: 이벤트를 받으면 작업 영역을 await로 다시 읽는다.
+    let refetchFailures = 1;
+    const refetched: number[] = [];
+    const flakySignals: Array<{ revision: number; reason?: string }> = [];
+    await network.listen(ORCHESTRATION_WORKSPACE_UPDATED_EVENT, async (payload) => {
+      const signal = payload as { revision: number; reason?: string };
+      flakySignals.push(signal);
+      if (refetchFailures > 0) {
+        refetchFailures -= 1;
+        throw new Error("getOrchestrationWorkspace failed");
+      }
+      const session = await client.call("orchestration.get" as never, {} as never);
+      refetched.push(((session as { output: { revision: number } }).output).revision);
+    });
+    const other: number[] = [];
+    await network.listen(ORCHESTRATION_WORKSPACE_UPDATED_EVENT, (payload) => {
+      other.push((payload as { revision: number }).revision);
+      if (other.length === 1) {
+        throw new Error("synchronous failure in the second listener");
+      }
+    });
+    network.noteBench("b1");
+    network.noteOrchestrationStream("orchestration:bind-1");
+    await vi.waitFor(() => expect(hub.sockets.some((socket) => socket.readyState === 1)).toBe(true));
+
+    revision = 2;
+    hub.publish("orchestration:bind-1", { workspaceId: "ws1", revision: 2, reason: "bootstrap" }, "orchestration.workspaceUpdated.v1");
+    revision = 3;
+    hub.publish("orchestration:bind-1", { workspaceId: "ws1", revision: 3, reason: "child" }, "orchestration.workspaceUpdated.v1");
+    // 첫 수신자: 재조회 실패 → 스냅샷(revision 3)의 재설정 신호 → 다시 읽어 revision 3 반영. 스냅샷 이하 이벤트는 다시 받지 않는다.
+    await vi.waitFor(() => expect(refetched).toContain(3));
+    expect(flakySignals.some((signal) => signal.reason === "resync" && signal.revision === 3)).toBe(true);
+    // 두 번째 수신자(동기 예외): 재설정 신호로 revision 3을 받는다. 첫 수신자의 실패에 막히지 않았다.
+    await vi.waitFor(() => expect(other).toContain(3));
+    revision = 4;
+    hub.publish("orchestration:bind-1", { workspaceId: "ws1", revision: 4, reason: "child" }, "orchestration.workspaceUpdated.v1");
+    await vi.waitFor(() => {
+      expect(refetched[refetched.length - 1]).toBe(4);
+      expect(other[other.length - 1]).toBe(4);
+    });
     events.close();
   });
 });
