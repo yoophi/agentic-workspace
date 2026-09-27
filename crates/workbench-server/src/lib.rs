@@ -63,6 +63,13 @@ impl ExposurePolicy {
         )
     }
 
+    /// 운영 기본값: 전체 공개. 변경 operation을 여는 근거는 공개 게이트 시험이다 — 연결 단절·종료 drain
+    /// (`workbench-core/tests/http_disconnect_retry.rs`), 영속 변경 중단 판정(`crash_points_updates.rs`와 038·040
+    /// crash 시험), 재시작 뒤 재시도(`restart_retry.rs`). 이 시험이 깨지면 공개를 다시 좁힌다.
+    pub fn network_default() -> Self {
+        Self::All
+    }
+
     pub fn allows(&self, id: OperationId) -> bool {
         match self {
             Self::All => true,
@@ -207,4 +214,20 @@ pub async fn serve(
         })
         .await;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queries_only_opens_exactly_the_read_operations() {
+        let ExposurePolicy::Only(ids) = ExposurePolicy::queries_only() else {
+            panic!("queries_only is a set");
+        };
+        assert_eq!(ids.len(), 32);
+        assert!(ids.contains(&OperationId::ProjectList));
+        assert!(!ids.contains(&OperationId::ProjectCreate));
+        assert!(ExposurePolicy::network_default().allows(OperationId::ProjectCreate));
+    }
 }

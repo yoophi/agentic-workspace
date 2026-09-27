@@ -13,7 +13,30 @@ pub const MESSAGE_BAD_BODY: &str = "invalid request body.";
 
 pub async fn call(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
     let started = Instant::now();
-    let request: CallRequest = match serde_json::from_slice(&body) {
+    // 인증이 먼저다: 자격 증명 없는 요청은 본문이 어떻든 `401`. 본문이 올바르면 그 requestId를 싣는다.
+    let parsed = serde_json::from_slice::<CallRequest>(&body);
+    let principal = authenticate(&state, &headers);
+    let Some(principal) = principal else {
+        let request_id = parsed
+            .as_ref()
+            .map(|request| request.request_id.clone())
+            .unwrap_or_else(|_| RequestId::random());
+        let response = unauthenticated(&request_id);
+        let operation = parsed
+            .as_ref()
+            .map(|request| request.operation.as_str())
+            .unwrap_or("calls");
+        record(
+            &state,
+            started,
+            Some(&request_id),
+            operation,
+            None,
+            &response,
+        );
+        return response;
+    };
+    let request = match parsed {
         Ok(request) => request,
         Err(_) => {
             let response = problem(&WorkbenchFault::new(
@@ -21,27 +44,12 @@ pub async fn call(State(state): State<Arc<AppState>>, headers: HeaderMap, body: 
                 RequestId::random(),
                 MESSAGE_BAD_BODY,
             ));
-            record(&state, started, None, "calls", None, &response);
+            record(&state, started, None, "calls", Some(&principal), &response);
             return response;
         }
     };
     let request_id = request.request_id.clone();
     let operation = request.operation.clone();
-    let principal = match authenticate(&state, &headers) {
-        Some(principal) => principal,
-        None => {
-            let response = unauthenticated(&request_id);
-            record(
-                &state,
-                started,
-                Some(&request_id),
-                &operation,
-                None,
-                &response,
-            );
-            return response;
-        }
-    };
     if let Some(id) = OperationId::parse(&operation) {
         if !state.config.exposure.allows(id) {
             let response = problem(&WorkbenchFault::new(
