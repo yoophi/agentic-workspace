@@ -66,3 +66,7 @@
 - `close_all`의 스냅샷 이후 새 작업대: 종료 전에 받아들인 `bench.open`이 스냅샷 뒤에 등록될 수 있다. 그 작업대에는 run이 생길 수 없다(새 호출은 이미 `503`, 클라이언트는 open 응답 전에 id를 모른다) — 권한 대기가 없어 drain을 막지 않는다. 남는 것은 메모리 속 빈 작업대이며 앱 종료와 함께 사라진다. 입증된 해악이 아니라 고치지 않았다 — 5단계 독립 서버 재조립 때 확인 항목.
 
 **게이트**: `cargo fmt --all -- --check` 0 · `cargo clippy --workspace --all-targets -- -D warnings` 0 · `cargo test --workspace --all-targets --no-fail-fast` 0(747 passed, 0 failed, 7 ignored).
+
+## 5. Codex adversarial review 최종 — verdict: approve
+
+"main 2e7f359 대비 재검토에서 출하를 막을 실질적 결함을 찾지 못했습니다." Codex는 읽기 전용 환경이라 `acp_permission_exit`를 재실행하지 못했다 — 최종 HEAD 전체 게이트(747 passed)에서 이 시험이 통과했다.
