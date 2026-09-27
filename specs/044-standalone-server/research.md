@@ -227,6 +227,11 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
   - 저장된 미전달 알림(대상 coordinator run이 살아 있음)을 활동에 센다(저장소 파생). 알림은 보고 호출이 돌아가기 전에 저장되므로 공백이 없다.
   - 보고 도구는 C-call을 놓기 전에 N-notify 예약을 만들어 전달기로 넘긴다. 전달기가 `send_and_wait`에 들어가면 A-turn으로 인계한다.
   - 비우기에 들어갈 때와 전달 실패 뒤(재시도 가능 실패), 서버가 알림 전달 한 바퀴를 스스로 돈다(backoff). 저장된 미전달 알림이 외부 계기 없이 남아 wait를 영원히 막지 않게 한다.
+  - **중단된 전달의 회수(Codex 재검토 4 G1)**: 전달기는 전달 전에 `Dispatching`을 저장하고, 다음 전달은 `Pending`·재시도 가능 `Failed`만 고른다(`notification_dispatcher.rs`). 그래서 `Dispatching` 저장 뒤 future가 drop되거나 결과 저장이 실패하면, 그 알림은 활동으로 남는데 재시도에서는 고르지 않아 wait가 끝나지 않는다(`recover_interrupted`는 재시작 복구 경로라 여기서 돌지 않는다).
+    - 전달 시도마다 `attemptId`를 발급해 `Dispatching{attemptId}`로 저장한다. 그 시도의 예약(N-notify→A-turn)이 G의 활동 표에 있다.
+    - 예약 guard가 결과 저장 없이 해제되면(drop·결과 저장 실패), guard가 회수를 예약한다(6''). 서버의 전달 한 바퀴도 시작할 때 "예약이 없는 `attemptId`의 `Dispatching`"을 회수한다.
+    - 회수는 같은 `attemptId`일 때만 `Failed(retryable)`로 되돌린다. 살아 있는 시도는 예약이 있어 회수하지 않는다.
+  - 시험: `Dispatching` 저장 직후 abort, 결과 저장 실패 주입 → 외부 복구 호출 없이 재전달 → wait 종료. 정상 전달 중에 회수 한 바퀴를 돌려도 그 시도가 되돌려지지 않음.
 - 시험: 전달기 첫 poll을 gate로 막은 채 보고 호출과 자식 turn을 끝내고 wait-stop 요청 → 멈추지 않음 → gate 해제 → 알림 전달 → 멈춤. 재시도 가능 실패 주입 → 서버가 다시 전달 → 멈춤.
 
 ### 상태 전이 표
@@ -242,7 +247,8 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 | 4 | 대기 task 배정 | 상태 ≠ `stopping` + (비우기 중이면 비우기 전 생성) | 기동 토큰 `Pending` 만들기 + T-start 예약 | 저장소 RMW: `Ready`·예약 없음 → `Starting{token}`(아니면 기존 예약 반환하고 T 해제) → 엔진 **준비**(fingerprint, registry 예약, 장벽에서 기다리는 spawn, attach) | G 아래 `Pending→Registered{runId}` + T→A 인계 → G 밖에서 시작 장벽 열기 | 준비 실패 → 토큰 `Failed`, T 해제, task는 오늘 규칙의 실패 상태 | drop → 토큰 `Failed`, 준비한 run이 있으면 registry에서 취소, T 해제 |
 | 5 | task 취소(배정 전후) | 토큰 상태 | `Pending`이면 `Cancelled`로 바꾼다. `Registered`면 run id를 넘긴다 | `Pending→Cancelled`: 시작 장벽은 열리지 않음(실행 0), task `Cancelled`. `Registered`: registry의 실제 run 취소 | — | — | — |
 | 5' | 기동 경로가 G 아래 전이를 하려는 순간 | 토큰이 `Cancelled` | 전이하지 않음 | 준비한 run을 registry에서 취소(장벽 닫힌 채 drop → launcher 실행 0), T 해제 | — | — | — |
-| 6' | 자식 보고가 coordinator 알림 저장 | 상태 ≠ `stopping` | N-notify 예약(보고 C-call 해제 전) | 전달기로 넘김 → `send_and_wait` 시작 때 A-turn 인계 | 전달 결과 저장 후 해제 | 재시도 가능 실패: 알림은 미전달로 남고(활동에 셈) 서버가 backoff로 다시 전달 | drop → 해제, 알림은 미전달로 남음(활동에 셈) |
+| 6' | 자식 보고가 coordinator 알림 저장 | 상태 ≠ `stopping` | N-notify 예약(보고 C-call 해제 전, 전달 시도 id 발급) | 전달기로 넘김 → 알림을 `Dispatching{attemptId}`로 저장 → `send_and_wait` 시작 때 A-turn 인계 | 전달 결과 저장 후 해제 | 재시도 가능 실패: `Failed(retryable)`로 저장, 서버가 backoff로 다시 전달. **결과 저장 자체가 실패**하면 6''로 회수 | drop → 6''로 회수 후 해제 |
+| 6'' | 전달 시도 회수 | 알림이 `Dispatching{attemptId}`이고 그 `attemptId`의 N-notify·A-turn 예약이 G에 없음 | — | 저장소 RMW로 같은 `attemptId`일 때만 `Failed(retryable)`로 되돌리고 서버 재전달 예약. 살아 있는 시도의 `Dispatching`은 건드리지 않음 | — | — | — |
 | 6 | 자식 run 바인딩(`bind_child_run`) | task가 `Cancelled`면 거절 | — | — | — | — | — |
 | 7 | 정지 판정(wait·idle) | 활동 작업 0(임대 조건 포함) | 상태 `stopping` | 받아들인 호출 drain → 쉬는 세션 취소 → 안내 파일 삭제 | — | — | — |
 | 8 | 강제 정지·SIGTERM | 항상 | 상태 `stopping` 직전 `close_all_benches` 예약 | 작업대 닫기(모든 run 취소 → A-turn들이 drop으로 해제) → 7의 G 밖 동작 | — | — | — |
@@ -261,6 +267,7 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 | E4: 등록이 먼저면 취소가 실제 run을 멈춤 | 5(`Registered`) | 등록 뒤 취소 → run 취소 확인 |
 | F1: 비동기 등록 중간의 취소(예약 전·spawn 뒤·attach 전·전이 전·장벽 전) | 4·5·5'(시작 장벽 + G 아래 선형화) | 지점별 gate 시험, abort 포함 |
 | F2: 보고 반환 뒤 전달기 첫 poll 전에 활동 0 | 6'(저장소 파생 + N-notify) | 전달기 첫 poll gate 시험, 재시도 실패 주입 |
+| G1: 중단된 `Dispatching` 알림이 영구히 남아 wait를 막음 | 6''(시도 소유권 회수) | `Dispatching` 저장 직후 abort, 결과 저장 실패 주입, 정상 시도 비회수 |
 
 ### 데스크톱 없이 실행을 유지한다는 목표와의 관계
 

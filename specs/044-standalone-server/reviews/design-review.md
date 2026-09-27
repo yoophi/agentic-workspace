@@ -59,3 +59,11 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 |---|---|---|---|
 | F1 | 비동기 엔진 등록(`reserve_run` → spawn → `attach_run_handle`)과 `Pending→Registered` 사이에 선형화 지점이 없다. 등록 뒤에 전이하면 그 사이 취소가 spawn한 실행을 못 막고, 등록 전에 전이하면 없는 run을 취소하고 끝난다 | `start_agent_run.rs`, `AppState::cancel_run` | 엔진 시작을 준비(예약·장벽에서 기다리는 spawn·attach)와 실행 허용으로 나눈다(`acp-agent-core` 선택 인자 `start_gate`). G 아래 전이를 선형화 지점으로 삼는다. 지점별 결정적 취소·abort 시험 |
 | F2 | 자식 보고는 결과를 저장하고 전달기를 spawn한 뒤 돌아간다. 전달기 첫 poll 전에 활동이 0이 되어 정지하면 알림을 잃는다 | `agent_tools.rs:540-570` | 저장된 미전달 알림(대상 coordinator 살아 있음)을 활동에 센다. 보고 C-call 해제 전 N-notify 예약, 비우기 진입·재시도 실패 뒤 서버가 전달 한 바퀴. 전달기 첫 poll gate 시험 |
+
+## Codex 설계 재검토 4 (`--wait --base 5ce3744`, 대상 `dd79a23`)
+
+판정: needs-attention. F1의 시작 장벽은 등록 경쟁을 해소한다고 확인했다. High 1건:
+
+| # | 문제 | 근거 | 반영 |
+|---|---|---|---|
+| G1 | 중단된 `Dispatching` 알림을 다시 전달 가능한 상태로 되돌리는 전이가 없다. 전달기는 `Pending`·재시도 가능 `Failed`만 고르므로, `Dispatching` 저장 뒤 drop이나 결과 저장 실패가 나면 활동으로만 남아 wait가 끝나지 않는다 | `notification_dispatcher.rs`, `recover_interrupted`는 재시작 경로 | 전달 시도 `attemptId` 소유권을 둔다. 예약 없이 남은 같은 시도의 `Dispatching`만 `Failed(retryable)`로 회수하고 서버가 다시 전달한다(6''). abort·결과 저장 실패 주입 시험, 정상 시도 비회수 시험 |
