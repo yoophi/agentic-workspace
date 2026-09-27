@@ -123,6 +123,33 @@ fn format_time(time: DateTime<Utc>) -> String {
     time.to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+/// 기존 ledger 파일의 저장 형식 버전을 **읽기 전용**으로 읽는다(044: 독립 서버가 모르는 형식을 데이터를 건드리기
+/// 전에 거절한다). 파일이나 버전 표가 없으면 `None`.
+pub fn read_schema_version(path: &std::path::Path) -> Result<Option<i64>, LedgerError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let conn = Connection::open_with_flags(
+        path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .map_err(storage)?;
+    let has_table: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version')",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(storage)?;
+    if !has_table {
+        return Ok(None);
+    }
+    conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+        row.get(0)
+    })
+    .map_err(storage)
+}
+
 fn storage(error: rusqlite::Error) -> LedgerError {
     LedgerError::Storage(error.to_string())
 }

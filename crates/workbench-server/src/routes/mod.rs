@@ -4,6 +4,7 @@ pub mod calls;
 pub mod events;
 pub mod handshake;
 pub mod health;
+pub mod identify;
 pub mod openapi;
 
 use std::time::Instant;

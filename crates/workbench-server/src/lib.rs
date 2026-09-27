@@ -150,11 +150,15 @@ pub fn build_router(
     let connection_grace = config.connection_grace;
     let calls = Arc::new(DetachedCalls::default());
     let subscriptions = Arc::new(DetachedCalls::default());
+    let instance_id = config
+        .server_info
+        .instance_id()
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let state = Arc::new(AppState {
         workbench,
         config,
         host: HostPolicy::new(port),
-        instance_id: uuid::Uuid::new_v4().to_string(),
+        instance_id,
         calls: Arc::clone(&calls),
         subscriptions: Arc::clone(&subscriptions),
     });
@@ -163,6 +167,7 @@ pub fn build_router(
         .route("/health/ready", get(routes::health::ready))
         .route("/openapi.json", get(routes::openapi::document))
         .route("/v1/system/handshake", post(routes::handshake::handshake))
+        .route("/v1/system/identify", post(routes::identify::identify))
         .route("/v1/calls", post(routes::calls::call))
         .route("/v1/event-tickets", post(routes::events::issue_ticket))
         .route("/v1/events", get(routes::events::connect))
