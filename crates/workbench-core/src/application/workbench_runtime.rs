@@ -393,6 +393,12 @@ impl WorkbenchRuntime {
     }
 
     /// 작업대·run·교환 서비스(040).
+    /// 서버 종료(042): 열린 작업대를 모두 닫는다(소유 run 취소·권한 대기 제거). 새 호출 수락을 닫은 뒤, 받아들인
+    /// 호출 drain 전에 부른다.
+    pub async fn close_all_benches(&self) -> usize {
+        self.benches.close_all().await
+    }
+
     pub fn benches(&self) -> &Arc<BenchServices> {
         &self.benches
     }

@@ -195,12 +195,20 @@ impl WorkbenchHttpState {
         }
     }
 
-    /// 종료(research R17, T033): **먼저 HTTP·MCP 양쪽의 새 호출 수락을 닫고**(종료 중 들어온 변경은 `503`), 그다음
-    /// 종료 신호 → `serve` 완료(받아들인 HTTP 호출 drain) → 받아들인 MCP 도구 호출 drain. 상한 없이 기다리고 경고
-    /// 간격마다 남은 수를 기록한다. 소유자(앱 종료 경로)는 이 future가 끝난 뒤에 종료한다.
-    pub async fn shutdown(&self, mcp_calls: &DetachedCalls) {
+    /// 종료(research R17, T033): 먼저 HTTP·MCP 양쪽의 새 호출 수락을 닫고(종료 중 들어온 변경은 `503`), 진행 중 작업을
+    /// 푼다(`release_work` — AW는 열린 작업대를 닫아 소유 run을 취소하고 권한 대기를 지운다). 그다음 종료 신호 →
+    /// `serve` 완료(받아들인 HTTP 호출 drain) → 받아들인 MCP 도구 호출 drain. 상한 없이 기다리고 경고 간격마다 남은
+    /// 수를 기록한다. 소유자(앱 종료 경로)는 이 future가 끝난 뒤에 종료한다.
+    pub async fn shutdown(
+        &self,
+        mcp_calls: &DetachedCalls,
+        release_work: impl std::future::Future<Output = ()>,
+    ) {
         self.http_calls.close();
         mcp_calls.close();
+        // 수락을 닫은 뒤, 받아들인 호출을 기다리기 전에 진행 중 작업을 푼다(권한 대기 등) — 닫힌 수락 때문에 응답·취소
+        // 요청이 더는 들어올 수 없으므로 종료가 스스로 풀어야 한다(Codex 재리뷰).
+        release_work.await;
         if let Some(tx) = self
             .shutdown
             .lock()
@@ -308,11 +316,19 @@ impl ExitGate {
     }
 }
 
-/// 종료 drain: HTTP 어댑터가 있으면 그 종료(HTTP drain → MCP drain), 없으면 MCP drain만.
-pub async fn drain_for_exit(http: Option<Arc<WorkbenchHttpState>>, mcp_calls: Arc<DetachedCalls>) {
+/// 종료 drain: 수락 닫기 → `release_work`(진행 중 작업 풀기) → HTTP drain → MCP drain. HTTP 어댑터가 없으면 MCP만.
+pub async fn drain_for_exit(
+    http: Option<Arc<WorkbenchHttpState>>,
+    mcp_calls: Arc<DetachedCalls>,
+    release_work: impl std::future::Future<Output = ()>,
+) {
     match http {
-        Some(state) => state.shutdown(&mcp_calls).await,
-        None => drain_mcp(&mcp_calls, DEFAULT_DRAIN_WARN_AFTER).await,
+        Some(state) => state.shutdown(&mcp_calls, release_work).await,
+        None => {
+            mcp_calls.close();
+            release_work.await;
+            drain_mcp(&mcp_calls, DEFAULT_DRAIN_WARN_AFTER).await
+        }
     }
 }
 
@@ -505,12 +521,12 @@ mod tests {
         let state = Arc::new(state);
         let exiting = {
             let (state, mcp_calls) = (state.clone(), mcp_calls.clone());
-            tokio::spawn(async move { state.shutdown(&mcp_calls).await })
+            tokio::spawn(async move { state.shutdown(&mcp_calls, async {}).await })
         };
         // 두 번째 종료 경로(macOS `RunEvent::Exit`)가 겹쳐도 같은 끝을 기다린다.
         let exiting_again = {
             let (state, mcp_calls) = (state.clone(), mcp_calls.clone());
-            tokio::spawn(async move { state.shutdown(&mcp_calls).await })
+            tokio::spawn(async move { state.shutdown(&mcp_calls, async {}).await })
         };
         tokio::time::sleep(Duration::from_millis(150)).await;
         assert!(
@@ -551,6 +567,111 @@ mod tests {
             let read =
                 tokio::time::timeout(Duration::from_millis(200), stream.read(&mut buffer)).await;
             assert!(!matches!(read, Ok(Ok(1))), "server still answering");
+        }
+    }
+
+    /// 사용자 권한 응답을 기다리는 받아들인 호출(`run.cancelAndSend`가 권한 요청에 막힌 상태). 응답은 풀림 신호가
+    /// 올 때만 끝난다 — 실제로는 run 취소가 권한 대기를 지운다(acp-agent-core `cancel_run_clears_owner_and_permission_state_for_that_run`).
+    struct PermissionWaitingWorkbench {
+        entered: Arc<tokio::sync::Notify>,
+        released: Arc<tokio::sync::Notify>,
+        finished: Arc<AtomicBool>,
+    }
+
+    #[async_trait]
+    impl Workbench for PermissionWaitingWorkbench {
+        async fn call(
+            &self,
+            _principal: AuthenticatedPrincipal,
+            _request: CallRequest,
+        ) -> Result<CallReply, WorkbenchFault> {
+            let released = self.released.notified();
+            self.entered.notify_one();
+            released.await;
+            self.finished.store(true, Ordering::Release);
+            Ok(CallReply::complete(serde_json::Value::Null, None))
+        }
+
+        fn events(
+            &self,
+            _principal: AuthenticatedPrincipal,
+            _request: Subscription,
+        ) -> Result<EventStream, WorkbenchFault> {
+            Ok(EventStream::new(futures_util::stream::empty()))
+        }
+    }
+
+    /// Codex 재리뷰: 종료는 수락을 닫은 뒤 진행 중 작업을 풀고(`release_work`) 나서 drain한다 — 권한 응답을 기다리는
+    /// 받아들인 호출이 있어도 종료가 끝나고, 그 호출도 끝난 뒤에 끝난다. 풀지 않으면 끝나지 않는다.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exit_releases_calls_waiting_for_a_permission_answer() {
+        for release in [true, false] {
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let released = Arc::new(tokio::sync::Notify::new());
+            let finished = Arc::new(AtomicBool::new(false));
+            let state = WorkbenchHttpState::start(HttpAssembly {
+                workbench: Arc::new(PermissionWaitingWorkbench {
+                    entered: entered.clone(),
+                    released: released.clone(),
+                    finished: finished.clone(),
+                }),
+                mcp_registry: CapabilityRegistry::default(),
+                server_info: AwServerInfo {
+                    version: "test".into(),
+                    epoch: "e".into(),
+                },
+                drain_warn_after: Duration::from_millis(20),
+            })
+            .unwrap();
+            let origin = "http://localhost:1420";
+            let connection = state.connection_for(origin).unwrap();
+            let address = connection.base_url.trim_start_matches("http://").to_owned();
+            let body = serde_json::to_vec(&CallRequest::query(
+                workbench_protocol::OperationId::ProjectList,
+                serde_json::json!({}),
+            ))
+            .unwrap();
+            let mut stream = tokio::net::TcpStream::connect(&address).await.unwrap();
+            let head = format!(
+                "POST /v1/calls HTTP/1.1\r\nHost: {address}\r\nOrigin: {origin}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                connection.token,
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+            entered.notified().await;
+
+            let mcp_calls = Arc::new(DetachedCalls::default());
+            let release_work = {
+                let released = released.clone();
+                async move {
+                    if release {
+                        released.notify_one();
+                    }
+                }
+            };
+            let exited = tokio::time::timeout(
+                Duration::from_secs(5),
+                state.shutdown(&mcp_calls, release_work),
+            )
+            .await;
+            if release {
+                assert!(
+                    exited.is_ok(),
+                    "exit finished once the permission wait was released"
+                );
+                assert!(
+                    finished.load(Ordering::Acquire),
+                    "the accepted call completed first"
+                );
+            } else {
+                assert!(
+                    exited.is_err(),
+                    "without releasing work the drain keeps waiting"
+                );
+                released.notify_one();
+            }
+            drop(stream);
         }
     }
 }

@@ -194,9 +194,39 @@ impl BenchServices {
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
     ) -> Result<BenchCloseOutput, WorkbenchFault> {
+        self.close_as(request_id, &principal.subject, bench_id)
+            .await
+    }
+
+    /// 열린 작업대 수.
+    pub fn open_count(&self) -> usize {
+        self.registry.len()
+    }
+
+    /// 서버 종료(042): 연 주체와 무관하게 열린 작업대를 모두 닫는다. 작업대 닫기는 소유 run을 취소하고 그 run의 권한
+    /// 대기를 지운다 — 수락이 닫혀 응답·취소 요청이 더 들어올 수 없는 종료 중에, 사용자 응답을 기다리던 받아들인
+    /// 호출이 끝나 drain이 완료된다. 닫은 작업대 수를 돌려준다.
+    pub async fn close_all(self: &Arc<Self>) -> usize {
+        let open = self.registry.open_benches();
+        let request_id = RequestId::random();
+        let mut closed = 0;
+        for (bench_id, owner) in open {
+            if let Ok(output) = self.close_as(&request_id, &owner, &bench_id).await {
+                closed += usize::from(output.closed);
+            }
+        }
+        closed
+    }
+
+    async fn close_as(
+        self: &Arc<Self>,
+        request_id: &RequestId,
+        subject: &workbench_protocol::PrincipalSubject,
+        bench_id: &str,
+    ) -> Result<BenchCloseOutput, WorkbenchFault> {
         let start = self
             .registry
-            .begin_close(bench_id, &principal.subject)
+            .begin_close(bench_id, subject)
             .map_err(|error| bench_fault(request_id, error))?;
         let ticket = match start {
             CloseStart::Unknown => {

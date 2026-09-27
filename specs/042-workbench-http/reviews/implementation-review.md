@@ -47,3 +47,22 @@
 ## 3. OCR delegate-review 재실행 (`--from 2381d4f --to HEAD`, Codex 반영분 11개 파일)
 
 새 High/Medium 없음. 확인한 것: 종료 신호 뒤 `calls.close()`·`subscriptions.close()`가 graceful 신호보다 먼저, 구독 추적은 표 소모보다 먼저(종료 중이면 표를 쓰지 않고 `503`), `read_body`의 `Bytes::from_request`는 `DefaultBodyLimit`를 그대로 따른다(`http_security.rs` 413 통과), 유예 뒤 abort된 연결의 handler가 기다리던 분리 호출은 추적기로 끝까지 drain(`accepted_calls_outlive_the_connection_grace`), accept 오류는 50ms 뒤 재시도. 준비 확인 probe 실험은 원인과 무관해 최종 diff에 없다.
+
+## 4. Codex adversarial review 재실행 — verdict: needs-attention (C1·C2·hello 순서 확인됨)
+
+| # | 등급 | 지적 | 조치 |
+|---|---|---|---|
+| C3 | High | HTTP로 받아들인 `run.cancelAndSend`가 교체 prompt의 **사용자 권한 응답**을 기다리는 동안 Quit하면: 메인 스레드는 drain에 묶여 승인 UI가 안 뜨고, 수락이 닫혀 `run.respondPermission`·`run.cancel`이 못 들어와 호출과 종료가 서로 기다린다 | 종료 순서를 **수락 차단 → 진행 중 작업 해제 → drain**으로. 해제 = core `WorkbenchRuntime::close_all_benches()`(연 주체와 무관하게 열린 작업대를 모두 닫음 → 소유 run 취소 → acp-agent-core `cancel_run`이 run task abort·권한 대기 제거). AW `WorkbenchHttpState::shutdown(mcp_calls, release_work)`·`drain_for_exit`가 두 종료 경로(`ExitRequested`·`Exit`) 모두에서 이것을 부른다. 시간 제한·task 유기 없음 |
+
+**실제 경로 재현**(`crates/workbench-core/tests/acp_permission_exit.rs`): 실제 `AcpRunEngine`(acp-agent-core runner·`permission_flow`)과 최소 ACP agent(`tests/support/agents/fake_acp_permission_agent.py` — prompt마다 `session/request_permission`, `$/cancel_request`에 `cancelled`)를 `run.start`의 `agentCommand`로 띄운다. 첫 prompt가 권한을 기다리게 한 뒤 HTTP로 `run.cancelAndSend`를 받아들이고, 교체 prompt의 권한 요청(두 번째)까지 확인한다.
+- 수정 전 순서(수락만 닫고 drain): `exit_without_releasing_work_waits_forever` — 2초 뒤에도 serve 미완료(결함 재현). 정리로 작업대를 닫으면 끝난다.
+- 수정 뒤 순서: `exit_releases_permission_waits_then_drains` — 15초 제한 안에 종료, 받아들인 호출은 terminal 결과(`internal: ... ACP connection closed`)로 끝남(`calls.active() == 0`), run 소유 없음.
+- 멱등 처리 근거(과장 없이): 세대 멱등은 **성공만 기록**하고, 작업대 닫기는 그 작업대 범위의 기록을 지운다(`idempotency.drop_bench` — 계약). 그래서 끝난 뒤 같은 키 재시도는 `notFound`(작업대 없음)이며 교체 prompt를 다시 보내지 않는다 — 시험이 단정. 영속 ledger 기록은 없다(세대 범위 command).
+- `closing_all_benches_covers_every_owner`: 데스크톱과 다른 주체(HTTP 클라이언트)가 연 작업대의 run도 취소된다(창 표 기반 해제였다면 빠졌을 경로 — 처음 AW 창 표로 구현했다가 core API로 바꿈).
+
+**경합 검토**:
+- 받아들였지만 run 등록 전인 호출(`run.start` 진행 중): 작업대 닫기는 입장한 동작이 끝나기를 기다린 뒤 소유 run을 취소한다 — `bench_close_race.rs` `start_racing_with_close_never_leaves_runs_behind`(닫기 뒤 소유 run 0). `cancelAndSend`는 입장하지 않아 닫기를 막지 않는다 — `long_control_does_not_block_close`.
+- 취소 뒤 새 권한 대기: 권한 대기는 run task 안의 client read loop에서만 만들어지고 `cancel_run`이 그 task를 abort한다. 남은 대기는 `clear_run`이 지운다(acp-agent-core `cancel_run_clears_owner_and_permission_state_for_that_run`). 기다리던 prompt 응답은 연결 종료로 실패한다(실측).
+- `close_all`의 스냅샷 이후 새 작업대: 종료 전에 받아들인 `bench.open`이 스냅샷 뒤에 등록될 수 있다. 그 작업대에는 run이 생길 수 없다(새 호출은 이미 `503`, 클라이언트는 open 응답 전에 id를 모른다) — 권한 대기가 없어 drain을 막지 않는다. 남는 것은 메모리 속 빈 작업대이며 앱 종료와 함께 사라진다. 입증된 해악이 아니라 고치지 않았다 — 5단계 독립 서버 재조립 때 확인 항목.
+
+**게이트**: `cargo fmt --all -- --check` 0 · `cargo clippy --workspace --all-targets -- -D warnings` 0 · `cargo test --workspace --all-targets --no-fail-fast` 0(747 passed, 0 failed, 7 ignored).

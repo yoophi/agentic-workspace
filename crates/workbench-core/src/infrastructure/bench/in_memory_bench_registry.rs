@@ -225,6 +225,14 @@ impl InMemoryBenchRegistry {
         let _ = ticket.done.send(true);
     }
 
+    /// 열린 작업대와 연 주체(042 서버 종료: 모두 닫기).
+    pub fn open_benches(&self) -> Vec<(String, PrincipalSubject)> {
+        lock(&self.benches)
+            .values()
+            .map(|record| (record.view.id.clone(), record.view.opened_by.clone()))
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         lock(&self.benches).len()
     }

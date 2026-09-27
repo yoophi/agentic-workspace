@@ -370,8 +370,12 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
                     eprintln!(
                         "[workbench-http] exit requested: closing new calls and draining accepted calls"
                     );
+                    let runtime = app.state::<Arc<WorkbenchRuntime>>().inner().clone();
                     tauri::async_runtime::spawn(async move {
-                        workbench_http::drain_for_exit(state, mcp_calls).await;
+                        workbench_http::drain_for_exit(state, mcp_calls, async move {
+                            runtime.close_all_benches().await;
+                        })
+                        .await;
                         eprintln!("[workbench-http] exit: accepted calls drained");
                         app.state::<workbench_http::WorkbenchHttp>().exit.drained();
                         app.exit(code.unwrap_or(0));
@@ -389,7 +393,14 @@ fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
             );
             let state = http.state.clone();
             let mcp_calls = app.state::<McpServerState>().detached_calls();
-            tauri::async_runtime::block_on(workbench_http::drain_for_exit(state, mcp_calls));
+            let runtime = app.state::<Arc<WorkbenchRuntime>>().inner().clone();
+            tauri::async_runtime::block_on(workbench_http::drain_for_exit(
+                state,
+                mcp_calls,
+                async move {
+                    runtime.close_all_benches().await;
+                },
+            ));
             http.exit.drained();
             eprintln!("[workbench-http] exit: accepted calls drained");
         }
