@@ -1,24 +1,20 @@
 use std::net::Ipv4Addr;
 
-use crate::{
-    domain::{
-        mcp_title_control::{TitleChangeFailureCode, TitleChangeResult},
-        run::{AgentMcpHttpHeader, AgentMcpServerConfig},
+use crate::mcp::{
+    agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
+    capability_registry::{CapabilityPrincipal, CapabilityRegistry},
+    orchestration_tool::{
+        agent_role, handle_tool as handle_orchestration_tool, is_orchestration_tool,
+        tool_definitions as orchestration_tool_definitions,
     },
-    infrastructure::mcp::{
-        agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
-        capability_registry::{CapabilityPrincipal, CapabilityRegistry},
-        orchestration_tool::{
-            agent_role, handle_tool as handle_orchestration_tool, is_orchestration_tool,
-            tool_definitions as orchestration_tool_definitions,
-        },
-        protocol::{JsonRpcResponse, initialize_result, parse_request},
-        title_tool::{
-            SET_WINDOW_TITLE_TOOL, origin_allowed, parse_title_change_request, tool_result,
-            tools_list_result, unsupported_tool_result,
-        },
+    protocol::{JsonRpcResponse, initialize_result, parse_request},
+    title_control::{TitleChangeFailureCode, TitleChangeResult},
+    title_tool::{
+        SET_WINDOW_TITLE_TOOL, origin_allowed, parse_title_change_request, tool_result,
+        tools_list_result, unsupported_tool_result,
     },
 };
+use acp_agent_core::domain::run::{AgentMcpHttpHeader, AgentMcpServerConfig};
 use anyhow::{Context, Result};
 use axum::{
     Json, Router,
@@ -28,8 +24,8 @@ use axum::{
     routing::post,
 };
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager};
 use tokio::net::TcpListener;
+use workbench_core::application::workbench_runtime::WorkbenchRuntime;
 
 pub mod agent_exchange_tool;
 pub mod capability_registry;
@@ -38,6 +34,7 @@ pub mod protocol;
 pub mod retry_identity;
 #[cfg(test)]
 mod retry_tests;
+pub mod title_control;
 pub mod title_tool;
 
 pub const AW_MCP_URL_ENV: &str = "AW_MCP_URL";
@@ -55,7 +52,7 @@ pub struct McpServerState {
 
 #[derive(Clone)]
 struct McpRouterState {
-    app: AppHandle,
+    runtime: std::sync::Arc<WorkbenchRuntime>,
     mcp_state: McpServerState,
 }
 
@@ -107,7 +104,11 @@ Do not use this MCP server for file edits, Git operations, permission approval, 
 }
 
 impl McpServerState {
-    pub fn start(app: AppHandle) -> Result<Self> {
+    /// 루프백 임의 포트에 bind하고 `spawner` 런타임에서 MCP 서버를 띄운다(044: 창·Tauri와 무관, runtime을 직접 받는다).
+    pub fn start(
+        runtime: std::sync::Arc<WorkbenchRuntime>,
+        spawner: &tokio::runtime::Handle,
+    ) -> Result<Self> {
         let std_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .context("failed to bind MCP server to localhost")?;
         std_listener
@@ -122,14 +123,14 @@ impl McpServerState {
             calls: std::sync::Arc::default(),
         };
         let router_state = McpRouterState {
-            app,
+            runtime,
             mcp_state: server_state.clone(),
         };
         let router = Router::new()
             .route("/mcp", post(handle_post).get(handle_get))
             .with_state(router_state);
 
-        tauri::async_runtime::spawn(async move {
+        spawner.spawn(async move {
             let listener = match TcpListener::from_std(std_listener) {
                 Ok(listener) => listener,
                 Err(error) => {
@@ -144,6 +145,11 @@ impl McpServerState {
         });
 
         Ok(server_state)
+    }
+
+    /// MCP 끝점(`http://127.0.0.1:<port>/mcp`).
+    pub fn base_url(&self) -> &str {
+        &self.base_url
     }
 
     /// run에 묶인 MCP 토큰을 만든다(041: 역할 주장 없음).
@@ -172,14 +178,6 @@ impl McpServerState {
     fn resolve_capability(&self, token: &str) -> Option<CapabilityPrincipal> {
         self.capability_registry.resolve(token)
     }
-}
-
-fn workbench_runtime(
-    app: &AppHandle,
-) -> std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime> {
-    app.state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
-        .inner()
-        .clone()
 }
 
 async fn handle_get() -> Response {
@@ -247,7 +245,7 @@ async fn handle_post(
             let mut result = tools_list_result();
             // 041: 도구 목록은 요청 시점의 서버 역할에서 고른다(research R7).
             let role = agent_role(
-                &workbench_runtime(&state.app),
+                &state.runtime,
                 principal.as_ref().expect("authenticated tools list"),
             )
             .await;
@@ -270,7 +268,7 @@ async fn handle_post(
                     .into_response();
             };
             let principal = principal.expect("authenticated tool call");
-            let runtime = workbench_runtime(&state.app);
+            let runtime = state.runtime.clone();
             let rpc_id = id.clone();
             match workbench_server::drain::spawn_accepted(guard, async move {
                 handle_tool_call(&runtime, &principal, request.params, rpc_id).await
@@ -390,8 +388,8 @@ mod tests {
         AW_MCP_RUN_ID_ENV, AW_MCP_SERVER_NAME, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpServerState,
         bearer_token,
     };
-    use crate::domain::run::{AgentMcpHttpHeader, AgentMcpServerConfig};
-    use crate::infrastructure::mcp::capability_registry::CapabilityRegistry;
+    use crate::mcp::capability_registry::CapabilityRegistry;
+    use acp_agent_core::domain::run::{AgentMcpHttpHeader, AgentMcpServerConfig};
     use axum::http::{HeaderMap, HeaderValue};
 
     fn test_state() -> McpServerState {

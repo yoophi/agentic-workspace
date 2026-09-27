@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use workbench_core::application::workbench_runtime::WorkbenchRuntime;
 use workbench_protocol::{AuthenticatedPrincipal, CallRequest, OperationId, Workbench};
 
-use crate::infrastructure::mcp::capability_registry::CapabilityPrincipal;
+use crate::mcp::capability_registry::CapabilityPrincipal;
 
 pub const CREATE_CHILD_TASK_TOOL: &str = "aw_create_child_task";
 pub const ASSIGN_CHILD_TASK_TOOL: &str = "aw_assign_child_task";

@@ -39,10 +39,7 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
-use workbench_core::{
-    application::workbench_runtime::{RuntimeAdapters, WorkbenchRuntime},
-    infrastructure::data_paths::DataPaths,
-};
+use workbench_core::application::workbench_runtime::{RuntimeAdapters, WorkbenchRuntime};
 
 const ABOUT_MENU_ID: &str = "about-agentic-workbench";
 const PREFERENCES_MENU_ID: &str = "preferences-agentic-workbench";
@@ -249,18 +246,33 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-            // 040: 데스크톱 포트(창 삽입 전달·run 시작 보강)를 주입한다. run 종료 후처리와 orchestration은 core가
-            // 소유한다(041).
+            // 040: 데스크톱 포트(창 삽입 전달)를 주입한다. run 종료 후처리와 orchestration은 core가 소유한다(041).
+            // 044 T014: 런타임 → MCP → HTTP 조립은 `workbench-host`가 한다(창 무관 MCP 주입 포함).
             let desktop_bridge = infrastructure::tauri_desktop_bridge::TauriDesktopBridge::new(
                 _app.handle().clone(),
             );
             let mut adapters = RuntimeAdapters::production();
-            adapters.desktop = Some(desktop_bridge.clone());
-            adapters.launch_decorator = Some(desktop_bridge.clone());
-            let workbench_runtime: Arc<WorkbenchRuntime> =
-                WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
-                    .map_err(|error| error.to_string())?;
-            let http_runtime = workbench_runtime.clone();
+            adapters.desktop = Some(desktop_bridge);
+            // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
+            // 043 T052(debug 전용): 끝점 기동 실패를 주입해 창이 호환 경로로 부팅하는지 확인한다(SC-007).
+            #[cfg(debug_assertions)]
+            let injected_failure = std::env::var("AW_WORKBENCH_HTTP_FAIL_START").is_ok();
+            #[cfg(not(debug_assertions))]
+            let injected_failure = false;
+            let mut options = workbench_host::assembly::HostOptions::new(
+                app_data_dir,
+                adapters,
+                APP_VERSION,
+                tauri::async_runtime::handle().inner().clone(),
+            );
+            if injected_failure {
+                options.http = workbench_host::assembly::HttpStart::Fail(
+                    "injected start failure (AW_WORKBENCH_HTTP_FAIL_START)".to_owned(),
+                );
+            }
+            let host = workbench_host::assembly::assemble(options)
+                .map_err(|error| format!("{error:#}"))?;
+            let workbench_runtime: Arc<WorkbenchRuntime> = host.runtime.clone();
             _app.manage(workbench_runtime);
 
             let appearance_repository =
@@ -269,38 +281,16 @@ pub fn run() {
                 AppearancePreferencesService::bootstrap(appearance_repository)?;
             _app.manage(appearance_service);
 
-            let mcp_state = McpServerState::start(_app.handle().clone())?;
-            desktop_bridge.bind_mcp(mcp_state.clone());
-
-            // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
-            // 043 T052(debug 전용): 끝점 기동 실패를 주입해 창이 호환 경로로 부팅하는지 확인한다(SC-007).
-            #[cfg(debug_assertions)]
-            let injected_failure = std::env::var("AW_WORKBENCH_HTTP_FAIL_START").is_ok();
-            #[cfg(not(debug_assertions))]
-            let injected_failure = false;
-            let started = if injected_failure {
-                Err(anyhow::anyhow!(
-                    "injected start failure (AW_WORKBENCH_HTTP_FAIL_START)"
-                ))
-            } else {
-                workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
-                    workbench: http_runtime.clone() as Arc<dyn workbench_protocol::Workbench>,
-                    mcp_registry: mcp_state.capability_registry(),
-                    server_info: workbench_http::AwServerInfo {
-                        version: APP_VERSION.to_owned(),
-                        epoch: http_runtime.epoch().to_owned(),
-                    },
-                    drain_warn_after: workbench_http::default_drain_warn_after(),
-                })
-            };
-            let (http_state, start_error) = match started {
-                Ok(state) => {
+            let mcp_state = host.mcp.clone();
+            let (http_state, start_error) = match (host.http, host.http_start_error) {
+                (Some(state), _) => {
                     eprintln!("[workbench-http] listening on {}", state.base_url());
-                    (Some(Arc::new(state)), None)
+                    (Some(state), None)
                 }
-                Err(error) => {
-                    eprintln!("[workbench-http] failed to start: {error:#}");
-                    (None, Some(format!("{error:#}")))
+                (None, error) => {
+                    let error = error.unwrap_or_else(|| "not started".to_owned());
+                    eprintln!("[workbench-http] failed to start: {error}");
+                    (None, Some(error))
                 }
             };
             let http = workbench_http::WorkbenchHttp {

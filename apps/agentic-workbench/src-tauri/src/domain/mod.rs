@@ -8,7 +8,8 @@ pub use workbench_core::domain::{
 };
 pub mod appearance_preferences;
 pub mod git_worktree_changes;
-pub mod mcp_title_control;
+// 044: MCP 제목 도구 도메인은 `workbench-host` MCP 모듈로 옮겼다.
+pub use workbench_host::mcp::title_control as mcp_title_control;
 // 프로젝트 도메인은 037에서 `workbench-core`로 이동했다. 기존 import 경로를 유지하기 위해 재노출한다.
 pub use workbench_core::domain::project;
 // 038 US3: provider 세션 도메인도 `workbench-core`로 이동했다.

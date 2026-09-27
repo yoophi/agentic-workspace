@@ -1,21 +1,14 @@
 //! core 데스크톱 포트의 Tauri 구현(040, research R4·R10). 발행 결과를 작업대의 창에 **창 삽입 경로 하나로만** 넣는다
-//! (ADR 0003·0004; 네이티브 `emit`은 모든 창에 방송되어 쓰지 않는다). `run.start` 보강은 run에 묶인 MCP 토큰만
-//! 만든다 — orchestration 역할은 서버 상태로 판정한다(041 research R7). run 종료 후처리는 core가 한다.
+//! (ADR 0003·0004; 네이티브 `emit`은 모든 창에 방송되어 쓰지 않는다). run 종료 후처리는 core가 한다. `run.start`의 MCP
+//! 보강은 044부터 `workbench-host`의 창 무관 `McpLaunchDecorator`가 한다(research R2).
 
 use std::sync::{Arc, OnceLock};
 
 use serde_json::Value;
 use tauri::{AppHandle, Manager};
-use workbench_core::ports::desktop_bridge::{
-    DesktopBridge, DesktopDelivery, LaunchContext, RunLaunchDecorator,
-};
+use workbench_core::ports::desktop_bridge::{DesktopBridge, DesktopDelivery};
 
-use crate::{
-    domain::run::AgentRunRequest,
-    infrastructure::{
-        acp_agent_launch_factory::inject_mcp_launch_env, desktop_benches, mcp::McpServerState,
-    },
-};
+use crate::infrastructure::desktop_benches;
 
 pub const AGENT_RUN_EVENT_FALLBACK: &str = "agent-run-event-fallback";
 pub const AGENT_EXCHANGE_REQUESTED_FALLBACK: &str = "agent-exchange-requested-fallback";
@@ -95,20 +88,11 @@ pub fn dispatch_script(event_name: &str, payload: &Value) -> String {
 
 pub struct TauriDesktopBridge {
     app: AppHandle,
-    /// 런타임은 MCP 서버보다 먼저 만들어진다(MCP가 런타임을 쓴다). 시작 뒤 `bind_mcp`로 묶는다.
-    mcp: OnceLock<McpServerState>,
 }
 
 impl TauriDesktopBridge {
     pub fn new(app: AppHandle) -> Arc<Self> {
-        Arc::new(Self {
-            app,
-            mcp: OnceLock::new(),
-        })
-    }
-
-    pub fn bind_mcp(&self, mcp: McpServerState) {
-        let _ = self.mcp.set(mcp);
+        Arc::new(Self { app })
     }
 
     fn eval_in_bench(&self, bench_id: &str, event_name: &str, payload: &Value) {
@@ -176,31 +160,6 @@ impl DesktopBridge for TauriDesktopBridge {
                     ));
                 });
             }
-        }
-    }
-}
-
-impl RunLaunchDecorator for TauriDesktopBridge {
-    /// 오늘 `start_agent_run`의 보강: run에 묶인 MCP 토큰을 만들어 env·MCP 서버·안내문을 넣는다. 작업대에 창이
-    /// 없으면(닫힘) 띄우지 않는다(오늘 문구).
-    fn decorate(
-        &self,
-        request: &mut AgentRunRequest,
-        context: &LaunchContext,
-    ) -> Result<(), String> {
-        let mcp = self
-            .mcp
-            .get()
-            .ok_or_else(|| "MCP server is not ready.".to_owned())?;
-        desktop_benches::label_for(&context.bench_id)
-            .ok_or_else(|| desktop_benches::MESSAGE_WINDOW_UNAVAILABLE.to_owned())?;
-        inject_mcp_launch_env(request, mcp.launch_env(&context.run_id));
-        Ok(())
-    }
-
-    fn revoke_run(&self, run_id: &str) {
-        if let Some(mcp) = self.mcp.get() {
-            mcp.revoke_run_capability(run_id);
         }
     }
 }

@@ -1,9 +1,7 @@
 use axum::http::HeaderMap;
 use serde_json::{Value, json};
 
-use crate::domain::mcp_title_control::{
-    TitleChangeFailureCode, TitleChangeRequest, TitleChangeResult,
-};
+use crate::mcp::title_control::{TitleChangeFailureCode, TitleChangeRequest, TitleChangeResult};
 
 pub const SET_WINDOW_TITLE_TOOL: &str = "set_window_title";
 
@@ -27,7 +25,7 @@ pub fn tools_list_result() -> Value {
             "additionalProperties": false
         }
     })];
-    tools.extend(crate::infrastructure::mcp::agent_exchange_tool::tool_definitions());
+    tools.extend(crate::mcp::agent_exchange_tool::tool_definitions());
     json!({ "tools": tools })
 }
 
@@ -85,8 +83,7 @@ pub fn origin_allowed(headers: &HeaderMap) -> bool {
     let origin = headers
         .get("origin")
         .map(|value| value.to_str().unwrap_or("null"));
-    crate::infrastructure::workbench_http::origin_policy().check(origin)
-        != workbench_server::origin::OriginCheck::Rejected
+    crate::http::origin_policy().check(origin) != workbench_server::origin::OriginCheck::Rejected
 }
 
 #[cfg(test)]
@@ -143,7 +140,7 @@ mod tests {
             headers.insert("origin", HeaderValue::from_static(rejected));
             assert!(!origin_allowed(&headers), "{rejected}");
         }
-        for allowed in crate::infrastructure::workbench_http::WEBVIEW_ORIGINS {
+        for allowed in crate::http::WEBVIEW_ORIGINS {
             headers.insert("origin", HeaderValue::from_static(allowed));
             assert!(origin_allowed(&headers), "{allowed}");
         }

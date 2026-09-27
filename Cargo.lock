@@ -101,6 +101,7 @@ dependencies = [
  "tower-http 0.5.2",
  "uuid",
  "workbench-core",
+ "workbench-host",
  "workbench-protocol",
  "workbench-server",
 ]
@@ -5641,6 +5642,17 @@ dependencies = [
 name = "workbench-host"
 version = "0.1.0"
 dependencies = [
+ "acp-agent-core",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "uuid",
  "workbench-core",
  "workbench-protocol",
  "workbench-server",

@@ -50,12 +50,12 @@ use crate::{
 };
 
 #[cfg(test)]
-use crate::infrastructure::{
-    acp_agent_launch_factory::inject_mcp_launch_env,
+use std::collections::BTreeMap;
+#[cfg(test)]
+use workbench_host::{
+    launch::inject_mcp_launch_env,
     mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
 };
-#[cfg(test)]
-use std::collections::BTreeMap;
 
 const WORKTREE_CHANGED_EVENT: &str = "workspace://worktree-changed";
 pub const APPEARANCE_PREFERENCES_CHANGED_EVENT: &str = "app://appearance-preferences-changed";

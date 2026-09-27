@@ -12,7 +12,7 @@ use workbench_protocol::{
     operations::spec_for,
 };
 
-use crate::infrastructure::mcp::capability_registry::CapabilityPrincipal;
+use crate::mcp::capability_registry::CapabilityPrincipal;
 
 pub const LIST_PEER_AGENTS_TOOL: &str = "list_peer_agents";
 pub const SEND_MESSAGE_TO_AGENT_TOOL: &str = "send_message_to_agent";

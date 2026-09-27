@@ -77,6 +77,8 @@ pub struct ScriptedRunEngine {
     /// 순서를 시간 지연 없이 뒤집는다).
     pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
     work_gate: OnceLock<Arc<WorkGate>>,
+    /// `start`가 받은 요청(044: launch decorator가 넣은 MCP 연결을 시험이 확인한다).
+    pub start_requests: Mutex<Vec<AgentRunRequest>>,
 }
 
 fn not_active() -> RunEngineError {
@@ -167,6 +169,7 @@ impl RunEngine for ScriptedRunEngine {
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
+        self.start_requests.lock().unwrap().push(request.clone());
         if self.script.start_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.start_delay_ms)).await;
         }

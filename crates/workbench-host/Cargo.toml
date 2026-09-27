@@ -4,7 +4,27 @@ version = "0.1.0"
 edition = "2024"
 description = "Workbench 조립·생명주기(044): 런타임 + HTTP/WS 어댑터 + MCP + 단일 writer·비우기·정지. 독립 서버와 AW embedded 모드가 함께 쓴다."
 
+[features]
+# 시험 host(`examples/http_test_host.rs`)와 시험이 가짜 run 엔진을 쓴다.
+test-hooks = ["workbench-core/test-hooks"]
+
 [dependencies]
 workbench-core = { path = "../workbench-core" }
 workbench-protocol = { path = "../workbench-protocol" }
 workbench-server = { path = "../workbench-server" }
+acp-agent-core = { path = "../acp-agent-core" }
+anyhow = "1.0"
+axum = "0.7"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net", "io-util"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v4"] }
+
+
+[dev-dependencies]
+workbench-core = { path = "../workbench-core", features = ["test-hooks"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "io-util", "io-std", "test-util"] }
+tempfile = "3"
+async-trait = "0.1"
+futures-util = "0.3"
