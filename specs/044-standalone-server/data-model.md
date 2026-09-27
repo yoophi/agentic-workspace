@@ -25,7 +25,7 @@
 
 ## ActiveWork (파생 값)
 
-`runs`(진행·예약), `permissionWaits`, `orchestrationTasks`(진행 중), `pendingExchanges`(확인 전 + 대상 run 살아 있음), `pendingOperations`(이 프로세스가 적용 중인 ledger `pending`), `acceptedCalls`(HTTP·MCP 분리 호출).
+`busyRuns`(진행 중 turn·엔진 대기열 prompt·권한 대기가 있는 run. 세션 수가 아님), `orchestrationTasks`(배정된 진행 중), `queuedTasks`(비우기 시작 전에 만든 대기 task), `pendingExchanges`(전달 prompt 미소비 `send`/`queue` 교환, 데스크톱 임대가 있을 때만), `pendingOperations`(이 프로세스가 적용 중인 ledger `pending`), `acceptedCalls`(HTTP·MCP 분리 호출).
 
 - 모두 0이면 wait 비우기가 `stopping`으로 간다.
 - 모두 0이고 임대도 0이면 유휴 판정이 시작된다.
@@ -56,3 +56,19 @@
 | `closeIntent: Set<label:incarnation>` | 사용자가 닫으려 한 창(R8, spike 뒤 확정) |
 | `quitting: bool` | 앱 종료 의도가 선 뒤 true |
 | `lease` | 앱 인스턴스의 임대 id와 갱신 타이머 |
+
+## 교환 전달 소비 (K)
+
+| 필드 | 뜻 |
+|---|---|
+| `deliveryConsumed: Map<requestId, RunId>` | `continuation`으로 받은 전달 prompt. 교환마다 1회. 작업대가 닫히면 사라진다 |
+
+## 창 폐기 tombstone
+
+| 필드 | 뜻 |
+|---|---|
+| `retiredWindows: HashSet<label:incarnation>` | 세대 동안 폐기한 창 주체. 발급기가 같은 잠금 아래에서 발급을 거절한다 |
+
+## RunActivity (운영용)
+
+run별 `{turnInProgress, queuedPrompts, permissionWaits}`. run 이벤트로 유지한다. 모두 0이면 쉬는 세션이다(활성 작업 아님).

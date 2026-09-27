@@ -84,6 +84,11 @@
   - 창 토큰은 소유자가 owner 전용 operation `desktop.issueWindowToken`으로 받는다. 입력은 `{label, incarnation, origin}`이고, 출력 `{token, expiresAt}`은 043과 같은 창 주체·출처 묶음이다.
   - 창 폐기는 `desktop.retireWindow {label, incarnation, closeBench}`다. 한 호출로 그 주체의 토큰·표 폐기와 (요청 시) 그 주체가 연 작업대 닫기를 한다.
   - 서버의 창 주체 등록은 두지 않는다. incarnation은 데스크톱이 발급하고, 서버는 소유자가 요청한 주체로 토큰을 만든다.
+  - **폐기 tombstone(Codex 설계 리뷰 C4)**: 발급 요청과 `retireWindow`가 HTTP로 따로 오므로, 폐기보다 늦게 도착한 발급 요청이 폐기된 창의 토큰을 되살릴 수 있다. 그래서 서버는 세대 동안 폐기한 창 주체(`label:incarnation`)의 tombstone을 둔다.
+    - 발급과 폐기는 발급기의 같은 잠금 아래에서 처리한다.
+    - tombstone이 선 주체에는 발급하지 않는다(`forbidden`, "window is retired").
+    - 같은 label의 새 incarnation은 다른 주체라 영향을 받지 않는다.
+    - 시험: 폐기가 먼저 끝난 뒤 지연된 발급이 도착하는 순서, 그리고 같은 label의 새 incarnation 발급.
 - **Rationale**:
   - 소유자 자격 증명은 같은 OS 사용자만 읽을 수 있다. 데스크톱은 그 사용자의 프로세스라 같은 신뢰 수준이다.
   - 데스크톱이 없을 때 run을 조회·취소할 주체가 필요하다(US1, 완료 기준 (a)).
@@ -102,37 +107,48 @@
   - **N(새 작업)**: `draining` fault로 거절, 적용 안 됨.
   - 분류는 core의 `drain_class(OperationId, &input)`가 command마다 **빠짐없는 match**로 정한다. 새 operation을 추가하면 분류하지 않고는 컴파일되지 않는다.
   - 입구는 `WorkbenchRuntime::call` 하나다. HTTP·MCP·embedded가 같은 판정을 받는다.
-- **K가 필요한 실제 경로 — 교환 전달(사용자 검토 3)**:
-  - 교환은 서버가 agent에 직접 보내지 않는다. 대상 창의 원장이 요청 이벤트를 받아 대상 run에 `run.sendPrompt`로 전달하고(키 `exchange-delivery:<requestId>`, 043), 그 뒤 `exchange.acknowledge`로 확인한다.
-  - 따라서 확인(C)만 허용하면, 비우기 전에 요청된 교환은 전달되지 못한 채 남아 wait-stop이 끝나지 않는다.
+- **K 경로 1 — 교환 전달(사용자 검토 3, Codex 설계 리뷰 C2·C5)**:
+  - 교환은 서버가 agent에 직접 보내지 않는다. 043의 실제 순서는 다음과 같다:
+    1. 원장이 요청 이벤트를 받아 대상 패널로 **라우팅**한다(React 상태 갱신, `worktree-agent-run-area.tsx:315-337`).
+    2. **곧바로 확인(ack)**을 보낸다(`exchange-reconciler.ts:45-55`).
+    3. 패널은 prompt를 화면 대기열에 넣는다(`agent-run-panel.tsx:1458-1471`).
+    4. 대상 run의 현재 turn이 끝난 뒤 별도 effect가 `run.sendPrompt`로 보낸다(`:1042-1064`, 키 `exchange-delivery:<requestId>`).
+    - 따라서 확인이 실제 전송보다 **먼저** 도착한다. 교환 상태(`accepted`/`delivered`)로는 "아직 prompt가 안 갔다"를 알 수 없다.
   - 계약:
+    - 서버는 교환마다 **전달 prompt 소비 여부**(`deliveryConsumed`)를 따로 관리한다.
     - `run.sendPrompt` 입력에 선택 필드 `continuation: { exchangeRequestId }`를 더한다.
-    - 서버는 다음을 모두 확인하면 `draining` 중에도 받는다. 하나라도 어긋나면 N으로 거절한다:
+    - `draining` 중에는 다음을 **원자적으로** 모두 확인하고 `deliveryConsumed`를 세울 때만 받는다:
       - 그 교환이 호출자 작업대에 있다.
-      - 상태가 확인 전(`accepted`)이다.
       - 대상 run이 이 run이다.
-    - 화면의 교환 원장은 전달할 때 이 필드를 싣는다(오늘 키와 함께).
-- **orchestration 후속 경로(사용자 검토 3)**:
-  - coordinator 알림 전달은 서버 내부의 알림 전달기(`notification_dispatcher`)가 한다. 호출이 아니라서 입구 판정을 받지 않는다.
-  - 화면의 `orchestration.dispatchPrompt`·`sendChildCommand`는 사용자가 새로 보내는 prompt다(N).
-  - **R7-check 결과(설계 리뷰 D3, 코드 판독)**:
-    - 대기 자식 명령(`PromptDelivery::Queue`)은 명령 서비스가 받아들이는 순간 run 엔진의 대기열에 넣는다(`engine_agent_worker.rs:197` `engine.queue_prompt`). 엔진이 현재 turn 뒤 스스로 넘긴다. 서버 내부 경로이며 클라이언트 호출이 필요 없다.
-    - 동시 실행 상한으로 대기한 task(`LeaseOutcome::Queued`, `runtime.rs:642`)는 자리가 나면 스케줄러의 `release`(`scheduler.rs:56`)가 다음 task를 돌려주고 런타임이 띄운다. 이것도 서버 내부다.
-    - 그래서 대기 항목을 위한 추가 K operation은 없다. 대신 비우기 시작 전에 받아들인 대기 명령·대기 task는 **활성 작업에 센다**. 엔진 대기열의 prompt는 그 run이 활성인 동안 세지고, 대기 task는 스케줄러 대기열 수로 센다.
-- **활성 작업(`ActiveWork`)과 출처(설계 리뷰 D5)**:
-  - 진행·예약 run 수: `AgentSessionRegistry::active_run_count`(`agent_session_registry.rs:195`). 권한 대기 중인 run도 활성 run이라 따로 세지 않는다(`acp-agent-core` 변경 없이). `server.status`에는 표시용으로 run별 상태를 싣는다.
-  - 진행 중 orchestration task 수 + 스케줄러 대기 task 수: `Scheduler::active_count`(`scheduler.rs:71`) + 대기열 길이(같은 crate에 accessor 추가)
-  - **확인 전 교환 중 대상 run이 살아 있는 것**의 수
+      - 교환 배달 방식이 `send`/`queue`다(`draft`는 사용자가 직접 보내야 하므로 K가 아니다).
+      - 확인 결과가 `rejected`가 아니다.
+      - `deliveryConsumed`가 아직 없다.
+      - 멱등성 키가 정확히 `exchange-delivery:<requestId>`다.
+    - 같은 교환으로 두 번째 prompt(다른 키·다른 내용·동시 요청 포함)를 보내면 N으로 거절한다. 같은 키 재시도는 기존 멱등 결과를 돌려준다.
+    - prompt 내용은 교환 메시지에 묶지 않는다. 비우기 분류는 보안 경계가 아니다(그 창은 비우기가 아닐 때 어떤 prompt든 보낼 수 있다). 유한성에는 소비 1회로 충분하다.
+    - `serving`에서도 `continuation`이 있으면 `deliveryConsumed`를 세운다. 그래야 비우기 시작 뒤에 같은 교환으로 또 보내지 못한다.
+  - 화면의 교환 전달은 이 필드를 싣는다(오늘 키와 함께).
+- **K 경로 2 — 대기 task 배정(Codex 설계 리뷰 C1)**:
+  - 동시 실행 상한으로 대기한 자식 task는 서버가 자동 실행하지 **않는다**. 스케줄러 `release`는 다음 준비 task id를 돌려줄 뿐이다(`agent_tools.rs:555-570`). coordinator가 `orchestration.assignChildTask`를 다시 불러야 진행한다(`orchestration_liveness.rs:232-266`).
+  - 계약: `draining` 중 `orchestration.assignChildTask`는 대상 task가 **비우기 시작 전에 만들어진 대기 task**일 때만 받는다(K). 새로 만든 task는 `createChildTask`가 N이라 생기지 않는다. 배정은 task 상태 전이로 1회만 성공한다.
+  - 시험: 동시 실행 상한 1에서 task 둘을 받아들인 뒤 wait-stop → 첫 task 완료 → coordinator가 둘째를 배정(K) → 완료 → 서버 정지.
+- **서버 내부로 이어지는 경로(입구 판정 없음)**:
+  - coordinator 알림 전달(`notification_dispatcher`)
+  - 대기 자식 명령(`PromptDelivery::Queue`, 엔진 대기열 `engine_agent_worker.rs:197`)
+  - 엔진이 현재 turn 뒤 대기열 prompt를 넘기는 것
+- **활성 작업(`ActiveWork`)과 출처(설계 리뷰 D5, Codex 설계 리뷰 C3)**:
+  - **바쁜 run 수**(`busyRuns`): 진행 중 turn, 엔진 대기열 prompt, 권한 대기 중 하나라도 있는 run.
+    - 세션 수(`active_run_count` = `runs.len()`)는 쓰지 않는다. ACP 프로세스는 turn이 끝나도 다음 prompt를 기다리며 살아 있다(`runner.rs:419-475`, `start_agent_run.rs:87-88`). 세션 수로 세면 wait·유휴가 영원히 끝나지 않는다. 그 accessor는 시험 전용이기도 하다.
+    - 출처: core가 run 이벤트(`lifecycle:promptSent`·`promptCompleted`·`permission` 요청·응답, run 종료)로 유지하는 운영용 run 활동 표(새 port `RunActivity`). `acp-agent-core`는 바꾸지 않는다.
+    - 쉬고 있는 세션(바쁘지 않은 run)은 활성 작업이 아니다. 서버가 멈출 때(wait·idle·force 모두) 남은 세션은 취소되고 run은 끝난다.
+  - 진행 중(배정된) orchestration task 수 + 비우기 시작 전에 만든 대기 task 수(K로 배정 가능한 것).
+  - **확인했지만 전달 prompt가 아직 소비되지 않은 교환**(`send`/`queue`, `rejected` 아님, 대상 run 살아 있음): **데스크톱 임대가 하나라도 있을 때만** 센다. 임대가 없으면 화면 대기열을 보낼 클라이언트가 없어 기다려도 끝나지 않는다. 이 경우 `server.status`의 `undeliverableExchanges`로 보고한다.
   - 이 프로세스가 적용 중인 ledger `pending` 수
   - 받아들인 분리 호출 수(HTTP·MCP)
   - 유효 임대 수(유휴 판정에만)
-- **ledger `unknown`의 의미**:
-  - `unknown`은 이전 세대에서 시작 복구가 적용 여부를 판정하지 못한 기록이다. 시간이 지나도 스스로 풀리지 않는다.
-  - 그래서 `unknown`은 **활성 작업이 아니다**. wait·idle을 막지 않는다. `server.status`의 `unresolvedOperations`로 보여 준다.
-  - 설계 문서는 "durable pending/unknown이 있으면 idle shutdown 불가"라고 적었다. 영구 `unknown`이 서버를 영원히 살려 두지 않도록 이 증분은 이렇게 **다르게 정하고 기록한다**. 이 프로세스가 적용 중인 `pending`만 막는다.
 - **wait-stop이 끝남을 보장하는 논증**:
-  - 새 run turn을 시작하는 호출은 K 조건을 만족하는 교환 전달을 빼면 모두 N이다: run.start, sendPrompt(조건 밖), steer, cancelAndSend, orchestration.dispatchPrompt·sendChildCommand·sendChildMessage·delegateGoal·createChildTask·retry·reassign·recover.
-  - K는 비우기 시작 때 이미 있던 교환에만 해당한다. 새 교환 요청(`exchange.send`·`sendFromRun`)은 N이라 늘지 않는다. 따라서 K로 생기는 turn 수는 유한하다.
+  - 새 run turn을 시작하는 호출은 K를 빼면 모두 N이다: run.start, sendPrompt(조건 밖), steer, cancelAndSend, orchestration.dispatchPrompt·sendChildCommand·sendChildMessage·delegateGoal·createChildTask·assignChildTask(조건 밖)·retry·reassign·recover.
+  - K는 비우기 시작 때 이미 있던 항목에만, 항목마다 **한 번** 적용된다: 교환마다 전달 prompt 1회(`deliveryConsumed`), 대기 task마다 배정 1회. 새 교환(`exchange.send`·`sendFromRun`)과 새 task(`createChildTask`)는 N이라 늘지 않는다. 따라서 K로 생기는 turn 수는 유한하다.
   - 알림 전달기가 만드는 coordinator turn 안에서 새 작업을 만드는 호출은 N이다.
   - 사용자는 언제든 "강제" 정지로 넘어갈 수 있다.
 - **Rationale**:
@@ -146,13 +162,17 @@
   1. 분류 표 문서와 `drain_class`, `OperationId::ALL`, operation 종류의 대조 시험(문서 표 파싱).
   2. operation마다 `draining` 입구 판정. K는 조건 충족·불충족 양쪽을 본다.
   3. **실제 경로 wait-stop 시험**: 실제 서버 조립(시험 host), HTTP 클라이언트, 043의 실제 소비자 코드를 쓴다. 각 경우 wait-stop을 요청한 뒤 실제 경로로 작업을 끝내고, 서버가 멈추는지 본다:
-     - (a) 권한 대기 run: 권한 응답 → turn 완료 → 멈춤
-     - (b) 확인 전 교환: 043 `createNetworkEvents` + `createExchangeReconciler`가 요청 이벤트로 라우팅 → `run.sendPrompt(continuation)` → 확인 → 교환 종결 → 멈춤
-     - (c) 진행 중 orchestration 자식 task: 자식의 보고·결과(MCP 경로) → 알림 전달기가 coordinator에 전달 → task 종결 → 멈춤
-     - (d) 대기 중 자식 명령: R7-check 결과에 따른 실제 전달 경로
-  4. 각 실제 경로 시험의 대조 변이: 해당 C·K를 N으로 바꾸면 wait-stop이 끝나지 않는다(정해진 상한 안에 멈추지 않음을 단정).
-  5. N operation이 `draining`으로 거절되고 효과가 없는 시험.
-  6. ledger `unknown`만 남은 서버가 wait·idle에서 멈추고 `unresolvedOperations`에 보이는 시험.
+     - (a) 권한 대기 run: 권한 응답 → turn 완료 → **세션은 살아 있어도** 바쁜 run 0 → 멈춤(C3 실패 시나리오: 세션 수로 세면 멈추지 않음)
+     - (b) 교환 전달: 대상 run이 바쁜 상태에서 교환 요청 → 043 원장이 라우팅하고 **전송보다 먼저 확인** → turn 종료 뒤 패널 대기열이 `run.sendPrompt(continuation)` → 소비 → 멈춤(C2 실패 시나리오: 확인 뒤 상태로 판정하면 전달 거절)
+     - (c) orchestration 자식 task 보고·결과(MCP 경로) → 알림 전달기가 coordinator에 전달 → task 종결 → 멈춤
+     - (d) 동시 실행 상한 1, task 둘 → 첫 task 완료 → coordinator가 둘째를 `assignChildTask`(K) → 완료 → 멈춤(C1 실패 시나리오: N이면 멈추지 않음)
+     - (e) 대기 자식 명령(`queue`): 엔진 대기열 prompt 전달 → 완료 → 멈춤
+  4. 각 실제 경로 시험의 대조 변이: 해당 C·K를 N으로 바꾸면(또는 (a)에서 세션 수로 세면) wait-stop이 정해진 상한 안에 끝나지 않음을 단정한다.
+  5. **K 단일 실행(C5)**: 같은 교환으로 다른 키·다른 내용의 둘째 prompt, 동시 두 요청, `draft` 교환, `rejected` 교환, 다른 run 대상 → 모두 거절되고 효과는 1회뿐임을 확인한다. 같은 키 재시도는 기존 결과를 돌려준다.
+  6. N operation이 `draining`으로 거절되고 효과가 없는 시험.
+  7. ledger `unknown`만 남은 서버가 wait·idle에서 멈추고 `unresolvedOperations`에 보이는 시험.
+  8. 데스크톱 임대가 없을 때 미소비 교환이 wait를 막지 않고 `undeliverableExchanges`에 보이는 시험.
+  9. **창 폐기 단조성(C4)**: 폐기 완료 뒤 지연된 발급 → `forbidden`. 같은 label 새 incarnation 발급 → 성공. 발급·폐기 동시 100회 → 폐기 뒤 유효 토큰 0.
 
 ## R8. 앱 전체 종료 대 창 닫기 — 실제 종료 이벤트 순서 (사용자 검토 2·4)
 

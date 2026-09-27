@@ -14,3 +14,17 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 | D6 | Low→기록 | 데스크톱이 띄운 서버는 데스크톱 환경 변수를 물려받는다(agent 카탈로그가 환경 변수를 읽음). 오늘과 같지만, 6단계 CLI가 서버를 띄우면 환경이 달라진다 | 이 증분은 오늘과 같음. 6단계 추적 항목 |
 
 사용자 검토(R7 실제 전달 경로·ledger `unknown`, R8 순서 주장)는 research R7·R8에 반영돼 있다: K 이어 가기 계약, 실제 경로 wait-stop 시험과 대조 변이, `unknown` 비차단, R8-spike 전 순서 무관 주장 금지, 관측 경로마다 구현·실검증이 완료 조건.
+
+## Codex 적대적 설계 리뷰 (`--wait --base cb0bd4c`, 대상 `00654e9`)
+
+판정: needs-attention. High 5건(문서·코드 대조, 실행 검증 없음). 모두 코드 판독으로 확인했다.
+
+| # | 문제 | 근거(Codex·재확인) | 반영 |
+|---|---|---|---|
+| C1 | R7-check의 "대기 task는 서버가 띄운다"는 틀렸다. 스케줄러 `release`는 다음 준비 task id를 돌려줄 뿐이고, coordinator가 `assignChildTask`를 다시 불러야 한다. 이를 N으로 막고 대기 task를 활성 작업에 세면 wait-stop이 멈추지 않는다 | `agent_tools.rs:555-570`, `orchestration_liveness.rs:232-266` | `assignChildTask`를 K로 둔다(비우기 시작 전 대기 task만, 상태 전이로 1회). 동시 실행 상한 1 실제 경로 시험 |
+| C2 | 043은 prompt 전송 **전에** 확인한다(라우팅 = 상태 갱신, 전송은 turn 뒤 effect). 교환 상태(`accepted`)로 K를 판정하면 확인 뒤라 거절된다 | `exchange-reconciler.ts:45-55`, `worktree-agent-run-area.tsx:315-337`, `agent-run-panel.tsx:1042-1064·1458-1471` | 교환 상태 대신 서버가 관리하는 **전달 prompt 소비 여부**로 판정한다. 확인 결과 `rejected`만 제외하고 `draft`는 K가 아니다. 확인이 전송보다 먼저 오는 실제 화면 경로 시험 |
+| C3 | 세션 수(`active_run_count` = `runs.len()`)는 turn이 끝난 뒤 다음 prompt를 기다리는 ACP 프로세스도 센다. wait·유휴가 끝나지 않는다. accessor도 시험 전용이다 | `runner.rs:419-475`, `start_agent_run.rs:87-88` | 활성 작업은 **바쁜 run**(진행 중 turn·엔진 대기열 prompt·권한 대기)으로 센다. core가 run 이벤트로 운영용 `RunActivity`를 유지한다. 쉬는 세션은 정지 때 취소한다. prompt 완료 뒤 살아 있는 ACP 프로세스로 시험 |
+| C4 | 등록 없이 요청한 incarnation에 토큰을 발급하면, 폐기보다 늦게 도착한 발급이 폐기된 창의 토큰을 되살린다. `revoke_subject`는 현재 토큰만 지운다 | `auth.rs:127-132` | 세대 동안 폐기 tombstone. 발급·폐기를 같은 잠금으로 직렬화하고 tombstone 주체에는 발급하지 않는다. 역순·새 incarnation·동시 시험 |
+| C5 | K 조건이 교환을 소비하지 않아, 한 교환 id로 다른 키·다른 내용의 prompt를 계속 보낼 수 있다. 유한성 논증이 깨진다 | `epoch_idempotency.rs`(키별 중복 제거뿐) | 교환마다 전달 prompt **1회 소비**(원자적), 키는 `exchange-delivery:<id>`로 고정. 둘째 prompt·동시 요청은 N. 내용 결합은 하지 않는다(비우기는 보안 경계가 아님, 유한성에는 1회 소비로 충분) |
+
+사용자 요청에 따라 수정된 설계의 이 5건을 Codex `--wait`로 다시 검토한다(아래).

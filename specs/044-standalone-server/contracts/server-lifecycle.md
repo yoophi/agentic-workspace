@@ -60,12 +60,12 @@ research R4–R6·R9·R10.
 
 | operation | 종류 | 권한 | 입력 → 출력 |
 |---|---|---|---|
-| `server.status` | query | 소유자 | `{}` → `{state, instanceId, serverEpoch, activeWork{runs, permissionWaits, orchestrationTasks, pendingExchanges, pendingOperations, acceptedCalls}, leases, unresolvedOperations, idleSince?}` |
+| `server.status` | query | 소유자 | `{}` → `{state, instanceId, serverEpoch, activeWork{busyRuns, orchestrationTasks, queuedTasks, pendingExchanges, pendingOperations, acceptedCalls}, idleRuns, leases, unresolvedOperations, undeliverableExchanges, idleSince?}` |
 | `server.stop` | command | 소유자 | `{mode: "default"\|"wait"\|"force"}` → `{state}`. `default`는 활성 작업이 있으면 `conflict`와 `details.activeWork` |
 | `lease.acquire` | command | 소유자 | `{clientKind: "desktop"\|"cli"\|"test", clientId}` → `{leaseId, ttlSeconds}` |
 | `lease.renew` | command | 소유자 | `{leaseId}` → `{ttlSeconds}`. 모르는 임대는 `notFound` |
 | `lease.release` | command | 소유자 | `{leaseId}` → `{}`(없어도 성공) |
-| `desktop.issueWindowToken` | command | 소유자 | `{label, incarnation, origin}` → `{token, expiresAt}`. 출처는 WebView 허용 목록만 |
+| `desktop.issueWindowToken` | command | 소유자 | `{label, incarnation, origin}` → `{token, expiresAt}`. 출처는 WebView 허용 목록만. 폐기된 주체(tombstone)면 `forbidden` |
 | `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBenches}`. `closeBench`면 그 창 주체가 **연** 작업대를 모두 닫는다(레지스트리의 `opened_by` 조회) |
 | `bench.list` | query | 모든 주체 | `{}` → `[{benchId, workingDirectory, owner, runs:[{runId, state}]}]`. 소유자는 전부, 그 밖은 자기 작업대만 |
 

@@ -38,7 +38,7 @@
 | `goal.recordProgress` | command | C | 실행 중 agent의 진행 보고. 새 turn을 만들지 않는다 |
 | `goal.update` | command | N | 새 작업 또는 새 데이터 변경 |
 | `orchestration.adoptManualChild` | command | N | 새 작업 또는 새 데이터 변경 |
-| `orchestration.assignChildTask` | command | N | 새 작업 또는 새 데이터 변경 |
+| `orchestration.assignChildTask` | command | K | 대상이 비우기 시작 전에 만든 대기 task면 받는다(상태 전이로 1회). 아니면 N |
 | `orchestration.bindCoordinator` | command | N | 새 작업 또는 새 데이터 변경 |
 | `orchestration.bootstrap` | command | N | 새 작업 또는 새 데이터 변경 |
 | `orchestration.cancelChildTask` | command | C | 자식 task 취소(활성 작업 감소) |
@@ -80,7 +80,7 @@
 | `run.listToolCandidates` | query | Q | 조회 |
 | `run.replay` | query | Q | 조회 |
 | `run.respondPermission` | command | C | 권한 대기에 답한다(현재 turn을 끝까지 가게 함) |
-| `run.sendPrompt` | command | K | `continuation.exchangeRequestId`가 호출자 작업대의 확인 전 교환이고 대상 run이 이 run이면 받는다(교환 전달). 아니면 N |
+| `run.sendPrompt` | command | K | `continuation.exchangeRequestId`가 호출자 작업대의 교환이고, 대상 run이 이 run, 배달 방식 `send`/`queue`, 확인 결과가 `rejected` 아님, 전달 prompt 미소비, 키가 `exchange-delivery:<id>`이면 소비 표시와 함께 1회 받는다(교환 전달). 아니면 N |
 | `run.setPermissionMode` | command | C | 권한 대기를 자동 승인·거절로 풀 수 있다(대기 해소) |
 | `run.start` | command | N | 새 작업 또는 새 데이터 변경 |
 | `run.steer` | command | N | 새 작업 또는 새 데이터 변경 |
@@ -112,6 +112,6 @@
 | `desktop.retireWindow` | command | C | 토큰 폐기·작업대 닫기(활성 작업 감소) |
 | `bench.list` | query | Q | 조회 |
 
-## R7-check 결과
+## 서버 내부로 이어지는 경로(입구 판정 없음)
 
-(구현 전 기록) 대기 중 자식 명령(`delivery: queue`)의 전달 경로: 서버 내부 / 클라이언트 호출 필요. 근거 코드 위치와 분류 반영.
+coordinator 알림 전달기, 대기 자식 명령(엔진 대기열), 엔진의 대기열 prompt 전달. research R7.
