@@ -43,6 +43,8 @@ pub struct DerivedWork {
     pub pending_operations: u64,
     /// ledger `unknown`. 활동 작업이 아니다.
     pub unresolved_operations: u64,
+    /// 배정할 수 있는 쪽(바쁜 coordinator·미전달 알림)이 없어 세지 않은 준비 task(보고만). 저장돼 있어 복구할 수 있다.
+    pub deferred_tasks: Vec<String>,
 }
 
 impl DerivedWork {
@@ -181,32 +183,21 @@ impl ServerControl {
                 async move { engine.active_owner_of(&run_id).await.as_deref() == Some(&bench_id) }
             };
             if let Ok(Some(session)) = self.orchestration.get(&bench_id).await {
-                for task in &session.tasks {
-                    match task.status {
-                        TaskStatus::Running => derived.orchestration_tasks += 1,
-                        TaskStatus::Pending | TaskStatus::Ready => {
-                            let before_drain = match drain_started_at {
-                                None => true,
-                                Some(started) => DateTime::parse_from_rfc3339(&task.created_at)
-                                    .is_ok_and(|created| created < started),
-                            };
-                            if before_drain {
-                                derived.queued_tasks += 1;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
                 let coordinator_run = session
                     .nodes
                     .iter()
                     .find(|node| node.id == MAIN_AGENT_NODE_ID)
                     .and_then(|node| node.current_run_id.clone());
-                if let (Some(generation), Some(run)) = (
+                let coordinator_alive = match &coordinator_run {
+                    Some(run) => alive(run.clone()).await,
+                    None => false,
+                };
+                // 이 coordinator에게 아직 전달하지 않은 알림(알림 전달기가 넘겨 coordinator turn을 깨운다).
+                let undelivered = match (
                     session.active_coordinator_generation_id.as_deref(),
-                    coordinator_run,
+                    coordinator_alive,
                 ) {
-                    let undelivered = session
+                    (Some(generation), true) => session
                         .coordinator_notifications
                         .iter()
                         .filter(|notification| {
@@ -221,9 +212,37 @@ impl ServerControl {
                                     _ => false,
                                 }
                         })
-                        .count() as u64;
-                    if undelivered > 0 && alive(run).await {
-                        derived.pending_notifications += undelivered;
+                        .count() as u64,
+                    _ => 0,
+                };
+                derived.pending_notifications += undelivered;
+                // 준비 task는 coordinator agent만 배정한다(`assignChildTask`는 coordinator 역할의 agent 도구 —
+                // 소유자·데스크톱·CLI는 부를 수 없다). coordinator는 turn 안에서만 배정하고, turn은 바쁜 실행(엔진
+                // 대기열·Ralph 포함)이나 미전달 알림으로만 생긴다(비우는 중 사용자 prompt는 N). 둘 다 없으면 아무도
+                // 배정하지 않으므로 활동으로 세지 않고 `deferred_tasks`로 보고한다 — task는 저장돼 있어 복구할 수 있다.
+                let coordinator_busy = coordinator_run
+                    .as_deref()
+                    .is_some_and(|run| gate.busy_run_count(run) > 0);
+                let can_assign = coordinator_alive && (coordinator_busy || undelivered > 0);
+                for task in &session.tasks {
+                    match task.status {
+                        TaskStatus::Running => derived.orchestration_tasks += 1,
+                        TaskStatus::Pending | TaskStatus::Ready => {
+                            let before_drain = match drain_started_at {
+                                None => true,
+                                Some(started) => DateTime::parse_from_rfc3339(&task.created_at)
+                                    .is_ok_and(|created| created < started),
+                            };
+                            if !before_drain {
+                                continue;
+                            }
+                            if can_assign {
+                                derived.queued_tasks += 1;
+                            } else {
+                                derived.deferred_tasks.push(task.id.clone());
+                            }
+                        }
+                        _ => {}
                     }
                 }
             }
@@ -256,6 +275,7 @@ impl ServerControl {
             }
         }
         derived.undeliverable_exchanges.sort();
+        derived.deferred_tasks.sort();
         derived
     }
 

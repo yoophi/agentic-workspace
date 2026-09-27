@@ -11885,6 +11885,16 @@
             },
             "description": "엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음."
           },
+          "deferredTasks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "비우기 전 준비 task 중 배정할 쪽(바쁜 coordinator·미전달 알림)이 없어 활동으로 세지 않은 것(task id). 저장돼 있어\n복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음."
+          },
           "idleSince": {
             "type": [
               "string",

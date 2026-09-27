@@ -25,7 +25,7 @@
 
 ## ActiveWork (파생 값)
 
-`busyRuns`(진행 중 turn·엔진 대기열 prompt·권한 대기가 있는 run. 세션 수가 아님), `orchestrationTasks`(배정된 진행 중), `queuedTasks`(비우기 시작 전에 만든 대기 task), `pendingExchanges`(전달 prompt 미소비 `send`/`queue` 교환, 데스크톱 임대가 있을 때만), `pendingOperations`(이 프로세스가 적용 중인 ledger `pending`), `acceptedCalls`(HTTP·MCP 분리 호출).
+`busyRuns`(진행 중 turn·엔진 대기열 prompt·권한 대기가 있는 run. 세션 수가 아님), `orchestrationTasks`(배정된 진행 중), `queuedTasks`(비우기 시작 전에 만든 대기 task 중 **배정할 쪽이 있는 것** — coordinator run이 살아 있고, 바쁘거나 그 coordinator에게 미전달 알림이 있을 때. 배정할 쪽이 없는 준비 task는 `deferredTasks`로 보고만 한다. 구현 중 정책 변경, research R7 참조), `pendingExchanges`(전달 prompt 미소비 `send`/`queue` 교환, 데스크톱 임대가 있을 때만), `pendingOperations`(이 프로세스가 적용 중인 ledger `pending`), `acceptedCalls`(HTTP·MCP 분리 호출).
 
 - 모두 0이면 wait 비우기가 `stopping`으로 간다.
 - 모두 0이고 임대도 0이면 유휴 판정이 시작된다.

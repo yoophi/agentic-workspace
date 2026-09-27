@@ -167,3 +167,4 @@ apps/agentic-workbench/src/
 |---|---|---|
 | embedded 모드 유지(코드 경로 둘) | 개발·시험 편의와 8단계까지의 호환 경로 | 지금 지우면 compat 제거(8단계)가 이 증분에 섞여 범위가 두 배가 된다. embedded도 같은 소유 잠금을 잡아 단일 writer는 지킨다 |
 | 조건부 분류 K | 교환 전달이 새 prompt 모양이지만 이미 약속된 작업이다 | K 없이는 wait-stop 중 교환이 영원히 남거나(N), 모든 prompt를 허용해 비우기가 끝나지 않는다(C) |
+| 대기 task를 조건부로 셈(`deferredTasks`, 구현 중 정책 변경) | 배정(K)은 coordinator turn 안에서만 일어난다. 배정할 쪽이 없는 대기 task를 활동으로 세면 유휴·wait 정지가 영원히 막힌다 | "비우기 전 대기 task는 모두 활동"은 반례(쉬는 coordinator)에서 정지가 끝나지 않는다. "데스크톱 임대가 있으면 셈"은 임대가 배정을 일으킬 수 없어(데스크톱 prompt·`retryTask`·`reassignTask`·`recover`는 N) 같은 문제다. research R7, 구현 리뷰 대상 |

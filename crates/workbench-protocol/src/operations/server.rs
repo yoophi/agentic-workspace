@@ -77,6 +77,10 @@ pub struct ServerStatusOutput {
     pub undeliverable_exchanges: Option<Vec<String>>,
     /// 엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음.
     pub failed_exchange_deliveries: Option<Vec<String>>,
+    /// 비우기 전 준비 task 중 배정할 쪽(바쁜 coordinator·미전달 알림)이 없어 활동으로 세지 않은 것(task id). 저장돼 있어
+    /// 복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음.
+    #[serde(default)]
+    pub deferred_tasks: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<String>,
     /// 이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의

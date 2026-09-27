@@ -3251,6 +3251,11 @@ export interface components {
             undeliverableExchanges?: string[] | null;
             /** @description 엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음. */
             failedExchangeDeliveries?: string[] | null;
+            /**
+             * @description 비우기 전 준비 task 중 배정할 쪽(바쁜 coordinator·미전달 알림)이 없어 활동으로 세지 않은 것(task id). 저장돼 있어
+             *     복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음.
+             */
+            deferredTasks?: string[] | null;
             idleSince?: string | null;
             /**
              * @description 이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의

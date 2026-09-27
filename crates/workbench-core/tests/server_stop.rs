@@ -352,3 +352,250 @@ async fn an_unconsumed_exchange_with_a_desktop_lease_blocks_until_it_is_delivere
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 }
+
+// 044 메인 세션 검토(사용자 검토 반영): 비우기 전에 만든 준비(Ready) task는 coordinator agent만 `assignChildTask`(K)로
+// 배정한다(coordinator 역할의 agent 도구 — 소유자·데스크톱·CLI는 부를 수 없다). coordinator는 turn 안에서만 배정하고,
+// turn은 바쁜 실행이나 미전달 알림으로만 생긴다(비우는 중 사용자 prompt는 N). 그래서 준비 task는 **coordinator가 살아
+// 있고, 바쁘거나 전달할 알림이 있을 때만** 활동으로 센다. 아니면 `deferredTasks`로 보고한다. task는 저장돼 있어 복구할
+// 수 있다. 데스크톱 임대만으로는 배정이 일어나지 않는다(교환과 다른 점).
+
+use workbench_core::application::orchestration::notification_dispatcher::{
+    DispatchAction, DispatchPoint, DispatchProbe,
+};
+
+fn git_init(dir: &str) {
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+}
+
+/// 동시 한도 1에서 첫 task가 결과를 보고해 둘째 task가 배정 전 준비(Ready) 상태가 된 harness. coordinator run `coord`는
+/// 살아 있지만 turn이 없다. `probe`가 있으면 보고 전에 전달기에 설치한다(첫 poll에서 붙잡기).
+async fn with_ready_task(probe: Option<DispatchProbe>) -> (BenchHarness, String, String) {
+    let h = BenchHarness::with(
+        |adapters| adapters.orchestration.max_concurrent_children = 1,
+        RunScript::default(),
+    );
+    git_init(&h.dir);
+    let bench = h.open().await;
+    let desktop = AuthenticatedPrincipal::desktop();
+    let bootstrapped = h
+        .call(
+            &desktop,
+            OperationId::OrchestrationBootstrap,
+            json!({ "benchId": bench, "worktreePath": h.dir }),
+        )
+        .await
+        .unwrap();
+    h.start(&bench, "coord").await.unwrap();
+    h.call(
+        &desktop,
+        OperationId::OrchestrationBindCoordinator,
+        json!({ "benchId": bench, "request": {
+            "requestId": "bind-1", "panelId": "main-agent-run", "runId": "coord",
+            "state": "active", "expectedRevision": bootstrapped["revision"] } }),
+    )
+    .await
+    .unwrap();
+    let agent = |run: &str| AuthenticatedPrincipal::agent(run);
+    let create = |key: &str| {
+        json!({ "runId": "coord", "arguments": {
+            "requestId": key, "title": format!("task {key}"),
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read", "expectedResult": "summary" } })
+    };
+    let first = h
+        .call(
+            &agent("coord"),
+            OperationId::OrchestrationCreateChildTask,
+            create("c0"),
+        )
+        .await
+        .unwrap();
+    let second = h
+        .call(
+            &agent("coord"),
+            OperationId::OrchestrationCreateChildTask,
+            create("c1"),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second["queued"], true, "{second}");
+    if let Some(probe) = probe {
+        h.rt.runtime.orchestration().set_dispatch_probe(Some(probe));
+    }
+    let first_run = first["runId"].as_str().unwrap().to_owned();
+    h.call(
+        &agent(&first_run),
+        OperationId::OrchestrationReportResult,
+        json!({ "runId": first_run, "arguments": { "requestId": "r0", "summary": "done" } }),
+    )
+    .await
+    .unwrap();
+    let task_id = second["taskId"].as_str().unwrap().to_owned();
+    (h, bench, task_id)
+}
+
+/// 첫 task의 결과 보고가 만든 coordinator 알림 전달(진짜 활동 작업)이 끝나기를 제한 시간 안에서 기다린다.
+async fn settled(h: &BenchHarness) -> Value {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let current = status(h).await;
+        if current["activeWork"]["pendingNotifications"] == 0
+            && current["activeWork"]["reservations"] == 0
+        {
+            return current;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the coordinator notification settles: {current}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_unassignable_ready_task_is_deferred_and_does_not_hold_the_idle_stop() {
+    let (h, _bench, task_id) = with_ready_task(None).await;
+    let status = settled(&h).await;
+    assert_eq!(
+        status["activeWork"]["queuedTasks"], 0,
+        "nobody can assign it: {status}"
+    );
+    assert_eq!(status["deferredTasks"], json!([task_id]), "{status}");
+    assert!(
+        h.rt.runtime.server_control().tick(Duration::ZERO).await,
+        "idle stop proceeds"
+    );
+}
+
+/// 반례(앞선 "데스크톱 임대가 있으면 셈" 조건): 비우는 중 데스크톱은 새 prompt(N)를 못 보내 배정을 일으킬 수 없다.
+/// 임대만으로 세면 wait-stop이 영원히 끝나지 않는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_desktop_lease_alone_does_not_make_a_ready_task_assignable() {
+    let (h, _bench, task_id) = with_ready_task(None).await;
+    owner(
+        &h,
+        OperationId::LeaseAcquire,
+        json!({"clientKind": "desktop", "clientId": "app"}),
+    )
+    .await
+    .unwrap();
+    let status = settled(&h).await;
+    assert_eq!(status["activeWork"]["queuedTasks"], 0, "{status}");
+    assert_eq!(status["deferredTasks"], json!([task_id]), "{status}");
+    stop(&h, "wait").await.unwrap();
+    // host 감시처럼 판정을 되풀이한다(비우기 진입의 알림 한 바퀴가 첫 판정의 활동 세대를 바꿀 수 있다).
+    let control = h.rt.runtime.server_control();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !control.tick(Duration::ZERO).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "wait completes: {}",
+            self::status(&h).await
+        );
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Stopping);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_ready_task_counts_while_its_coordinator_is_busy() {
+    let (h, _bench, _task) = with_ready_task(None).await;
+    settled(&h).await;
+    let _turn =
+        h.rt.runtime
+            .work_gate()
+            .reserve(
+                workbench_core::application::work_gate::ReservationKind::Turn,
+                Some("coord"),
+            )
+            .unwrap();
+    let status = status(&h).await;
+    assert_eq!(
+        status["activeWork"]["queuedTasks"], 1,
+        "the coordinator can still assign it: {status}"
+    );
+    assert_eq!(status["deferredTasks"], json!([]), "{status}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_ready_task_counts_while_a_notification_to_its_coordinator_is_undelivered() {
+    let (reached_tx, mut reached) = tokio::sync::mpsc::unbounded_channel();
+    let release = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let gate = std::sync::Arc::clone(&release);
+    let probe: DispatchProbe = std::sync::Arc::new(move |at| {
+        let (tx, gate) = (reached_tx.clone(), std::sync::Arc::clone(&gate));
+        Box::pin(async move {
+            if at == DispatchPoint::FirstPoll {
+                let _ = tx.send(());
+                gate.acquire().await.expect("probe gate").forget();
+            }
+            DispatchAction::Continue
+        })
+    });
+    let (h, _bench, _task) = with_ready_task(Some(probe)).await;
+    tokio::time::timeout(Duration::from_secs(10), reached.recv())
+        .await
+        .expect("dispatcher held")
+        .unwrap();
+    let status = status(&h).await;
+    assert!(
+        status["activeWork"]["pendingNotifications"]
+            .as_u64()
+            .unwrap()
+            >= 1,
+        "{status}"
+    );
+    assert_eq!(
+        status["activeWork"]["queuedTasks"], 1,
+        "the notification will wake the coordinator: {status}"
+    );
+    release.add_permits(64);
+}
+
+/// 저장 지속성만: deferred task는 저장돼 있어, 작업대가 닫히고 런타임이 다시 떠도 복구 목록에서 보인다. 실제 정지(감시
+/// 루프) → host 전체 종료 → 같은 데이터로 새 host → 복구·재배정은 `workbench-host` `wait_stop.rs`
+/// `a_waiting_task_without_an_assigner_is_deferred_and_reassigned_after_a_restart`가 본다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_deferred_task_survives_the_stop_and_is_recoverable_after_restart() {
+    let (h, _bench, task_id) = with_ready_task(None).await;
+    let status = settled(&h).await;
+    assert_eq!(status["deferredTasks"], json!([task_id]), "{status}");
+    // 시험 harness의 `restart`는 관문(adapters)을 이어 쓰므로 정지 상태를 거치지 않고 닫기 → 새 런타임으로 저장
+    // 지속성만 본다(실제 정지 뒤 복구는 위 host 시험).
+    h.rt.runtime.close_all_benches().await;
+    let h = h.restart();
+    let reopened = h.open().await;
+    let recoverable = h
+        .call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::OrchestrationListRecoverable,
+            json!({ "benchId": reopened, "worktreePath": h.dir }),
+        )
+        .await
+        .unwrap();
+    assert!(
+        recoverable.to_string().contains(&task_id),
+        "the deferred task is recoverable: {recoverable}"
+    );
+}

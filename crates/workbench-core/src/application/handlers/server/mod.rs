@@ -164,6 +164,7 @@ async fn server_status(control: &ServerControl) -> ServerStatusOutput {
         unresolved_operations: Some(derived.unresolved_operations),
         undeliverable_exchanges: Some(derived.undeliverable_exchanges),
         failed_exchange_deliveries: Some(gate.failed_deliveries()),
+        deferred_tasks: Some(derived.deferred_tasks),
         idle_since: control.idle_since(),
         not_yet_derived: NOT_YET_DERIVED
             .iter()

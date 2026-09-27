@@ -60,8 +60,16 @@ struct Server {
 
 impl Server {
     fn start(configure: impl FnOnce(&mut RuntimeAdapters), engine: Option<RunScript>) -> Self {
+        Self::start_in(tempfile::tempdir().unwrap(), configure, engine)
+    }
+
+    /// 같은 데이터 디렉터리(`dir/data`)와 작업 디렉터리(`dir/work`)로 host를 조립한다.
+    fn start_in(
+        dir: tempfile::TempDir,
+        configure: impl FnOnce(&mut RuntimeAdapters),
+        engine: Option<RunScript>,
+    ) -> Self {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let dir = tempfile::tempdir().unwrap();
         let work = dir.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
         let work = std::fs::canonicalize(work)
@@ -107,7 +115,12 @@ impl Server {
     fn try_owner(&self, operation: &str, input: Value) -> Result<Value, CallError> {
         let command = !matches!(
             operation,
-            "server.status" | "run.replay" | "bench.list" | "orchestration.get"
+            "server.status"
+                | "run.replay"
+                | "bench.list"
+                | "orchestration.get"
+                | "orchestration.listRecoverable"
+                | "orchestration.listTasks"
         );
         call(&self.base, &self.owner, None, operation, input, command)
     }
@@ -179,26 +192,55 @@ impl Server {
             .unwrap_or_else(|| panic!("no MCP token for {run}"))
     }
 
+    fn mcp_base(&self) -> String {
+        let mcp = self.host.as_ref().unwrap().mcp.base_url().to_owned();
+        mcp.strip_suffix("/mcp").unwrap().to_owned()
+    }
+
     /// 실제 MCP HTTP 끝점으로 도구를 부른다. 성공이면 구조화 결과, 도구 실패면 `Err(결과)`.
     fn tool(&self, run: &str, name: &str, arguments: Value) -> Result<Value, Value> {
-        let mcp = self.host.as_ref().unwrap().mcp.base_url().to_owned();
-        let base = mcp.strip_suffix("/mcp").unwrap();
-        let (status, body) = request(
-            base,
-            "POST",
-            "/mcp",
-            Some(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                "params": { "name": name, "arguments": arguments } })),
-            Some(&self.mcp_token(run)),
-        )
-        .expect("MCP reachable");
-        assert_eq!(status, 200, "{body}");
-        let result = body["result"].clone();
-        if result["isError"] == json!(false) {
-            Ok(result["structuredContent"].clone())
-        } else {
-            Err(result)
+        mcp_call(&self.mcp_base(), &self.mcp_token(run), name, arguments)
+    }
+
+    /// host 전체 종료(`HostAssembly::shutdown` — 독립 서버의 종료 경로와 같음: HTTP·MCP 비우기 → 작업대 닫기) 뒤
+    /// 런타임·저장소를 모두 버리고, **같은 데이터 디렉터리**로 새 host를 조립한다(새 소유자 신원·새 엔진).
+    fn restart(
+        mut self,
+        configure: impl FnOnce(&mut RuntimeAdapters),
+        engine: Option<RunScript>,
+    ) -> Self {
+        let host = self.host.take().expect("host");
+        self.rt.block_on(host.shutdown());
+        drop(host);
+        let dir = std::mem::replace(&mut self.dir, tempfile::tempdir().unwrap());
+        drop(self);
+        Self::start_in(dir, configure, engine)
+    }
+
+    /// 현재 파생 결과(정지 판정과 같은 `ServerControl::derive`).
+    fn derived(&self) -> workbench_core::application::server_control::DerivedWork {
+        self.rt.block_on(self.control.derive())
+    }
+
+    /// 상한 안에 멈추는지 보면서, 멈추기 전 마지막 파생 결과를 돌려준다(정지 판정 근거 기록).
+    fn stops_within_observing(
+        &self,
+        bound: Duration,
+    ) -> (
+        bool,
+        Option<workbench_core::application::server_control::DerivedWork>,
+    ) {
+        let until = std::time::Instant::now() + bound;
+        let mut last = None;
+        while std::time::Instant::now() < until {
+            if self.stopped() {
+                assert_eq!(self.control.work_gate().state(), GateState::Stopping);
+                return (true, last);
+            }
+            last = Some(self.derived());
+            std::thread::sleep(Duration::from_millis(10));
         }
+        (false, last)
     }
 
     fn start_run(&self, bench: &str, run: &str, extra: Value) {
@@ -215,6 +257,26 @@ impl Drop for Server {
         if let Some(host) = self.host.take() {
             self.rt.block_on(host.shutdown());
         }
+    }
+}
+
+/// MCP `tools/call`(agent가 하는 호출과 같은 경로). blocking — 비동기 문맥에서는 `spawn_blocking`으로 부른다.
+fn mcp_call(base: &str, token: &str, name: &str, arguments: Value) -> Result<Value, Value> {
+    let (status, body) = request(
+        base,
+        "POST",
+        "/mcp",
+        Some(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": { "name": name, "arguments": arguments } })),
+        Some(token),
+    )
+    .expect("MCP reachable");
+    assert_eq!(status, 200, "{body}");
+    let result = body["result"].clone();
+    if result["isError"] == json!(false) {
+        Ok(result["structuredContent"].clone())
+    } else {
+        Err(result)
     }
 }
 
@@ -451,13 +513,84 @@ fn a_child_result_over_mcp_is_delivered_to_the_coordinator_and_the_server_stops(
     );
 }
 
-#[test]
-fn a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops() {
-    let server = Server::start(
-        |adapters| adapters.orchestration.max_concurrent_children = 1,
-        Some(RunScript::default()),
-    );
-    coordinator(&server);
+/// coordinator의 **실제 turn**(엔진 `send_and_wait` — 알림 전달이 여는 A-turn) 안에서 도구를 부르는 가짜 agent.
+/// ACP agent는 turn 안에서만 MCP 도구를 부른다. `assign`이 있으면 `release` 뒤 그 turn 안에서 대기 task를 배정한다(K).
+/// 없으면 turn이 배정 없이 끝난다 — 재배정 주체가 없는 경로.
+struct CoordinatorTurn {
+    armed: Arc<std::sync::atomic::AtomicBool>,
+    entered: Arc<std::sync::atomic::AtomicUsize>,
+    release: Arc<tokio::sync::Semaphore>,
+    assigned: Arc<std::sync::Mutex<Option<Result<Value, Value>>>>,
+}
+
+impl CoordinatorTurn {
+    fn install(server: &Server, assign: Option<String>) -> Self {
+        use std::sync::atomic::Ordering;
+        let turn = Self {
+            armed: Arc::default(),
+            entered: Arc::default(),
+            release: Arc::new(tokio::sync::Semaphore::new(0)),
+            assigned: Arc::default(),
+        };
+        let (armed, entered, release, assigned) = (
+            Arc::clone(&turn.armed),
+            Arc::clone(&turn.entered),
+            Arc::clone(&turn.release),
+            Arc::clone(&turn.assigned),
+        );
+        let (base, token) = (server.mcp_base(), server.mcp_token("coord"));
+        let engine = server.engine.as_ref().expect("scripted engine");
+        *engine.turn_hook.lock().unwrap() = Some(Arc::new(move |run: String| {
+            let (armed, entered, release, assigned) = (
+                Arc::clone(&armed),
+                Arc::clone(&entered),
+                Arc::clone(&release),
+                Arc::clone(&assigned),
+            );
+            let (base, token, assign) = (base.clone(), token.clone(), assign.clone());
+            Box::pin(async move {
+                if run != "coord" || !armed.swap(false, Ordering::SeqCst) {
+                    return;
+                }
+                entered.fetch_add(1, Ordering::SeqCst);
+                let Some(task) = assign else { return };
+                release.acquire().await.expect("release").forget();
+                let result = tokio::task::spawn_blocking(move || {
+                    mcp_call(
+                        &base,
+                        &token,
+                        "aw_assign_child_task",
+                        json!({ "taskId": task, "requestId": "a1" }),
+                    )
+                })
+                .await
+                .expect("assign call");
+                *assigned.lock().unwrap() = Some(result);
+            })
+        }));
+        turn
+    }
+
+    /// 다음 coordinator turn을 이 가짜 agent가 맡는다.
+    fn arm(&self) {
+        self.armed.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    fn entered(&self) -> usize {
+        self.entered.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn release(&self) {
+        self.release.add_permits(1);
+    }
+
+    fn assigned(&self) -> Option<Result<Value, Value>> {
+        self.assigned.lock().unwrap().clone()
+    }
+}
+
+/// 동시 상한 1: 첫 task 실행, 둘째 대기(Ready).
+fn two_tasks(server: &Server) -> (Value, Value) {
     let first = server
         .tool("coord", "aw_create_child_task", create_args("c0"))
         .expect("first");
@@ -465,7 +598,23 @@ fn a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops() {
         .tool("coord", "aw_create_child_task", create_args("c1"))
         .expect("second");
     assert_eq!(second["queued"], true, "{second}");
+    (first, second)
+}
+
+/// (d) 실제 K 경로: 첫 task 결과 → 알림이 coordinator turn을 연다 → **그 turn 안에서** coordinator가 둘째를 MCP로
+/// 배정(K) → 결과 → 멈춤. turn이 진행 중인 동안(배정 전) 대기 task는 배정될 수 있으므로 활동 작업이다.
+#[test]
+fn a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops() {
+    let server = Server::start(
+        |adapters| adapters.orchestration.max_concurrent_children = 1,
+        Some(RunScript::default()),
+    );
+    coordinator(&server);
+    let (first, second) = two_tasks(&server);
+    let second_id = second["taskId"].as_str().unwrap().to_owned();
+    let turn = CoordinatorTurn::install(&server, Some(second_id.clone()));
     server.wait_stop();
+    turn.arm();
     let reported = server
         .tool(
             first["runId"].as_str().unwrap(),
@@ -474,28 +623,138 @@ fn a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops() {
         )
         .expect("first result");
     assert_eq!(reported["nextReadyTaskId"], second["taskId"], "{reported}");
-    server.assert_not_stopping("a waiting task created before the drain remains");
+    server.wait_until("the coordinator's notification turn", || {
+        turn.entered() == 1
+    });
+    // coordinator turn 진행 중(A-turn), 배정 전: 대기 task는 배정 가능 → 활동 작업(queued), 보류 아님.
+    let derived = server.derived();
+    assert_eq!(derived.queued_tasks, 1, "{derived:?}");
+    assert!(derived.deferred_tasks.is_empty(), "{derived:?}");
+    server.assert_not_stopping("the coordinator's turn can still assign the waiting task");
 
-    // coordinator가 대기 task를 배정한다(K). 결과는 멈춤 판정 뒤에 단정한다.
-    let assigned = server.tool(
-        "coord",
-        "aw_assign_child_task",
-        json!({ "taskId": second["taskId"], "requestId": "a1" }),
+    turn.release();
+    server.wait_until("the in-turn assignment", || turn.assigned().is_some());
+    let assigned = turn.assigned().unwrap();
+    let assigned = assigned.expect("the continuation assignment is accepted during the drain");
+    assert_eq!(assigned["taskId"], json!(second_id), "{assigned}");
+    let run = assigned["runId"].as_str().expect("assigned run").to_owned();
+    server.assert_not_stopping("the assigned task is running");
+    let result = server.tool(
+        &run,
+        "aw_report_result",
+        json!({ "requestId": "r1", "summary": "done" }),
     );
-    if let Ok(assigned) = &assigned
-        && let Some(run) = assigned["runId"].as_str()
-    {
-        let _ = server.tool(
-            run,
-            "aw_report_result",
-            json!({ "requestId": "r1", "summary": "done" }),
-        );
-    }
     assert!(
         server.stops_within(STOP_BOUND),
-        "the server did not stop after the waiting task ran ({assigned:?})"
+        "the server did not stop after the waiting task ran ({result:?})"
     );
-    assert!(assigned.is_ok(), "{assigned:?}");
+    assert!(result.is_ok(), "{result:?}");
+}
+
+/// (d 대조) 재배정 주체가 없는 경로: coordinator의 알림 turn이 **배정 없이** 끝난다(바쁜 coordinator·미전달 알림
+/// 없음) → 대기 task는 보류(`deferredTasks`)로 보고되고 서버가 멈춘다. 이어서 host 전체 종료 → 같은 데이터로 새
+/// host → 복구 목록에 **같은 task id·Ready** → 복구·coordinator 재결합 → 배정되어 새 run으로 실행된다.
+#[test]
+fn a_waiting_task_without_an_assigner_is_deferred_and_reassigned_after_a_restart() {
+    let limit = |adapters: &mut RuntimeAdapters| adapters.orchestration.max_concurrent_children = 1;
+    let server = Server::start(limit, Some(RunScript::default()));
+    coordinator(&server);
+    let (first, second) = two_tasks(&server);
+    let second_id = second["taskId"].as_str().unwrap().to_owned();
+    let turn = CoordinatorTurn::install(&server, None);
+    server.wait_stop();
+    turn.arm();
+    server
+        .tool(
+            first["runId"].as_str().unwrap(),
+            "aw_report_result",
+            json!({ "requestId": "r0", "summary": "done" }),
+        )
+        .expect("first result");
+    let (stopped, last) = server.stops_within_observing(STOP_BOUND);
+    assert!(
+        stopped,
+        "the server stops when nobody can assign the waiting task ({last:?})"
+    );
+    assert_eq!(
+        turn.entered(),
+        1,
+        "the coordinator had its notification turn and did not assign"
+    );
+    let last = last.expect("derived before the stop");
+    assert_eq!(last.deferred_tasks, vec![second_id.clone()], "{last:?}");
+    assert_eq!(last.queued_tasks, 0, "{last:?}");
+
+    let server = server.restart(limit, Some(RunScript::default()));
+    let bench = server.open_bench();
+    let recoverable = server.owner(
+        "orchestration.listRecoverable",
+        json!({ "benchId": bench, "worktreePath": server.work }),
+    );
+    let tasks = recoverable[0]["tasks"]
+        .as_array()
+        .expect("recoverable tasks");
+    let task = tasks
+        .iter()
+        .find(|task| task["id"] == json!(second_id))
+        .unwrap_or_else(|| panic!("the deferred task is recoverable: {recoverable}"));
+    assert_eq!(task["status"], "ready", "{task}");
+    assert_eq!(task["startedAt"], Value::Null, "{task}");
+
+    // 복구: 작업 영역을 다시 묶고 새 coordinator run을 결합한 뒤 복구(scheduler에 Ready task 반영)한다.
+    let session = server.owner(
+        "orchestration.bootstrap",
+        json!({ "benchId": bench, "worktreePath": server.work,
+            "resumeWorkspaceId": recoverable[0]["id"] }),
+    );
+    assert_eq!(
+        session["id"], recoverable[0]["id"],
+        "the recoverable session is resumed"
+    );
+    server.start_run(&bench, "coord2", json!({}));
+    // 새 Main run은 명시적 coordinator 인계로 결합한다(이전 세대 run `coord`는 서버와 함께 끝났다).
+    let handed = server.owner(
+        "orchestration.handoffCoordinator",
+        json!({ "benchId": bench, "request": {
+            "requestId": "handoff-1", "successorRunId": "coord2", "summary": "resume after restart",
+            "confirmed": true, "expectedRevision": session["revision"] } }),
+    );
+    assert_ne!(
+        handed["activeCoordinatorGenerationId"], session["activeCoordinatorGenerationId"],
+        "{handed}"
+    );
+    server.owner("orchestration.recover", json!({ "benchId": bench }));
+    let assigned = server
+        .tool(
+            "coord2",
+            "aw_assign_child_task",
+            json!({ "taskId": second_id, "requestId": "a2" }),
+        )
+        .expect("the deferred task is assigned by the new coordinator");
+    assert_eq!(assigned["taskId"], json!(second_id), "{assigned}");
+    assert_eq!(
+        assigned["queued"],
+        Value::Null,
+        "a free slot starts the task: {assigned}"
+    );
+    let run = assigned["runId"].as_str().expect("assigned run").to_owned();
+    let reported = server
+        .tool(
+            &run,
+            "aw_report_result",
+            json!({ "requestId": "r1", "summary": "done after restart" }),
+        )
+        .expect("the reassigned task reports its result");
+    assert_eq!(reported["report"]["taskId"], json!(second_id), "{reported}");
+    let tasks = server.owner("orchestration.get", json!({ "benchId": bench }))["tasks"].clone();
+    let task = tasks
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["id"] == json!(second_id))
+        .cloned()
+        .expect("task");
+    assert_eq!(task["status"], "completed", "{task}");
 }
 
 #[test]

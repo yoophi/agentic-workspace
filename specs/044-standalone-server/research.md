@@ -152,7 +152,21 @@
       - 권한 대기는 그 prompt 실행 future 안에서 일어나므로 같은 guard에 포함된다.
     - **정지 판정과 예약의 직렬화**: 활동 표는 서버 상태와 한 잠금을 쓴다. 정지 판정은 그 잠금 아래에서 "활동 0이면 `stopping`으로 전이"를 한다. `stopping` 뒤의 예약은 실패한다(내부 경로의 새 실행은 시작하지 않고 run 취소로 처리). 예약이 정지 판정과 엇갈려 "0으로 보고 멈췄는데 방금 예약된 실행이 있는" 경우가 없다.
     - 쉬고 있는 세션(바쁘지 않은 run)은 활성 작업이 아니다. 서버가 멈출 때(wait·idle·force 모두) 남은 세션은 취소되고 run은 끝난다.
-  - 진행 중(배정된) orchestration task 수 + 비우기 시작 전에 만든 대기 task 수(K로 배정 가능한 것).
+  - 진행 중(배정된) orchestration task 수 + 비우기 시작 전에 만든 대기 task 중 **배정할 쪽이 있는 것**의 수.
+  - **구현 중 정책 변경(메인 세션 검토, 사용자 검토 요청으로 근거·반례 기록)**: 처음 계약은 "비우기 전 대기 task는 활동 작업"이었다. 그러면 coordinator가 쉬는 동안 대기 task 하나가 wait·유휴 정지를 **영원히** 막는다.
+    - 사실(코드): `assignChildTask`는 coordinator 역할의 agent 도구뿐이다(`agent_tools.rs:463` `AgentRole::Coordinator`). 소유자·데스크톱·CLI는 agent 전용 operation을 부를 수 없다(T027 소유자 우회 제외). 따라서 배정은 coordinator turn 안에서만 일어난다.
+    - coordinator turn이 생기는 경로: 사용자 prompt(비우는 중에는 N), 저장된 미전달 coordinator 알림(알림 전달기), 엔진 대기열 prompt·Ralph 반복(이미 바쁜 run).
+    - 결정: 대기 task는 **coordinator run이 살아 있고, 바쁘거나 그 coordinator에게 미전달 알림이 있을 때만** 활동으로 센다. 그 밖의 준비 task는 `server.status`의 `deferredTasks`(task id)로 보고만 한다. task는 orchestration 저장소에 남아 작업대가 닫히면 복구할 수 있는 작업 영역이 된다(041). 따라서 정지가 작업을 잃지 않는다.
+    - 데스크톱 임대는 조건이 아니다. 비우는 중 데스크톱은 N인 prompt를 못 보내 배정을 일으킬 수 없다(교환과 다른 점 — 교환은 데스크톱 원장이 직접 전달한다). 임대가 있는 서빙 상태는 유휴 판정 자체가 일어나지 않는다.
+    - 데스크톱 operation도 배정을 일으키지 않는다: `orchestration.retryTask`·`reassignTask`·`recover`·`dispatchPrompt`는 N이다(`drain.rs`). 비우는 중 데스크톱은 준비 task를 시작할 수 없다.
+    - 실제 K 경로: 자식 결과 → 알림 전달기가 coordinator turn을 연다(`send_and_wait`, A-turn) → 그 turn 안에서 agent가 `aw_assign_child_task`(K)를 부른다. turn이 끝날 때까지 알림은 전달 중이라 미전달로 세지고, turn 중 배정은 비우는 중에도 받아들여진다.
+    - 반례·검증:
+      - core(`crates/workbench-core/tests/server_stop.rs`): 배정할 쪽 없음 → `deferredTasks`·유휴 정지 / 임대만 있음 → wait 정지 완료 / coordinator 바쁨 → 셈 / 전달기를 붙잡아 미전달 알림 → 셈. 변이 3개(항상 셈, 임대면 셈, 바쁨 조건 제거)가 각각 해당 시험을 실패시킨다.
+      - host 실제 경로(`crates/workbench-host/tests/wait_stop.rs`, HTTP·MCP·감시 루프): (d) 알림이 연 coordinator turn 안에서 배정 → turn 중 `queued_tasks=1`·멈추지 않음 → 결과 → 멈춤. (d 대조) coordinator turn이 배정 없이 끝남 → 멈추기 직전 파생 `deferred_tasks=[task]`·`queued_tasks=0` → 멈춤 → **host 전체 종료 → 같은 데이터 디렉터리로 새 host** → `listRecoverable`에 같은 task id·`ready`·`startedAt=null` → `bootstrap{resumeWorkspaceId}` → 새 Main run `handoffCoordinator` → `recover` → 새 coordinator가 배정 → 새 run → 결과 → `completed`.
+      - 한계: 재시작은 같은 테스트 프로세스 안의 host 재조립이다(OS 프로세스 재시작 아님). 독립 서버 바이너리에는 가짜 엔진이 없어 MCP를 부르는 agent를 쓸 수 없다 — 프로세스 수준 재배정은 미검증으로 남긴다.
+    - 이 검증에서 드러난 기존 결함(041부터, 044 변경 아님): `recover`의 `scheduler.reconcile`이 준비 task를 자리와 무관하게 대기열에 넣고, `acquire`는 대기열에 있는 task에 자리가 비어도 `Queued`를 돌려줬다. 실행 중 task가 없으면 `release`가 오지 않아 재시작 뒤 재배정이 영원히 대기했다. 수정: 대기열의 task도 자리가 비면 `acquire`가 시작한다(`scheduler.rs`, 단위 시험 red→green, 변이 시 host 재시작 시험 실패).
+    - 처음 제안의 잘못: 메인 세션이 처음 둔 조건 "데스크톱 임대 또는 coordinator 바쁨"은 틀렸다(임대는 배정 주체가 아님). 사용자 반론 뒤 코드로 확인해 고쳤다.
+    - 구현 리뷰 대상으로 명시한다(정책 변경·scheduler 수정·증거 범위).
   - **확인했지만 전달 prompt가 아직 소비되지 않은 교환**(`send`/`queue`, `rejected` 아님, 대상 run 살아 있음): **데스크톱 임대가 하나라도 있을 때만** 센다. 임대가 없으면 화면 대기열을 보낼 클라이언트가 없어 기다려도 끝나지 않는다. 이 경우 `server.status`의 `undeliverableExchanges`로 보고한다.
   - 이 프로세스가 적용 중인 ledger `pending` 수
   - 받아들인 분리 호출 수(HTTP·MCP)
@@ -208,7 +222,7 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 | N-notify | 자식 보고·결과·막힘·입력 요청이 coordinator 알림을 저장하는 순간(보고 호출의 C-call을 놓기 전) | 알림 선택·전달·**결과 저장 commit까지**. A-turn과 **별개로** 유지한다(인계하지 않음). `send_and_wait`는 그 안에서 A-turn을 따로 잡고 prompt 실행이 끝나면 놓는다. 전달 시도의 소유권(`attemptId`)은 N-notify가 쥔다 |
 | C-call | HTTP·MCP 받아들인 분리 호출 | 호출 처리 끝까지(042) |
 
-활동 작업 = 예약 수 합계 + 이 프로세스의 ledger `pending` + (데스크톱 임대가 있을 때) 미소비 교환 + 비우기 시작 전 대기 task(K로 배정 가능) + **저장된 미전달 coordinator 알림 중 대상 coordinator run이 살아 있는 것**(저장소에서 파생, Codex 재검토 3 F2).
+활동 작업 = 예약 수 합계 + 이 프로세스의 ledger `pending` + (데스크톱 임대가 있을 때) 미소비 교환 + 비우기 시작 전 대기 task 중 배정할 쪽(살아 있는 coordinator가 바쁘거나 미전달 알림이 있음)이 있는 것(R7 구현 중 정책 변경; 나머지는 `deferredTasks`로 보고만) + **저장된 미전달 coordinator 알림 중 대상 coordinator run이 살아 있는 것**(저장소에서 파생, Codex 재검토 3 F2).
 
 ### 엔진 시작 장벽 (Codex 재검토 3 F1)
 

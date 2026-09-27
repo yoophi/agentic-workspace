@@ -612,3 +612,47 @@ green·최종:
 - `test:integration`: AW `aw-itest-1.log` 종료 0(2 passed), workbench-client `wc-itest-1.log` 종료 0(7 passed).
 - 프로토콜 crate와 생성 TS는 바꾸지 않았다(`git diff fd53701 -- crates/workbench-protocol packages/workbench-client/src/generated`가 비어 있음). 그래서 drift 검사 대상이 아니다.
 - 잔여 프로세스(가짜 agent·서버·시험 host)는 없다. 디스크 여유는 7.8GB다.
+
+## 대기 task 정책 변경과 실제 K 경로 (구현 리뷰 대상)
+
+사용자 검토 요청: 비우기 전 대기 task를 모두 활동으로 세던 계약(data-model·research R7)이 쉬는 coordinator에서 정지를 영원히 막는 문제, 그리고 host 시험 (d) 실패와의 관계.
+
+### 정책
+
+- 배정(`assignChildTask`)은 coordinator agent 도구뿐이다(`agent_tools.rs` `AgentRole::Coordinator`). 데스크톱의 `retryTask`·`reassignTask`·`recover`·`dispatchPrompt`는 비우는 중 N이다(`drain.rs`). 따라서 데스크톱 임대는 배정 주체가 아니다.
+- 대기 task는 **coordinator run이 살아 있고, 바쁘거나 그에게 미전달 알림이 있을 때만** `queuedTasks`로 센다. 그 밖에는 `deferredTasks`(task id)로 보고만 한다. `server.status`에 `deferredTasks` 필드를 추가했다(OpenAPI·TS 생성물 갱신).
+- 메인 세션이 처음 둔 조건 "데스크톱 임대 또는 coordinator 바쁨"은 틀렸다. 사용자 반론 뒤 코드로 확인해 고쳤다.
+- 문서: spec 활성 작업 정의, plan Complexity Tracking, research R7 정책 변경 블록·R14 활동 작업 식, data-model ActiveWork, server-lifecycle §4.
+
+### host 시험 (d) 실패의 원인과 관계
+
+- `scratchpad/044/deferred-final/host.log` 종료 101: 옛 (d) `a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops`가 "stopped although a waiting task created before the drain remains"로 실패했다.
+- 원인: 옛 (d)는 coordinator **turn 밖**에서 MCP 배정을 불렀다. 기본 스크립트에서는 자식 결과 알림의 coordinator turn이 곧바로 끝나 coordinator가 쉬고 미전달 알림도 없다. 그래서 새 정책이 대기 task를 보류로 보고 멈췄다. ACP agent는 turn 안에서만 도구를 부르므로 turn 밖 배정은 실제 경로가 아니다.
+- 기존 검증은 지우거나 기대만 바꾸지 않았다. 실제 경로로 바꾸고, 재배정 주체가 없는 경로를 따로 두었다.
+  - (d) 실제 K 경로: 엔진 `turn_hook`이 알림 전달(`send_and_wait`, A-turn) 안에서 도는 가짜 coordinator agent다. 첫 결과 → 알림 turn 진입(관문으로 붙잡음) → 파생 `queued_tasks=1`, `deferred_tasks=[]`, `assert_not_stopping` → 관문을 풀면 **그 turn 안에서** MCP `aw_assign_child_task`가 받아들여짐(비우는 중) → 배정 run 결과 → 상한 안에 멈춤.
+  - (d 대조) 재배정 주체 없음: 알림 turn이 배정 없이 끝남(`entered=1`). 멈추기 직전 파생은 `deferred_tasks=[둘째]`, `queued_tasks=0`. 서버가 멈춘다. 이어서 **host 전체 종료(`HostAssembly::shutdown`) → 같은 데이터 디렉터리로 새 host(새 소유자 신원·새 엔진)** → `orchestration.listRecoverable`에 같은 task id, `status=ready`, `startedAt=null` → `bootstrap{resumeWorkspaceId}`(같은 session id) → 새 Main run `handoffCoordinator`(새 세대) → `recover` → 새 coordinator가 배정(`queued` 아님, `runId` 있음) → 결과 → task `completed`.
+- 한계: 재시작은 같은 테스트 프로세스 안의 host 재조립이다. OS 프로세스 재시작이 아니다. 독립 서버 바이너리에는 가짜 엔진이 없어 MCP를 부르는 agent를 쓸 수 없다. 프로세스 수준 재배정은 미검증(T048 목록).
+
+### 드러난 기존 결함: 복구 뒤 재배정 영구 대기
+
+- 041부터 있던 결함이다. 044 전 `scheduler.rs`는 변경되지 않았다(`git diff cb0bd4c`에서 빈 diff, 마지막 변경 2e7f359).
+- `recover`의 `scheduler.reconcile`은 준비 task를 자리와 무관하게 대기열에 넣는다. `acquire`는 대기열에 있는 task에 자리가 비어도 `Queued`를 돌려줬다. 실행 중 task가 없으면 `release`가 오지 않아 영원히 대기했다. 탐색 로그 `d-realpath/probe-8.log`: 배정 응답 `queued:true, queuePosition:1`, 20초 조건 대기 뒤에도 task `ready`.
+- 수정: 대기열의 task도 자리가 비면 `acquire`가 시작한다. 자리가 차 있으면 대기열 순서를 유지한다.
+- 단위 시험 `a_reconciled_ready_task_is_acquired_when_capacity_is_free`: `d-realpath/sched-red-1.log` 종료 101(동작 red: `Queued { position: 2 }` ≠ `Acquired`) → `sched-green-1.log` 종료 0(4 passed).
+
+### 실행 기록 (`scratchpad/044/`)
+
+- `d-realpath/wait-stop-green-2.log` 종료 0: `wait_stop` 6 passed, 0 filtered out. `probe-*`는 필터를 쓴 탐색 실행이라 증거로 쓰지 않는다.
+- 변이(각각 한 번 실행 뒤 원본 복원, `git diff`로 확인):
+  - `d-realpath/mut-scheduler.log` 종료 101: scheduler 수정을 끄면 재시작 시험이 "a free slot starts the task … queued:true"로 실패.
+  - `d-realpath/mut-always.log` 종료 101: 대기 task를 항상 세면 재시작 시험이 멈추지 않아 실패(마지막 파생 `queued_tasks: 1`).
+  - `d-realpath/mut-no-busy.log` 종료 0: 바쁨 조건을 빼도 host 시험은 모두 통과. 실제 경로에서는 알림 turn이 끝날 때까지 알림이 미전달로 세져 그것이 정지를 막는다. 바쁨 조건 자체는 `d-realpath/mut-no-busy-core.log` 종료 101(`a_ready_task_counts_while_its_coordinator_is_busy` 실패)로 core 시험이 검출한다.
+  - `gate-kpath/mut-assign-n.log` 종료 101: `assignChildTask`를 N으로 바꾸면 새 (d)가 "server is draining; new work is not accepted."로 실패(T042 대조 변이를 새 (d)로 다시 확인). `grep -c MUTATION` = 0.
+- 전체 게이트 `gate-kpath/status.txt`: generate·clippy·core(492)·protocol(45)·host(63)·server-app(15)·aw(102)·types·wc-test(73)·aw-test(642)·wc-itest(7)·aw-itest(2) 모두 종료 0, filtered out 0. fmt만 종료 1(새 시험의 줄바꿈). `cargo fmt` 뒤 `fmt-2` 종료 0, `clippy-2` 종료 0, `wait-stop-2` 종료 0(6 passed).
+
+### 구현 리뷰에서 볼 것
+
+- 정책 변경 자체(`server_control.rs` `derive`의 `can_assign`)와 `deferredTasks` 보고.
+- scheduler `acquire` 수정: 대기열 FIFO 대신 명시 배정을 먼저 시작해도 되는가. 자리가 비어 있을 때만 해당한다.
+- 부수 관찰: MCP 도구로 받은 `draining` 거절이 `structuredContent.code = "internalError"`로 나간다(`mut-assign-n.log`). 계약상 `draining`(notApplied)의 의미가 MCP 도구 오류 코드에서 사라진다. 수정 여부를 리뷰에서 판단한다(이 변경에서는 고치지 않음).
+- 증거 범위: 재시작은 host 재조립 수준이다(OS 프로세스 아님).
