@@ -19,7 +19,7 @@
 
 | operation | 종류 | scope | 입력 → 출력 |
 |---|---|---|---|
-| `orchestration.bootstrap` | command | `orchestration:write` | `{benchId, worktreePath, resumeWorkspaceId?}` → `OrchestrationSessionDto`(작업대에 묶음) |
+| `orchestration.bootstrap` | command | `orchestration:write` | `{benchId, worktreePath, resumeWorkspaceId?}` → `OrchestrationSessionDto`. 작업대에 이미 묶인 작업 영역이 있으면 그것(다른 worktree면 `"The window is already bound to another worktree."`), `resumeWorkspaceId`가 있으면 그 복구 가능 작업 영역을 묶고(이미 묶였거나 worktree가 다르면 `"The workspace cannot be bound to this window."`), 없으면 새 작업 영역을 만든다 — 같은 worktree라도 작업대마다 따로(오늘 창마다 따로와 같음) |
 | `orchestration.get` | query | `orchestration:read` | `{benchId}` → `OrchestrationSessionDto \| null` |
 | `orchestration.listRecoverable` | query | `orchestration:read` | `{benchId, worktreePath}` → `[OrchestrationSessionDto]`(묶이지 않은 것) |
 | `orchestration.bindCoordinator` | command | `orchestration:write` | `{benchId, request: BindMainRunRequest}` → Session. `request.runId`는 이 작업대 소유의 살아 있는 run이어야 함(아니면 `forbidden` `"run is owned by another bench."`, 상태 불변), 다른 작업 영역에 이미 속한 run이면 `conflict` `"run already belongs to another orchestration workspace."`(research R18) |
@@ -33,7 +33,7 @@
 | `orchestration.cancelTask` · `retryTask` · `reassignTask` | command | `orchestration:write` | `{benchId, request: TaskActionRequest}` → Session |
 | `orchestration.handoffCoordinator` | command | `orchestration:write` | `{benchId, request: CoordinatorHandoffRequest}` → Session. `request.successorRunId`에 bindCoordinator와 같은 출처·유일성 검사 |
 | `orchestration.dispatchPrompt` | command | `orchestration:write` | `{benchId, request: DispatchPromptRequest}` → `PromptDispatchDto` |
-| `orchestration.recover` | command | `orchestration:write` | `{benchId}` → Session(작업대의 worktree에서 복구 가능한 작업 영역을 묶고 재조정·대기 전달) |
+| `orchestration.recover` | command | `orchestration:write` | `{benchId}` → Session. **이미 이 작업대에 묶인** 작업 영역을 재조정한다(살아 있는 run 반영·scheduler 재구성·중단된 명령/알림 복구·대기 알림 백그라운드 전달). 묶이지 않았으면 평문 `"Orchestration workspace is not bootstrapped."`. 복구 가능한 작업 영역을 묶는 것은 `bootstrap`의 `resumeWorkspaceId`다(오늘과 같음) |
 | `run.replay` | query | `run:read` | `{benchId, runId, afterSequence}` → `RunReplayDto`. 허용: run 스트림의 소유 작업대 기록(첫 발행 때 hub가 기록, journal과 같은 수명)이 호출자 작업대이거나, run이 호출자 작업대에 지금 묶인 작업 영역의 노드 run(노드·세대·과제 시도 run id — 모두 삽입 시점에 출처 검증됨, research R18)이다. 그 외 `forbidden` `"run is owned by another bench."`. 보관 한도로 제거된 run은 소유 검사 없이 오늘 Evicted 형태(`terminal: true, gapDetected: true`), 모르는 run은 Missing 형태(`gapDetected: afterSequence > 0`) |
 
 ## agent operation (17, agent 전용)

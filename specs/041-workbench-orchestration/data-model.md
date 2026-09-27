@@ -34,7 +34,7 @@ protocol DTO(`OrchestrationSessionDto`)는 `boundWindowLabel`이 없고 `eventSt
 ```mermaid
 stateDiagram-v2
     [*] --> Recoverable: 작업 영역 생성 전/서버 재시작
-    Recoverable --> Bound: orchestration.bootstrap / orchestration.recover (작업대 A)
+    Recoverable --> Bound: orchestration.bootstrap(resumeWorkspaceId) (작업대 A)
     Bound --> Recoverable: 작업대 A 닫기 hook (노드 주의 필요·run 재조정, 스트림 제거)
     Bound --> Bound: 같은 작업대로 bootstrap 재호출(멱등)
 ```
