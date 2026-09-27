@@ -1,0 +1,480 @@
+//! 작업 관문(044, research R14): 서버 상태, 활동 예약, 교환 전달 소비, task 기동 토큰, 정지 판정을 **한 잠금 G** 아래에 둔다.
+//!
+//! - G는 짧게만 잡는다(await를 걸치지 않는다). 비동기 작업은 G 아래에서 예약을 먼저 만들고, G 밖에서 수행하고, 결과를
+//!   다시 G 아래에서 확정·해제한다.
+//! - 예약은 **드롭하면 해제되는 guard**다. 성공·오류·취소·abort(future drop) 어느 쪽으로 끝나도 해제가 빠지지 않는다.
+//! - 정지 판정은 G 아래에서만 한다. 판정 뒤(`stopping`)의 예약은 실패한다 — "0으로 보고 멈췄는데 방금 예약된 실행"이 없다.
+//!
+//! 활동 작업(유휴·wait 정지를 막는 것)은 예약 수 + 조립이 넘기는 파생 수(ledger `pending`, 미소비 교환, 미전달 알림 등)다.
+//! 세션 수는 쓰지 않는다: 바쁜 run = A-turn 예약이 있는 run(Codex 재검토 E1).
+
+use std::{
+    collections::{BTreeMap, HashMap, HashSet},
+    sync::{Arc, Mutex, MutexGuard},
+};
+
+/// 서버 상태(contracts/server-lifecycle.md §5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateState {
+    Serving,
+    Draining(DrainMode),
+    Stopping,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrainMode {
+    /// 유휴 정지 판정 중. 임대가 잡히면 `Serving`으로 돌아간다.
+    Idle,
+    /// 정지 요청(`wait`). 돌아가지 않는다.
+    Wait,
+}
+
+/// 예약 종류(R14 표).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ReservationKind {
+    /// prompt 실행 future 전체(권한 대기 포함).
+    Turn,
+    /// 교환 전달 prompt의 엔진 대기열 등록까지(뒤는 Turn).
+    Deliver,
+    /// 대기 task 배정의 `Starting` 예약부터 실행 허용까지.
+    TaskStart,
+    /// coordinator 알림 전달 시도(결과 저장 commit까지).
+    Notify,
+    /// 받아들인 분리 호출(HTTP·MCP).
+    Call,
+}
+
+/// 관찰용 사건(시험). 예약·해제 직후, G 아래에서 부른다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GateEvent {
+    pub kind: ReservationKind,
+    pub run: Option<String>,
+    /// 이 사건 뒤 그 run의 Turn 예약 수(run이 없으면 0).
+    pub run_busy_after: usize,
+    /// 이 사건 뒤 전체 예약 수.
+    pub total_after: usize,
+}
+
+pub type GateObserver = Arc<dyn Fn(&GateEvent) + Send + Sync>;
+
+/// task 기동 토큰 상태(R14 표 4·5·5').
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchState {
+    /// 배정 중. 엔진 준비가 끝나지 않았다.
+    Pending,
+    /// G 아래 전이로 실행이 허용된 run.
+    Registered(String),
+    /// 전이 전에 취소됐다(실행 0).
+    Cancelled,
+    /// 전이 없이 끝났다(준비 실패·abort).
+    Failed,
+}
+
+/// task 취소가 기동 토큰에 대해 얻은 결과.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchCancel {
+    /// `Pending`을 `Cancelled`로 바꿨다. 시작 장벽은 열리지 않는다.
+    Prevented,
+    /// 이미 실행이 허용됐다. 이 run을 registry에서 취소해야 한다.
+    Registered(String),
+    /// 모르는 토큰이거나 이미 `Cancelled`·`Failed`다.
+    Unknown,
+}
+
+/// 기동 토큰을 `Registered`로 옮기려 했지만 이미 취소된 경우.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the task launch was cancelled before it was registered")]
+pub struct LaunchCancelled;
+
+/// 발급된 기동 토큰과 그 T-start 예약. `register_launch`로 확정하지 않고 drop하면 토큰은 `Failed`(아직 `Pending`일 때),
+/// T-start는 해제된다.
+#[must_use = "an unregistered launch ticket fails the launch when dropped"]
+pub struct LaunchTicket {
+    token: u64,
+    task_start: Option<Reservation>,
+}
+
+impl LaunchTicket {
+    pub fn token(&self) -> u64 {
+        self.token
+    }
+}
+
+impl std::fmt::Debug for LaunchTicket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchTicket")
+            .field("token", &self.token)
+            .finish()
+    }
+}
+
+impl Drop for LaunchTicket {
+    fn drop(&mut self) {
+        if let Some(reservation) = self.task_start.take() {
+            let gate = Arc::clone(&reservation.gate);
+            let mut inner = gate.lock();
+            if inner.launches.get(&self.token) == Some(&LaunchState::Pending) {
+                inner.launches.insert(self.token, LaunchState::Failed);
+            }
+            drop(inner);
+            drop(reservation);
+        }
+    }
+}
+
+/// 관문 예약에서 파생하는 활동 작업.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GateActiveWork {
+    pub busy_runs: usize,
+    pub accepted_calls: usize,
+    pub deliveries: usize,
+    pub task_starts: usize,
+    pub notifications: usize,
+}
+
+/// 정지 뒤의 예약 시도.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("server is stopping")]
+pub struct GateClosed;
+
+pub const MESSAGE_STOPPING: &str = "server is stopping";
+
+#[derive(Default)]
+struct Inner {
+    state: Option<GateState>,
+    next_id: u64,
+    reservations: HashMap<u64, (ReservationKind, Option<String>)>,
+    busy: BTreeMap<String, usize>,
+    /// 교환 전달 prompt 소비(교환마다 1회, K).
+    consumed_exchanges: HashSet<String>,
+    /// task 기동 토큰 표.
+    launches: HashMap<u64, LaunchState>,
+    next_launch: u64,
+    observer: Option<GateObserver>,
+}
+
+impl Inner {
+    fn state(&self) -> GateState {
+        self.state.unwrap_or(GateState::Serving)
+    }
+
+    /// 예약 한 건을 넣는다(G 아래).
+    fn insert(&mut self, kind: ReservationKind, run: Option<String>) -> u64 {
+        self.next_id += 1;
+        let id = self.next_id;
+        self.reservations.insert(id, (kind, run.clone()));
+        let run_busy_after = if kind == ReservationKind::Turn {
+            let count = self.busy.entry(run_id_key(run.as_deref())).or_default();
+            *count += 1;
+            *count
+        } else {
+            run.as_ref()
+                .map_or(0, |run| self.busy.get(run).copied().unwrap_or(0))
+        };
+        notify(self, kind, run, run_busy_after);
+        id
+    }
+
+    /// 예약 한 건을 뺀다(G 아래). 이미 빠졌으면 아무것도 하지 않는다(인계된 예약의 drop).
+    fn remove(&mut self, id: u64) {
+        let Some((kind, run)) = self.reservations.remove(&id) else {
+            return;
+        };
+        let run_busy_after = if kind == ReservationKind::Turn {
+            let key = run_id_key(run.as_deref());
+            let remaining = self.busy.get(&key).copied().unwrap_or(1).saturating_sub(1);
+            if remaining == 0 {
+                self.busy.remove(&key);
+            } else {
+                self.busy.insert(key, remaining);
+            }
+            remaining
+        } else {
+            run.as_ref()
+                .map_or(0, |run| self.busy.get(run).copied().unwrap_or(0))
+        };
+        notify(self, kind, run, run_busy_after);
+    }
+}
+
+#[derive(Default)]
+pub struct WorkGate {
+    inner: Mutex<Inner>,
+}
+
+/// 활동 예약. drop하면 해제된다.
+#[must_use = "a reservation is released when dropped"]
+pub struct Reservation {
+    gate: Arc<WorkGate>,
+    id: u64,
+}
+
+impl std::fmt::Debug for Reservation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Reservation").field("id", &self.id).finish()
+    }
+}
+
+impl Drop for Reservation {
+    fn drop(&mut self) {
+        self.gate.release(self.id);
+    }
+}
+
+impl WorkGate {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self::default())
+    }
+
+    fn lock(&self) -> MutexGuard<'_, Inner> {
+        self.inner
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    pub fn set_observer(&self, observer: GateObserver) {
+        self.lock().observer = Some(observer);
+    }
+
+    pub fn state(&self) -> GateState {
+        self.lock().state()
+    }
+
+    pub fn is_stopping(&self) -> bool {
+        self.state() == GateState::Stopping
+    }
+
+    /// 예약을 만든다. `stopping`이면 실패한다.
+    pub fn reserve(
+        self: &Arc<Self>,
+        kind: ReservationKind,
+        run: Option<&str>,
+    ) -> Result<Reservation, GateClosed> {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return Err(GateClosed);
+        }
+        let id = inner.insert(kind, run.map(str::to_owned));
+        Ok(Reservation {
+            gate: Arc::clone(self),
+            id,
+        })
+    }
+
+    fn release(&self, id: u64) {
+        self.lock().remove(id);
+    }
+
+    /// 대기 task 배정(R14 표 4): 기동 토큰 `Pending`과 T-start 예약을 G 아래에서 함께 만든다. `stopping`이면 실패한다.
+    pub fn issue_launch(self: &Arc<Self>) -> Result<LaunchTicket, GateClosed> {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return Err(GateClosed);
+        }
+        inner.next_launch += 1;
+        let token = inner.next_launch;
+        inner.launches.insert(token, LaunchState::Pending);
+        let id = inner.insert(ReservationKind::TaskStart, None);
+        Ok(LaunchTicket {
+            token,
+            task_start: Some(Reservation {
+                gate: Arc::clone(self),
+                id,
+            }),
+        })
+    }
+
+    /// 엔진 준비 뒤의 선형화 지점(R14 표 4 성공·5'): 토큰이 `Pending`이면 `Registered{run}`로 바꾸고 T-start를 run의
+    /// A-turn으로 **같은 G 아래에서** 인계한다. 이미 `Cancelled`면 전이하지 않는다(호출자는 준비한 run을 취소한다).
+    pub fn register_launch(
+        self: &Arc<Self>,
+        mut ticket: LaunchTicket,
+        run: &str,
+    ) -> Result<Reservation, LaunchCancelled> {
+        let task_start = ticket.task_start.take().expect("an unconsumed ticket");
+        let mut inner = self.lock();
+        if inner.launches.get(&ticket.token) != Some(&LaunchState::Pending) {
+            drop(inner);
+            drop(task_start);
+            return Err(LaunchCancelled);
+        }
+        inner
+            .launches
+            .insert(ticket.token, LaunchState::Registered(run.to_owned()));
+        let turn = inner.insert(ReservationKind::Turn, Some(run.to_owned()));
+        inner.remove(task_start.id);
+        drop(inner);
+        drop(task_start);
+        Ok(Reservation {
+            gate: Arc::clone(self),
+            id: turn,
+        })
+    }
+
+    /// task 취소(R14 표 5).
+    pub fn cancel_launch(&self, token: u64) -> LaunchCancel {
+        let mut inner = self.lock();
+        match inner.launches.get(&token).cloned() {
+            Some(LaunchState::Pending) => {
+                inner.launches.insert(token, LaunchState::Cancelled);
+                LaunchCancel::Prevented
+            }
+            Some(LaunchState::Registered(run)) => LaunchCancel::Registered(run),
+            _ => LaunchCancel::Unknown,
+        }
+    }
+
+    pub fn launch_state(&self, token: u64) -> Option<LaunchState> {
+        self.lock().launches.get(&token).cloned()
+    }
+
+    /// run의 Turn 예약 수(0이면 쉬는 세션이거나 run이 없음).
+    pub fn busy_run_count(&self, run: &str) -> usize {
+        self.lock().busy.get(run).copied().unwrap_or(0)
+    }
+
+    /// 바쁜 run id 목록.
+    pub fn busy_runs(&self) -> Vec<String> {
+        self.lock().busy.keys().cloned().collect()
+    }
+
+    /// 전체 예약 수(종류별).
+    pub fn reservation_counts(&self) -> BTreeMap<ReservationKind, usize> {
+        let mut counts = BTreeMap::new();
+        for (kind, _) in self.lock().reservations.values() {
+            *counts.entry(*kind).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    pub fn reservation_total(&self) -> usize {
+        self.lock().reservations.len()
+    }
+
+    /// 예약에서 파생하는 활동 작업. 바쁜 run은 Turn 예약이 있는 run 수(예약 수가 아님).
+    pub fn active_work(&self) -> GateActiveWork {
+        let inner = self.lock();
+        let count = |kind| {
+            inner
+                .reservations
+                .values()
+                .filter(|(k, _)| *k == kind)
+                .count()
+        };
+        GateActiveWork {
+            busy_runs: inner.busy.len(),
+            accepted_calls: count(ReservationKind::Call),
+            deliveries: count(ReservationKind::Deliver),
+            task_starts: count(ReservationKind::TaskStart),
+            notifications: count(ReservationKind::Notify),
+        }
+    }
+
+    /// 비우기에 들어간다. `stopping`이면 그대로 둔다. `Wait`는 `Idle`을 덮는다.
+    pub fn begin_drain(&self, mode: DrainMode) {
+        let mut inner = self.lock();
+        match inner.state() {
+            GateState::Stopping => {}
+            GateState::Draining(DrainMode::Wait) => {}
+            _ => inner.state = Some(GateState::Draining(mode)),
+        }
+    }
+
+    /// 유휴 비우기를 취소하고 서빙으로 돌아간다(임대 획득). `Wait`·`stopping`은 돌아가지 않는다.
+    pub fn resume_serving(&self) -> bool {
+        let mut inner = self.lock();
+        match inner.state() {
+            GateState::Draining(DrainMode::Idle) => {
+                inner.state = Some(GateState::Serving);
+                true
+            }
+            GateState::Serving => true,
+            _ => false,
+        }
+    }
+
+    /// 정지 판정(G 아래): 예약 0이고 `derived_active()`(파생 활동 수)가 0이면 `stopping`으로 전이하고 true.
+    /// `derived_active`는 G를 쥔 채 불린다 — 그 안에서 WorkGate를 다시 부르면 안 된다.
+    pub fn try_stop(&self, derived_active: impl FnOnce() -> u64) -> bool {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return true;
+        }
+        if !inner.reservations.is_empty() || derived_active() != 0 {
+            return false;
+        }
+        inner.state = Some(GateState::Stopping);
+        true
+    }
+
+    /// 강제 정지: 예약과 상관없이 `stopping`으로 전이한다(작업대 닫기가 예약을 drop으로 푼다).
+    pub fn force_stop(&self) {
+        self.lock().state = Some(GateState::Stopping);
+    }
+
+    /// 교환 전달 prompt 소비(교환마다 1회). 처음이면 true.
+    pub fn consume_exchange(&self, request_id: &str) -> bool {
+        self.lock().consumed_exchanges.insert(request_id.to_owned())
+    }
+
+    pub fn exchange_consumed(&self, request_id: &str) -> bool {
+        self.lock().consumed_exchanges.contains(request_id)
+    }
+}
+
+fn run_id_key(run: Option<&str>) -> String {
+    run.unwrap_or_default().to_owned()
+}
+
+fn notify(inner: &Inner, kind: ReservationKind, run: Option<String>, run_busy_after: usize) {
+    if let Some(observer) = &inner.observer {
+        observer(&GateEvent {
+            kind,
+            run,
+            run_busy_after,
+            total_after: inner.reservations.len(),
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dropped_reservation_is_released_and_counted_per_run() {
+        let gate = WorkGate::new();
+        let a = gate.reserve(ReservationKind::Turn, Some("r1")).unwrap();
+        let b = gate.reserve(ReservationKind::Turn, Some("r1")).unwrap();
+        assert_eq!(gate.busy_run_count("r1"), 2);
+        drop(a);
+        assert_eq!(gate.busy_run_count("r1"), 1);
+        drop(b);
+        assert_eq!(gate.busy_run_count("r1"), 0);
+        assert_eq!(gate.reservation_total(), 0);
+    }
+
+    #[test]
+    fn stopping_refuses_new_reservations_and_waits_for_live_ones() {
+        let gate = WorkGate::new();
+        let turn = gate.reserve(ReservationKind::Turn, Some("r1")).unwrap();
+        gate.begin_drain(DrainMode::Wait);
+        assert!(!gate.try_stop(|| 0), "a live reservation blocks stopping");
+        drop(turn);
+        assert!(!gate.try_stop(|| 1), "derived activity blocks stopping");
+        assert!(gate.try_stop(|| 0));
+        assert!(gate.reserve(ReservationKind::Turn, Some("r1")).is_err());
+    }
+
+    #[test]
+    fn idle_drain_resumes_on_lease_but_wait_drain_does_not() {
+        let gate = WorkGate::new();
+        gate.begin_drain(DrainMode::Idle);
+        assert!(gate.resume_serving());
+        assert_eq!(gate.state(), GateState::Serving);
+        gate.begin_drain(DrainMode::Wait);
+        gate.begin_drain(DrainMode::Idle);
+        assert_eq!(gate.state(), GateState::Draining(DrainMode::Wait));
+        assert!(!gate.resume_serving());
+    }
+}

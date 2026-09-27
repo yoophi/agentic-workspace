@@ -35,6 +35,7 @@ pub fn engine_fault(request_id: &RequestId, error: RunEngineError) -> WorkbenchF
         RunErrorKind::Conflict => FaultCode::Conflict,
         RunErrorKind::RateLimited => FaultCode::RateLimited,
         RunErrorKind::PreconditionFailed => FaultCode::PreconditionFailed,
+        RunErrorKind::Unavailable => FaultCode::Unavailable,
         RunErrorKind::Internal => FaultCode::Internal,
     };
     WorkbenchFault::new(code, request_id.clone(), error.message)

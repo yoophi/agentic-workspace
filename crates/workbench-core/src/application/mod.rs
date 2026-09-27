@@ -23,6 +23,7 @@ pub mod registry;
 pub mod run_dto;
 pub mod run_service;
 pub mod saved_prompt_service;
+pub mod work_gate;
 pub mod workbench_runtime;
 pub mod worktree_changes_service;
 pub mod worktree_file_service;

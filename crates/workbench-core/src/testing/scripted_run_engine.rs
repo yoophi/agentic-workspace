@@ -7,7 +7,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -16,6 +16,7 @@ use std::{
 pub type TurnHook = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 use crate::{
+    application::work_gate::{Reservation, ReservationKind, WorkGate, MESSAGE_STOPPING},
     infrastructure::run::workbench_run_sink::WorkbenchRunSink,
     ports::run_engine::{RunEngine, RunEngineError, RunErrorKind},
 };
@@ -56,6 +57,8 @@ pub struct RunScript {
 struct Slot {
     owner: String,
     permissions: HashSet<String>,
+    /// 044 A-turn 계약: 초기 turn이 권한 응답을 기다리는 동안 run은 바쁘다. 마지막 권한 응답·취소·종료로 놓는다.
+    initial_turn: Option<Reservation>,
 }
 
 #[derive(Default)]
@@ -73,6 +76,7 @@ pub struct ScriptedRunEngine {
     /// 있으면 `send_prompt`가 효과를 낸 **뒤** 허가를 하나 얻을 때까지 돌아가지 않는다(044 #207: 작업대 닫기와 호출 완료
     /// 순서를 시간 지연 없이 뒤집는다).
     pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    work_gate: OnceLock<Arc<WorkGate>>,
 }
 
 fn not_active() -> RunEngineError {
@@ -84,6 +88,17 @@ impl ScriptedRunEngine {
         Self {
             script,
             ..Self::default()
+        }
+    }
+
+    /// `AcpRunEngine`과 같은 A-turn 계약: 동기 예약, 정지 중이면 거절, 관문이 없으면 예약 없음.
+    fn reserve_turn(&self, run_id: &str) -> Result<Option<Reservation>, RunEngineError> {
+        match self.work_gate.get() {
+            None => Ok(None),
+            Some(gate) => gate
+                .reserve(ReservationKind::Turn, Some(run_id))
+                .map(Some)
+                .map_err(|_| RunEngineError::new(RunErrorKind::Unavailable, MESSAGE_STOPPING)),
         }
     }
 
@@ -141,6 +156,10 @@ impl ScriptedRunEngine {
 
 #[async_trait]
 impl RunEngine for ScriptedRunEngine {
+    fn attach_work_gate(&self, gate: Arc<WorkGate>) {
+        let _ = self.work_gate.set(gate);
+    }
+
     async fn start(
         &self,
         request: AgentRunRequest,
@@ -152,6 +171,7 @@ impl RunEngine for ScriptedRunEngine {
             tokio::time::sleep(Duration::from_millis(self.script.start_delay_ms)).await;
         }
         let run_id = request.run_id.clone().expect("normalized run id");
+        let initial_turn = self.reserve_turn(&run_id)?;
         {
             let mut runs = self.runs.lock().unwrap();
             if runs.contains_key(&run_id) {
@@ -176,6 +196,12 @@ impl RunEngine for ScriptedRunEngine {
                 run_id.clone(),
                 Slot {
                     owner: owner.to_owned(),
+                    // 권한 대기가 없으면 초기 turn은 여기서 끝난다(guard drop).
+                    initial_turn: if permissions.is_empty() {
+                        None
+                    } else {
+                        initial_turn
+                    },
                     permissions,
                 },
             );
@@ -231,6 +257,7 @@ impl RunEngine for ScriptedRunEngine {
                 "prompt is empty",
             ));
         }
+        let _guard = self.reserve_turn(run_id)?;
         if self.script.prompt_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
         }
@@ -262,6 +289,7 @@ impl RunEngine for ScriptedRunEngine {
                 format!("unknown or finished run: {run_id}"),
             ));
         }
+        let _guard = self.reserve_turn(run_id)?;
         if self.script.prompt_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
         }
@@ -281,6 +309,8 @@ impl RunEngine for ScriptedRunEngine {
         _queue: bool,
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError> {
+        // turn 전체(효과 + 턴 안 도구 호출)를 하나의 A-turn으로 센다.
+        let _guard = self.reserve_turn(run_id)?;
         self.queue_prompt(run_id, prompt, sink).await?;
         let hook = self.turn_hook.lock().unwrap().clone();
         if let Some(hook) = hook {
@@ -355,7 +385,13 @@ impl RunEngine for ScriptedRunEngine {
         let mut runs = self.runs.lock().unwrap();
         let removed = runs
             .get_mut(run_id)
-            .map(|slot| slot.permissions.remove(permission_id))
+            .map(|slot| {
+                let removed = slot.permissions.remove(permission_id);
+                if slot.permissions.is_empty() {
+                    slot.initial_turn = None;
+                }
+                removed
+            })
             .unwrap_or(false);
         if removed {
             Ok(())

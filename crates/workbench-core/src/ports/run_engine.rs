@@ -19,6 +19,8 @@ pub enum RunErrorKind {
     Conflict,
     RateLimited,
     PreconditionFailed,
+    /// 044: 서버가 정지 중이라 새 실행을 시작하지 않는다.
+    Unavailable,
     Internal,
 }
 
@@ -47,6 +49,10 @@ impl std::error::Error for RunEngineError {}
 
 #[async_trait]
 pub trait RunEngine: Send + Sync {
+    /// 044: 작업 관문을 붙인다(bootstrap이 한 번 부른다). 붙은 엔진은 prompt 실행 진입점에서 A-turn을 동기 예약하고
+    /// 실행 future가 끝날 때 해제한다(research R14). 기본은 아무것도 하지 않는다.
+    fn attach_work_gate(&self, _gate: std::sync::Arc<crate::application::work_gate::WorkGate>) {}
+
     /// run을 예약(소유 기록)하고 spawn한 뒤 돌아온다. 완료는 기다리지 않는다.
     async fn start(
         &self,

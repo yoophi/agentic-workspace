@@ -9,13 +9,27 @@
 `--log <path>`면 자기가 한 일을 **응답을 보내기 전에** 한 줄씩 기록·flush한다: `prompt:<id>`,
 `prompt-text:<id>:<본문 JSON 문자열>`(043: 어떤 prompt가 몇 번 왔는지 대조),
 `end_turn:<id>`, `cancelled:<id>:<cancel-request|permission-error|permission-refused>`. 시험이 terminal 결과가 어느
-경로에서 왔는지 대조한다. 그 밖의 파일·네트워크는 건드리지 않는다."""
+경로에서 왔는지 대조한다. 그 밖의 파일·네트워크는 건드리지 않는다.
+
+044(작업 관문 시험):
+- `--end-turn-gate <path>`: 권한이 승인된 prompt를 그 파일이 생길 때까지 끝내지 않는다(turn이 진행 중인 구간을 시험이
+  정한다). 이 동안 다음 입력은 읽지 않는다 — 엔진이 대기열 prompt를 보내는 것은 현재 turn이 끝난 뒤다.
+- `--rpc-error-text <text>`: 본문에 text가 든 prompt에는 JSON-RPC 오류로 답한다(`rpc-error:<id>` 기록).
+- `--respond-gate <path> --respond-gate-text <text>`: 본문에 text가 든 prompt는 `end_turn:<id>`를 기록한 **뒤** 그 파일이
+  생길 때까지 응답을 보내지 않는다(기록은 보였지만 엔진은 아직 응답을 받지 못한 구간을 시험이 정한다)."""
 import json
+import os
 import sys
+import time
 
 LOG = sys.argv[sys.argv.index("--log") + 1] if "--log" in sys.argv else None
 # 043 앱 스모크: `--echo`면 받은 prompt 본문을 `echo:<본문>` agent 메시지로 먼저 돌려보낸다(앱이 그 출력을 받는지 확인).
 ECHO = "--echo" in sys.argv
+END_TURN_GATE = sys.argv[sys.argv.index("--end-turn-gate") + 1] if "--end-turn-gate" in sys.argv else None
+RPC_ERROR_TEXT = sys.argv[sys.argv.index("--rpc-error-text") + 1] if "--rpc-error-text" in sys.argv else None
+RESPOND_GATE = sys.argv[sys.argv.index("--respond-gate") + 1] if "--respond-gate" in sys.argv else None
+RESPOND_GATE_TEXT = sys.argv[sys.argv.index("--respond-gate-text") + 1] if "--respond-gate-text" in sys.argv else None
+prompt_texts = {}
 pending_prompt = None
 prompt_for_permission = {}
 permission_seq = 0
@@ -41,6 +55,9 @@ def respond(request_id, result):
 def finish(prompt_id, stop_reason, reason=None):
     global pending_prompt
     log(f"{stop_reason}:{prompt_id}" if reason is None else f"cancelled:{prompt_id}:{reason}")
+    if RESPOND_GATE and RESPOND_GATE_TEXT and RESPOND_GATE_TEXT in prompt_texts.get(prompt_id, ""):
+        while not os.path.exists(RESPOND_GATE):
+            time.sleep(0.02)
     respond(prompt_id, {"stopReason": "end_turn" if stop_reason == "end_turn" else "cancelled"})
     if pending_prompt == prompt_id:
         pending_prompt = None
@@ -92,6 +109,12 @@ for line in sys.stdin:
         blocks = (message.get("params") or {}).get("prompt") or []
         text = " ".join(block.get("text", "") for block in blocks if isinstance(block, dict))
         log(f"prompt-text:{pending_prompt}:{json.dumps(text)}")
+        prompt_texts[pending_prompt] = text
+        if RPC_ERROR_TEXT and RPC_ERROR_TEXT in text:
+            log(f"rpc-error:{pending_prompt}")
+            send({"jsonrpc": "2.0", "id": pending_prompt, "error": {"code": -32000, "message": "fake rpc error"}})
+            pending_prompt = None
+            continue
         if ECHO:
             send({
                 "jsonrpc": "2.0",
@@ -112,6 +135,8 @@ for line in sys.stdin:
         if "error" in message:
             finish(prompt_id, "cancelled", "permission-error")
         elif granted(message):
+            while END_TURN_GATE and not os.path.exists(END_TURN_GATE):
+                time.sleep(0.02)
             finish(prompt_id, "end_turn")
         else:
             finish(prompt_id, "cancelled", "permission-refused")

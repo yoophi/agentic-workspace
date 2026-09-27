@@ -73,6 +73,8 @@ pub struct RuntimeAdapters {
     pub idempotency_limits: EpochIdempotencyLimits,
     /// orchestration 동시 자식 수·자식 프로필(041). 운영은 환경 변수, 테스트는 직접 지정.
     pub orchestration: OrchestrationConfig,
+    /// 작업 관문(044, research R14). 엔진·호출 입구·생명주기가 같은 관문을 쓴다.
+    pub work_gate: Arc<crate::application::work_gate::WorkGate>,
 }
 
 impl RuntimeAdapters {
@@ -93,6 +95,7 @@ impl RuntimeAdapters {
             bench_limits: BenchLimits::default(),
             idempotency_limits: EpochIdempotencyLimits::default(),
             orchestration: OrchestrationConfig::from_env(),
+            work_gate: crate::application::work_gate::WorkGate::new(),
         }
     }
 }
@@ -246,6 +249,7 @@ pub struct WorkbenchRuntime {
     hooks: Arc<TestHooks>,
     benches: Arc<BenchServices>,
     orchestration: Arc<OrchestrationRuntime>,
+    work_gate: Arc<crate::application::work_gate::WorkGate>,
 }
 
 /// run 종료 hook 여러 개를 차례로 부른다.
@@ -294,6 +298,9 @@ impl WorkbenchRuntime {
                 Arc::new(JsonAcpSessionStore::from_paths(&paths)),
             )),
         };
+        // 044: 엔진이 prompt 실행을 작업 관문에 예약한다(실행 수명 계약, research R14).
+        let work_gate = adapters.work_gate.clone();
+        engine.attach_work_gate(work_gate.clone());
         // orchestration(041): run 종료 hook은 core가 소유한다(worktree 감시). AW가 넘긴 hook이 있으면 뒤에 잇는다.
         let orchestration_hook = Arc::new(OrchestrationTerminalHook::new());
         let terminal_hook: Arc<dyn RunTerminalHook> = match adapters.terminal_hook.clone() {
@@ -384,7 +391,24 @@ impl WorkbenchRuntime {
             hooks,
             benches,
             orchestration,
+            work_gate,
         }))
+    }
+
+    /// 작업 관문(044, research R14).
+    pub fn work_gate(&self) -> &Arc<crate::application::work_gate::WorkGate> {
+        &self.work_gate
+    }
+
+    /// 서버 상태(작업 관문).
+    pub fn server_state(&self) -> crate::application::work_gate::GateState {
+        self.work_gate.state()
+    }
+
+    /// 활동 작업 중 관문 예약에서 파생하는 부분(data-model ActiveWork). 저장소·ledger에서 파생하는 수(`orchestrationTasks`·
+    /// `queuedTasks`·`pendingExchanges`·`pendingOperations`)는 서버 조립(`server.status`)이 채운다.
+    pub fn active_work(&self) -> crate::application::work_gate::GateActiveWork {
+        self.work_gate.active_work()
     }
 
     /// orchestration 런타임(041).
