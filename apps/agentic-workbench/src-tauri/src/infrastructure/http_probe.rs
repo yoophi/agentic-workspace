@@ -26,6 +26,9 @@ pub const APP_PROBE_CWD_ENV: &str = "AW_APP_PROBE_CWD";
 /// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). `quit`: 044 T035 앱 종료 전 준비 시나리오
 /// (run을 띄우고 살려 둔 채 `ready-to-quit`을 보고한다, 한 번만 넣는다). 기본은 스트림·재연결 시나리오.
 pub const APP_PROBE_SCENARIO_ENV: &str = "AW_APP_PROBE_SCENARIO";
+/// 044 T046 `close-token`: 이 창 토큰(`{baseUrl, token, origin}`)을 넘기는 0600 비밀 파일. 보고서와 따로 둔다 — 스모크 스크립트는
+/// 이 파일로 닫기 전·뒤 같은 토큰의 인증 결과(상태 코드만)를 확인한다.
+pub const APP_PROBE_SECRET_FILE_ENV: &str = "AW_APP_PROBE_SECRET_FILE";
 
 static PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
 static APP_PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
@@ -69,12 +72,7 @@ pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     {
         let agent = std::env::var(APP_PROBE_AGENT_ENV).unwrap_or_default();
         let cwd = std::env::var(APP_PROBE_CWD_ENV).unwrap_or_default();
-        let template = match scenario.as_str() {
-            "refresh" => APP_REFRESH_PROBE_SCRIPT,
-            "quit" => APP_QUIT_PROBE_SCRIPT,
-            _ => APP_PROBE_SCRIPT,
-        };
-        let script = template
+        let script = app_probe_template(&scenario)
             .replace("__AGENT__", &serde_json::to_string(&agent).expect("json"))
             .replace("__CWD__", &serde_json::to_string(&cwd).expect("json"));
         if let Err(error) = webview.eval(&script) {
@@ -90,6 +88,37 @@ pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     if let Err(error) = webview.eval(PROBE_SCRIPT) {
         eprintln!("[workbench-http] failed to inject the WebView probe: {error}");
     }
+}
+
+/// 시나리오별 앱 probe 템플릿. `close-token`은 `quit` 흐름에 창 토큰 넘기기를 더한다.
+fn app_probe_template(scenario: &str) -> String {
+    match scenario {
+        "refresh" => APP_REFRESH_PROBE_SCRIPT.to_owned(),
+        "quit" => APP_QUIT_PROBE_SCRIPT.to_owned(),
+        "close-token" => APP_QUIT_PROBE_SCRIPT
+            .replace("scenario: 'quit'", "scenario: 'close-token'")
+            .replace("    report.phase = 'ready-to-quit';\n", CLOSE_TOKEN_STEP),
+        _ => APP_PROBE_SCRIPT.to_owned(),
+    }
+}
+
+/// T046: 이 창의 토큰을 비밀 파일로만 넘기고, 그 토큰(+ 창 Origin)으로 handshake한 상태 코드만 보고서에 싣는다.
+const CLOSE_TOKEN_STEP: &str = r#"    const c = await invoke('get_workbench_connection');
+    await invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } });
+    const before = await fetch(c.baseUrl + '/v1/system/handshake', {
+      method: 'POST', headers: { authorization: 'Bearer ' + c.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ supportedProtocolVersions: [1], client: { name: 'aw-close-token-probe', version: '0' } }),
+    });
+    report.steps.tokenBeforeClose = before.status;
+    report.phase = 'ready-to-close';
+"#;
+
+/// 창 토큰 비밀 파일(debug 전용 command, `close-token` 시나리오).
+#[tauri::command]
+pub fn report_app_probe_secret(secret: Value) -> Result<(), String> {
+    let path =
+        std::env::var_os(APP_PROBE_SECRET_FILE_ENV).ok_or("probe secret file is not enabled")?;
+    write_owner_only(Path::new(&path), &secret).map_err(|error| error.to_string())
 }
 
 /// probe 결과를 파일에 쓴다(debug 전용 command).
@@ -421,5 +450,35 @@ mod tests {
                 "quit probe must not use {forbidden}"
             );
         }
+    }
+
+    /// T046(SC-006): `close-token`은 `quit` 흐름에 "이 창 토큰을 비밀 파일로 넘기고, 닫기 전 그 토큰의 handshake 상태
+    /// 코드만 보고"를 더한다. 토큰은 보고서에 들어가지 않는다(비밀 파일 command에만 넘긴다).
+    #[test]
+    fn close_token_probe_hands_the_window_token_only_to_the_secret_file() {
+        let script = app_probe_template("close-token")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'close-token'"));
+        assert!(script.contains("report.phase = 'ready-to-close'"));
+        assert!(script.contains("invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } })"));
+        assert!(script.contains("report.steps.tokenBeforeClose = "));
+        // 보고서에 토큰을 싣는 대입이 없다.
+        for forbidden in [
+            "report.token",
+            "report.steps.token =",
+            "report.secret",
+            "{ report, token",
+        ] {
+            assert!(
+                !script.contains(forbidden),
+                "close-token report must not carry {forbidden}"
+            );
+        }
+        assert!(
+            !script.contains("cancel"),
+            "the run stays alive until the window closes"
+        );
+        assert_eq!(app_probe_template("quit"), APP_QUIT_PROBE_SCRIPT);
     }
 }

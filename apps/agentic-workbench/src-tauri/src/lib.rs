@@ -135,7 +135,8 @@ macro_rules! app_invoke_handler {
             declare_network_delivery,
             withdraw_network_delivery,
             infrastructure::http_probe::report_http_probe,
-            infrastructure::http_probe::report_app_probe
+            infrastructure::http_probe::report_app_probe,
+            infrastructure::http_probe::report_app_probe_secret
         ]
     };
 }
