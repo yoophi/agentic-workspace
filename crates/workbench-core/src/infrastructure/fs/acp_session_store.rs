@@ -1,12 +1,14 @@
 //! ACP 세션 기록 저장소(`acp-sessions.json`). 040: AW `infrastructure/json_acp_session_store.rs`에서 이동 —
 //! run 기계(`AcpRunEngine`)와 041 전 AW orchestration이 **같은 인스턴스**를 쓴다(같은 파일을 두 인스턴스가
-//! 쓰지 않게).
+//! 쓰지 않게). 인스턴스 안에서는 읽기-수정-쓰기를 `io_lock`으로 직렬화하고(여러 run·orchestration task가 서로 다른
+//! thread에서 동시에 기록한다), 쓰기는 임시 파일에 쓴 뒤 rename해 읽는 쪽이 잘린 파일을 보지 않게 한다.
 
 use std::{
     fs,
     future::Future,
     path::PathBuf,
     pin::Pin,
+    sync::{Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -20,6 +22,7 @@ use crate::infrastructure::data_paths::DataPaths;
 
 pub struct JsonAcpSessionStore {
     store_path: PathBuf,
+    io_lock: Mutex<()>,
 }
 
 impl JsonAcpSessionStore {
@@ -28,7 +31,17 @@ impl JsonAcpSessionStore {
     }
 
     pub fn new(store_path: PathBuf) -> Self {
-        Self { store_path }
+        Self {
+            store_path,
+            io_lock: Mutex::new(()),
+        }
+    }
+
+    /// 임계 구역 안에는 await가 없다(동기 파일 I/O뿐). 앞선 기록이 panic했어도 파일은 rename 단위로 온전하다.
+    fn io(&self) -> MutexGuard<'_, ()> {
+        self.io_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn load_records(&self) -> Result<Vec<AcpSessionRecord>> {
@@ -57,7 +70,10 @@ impl JsonAcpSessionStore {
         let contents =
             serde_json::to_string_pretty(records).context("Failed to serialize ACP sessions")?;
 
-        fs::write(&self.store_path, contents)
+        let temp_path = self.store_path.with_extension("json.tmp");
+        fs::write(&temp_path, contents)
+            .with_context(|| format!("Failed to write ACP session store at {:?}", temp_path))?;
+        fs::rename(&temp_path, &self.store_path)
             .with_context(|| format!("Failed to write ACP session store at {:?}", self.store_path))
     }
 }
@@ -68,6 +84,7 @@ impl AcpSessionStore for JsonAcpSessionStore {
         mut record: AcpSessionRecord,
     ) -> Pin<Box<dyn Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
+            let _io = self.io();
             let mut records = self.load_records()?;
 
             if let Some(existing) = records
@@ -90,7 +107,10 @@ impl AcpSessionStore for JsonAcpSessionStore {
         lookup: AcpSessionLookup,
     ) -> Pin<Box<dyn Future<Output = Result<Option<AcpSessionRecord>>> + Send + 'a>> {
         Box::pin(async move {
-            let records = self.load_records()?;
+            let records = {
+                let _io = self.io();
+                self.load_records()?
+            };
 
             Ok(records
                 .into_iter()
@@ -104,8 +124,11 @@ impl AcpSessionStore for JsonAcpSessionStore {
         query: AcpSessionListQuery,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<AcpSessionRecord>>> + Send + 'a>> {
         Box::pin(async move {
-            let mut records: Vec<_> = self
-                .load_records()?
+            let loaded = {
+                let _io = self.io();
+                self.load_records()?
+            };
+            let mut records: Vec<_> = loaded
                 .into_iter()
                 .filter(|record| matches_query(record, &query))
                 .collect();
@@ -126,6 +149,7 @@ impl AcpSessionStore for JsonAcpSessionStore {
         run_id: String,
     ) -> Pin<Box<dyn Future<Output = Result<bool>> + Send + 'a>> {
         Box::pin(async move {
+            let _io = self.io();
             let mut records = self.load_records()?;
             let before_len = records.len();
             records.retain(|record| record.run_id != run_id);

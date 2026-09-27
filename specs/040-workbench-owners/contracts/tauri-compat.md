@@ -20,6 +20,7 @@
 - run command의 오류: fault `message` 그대로(037 규칙).
 - 교환 command의 오류: `serde_json::to_string(&{"code": details.exchangeCode, "message": message})` — 오늘 `exchange_error`와 같은 문자열.
 - "조회만"은 창에 작업대가 없을 때 새로 열지 않는다는 뜻이다(작업대가 없으면 그 창이 소유한 run·교환도 없다).
+- **예외 — `windowLabel` 제거**: 교환 command 3개(`send`·`acknowledge`·`list`)와 MCP 교환 도구(`send_message_to_agent`·`get_agent_exchange_status`)가 돌려주는 `AgentExchange`, 교환 상태 이벤트 payload에는 더 이상 `windowLabel`이 없다(data-model "교환 작업 영역", core ADR 0004 — 창 label은 `DesktopBenches` 밖으로 나가지 않는다). 화면 타입(`entities/agent-run/model/agent-exchange.ts`)은 이 필드를 선언하지 않아 화면 영향은 없다. 이 필드를 읽던 agent 프롬프트가 있다면 값이 사라진다. 그 밖의 필드·문구는 오늘과 같다.
 
 ## 창 수명
 

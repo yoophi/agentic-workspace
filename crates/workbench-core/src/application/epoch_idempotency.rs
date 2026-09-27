@@ -80,6 +80,29 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// 진행 중 표의 한 항목을 쥔다. drop될 때 다른 대기자가 없으면(표 1 + 자신 1) 항목을 지운다.
+struct InFlightSlot<'a> {
+    owner: &'a EpochIdempotency,
+    id: (String, Key),
+    slot: Arc<tokio::sync::Mutex<()>>,
+}
+
+impl<'a> InFlightSlot<'a> {
+    fn acquire(owner: &'a EpochIdempotency, id: (String, Key)) -> Self {
+        let slot = Arc::clone(lock(&owner.in_flight).entry(id.clone()).or_default());
+        Self { owner, id, slot }
+    }
+}
+
+impl Drop for InFlightSlot<'_> {
+    fn drop(&mut self) {
+        let mut in_flight = lock(&self.owner.in_flight);
+        if Arc::strong_count(&self.slot) <= 2 {
+            in_flight.remove(&self.id);
+        }
+    }
+}
+
 /// 호출 한 번의 멱등 문맥.
 pub struct EpochCall<'a> {
     pub scope: String,
@@ -115,15 +138,10 @@ impl EpochIdempotency {
             idempotency_key: call.key.as_str().to_owned(),
         };
         let print = fingerprint(call.operation, call.input);
-        let slot = {
-            let mut in_flight = lock(&self.in_flight);
-            Arc::clone(
-                in_flight
-                    .entry((call.scope.clone(), key.clone()))
-                    .or_default(),
-            )
-        };
-        let guard = slot.lock().await;
+        // 선언 순서가 곧 drop 역순이다: `guard`(직렬화 lock)가 먼저 풀리고 `slot`이 진행 중 표를 정리한다.
+        // future가 대기·실행 도중 취소돼도 표에 항목이 남지 않는다.
+        let slot = InFlightSlot::acquire(self, (call.scope.clone(), key.clone()));
+        let guard = slot.slot.lock().await;
 
         let decided = {
             let scopes = lock(&self.scopes);
@@ -166,12 +184,6 @@ impl EpochIdempotency {
             }
         };
         drop(guard);
-        {
-            let mut in_flight = lock(&self.in_flight);
-            if Arc::strong_count(&slot) <= 2 {
-                in_flight.remove(&(call.scope, key));
-            }
-        }
         result
     }
 
@@ -193,9 +205,11 @@ impl EpochIdempotency {
         }
     }
 
-    /// 작업대가 닫힐 때 그 작업대의 기록을 버린다.
-    pub fn drop_scope(&self, scope: &str) {
-        lock(&self.scopes).remove(scope);
+    /// 작업대가 닫힐 때 그 작업대의 기록(작업대 범위와 그 아래 run 범위 전부)을 버린다.
+    pub fn drop_bench(&self, bench_id: &str) {
+        let scope = bench_scope(bench_id);
+        let run_prefix = format!("{scope}:");
+        lock(&self.scopes).retain(|key, _| key != &scope && !key.starts_with(&run_prefix));
     }
 
     /// 주체별 `bench.open` 기록에서 닫힌 작업대를 만든 항목을 버린다.
@@ -218,6 +232,12 @@ impl EpochIdempotency {
 /// 작업대 id를 멱등 기록 범위로.
 pub fn bench_scope(bench_id: &str) -> String {
     format!("bench:{bench_id}")
+}
+
+/// agent 전용 operation의 범위: run의 소유 작업대 아래 run별로 둔다. agent가 기록 한도를 채워도 데스크톱의
+/// 작업대 범위(`run.*`·`exchange.*`)는 막히지 않는다. 작업대가 닫히면 `drop_bench`가 함께 버린다.
+pub fn bench_run_scope(bench_id: &str, run_id: &str) -> String {
+    format!("{}:run:{run_id}", bench_scope(bench_id))
 }
 
 /// `bench.open`처럼 작업대가 아직 없는 호출의 범위(주체별).
@@ -318,7 +338,7 @@ mod tests {
         assert!(!fault.retryable);
 
         // 작업대 닫힘 → 기록 폐기.
-        store.drop_scope(&bench_scope("b1"));
+        store.drop_bench("b1");
         store
             .run(call(&subject, &k4, &input, &rid), exec)
             .await
@@ -353,5 +373,82 @@ mod tests {
             task.await.unwrap();
         }
         assert_eq!(runs.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn cancelled_calls_do_not_leak_in_flight_slots() {
+        let store = EpochIdempotency::default();
+        let subject = PrincipalSubject::new("desktop");
+        let rid = RequestId::new("r").unwrap();
+        let input = json!({});
+        let key = IdempotencyKey::new("k").unwrap();
+        // 실행 도중 취소: `run`이 끝나지 않는 future를 timeout으로 버린다.
+        let pending = store.run(call(&subject, &key, &input, &rid), || {
+            std::future::pending::<Result<CallReply, WorkbenchFault>>()
+        });
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), pending)
+                .await
+                .is_err()
+        );
+        assert!(lock(&store.in_flight).is_empty());
+        // 취소 뒤 같은 키는 기록이 없으므로 다시 실행된다.
+        store
+            .run(call(&subject, &key, &input, &rid), || async {
+                Ok(CallReply::complete(json!({}), None))
+            })
+            .await
+            .unwrap();
+        assert!(lock(&store.in_flight).is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_scopes_are_isolated_and_dropped_with_their_bench() {
+        let store = EpochIdempotency::new(EpochIdempotencyLimits {
+            max_results: 0,
+            max_summaries: 1,
+        });
+        let agent = PrincipalSubject::new("agent:r1");
+        let desktop = PrincipalSubject::new("desktop");
+        let rid = RequestId::new("r").unwrap();
+        let input = json!({});
+        let ok = || async { Ok(CallReply::complete(json!({}), None)) };
+        let scoped = |scope: String, subject, key| EpochCall {
+            scope,
+            subject,
+            operation: OperationId::BenchRequestTitle,
+            key,
+            input: &input,
+            request_id: &rid,
+        };
+        let (k1, k2) = (
+            IdempotencyKey::new("k1").unwrap(),
+            IdempotencyKey::new("k2").unwrap(),
+        );
+        // agent가 자기 run 범위를 가득 채운다(요약 1).
+        store
+            .run(scoped(bench_run_scope("b1", "r1"), &agent, &k1), ok)
+            .await
+            .unwrap();
+        let exhausted = store
+            .run(scoped(bench_run_scope("b1", "r1"), &agent, &k2), ok)
+            .await
+            .unwrap_err();
+        assert_eq!(exhausted.code, FaultCode::RateLimited);
+        // 데스크톱의 작업대 범위는 영향이 없다.
+        store
+            .run(scoped(bench_scope("b1"), &desktop, &k2), ok)
+            .await
+            .unwrap();
+        store
+            .run(scoped(bench_scope("b10"), &desktop, &k1), ok)
+            .await
+            .unwrap();
+        // 닫기는 작업대 범위와 그 아래 run 범위를 함께 버리고, 이름이 겹치는 다른 작업대(b10)는 남긴다.
+        store.drop_bench("b1");
+        let scopes = lock(&store.scopes);
+        assert!(!scopes.contains_key(&bench_scope("b1")));
+        assert!(!scopes.contains_key(&bench_run_scope("b1", "r1")));
+        assert!(scopes.contains_key(&bench_scope("b10")));
     }
 }

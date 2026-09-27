@@ -118,3 +118,57 @@ async fn long_control_does_not_block_close() {
         .expect("close must not wait for controls");
     assert!(closed.unwrap()["closed"].as_bool().unwrap());
 }
+
+/// 코드 리뷰 반영: 닫기를 부른 쪽이 `Closing` 전이 뒤 사라져도(연결 끊김 → future 취소) 정리는 끝까지 간다.
+/// 작업대가 `Closing`에 멈춰 작업대 자리(상한)·run·스트림을 붙잡지 않는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn close_completes_even_if_the_caller_is_cancelled() {
+    let rt = TestRuntime::new();
+    let bench = open(&rt);
+    let held = rt.runtime.admit(&bench).expect("admit while open");
+    let caller = {
+        let services = std::sync::Arc::clone(rt.runtime.benches());
+        let bench = bench.clone();
+        tokio::spawn(async move {
+            services
+                .close(
+                    &RequestId::random(),
+                    &AuthenticatedPrincipal::desktop(),
+                    &bench,
+                )
+                .await
+        })
+    };
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while rt.runtime.admit(&bench).is_ok() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "bench never entered Closing"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    caller.abort();
+    let _ = caller.await;
+    drop(held);
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while rt.runtime.benches().registry.owner(&bench).is_some() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "close never finished after caller cancelled"
+        );
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    // 다음 닫기는 이미 끝난 작업대를 모른다(대기 없이 `closed: false`).
+    let again = rt
+        .runtime
+        .benches()
+        .close(
+            &RequestId::random(),
+            &AuthenticatedPrincipal::desktop(),
+            &bench,
+        )
+        .await
+        .unwrap();
+    assert!(!again.closed);
+}

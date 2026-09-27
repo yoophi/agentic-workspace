@@ -8,7 +8,7 @@ use workbench_protocol::{CallReply, OperationId, WorkbenchFault};
 
 use crate::application::{
     bench_service::BenchServices,
-    epoch_idempotency::{bench_scope, open_scope, EpochCall},
+    epoch_idempotency::{bench_run_scope, bench_scope, open_scope, EpochCall},
     intent_first::key_required_message,
     registry::{decode_input, CallContext, OperationHandler},
 };
@@ -67,7 +67,7 @@ where
                 .engine
                 .owner_of(&run_id)
                 .await
-                .map(|bench| bench_scope(&bench)),
+                .map(|bench| bench_run_scope(&bench, &run_id)),
             Scope::None => None,
         };
         let run = Arc::clone(&self.run);

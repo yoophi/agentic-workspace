@@ -42,7 +42,9 @@ impl OperationHandler for StartHandler {
         input: serde_json::Value,
     ) -> Result<CallReply, WorkbenchFault> {
         let typed: RunStartInput = decode_input(&ctx.request_id, &input)?;
-        // 작업대 아래 run을 등록하므로 입장권을 잡는다(닫기와 직렬화, research R1). 소유 기록까지 쥔다.
+        // 작업대 아래 run을 등록하므로 입장권을 잡는다(닫기와 직렬화, research R1). 입장권은 `apply` closure가
+        // 소유한다: apply는 blocking task에서 돌아 호출자 future가 취소돼도 끝까지 가므로, 호출자 쪽에 두면 엔진이
+        // run을 등록하는 도중 닫기가 입장 경계를 지나 닫힌 작업대에 살아 있는 run이 남을 수 있다.
         let admission =
             self.services
                 .admit(&ctx.request_id, Some(&ctx.principal), &typed.bench_id)?;
@@ -73,6 +75,7 @@ impl OperationHandler for StartHandler {
             reservation,
             tracks_revision: false,
             apply: Box::new(move |apply_ctx| {
+                let _admission = &admission;
                 let run_id = apply_ctx
                     .reserved_id
                     .expect("run.start always reserves a run id")
@@ -103,9 +106,7 @@ impl OperationHandler for StartHandler {
             recover: Box::new(|| Ok(())),
             fault: Box::new(|_, fault| fault),
         };
-        let result = self.runner.run(ctx, spec).await;
-        drop(admission);
-        result
+        self.runner.run(ctx, spec).await
     }
 }
 

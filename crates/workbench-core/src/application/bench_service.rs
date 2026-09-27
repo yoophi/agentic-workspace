@@ -11,11 +11,12 @@ use workbench_protocol::{
 use crate::{
     application::{
         agent_exchange_service::AgentExchangeService,
-        epoch_idempotency::{bench_scope, open_scope, EpochIdempotency},
+        epoch_idempotency::{open_scope, EpochIdempotency},
     },
     infrastructure::{
         bench::in_memory_bench_registry::{
-            wait_closed, BenchAdmission, BenchError, BenchView, CloseStart, InMemoryBenchRegistry,
+            wait_closed, BenchAdmission, BenchError, BenchView, CloseStart, CloseTicket,
+            InMemoryBenchRegistry,
         },
         event_hub::EventHub,
         exchange::{
@@ -181,8 +182,10 @@ impl BenchServices {
     }
 
     /// 닫기(research R1): `Closing` 전이 → 입장한 동작 대기 → 소유 run 취소 → 정리 hook → 스트림 제거 → 삭제.
+    /// `Closing` 전이 뒤 정리는 별도 task에서 끝까지 간다: 호출자 future가 취소돼도 작업대가 `Closing`에 멈춰
+    /// run·스트림·작업대 자리(상한)를 붙잡지 않는다.
     pub async fn close(
-        &self,
+        self: &Arc<Self>,
         request_id: &RequestId,
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
@@ -207,6 +210,14 @@ impl BenchServices {
             }
             CloseStart::Started(ticket) => ticket,
         };
+        let services = Arc::clone(self);
+        let bench_id = bench_id.to_owned();
+        tokio::spawn(async move { services.finish_close(ticket, &bench_id).await })
+            .await
+            .map_err(|error| WorkbenchFault::internal(request_id.clone(), error.to_string()))
+    }
+
+    async fn finish_close(&self, ticket: CloseTicket, bench_id: &str) -> BenchCloseOutput {
         let drained = ticket.wait_admissions().await;
         let cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
         let hooks = self
@@ -220,14 +231,14 @@ impl BenchServices {
         }
         self.hub.remove_stream(StreamKind::Exchange, bench_id);
         self.hub.remove_stream(StreamKind::Bench, bench_id);
-        self.idempotency.drop_scope(&bench_scope(bench_id));
+        self.idempotency.drop_bench(bench_id);
         self.idempotency
             .forget_open_of(&open_scope(&ticket.bench.opened_by), bench_id);
         drop(drained);
         self.registry.finish_close(ticket);
-        Ok(BenchCloseOutput {
+        BenchCloseOutput {
             closed: true,
             cancelled_runs,
-        })
+        }
     }
 }
