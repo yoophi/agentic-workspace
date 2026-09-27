@@ -8,8 +8,8 @@ use workbench_core::{
     domain::agent_exchange::{AgentExchangeDelivery, AgentExchangeError},
 };
 use workbench_protocol::{
-    AuthenticatedPrincipal, CallRequest, IdempotencyKey, OperationId, OperationKind, Workbench,
-    WorkbenchFault, operations::spec_for,
+    AuthenticatedPrincipal, CallRequest, OperationId, OperationKind, Workbench, WorkbenchFault,
+    operations::spec_for,
 };
 
 use crate::infrastructure::mcp::capability_registry::CapabilityPrincipal;
@@ -101,10 +101,12 @@ async fn call_as_agent(
     operation: OperationId,
     input: Value,
 ) -> Result<Value, AgentExchangeError> {
+    // 교환 요청의 `requestId`(`input.request.requestId`)로 재시도를 식별한다(`retry_identity`).
+    let key = matches!(spec_for(operation).kind, OperationKind::Command).then(|| {
+        super::retry_identity::tool_idempotency_key(run_id, operation, input.get("request"))
+    });
     let mut request = CallRequest::query(operation, input);
-    if matches!(spec_for(operation).kind, OperationKind::Command) {
-        request.idempotency_key = Some(IdempotencyKey::random());
-    }
+    request.idempotency_key = key;
     runtime
         .call(AuthenticatedPrincipal::agent(run_id), request)
         .await

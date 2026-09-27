@@ -20,7 +20,7 @@ const APP: &str = "http://localhost:1420";
 const RELEASE: &str = "tauri://localhost";
 
 struct Env {
-    rt: TestRuntime,
+    _rt: TestRuntime,
     harness: Harness,
     issuer: Arc<DesktopTokenIssuer>,
     dir: String,
@@ -41,7 +41,7 @@ async fn env() -> Env {
     )
     .await;
     Env {
-        rt,
+        _rt: rt,
         harness,
         issuer,
         dir: dir.to_string_lossy().into_owned(),

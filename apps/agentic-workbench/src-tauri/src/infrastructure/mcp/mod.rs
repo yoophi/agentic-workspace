@@ -35,6 +35,9 @@ pub mod agent_exchange_tool;
 pub mod capability_registry;
 pub mod orchestration_tool;
 pub mod protocol;
+pub mod retry_identity;
+#[cfg(test)]
+mod retry_tests;
 pub mod title_tool;
 
 pub const AW_MCP_URL_ENV: &str = "AW_MCP_URL";
@@ -262,9 +265,9 @@ async fn handle_post(
                     .into_response();
             };
             let principal = principal.expect("authenticated tool call");
-            let task_state = state.clone();
+            let runtime = workbench_runtime(&state.app);
             match workbench_server::drain::spawn_accepted(guard, async move {
-                handle_tool_call(&task_state, &principal, request.params).await
+                handle_tool_call(&runtime, &principal, request.params).await
             })
             .await
             {
@@ -286,8 +289,10 @@ fn bearer_token(headers: &HeaderMap) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-async fn handle_tool_call(
-    state: &McpRouterState,
+/// `tools/call` 한 건: 도구 → `Workbench.call`(agent principal). `AppHandle` 없이 runtime만 받아 시험에서 실제
+/// runtime으로 잰다(042 T027).
+pub(crate) async fn handle_tool_call(
+    runtime: &std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>,
     principal: &CapabilityPrincipal,
     params: Option<Value>,
 ) -> Value {
@@ -298,18 +303,11 @@ async fn handle_tool_call(
         .unwrap_or_default();
     if is_orchestration_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_orchestration_tool(
-            &workbench_runtime(&state.app),
-            principal,
-            name,
-            arguments,
-        )
-        .await;
+        return handle_orchestration_tool(runtime, principal, name, arguments).await;
     }
     if is_exchange_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_exchange_tool(&workbench_runtime(&state.app), principal, name, arguments)
-            .await;
+        return handle_exchange_tool(runtime, principal, name, arguments).await;
     }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);
@@ -328,7 +326,6 @@ async fn handle_tool_call(
     }
     // 040 US3(ADR 0006·0007): 제목 요청은 agent principal로 `bench.requestTitle`을 부른다. 서버는 작업대 알림
     // 스트림에 발행하고, 데스크톱 bridge가 그 작업대의 창에 적용한다(네이티브 방송 없음).
-    let runtime = workbench_runtime(&state.app);
     let mut call = workbench_protocol::CallRequest::query(
         workbench_protocol::OperationId::BenchRequestTitle,
         serde_json::json!({ "runId": request.run_id, "title": request.title }),

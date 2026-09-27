@@ -92,14 +92,21 @@ fn operation_for(name: &str) -> Option<OperationId> {
     })
 }
 
+/// 변경 도구는 인자의 `requestId`로 재시도를 식별한다(`retry_identity`).
 fn request(operation: OperationId, input: Value) -> CallRequest {
-    let mut call = CallRequest::query(operation, input);
-    if !matches!(
+    let key = (!matches!(
         workbench_protocol::operations::spec_for(operation).kind,
         workbench_protocol::OperationKind::Query
-    ) {
-        call.idempotency_key = Some(workbench_protocol::IdempotencyKey::random());
-    }
+    ))
+    .then(|| {
+        super::retry_identity::tool_idempotency_key(
+            input["runId"].as_str().unwrap_or_default(),
+            operation,
+            input.get("arguments"),
+        )
+    });
+    let mut call = CallRequest::query(operation, input);
+    call.idempotency_key = key;
     call
 }
 

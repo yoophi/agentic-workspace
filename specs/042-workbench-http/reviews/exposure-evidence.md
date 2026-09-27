@@ -35,6 +35,7 @@
 | D-E | `…disconnected_prompt_retry_applies_once` | E·Bench 범위(run.sendPrompt): 효과 뒤 단절 → 1회 |
 | D-O | `…disconnected_orchestration_write_retry_applies_once` | E·O(delegateGoal): 파일 revision +1, prompt 1회 |
 | D-A | `…disconnected_agent_child_creation_retry_starts_one_child` | E·RunOwner(createChildTask): 자식 1회, 저장 결과가 원 요청의 자식 |
+| D-M | AW `infrastructure/mcp/retry_tests.rs` (042 T027) | 실제 `tools/call` 어댑터 경로: 같은 `requestId` 재전송·동시 전송·단절 뒤 재전송 → 자식 1회·원 요청 결과, 교환 1건, 수집 재생, 제목 수렴(자연 멱등). 수정 전(호출마다 무작위 키) 4건 실패 |
 | D-S | `…shutdown_drains_a_disconnected_call_before_returning`, `…calls_after_the_shutdown_signal_are_rejected_without_effect` | 단절 → 종료 신호 → drain 뒤 반환, 종료 뒤 새 호출 503 |
 
 변이(같은 진입점, `tasks.md` 실행 기록): H의 분리 실행 제거 → D-E·D-O·D-A **효과 2회**, D-S 조기 반환으로 실패. D-L·D-R은 통과 — L 경로는 `spawn_blocking` 비취소와 ledger가 막으므로 H와 무관하게 안전하다(이 두 시험은 L 경로 자체의 단절 안전 증거).
@@ -103,4 +104,5 @@
 
 - 세대 멱등(E) operation의 "중단"은 세대와 함께 멱등 기록이 사라지는 설계라 재시작 뒤 재시도가 `notFound`(작업대 없음)로 끝나는 것이 판정이다. orchestration 파일은 O 원자 쓰기로 "반영 전/후" 둘 중 하나로 남고, 작업대가 닫혀 복구 가능이 된다. 사용자가 복구 뒤 새 키로 다시 요청한다.
 - run 제어·교환·orchestration의 개별 operation마다 단절 시험을 두지 않았다. 같은 `EpochHandler` 범위(Bench·RunOwner)를 쓰는 대표 시험(D-E·D-O·D-A)과, 범위와 무관한 H 분리 실행 변이로 덮는다. 엔진 부작용 종류(prompt·기동·취소)는 대표 시험이 prompt(D-E·D-O)와 기동(D-A·D-R)을 직접 잰다. 취소 계열은 자연 멱등(이미 취소된 run 재취소)에 기댄다.
+- agent 변경은 HTTP(D-A)와 AW MCP 도구 경로(D-M) 두 입구가 있다. MCP 경로는 `requestId`가 있어야 재시도가 식별된다 — 제목 도구와 `requestId`를 생략한 선택형 도구 호출은 자연 멱등(같은 상태로 수렴)에 기댄다(contracts §7).
 - 실제 git 명령 도중의 프로세스 종료는 C-G의 pending 경로 관찰 판정으로 대신한다(프로세스 kill 시험 없음).
