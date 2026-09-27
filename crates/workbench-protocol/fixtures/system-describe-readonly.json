@@ -203,6 +203,34 @@
             ]
           },
           {
+            "id": "orchestration.listChildTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.waitChildTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.getOwnTask",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.getAgentRole",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

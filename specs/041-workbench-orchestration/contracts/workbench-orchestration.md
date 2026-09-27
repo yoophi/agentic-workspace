@@ -44,7 +44,7 @@ coordinator(현재 세대): `orchestration.createChildTask`·`assignChildTask`·
 
 역할 조회: `orchestration.getAgentRole`(query) `{runId}` → `{role: "coordinator" | "child" | null, workspaceId?, taskId?}` — AW MCP `tools/list`가 요청 시점 역할로 도구 목록을 고른다(research R7).
 
-입력 = `{runId, ...오늘 도구 인자}`(보고의 `reporterRunId` 같은 run id는 principal run에서만 가져온다 — 입력 값이 다르면 `forbidden`), 출력 = 오늘 도구 결과 JSON(DTO). 보고류는 요청 id 멱등(작업 영역 내부 기록). `waitChildTasks`는 lock 없이 작업 영역 revision 알림으로 깨어나며 최대 30초(research R12).
+입력 = `{runId, arguments}`(`arguments` = 오늘 도구 인자 객체 그대로)(보고의 `reporterRunId` 같은 run id는 principal run에서만 가져온다 — 입력 값이 다르면 `forbidden`), 출력 = 오늘 도구 결과 JSON(DTO). 보고류는 요청 id 멱등(작업 영역 내부 기록). `waitChildTasks`는 lock 없이 작업 영역 revision 알림으로 깨어나며 최대 30초(research R12) — 구독한 뒤 읽으므로 읽기와 대기 사이의 보고도 놓치지 않는다.
 
 ## `run.start` 보강 (041)
 

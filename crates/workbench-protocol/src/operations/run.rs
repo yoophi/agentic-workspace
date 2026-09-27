@@ -215,4 +215,3 @@ pub struct RunReplayEventDto {
     pub event: serde_json::Value,
     pub terminal: bool,
 }
-

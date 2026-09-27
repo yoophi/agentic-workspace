@@ -1,5 +1,8 @@
 //! `orchestration.*` 데스크톱 handler와 `run.replay`(041 US1). 모든 operation은 `benchId`의 작업대 주체를 검사하고
-//! 그 작업대에 묶인 작업 영역만 다룬다. 흐름은 `OrchestrationRuntime`(AW command에서 옮김)에 있다.
+//! 그 작업대에 묶인 작업 영역만 다룬다. 흐름은 `OrchestrationRuntime`(AW command에서 옮김)에 있다. agent 도구는
+//! `agent` 모듈.
+
+mod agent;
 
 use std::sync::Arc;
 
@@ -390,6 +393,7 @@ pub fn register(registry: &mut Registry, services: &Arc<BenchServices>, runtime:
         }
     );
     register_run_replay(registry, services, runtime);
+    agent::register(registry, services, runtime);
 }
 
 /// `run.replay`(research R17): 작업대가 소유한 살아 있는 run이거나, 작업대에 묶인 작업 영역의 노드 run이면 허용.

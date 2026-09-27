@@ -37,7 +37,7 @@ use crate::{
         },
     },
     ports::{
-        agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
+        agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerBinding},
         desktop_bridge::{OrchestrationLaunchRole, RunTerminalHook},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
         orchestration_repository::OrchestrationRepository,
@@ -110,6 +110,9 @@ pub struct OrchestrationRuntime {
     config: OrchestrationConfig,
     benches: Arc<BenchServices>,
     guards: Arc<WorktreeGuards>,
+    /// 기동 중인 자식: 예정 run id → (작업 영역, 노드, 과제). 엔진이 run을 등록하고 노드에 묶기 전에 자식의 첫 턴이
+    /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
+    launching: std::sync::Mutex<std::collections::HashMap<String, (String, String, String)>>,
 }
 
 impl OrchestrationRuntime {
@@ -128,7 +131,43 @@ impl OrchestrationRuntime {
             config,
             benches,
             guards,
+            launching: std::sync::Mutex::default(),
         }
+    }
+
+    pub(crate) fn remember_launching(
+        &self,
+        run_id: &str,
+        workspace_id: &str,
+        node_id: &str,
+        task_id: &str,
+    ) {
+        self.launching
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(
+                run_id.to_owned(),
+                (
+                    workspace_id.to_owned(),
+                    node_id.to_owned(),
+                    task_id.to_owned(),
+                ),
+            );
+    }
+
+    pub(crate) fn forget_launching(&self, run_id: &str) {
+        self.launching
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(run_id);
+    }
+
+    pub(crate) fn launching_child(&self, run_id: &str) -> Option<(String, String, String)> {
+        self.launching
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(run_id)
+            .cloned()
     }
 
     pub fn bindings(&self) -> &Arc<OrchestrationBindings> {
@@ -137,6 +176,12 @@ impl OrchestrationRuntime {
 
     pub fn repository(&self) -> &Repository {
         &self.repository
+    }
+
+    pub fn revisions(
+        &self,
+    ) -> &Arc<crate::application::orchestration::revision_watch::RevisionWatch> {
+        self.repository.revisions()
     }
 
     pub fn service(&self) -> Service {
@@ -212,7 +257,7 @@ impl OrchestrationRuntime {
         }
     }
 
-    async fn emit_runtime_update_for(&self, bench_id: &str, reason: &str) {
+    pub(crate) async fn emit_runtime_update_for(&self, bench_id: &str, reason: &str) {
         let bench_id = bench_id.to_owned();
         if let Ok(Some(session)) = self
             .blocking(move |service| service.get_for_bench(&bench_id))
@@ -481,7 +526,7 @@ impl OrchestrationRuntime {
     }
 
     pub async fn retry_task(
-        &self,
+        self: &Arc<Self>,
         bench_id: &str,
         request: TaskActionRequest,
     ) -> OrchestrationResult<OrchestrationSession> {
@@ -495,7 +540,7 @@ impl OrchestrationRuntime {
     }
 
     pub async fn reassign_task(
-        &self,
+        self: &Arc<Self>,
         bench_id: &str,
         request: TaskActionRequest,
     ) -> OrchestrationResult<OrchestrationSession> {
@@ -508,7 +553,7 @@ impl OrchestrationRuntime {
         self.launch_task_for_ui(bench_id, &task_id).await
     }
 
-    async fn stop_existing_task_worker(
+    pub(crate) async fn stop_existing_task_worker(
         &self,
         bench_id: &str,
         task_id: &str,
@@ -547,7 +592,7 @@ impl OrchestrationRuntime {
 
     /// 과제 하나를 scheduler 자리를 얻어 기동한다(오늘 `launch_orchestration_task_for_ui`).
     pub async fn launch_task_for_ui(
-        &self,
+        self: &Arc<Self>,
         bench_id: &str,
         task_id: &str,
     ) -> OrchestrationResult<OrchestrationSession> {
@@ -564,47 +609,25 @@ impl OrchestrationRuntime {
             .iter()
             .find(|task| task.id == task_id)
             .ok_or_else(|| OrchestrationFailure::Plain("Task is unavailable.".into()))?;
-        let node = task
+        let node_id = task
             .assigned_node_id
             .as_ref()
             .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
+            .map(|node| node.id.clone())
             .ok_or_else(|| OrchestrationFailure::Plain("Assigned Child is unavailable.".into()))?;
-        let outcome = self
-            .worker
-            .start_worker(WorkerAssignment {
-                workspace_id: snapshot.id.clone(),
-                bench_id: bench_id.to_owned(),
-                worktree_path: snapshot.worktree_path.clone(),
-                node_id: node.id.clone(),
-                task_id: task.id.clone(),
-                attempt: task.attempt,
-                planned_run_id: uuid::Uuid::new_v4().to_string(),
-                role: node.role.clone(),
-                objective: task.objective.clone(),
-                constraints: task.constraints.clone(),
-                expected_result: task.expected_result.clone(),
-                runtime_profile: self.child_runtime_profile(),
-                mcp_capability: String::new(),
-            })
-            .await?;
-        match outcome {
-            StartWorkerOutcome::Started { run_id } => {
-                let bench = bench_id.to_owned();
-                let task_id = task.id.clone();
-                let node_id = node.id.clone();
-                self.blocking(move |service| {
-                    service.bind_child_run(&bench, &task_id, &node_id, &run_id)
-                })
-                .await
-            }
-            StartWorkerOutcome::Queued { .. } => {
-                self.snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
-                    .await
-            }
-            StartWorkerOutcome::Failed { message, .. } => {
+        match self
+            .start_child(bench_id, &snapshot, task_id, &node_id)
+            .await
+        {
+            Ok(StartWorkerOutcome::Failed { message, .. }) => {
                 let _ = self.scheduler.release(task_id);
                 Err(OrchestrationFailure::Plain(message))
             }
+            Ok(_) => {
+                self.snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
+                    .await
+            }
+            Err(error) => Err(OrchestrationFailure::Plain(error.message)),
         }
     }
 

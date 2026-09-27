@@ -207,6 +207,138 @@
             "idempotencyScope": "epoch"
           },
           {
+            "id": "orchestration.createChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.assignChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.listChildTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.sendChildMessage",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.waitChildTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.collectChildResults",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.interruptChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.cancelChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.retryChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.reassignChildTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.getOwnTask",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.reportProgress",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.reportResult",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.requestParentInput",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.reportBlocked",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.sendParentMessage",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.getAgentRole",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

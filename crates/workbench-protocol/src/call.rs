@@ -152,13 +152,47 @@ pub enum OperationId {
     OrchestrationRecover,
     #[serde(rename = "run.replay")]
     RunReplay,
+    #[serde(rename = "orchestration.createChildTask")]
+    OrchestrationCreateChildTask,
+    #[serde(rename = "orchestration.assignChildTask")]
+    OrchestrationAssignChildTask,
+    #[serde(rename = "orchestration.listChildTasks")]
+    OrchestrationListChildTasks,
+    #[serde(rename = "orchestration.sendChildMessage")]
+    OrchestrationSendChildMessage,
+    #[serde(rename = "orchestration.waitChildTasks")]
+    OrchestrationWaitChildTasks,
+    #[serde(rename = "orchestration.collectChildResults")]
+    OrchestrationCollectChildResults,
+    #[serde(rename = "orchestration.interruptChildTask")]
+    OrchestrationInterruptChildTask,
+    #[serde(rename = "orchestration.cancelChildTask")]
+    OrchestrationCancelChildTask,
+    #[serde(rename = "orchestration.retryChildTask")]
+    OrchestrationRetryChildTask,
+    #[serde(rename = "orchestration.reassignChildTask")]
+    OrchestrationReassignChildTask,
+    #[serde(rename = "orchestration.getOwnTask")]
+    OrchestrationGetOwnTask,
+    #[serde(rename = "orchestration.reportProgress")]
+    OrchestrationReportProgress,
+    #[serde(rename = "orchestration.reportResult")]
+    OrchestrationReportResult,
+    #[serde(rename = "orchestration.requestParentInput")]
+    OrchestrationRequestParentInput,
+    #[serde(rename = "orchestration.reportBlocked")]
+    OrchestrationReportBlocked,
+    #[serde(rename = "orchestration.sendParentMessage")]
+    OrchestrationSendParentMessage,
+    #[serde(rename = "orchestration.getAgentRole")]
+    OrchestrationGetAgentRole,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 68] = [
+    pub const ALL: [OperationId; 85] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -226,6 +260,23 @@ impl OperationId {
         OperationId::OrchestrationDispatchPrompt,
         OperationId::OrchestrationRecover,
         OperationId::RunReplay,
+        OperationId::OrchestrationCreateChildTask,
+        OperationId::OrchestrationAssignChildTask,
+        OperationId::OrchestrationListChildTasks,
+        OperationId::OrchestrationSendChildMessage,
+        OperationId::OrchestrationWaitChildTasks,
+        OperationId::OrchestrationCollectChildResults,
+        OperationId::OrchestrationInterruptChildTask,
+        OperationId::OrchestrationCancelChildTask,
+        OperationId::OrchestrationRetryChildTask,
+        OperationId::OrchestrationReassignChildTask,
+        OperationId::OrchestrationGetOwnTask,
+        OperationId::OrchestrationReportProgress,
+        OperationId::OrchestrationReportResult,
+        OperationId::OrchestrationRequestParentInput,
+        OperationId::OrchestrationReportBlocked,
+        OperationId::OrchestrationSendParentMessage,
+        OperationId::OrchestrationGetAgentRole,
         OperationId::SystemDescribe,
     ];
 
@@ -298,6 +349,23 @@ impl OperationId {
             OperationId::OrchestrationDispatchPrompt => "orchestration.dispatchPrompt",
             OperationId::OrchestrationRecover => "orchestration.recover",
             OperationId::RunReplay => "run.replay",
+            OperationId::OrchestrationCreateChildTask => "orchestration.createChildTask",
+            OperationId::OrchestrationAssignChildTask => "orchestration.assignChildTask",
+            OperationId::OrchestrationListChildTasks => "orchestration.listChildTasks",
+            OperationId::OrchestrationSendChildMessage => "orchestration.sendChildMessage",
+            OperationId::OrchestrationWaitChildTasks => "orchestration.waitChildTasks",
+            OperationId::OrchestrationCollectChildResults => "orchestration.collectChildResults",
+            OperationId::OrchestrationInterruptChildTask => "orchestration.interruptChildTask",
+            OperationId::OrchestrationCancelChildTask => "orchestration.cancelChildTask",
+            OperationId::OrchestrationRetryChildTask => "orchestration.retryChildTask",
+            OperationId::OrchestrationReassignChildTask => "orchestration.reassignChildTask",
+            OperationId::OrchestrationGetOwnTask => "orchestration.getOwnTask",
+            OperationId::OrchestrationReportProgress => "orchestration.reportProgress",
+            OperationId::OrchestrationReportResult => "orchestration.reportResult",
+            OperationId::OrchestrationRequestParentInput => "orchestration.requestParentInput",
+            OperationId::OrchestrationReportBlocked => "orchestration.reportBlocked",
+            OperationId::OrchestrationSendParentMessage => "orchestration.sendParentMessage",
+            OperationId::OrchestrationGetAgentRole => "orchestration.getAgentRole",
             OperationId::SystemDescribe => "system.describe",
         }
     }

@@ -133,3 +133,51 @@ pub fn reports_schema() -> RefOr<Schema> {
 
 /// 화면 표시 상태 값(오늘 `set_orchestration_presentation`의 선택지)을 문서에 노출한다.
 pub type OrchestrationPresentationStatus = PresentationStatusDto;
+
+/// agent orchestration 도구 operation 16개의 입력(041 US2). `arguments`는 오늘 MCP 도구 인자 객체 그대로다(도구별
+/// 스키마는 MCP `tools/list`가 싣는다, 검증 규칙·문구는 오늘과 같다). `runId`는 principal run과 같아야 한다.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentToolInput {
+    pub run_id: String,
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub arguments: serde_json::Value,
+}
+
+/// agent 도구 결과: 오늘 도구의 `structuredContent`와 같은 객체.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct AgentToolOutput(pub serde_json::Value);
+
+impl PartialSchema for AgentToolOutput {
+    fn schema() -> RefOr<Schema> {
+        utoipa::openapi::ObjectBuilder::new()
+            .description(Some("오늘 MCP 도구의 structuredContent와 같은 객체."))
+            .into()
+    }
+}
+
+impl ToSchema for AgentToolOutput {}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AgentRoleInput {
+    pub run_id: String,
+}
+
+/// 부른 run의 서버 상태상 역할(research R7). MCP `tools/list`가 이것으로 도구 목록을 고른다.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentRoleKindDto {
+    Coordinator,
+    Child,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRoleDto {
+    pub role: Option<AgentRoleKindDto>,
+    pub workspace_id: Option<String>,
+    pub task_id: Option<String>,
+}

@@ -5,7 +5,10 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::{
-    application::orchestration::binding::{BindingChange, BindingTable, OrchestrationBindings},
+    application::orchestration::{
+        binding::{BindingChange, BindingTable, OrchestrationBindings},
+        revision_watch::RevisionWatch,
+    },
     domain::agent_orchestration::{OrchestrationError, OrchestrationSession},
     ports::orchestration_repository::{OrchestrationRepository, OrchestrationTransaction},
 };
@@ -18,6 +21,8 @@ pub struct BoundOrchestrationRepository<R> {
     inner: R,
     bindings: Arc<OrchestrationBindings>,
     observer: Arc<Mutex<Option<BindingObserver>>>,
+    /// commit이 바꾼 작업 영역을 알린다(research R12, `waitChildTasks`).
+    revisions: Arc<RevisionWatch>,
 }
 
 impl<R: Clone> Clone for BoundOrchestrationRepository<R> {
@@ -26,6 +31,7 @@ impl<R: Clone> Clone for BoundOrchestrationRepository<R> {
             inner: self.inner.clone(),
             bindings: Arc::clone(&self.bindings),
             observer: Arc::clone(&self.observer),
+            revisions: Arc::clone(&self.revisions),
         }
     }
 }
@@ -36,7 +42,12 @@ impl<R> BoundOrchestrationRepository<R> {
             inner,
             bindings,
             observer: Arc::new(Mutex::new(None)),
+            revisions: Arc::new(RevisionWatch::default()),
         }
+    }
+
+    pub fn revisions(&self) -> &Arc<RevisionWatch> {
+        &self.revisions
     }
 
     pub fn bindings(&self) -> &Arc<OrchestrationBindings> {
@@ -69,6 +80,11 @@ impl<R: OrchestrationRepository> OrchestrationRepository for BoundOrchestrationR
         let table = self.bindings.lock();
         let mut inner = self.inner.begin()?;
         fill(inner.sessions(), &table);
+        let loaded = inner
+            .sessions()
+            .iter()
+            .map(|session| (session.id.clone(), session.revision))
+            .collect();
         let observer = self
             .observer
             .lock()
@@ -78,6 +94,8 @@ impl<R: OrchestrationRepository> OrchestrationRepository for BoundOrchestrationR
             table,
             inner,
             observer,
+            loaded,
+            revisions: Arc::clone(&self.revisions),
         })
     }
 
@@ -93,6 +111,9 @@ pub struct BoundTx<'a, T> {
     table: MutexGuard<'a, BindingTable>,
     inner: T,
     observer: Option<BindingObserver>,
+    /// begin 때 읽은 작업 영역별 revision(commit 뒤 바뀐 것만 알린다).
+    loaded: std::collections::HashMap<String, u64>,
+    revisions: Arc<RevisionWatch>,
 }
 
 impl<T: OrchestrationTransaction> OrchestrationTransaction for BoundTx<'_, T> {
@@ -107,7 +128,17 @@ impl<T: OrchestrationTransaction> OrchestrationTransaction for BoundTx<'_, T> {
             .iter()
             .map(|session| (session.id.clone(), session.bound_bench_id.clone()))
             .collect();
+        let changed: Vec<(String, u64)> = self
+            .inner
+            .sessions()
+            .iter()
+            .filter(|session| self.loaded.get(&session.id) != Some(&session.revision))
+            .map(|session| (session.id.clone(), session.revision))
+            .collect();
         self.inner.commit()?;
+        for (workspace_id, revision) in &changed {
+            self.revisions.notify(workspace_id, *revision);
+        }
         let mut changes = Vec::new();
         for (workspace_id, bench_id) in desired {
             changes.extend(self.table.set(&workspace_id, bench_id.as_deref()));
