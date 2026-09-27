@@ -1,0 +1,15 @@
+{
+  "name": "orchestration-unknown-binding-not-found",
+  "subscribe": [
+    {
+      "streamId": "orchestration:w1",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "message": "orchestration stream not found."
+    }
+  }
+}

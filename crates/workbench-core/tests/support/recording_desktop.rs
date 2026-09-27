@@ -12,6 +12,8 @@ pub struct RecordingDesktop {
     pub deliveries: Mutex<Vec<DesktopDelivery>>,
     pub terminals: Mutex<Vec<String>>,
     pub launches: Mutex<Vec<LaunchContext>>,
+    /// 폐기된 MCP 토큰의 run(041).
+    pub revoked: Mutex<Vec<String>>,
 }
 
 impl RecordingDesktop {
@@ -24,7 +26,8 @@ impl RecordingDesktop {
                 DesktopDelivery::Run { bench_id: id, .. }
                 | DesktopDelivery::ExchangeRequested { bench_id: id, .. }
                 | DesktopDelivery::ExchangeStatus { bench_id: id, .. }
-                | DesktopDelivery::TitleRequested { bench_id: id, .. } => id == bench_id,
+                | DesktopDelivery::TitleRequested { bench_id: id, .. }
+                | DesktopDelivery::Orchestration { bench_id: id, .. } => id == bench_id,
             })
             .cloned()
             .collect()
@@ -51,5 +54,9 @@ impl RunLaunchDecorator for RecordingDesktop {
     ) -> Result<(), String> {
         self.launches.lock().unwrap().push(context.clone());
         Ok(())
+    }
+
+    fn revoke_run(&self, run_id: &str) {
+        self.revoked.lock().unwrap().push(run_id.to_owned());
     }
 }

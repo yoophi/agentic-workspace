@@ -7,6 +7,8 @@ pub mod common;
 pub mod exchange;
 pub mod git;
 pub mod goal;
+pub mod orchestration;
+pub mod orchestration_dto;
 pub mod project;
 pub mod run;
 pub mod saved_prompt;
@@ -68,7 +70,7 @@ const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpe
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 50] = [
+pub const OPERATIONS: [OperationSpec; 85] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -127,6 +129,140 @@ pub const OPERATIONS: [OperationSpec; 50] = [
     query(OperationId::ExchangeListPeers, &[Scope::ExchangeRead]),
     epoch_command(OperationId::ExchangeSendFromRun, &[Scope::ExchangeWrite]),
     query(OperationId::ExchangeGetForRun, &[Scope::ExchangeRead]),
+    epoch_command(
+        OperationId::OrchestrationBootstrap,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(OperationId::OrchestrationGet, &[Scope::OrchestrationRead]),
+    query(
+        OperationId::OrchestrationListRecoverable,
+        &[Scope::OrchestrationRead],
+    ),
+    epoch_command(
+        OperationId::OrchestrationBindCoordinator,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationDelegateGoal,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationAdoptManualChild,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(
+        OperationId::OrchestrationListTasks,
+        &[Scope::OrchestrationRead],
+    ),
+    query(
+        OperationId::OrchestrationCollectReports,
+        &[Scope::OrchestrationRead],
+    ),
+    epoch_command(
+        OperationId::OrchestrationSetPresentation,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationSendChildCommand,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationRespondInput,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationCancelTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationRetryTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationReassignTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationHandoffCoordinator,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationDispatchPrompt,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationRecover,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(OperationId::RunReplay, &[Scope::RunRead]),
+    epoch_command(
+        OperationId::OrchestrationCreateChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationAssignChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(
+        OperationId::OrchestrationListChildTasks,
+        &[Scope::OrchestrationRead],
+    ),
+    epoch_command(
+        OperationId::OrchestrationSendChildMessage,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(
+        OperationId::OrchestrationWaitChildTasks,
+        &[Scope::OrchestrationRead],
+    ),
+    epoch_command(
+        OperationId::OrchestrationCollectChildResults,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationInterruptChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationCancelChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationRetryChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationReassignChildTask,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(
+        OperationId::OrchestrationGetOwnTask,
+        &[Scope::OrchestrationRead],
+    ),
+    epoch_command(
+        OperationId::OrchestrationReportProgress,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationReportResult,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationRequestParentInput,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationReportBlocked,
+        &[Scope::OrchestrationWrite],
+    ),
+    epoch_command(
+        OperationId::OrchestrationSendParentMessage,
+        &[Scope::OrchestrationWrite],
+    ),
+    query(
+        OperationId::OrchestrationGetAgentRole,
+        &[Scope::OrchestrationRead],
+    ),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
 
@@ -307,6 +443,143 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::ExchangeGetForRun => (
             exchange::ExchangeGetForRunInput::schema(),
             exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::OrchestrationBootstrap => (
+            orchestration::OrchestrationBootstrapInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationGet => (
+            orchestration::OrchestrationBenchInput::schema(),
+            orchestration::session_or_null_schema(),
+        ),
+        OperationId::OrchestrationListRecoverable => (
+            orchestration::OrchestrationListRecoverableInput::schema(),
+            orchestration::sessions_schema(),
+        ),
+        OperationId::OrchestrationBindCoordinator => (
+            orchestration::OrchestrationBindCoordinatorInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationDelegateGoal => (
+            orchestration::OrchestrationDelegateGoalInput::schema(),
+            orchestration_dto::DelegateGoalOutcomeDto::schema(),
+        ),
+        OperationId::OrchestrationAdoptManualChild => (
+            orchestration::OrchestrationAdoptManualChildInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationListTasks => (
+            orchestration::OrchestrationListTasksInput::schema(),
+            orchestration::tasks_schema(),
+        ),
+        OperationId::OrchestrationCollectReports => (
+            orchestration::OrchestrationBenchInput::schema(),
+            orchestration::reports_schema(),
+        ),
+        OperationId::OrchestrationSetPresentation => (
+            orchestration::OrchestrationSetPresentationInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationSendChildCommand => (
+            orchestration::OrchestrationSendChildCommandInput::schema(),
+            orchestration_dto::TaskCommandDto::schema(),
+        ),
+        OperationId::OrchestrationRespondInput => (
+            orchestration::OrchestrationTaskActionInput::schema(),
+            orchestration_dto::TaskCommandDto::schema(),
+        ),
+        OperationId::OrchestrationCancelTask => (
+            orchestration::OrchestrationTaskActionInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationRetryTask => (
+            orchestration::OrchestrationTaskActionInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationReassignTask => (
+            orchestration::OrchestrationTaskActionInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationHandoffCoordinator => (
+            orchestration::OrchestrationHandoffCoordinatorInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::OrchestrationDispatchPrompt => (
+            orchestration::OrchestrationDispatchPromptInput::schema(),
+            orchestration_dto::PromptDispatchDto::schema(),
+        ),
+        OperationId::OrchestrationRecover => (
+            orchestration::OrchestrationBenchInput::schema(),
+            orchestration_dto::OrchestrationSessionDto::schema(),
+        ),
+        OperationId::RunReplay => (run::RunReplayInput::schema(), run::RunReplayDto::schema()),
+        OperationId::OrchestrationCreateChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationAssignChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationListChildTasks => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationSendChildMessage => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationWaitChildTasks => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationCollectChildResults => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationInterruptChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationCancelChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationRetryChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationReassignChildTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationGetOwnTask => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationReportProgress => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationReportResult => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationRequestParentInput => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationReportBlocked => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationSendParentMessage => (
+            orchestration::AgentToolInput::schema(),
+            orchestration::AgentToolOutput::schema(),
+        ),
+        OperationId::OrchestrationGetAgentRole => (
+            orchestration::AgentRoleInput::schema(),
+            orchestration::AgentRoleDto::schema(),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

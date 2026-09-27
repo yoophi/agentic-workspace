@@ -1,5 +1,5 @@
 //! `orchestration.workspaceUpdated.v1` 본문: AW `ports::orchestration_event_sink::OrchestrationEvent`의 미러(039).
-//! 2b 예약: 스키마만 계약에 싣고 구독은 아직 받지 않는다(`stream kind is not available yet.`).
+//! 041: 작업 영역의 현재 묶임 스트림 `orchestration:<bindingId>`로 발행한다(분류 상태 복원용).
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

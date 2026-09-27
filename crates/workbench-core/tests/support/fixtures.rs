@@ -47,6 +47,24 @@ pub struct StepSpec {
     pub expect: Expect,
     #[serde(default)]
     pub capture: BTreeMap<String, String>,
+    /// 041: 조회 단계를 조건이 맞을 때까지 반복한다(비동기 알림 전달 완료 등 관찰 가능한 조건). 제한 시간 안에
+    /// 맞지 않으면 실패한다. 기대 대조·포착은 조건을 만족한 마지막 응답으로 한다.
+    #[serde(default)]
+    pub until: Option<Until>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Until {
+    /// 응답(`CallReply` 직렬화)의 JSON pointer.
+    pub pointer: String,
+    pub equals: Value,
+    #[serde(default = "default_until_timeout")]
+    pub timeout_ms: u64,
+}
+
+fn default_until_timeout() -> u64 {
+    10_000
 }
 
 fn default_principal() -> String {
@@ -122,7 +140,10 @@ impl SeedContext {
     pub fn capture(&mut self, name: &str, value: String) {
         self.substitutions
             .insert(format!("{{{{{name}}}}}"), value.clone());
-        self.captured.push((value, format!("{{{{{name}}}}}")));
+        // 숫자(revision 등)는 입력에만 쓴다 — 결과 문자열에서 되돌리면 같은 숫자가 든 모든 문자열이 바뀐다.
+        if value.parse::<u64>().is_err() {
+            self.captured.push((value, format!("{{{{{name}}}}}")));
+        }
     }
 
     pub fn normalize_captured(&self, value: &mut Value) {
@@ -172,6 +193,22 @@ impl SeedContext {
     pub fn substitute(&self, value: &mut Value) {
         if self.substitutions.is_empty() {
             return;
+        }
+        // 041: 값 전체가 `{{#name}}`이면 포착한 값을 숫자로 넣는다(`expectedRevision` 등 숫자 입력).
+        if let Value::String(text) = value {
+            if let Some(name) = text
+                .strip_prefix("{{#")
+                .and_then(|rest| rest.strip_suffix("}}"))
+            {
+                if let Some(number) = self
+                    .substitutions
+                    .get(&format!("{{{{{name}}}}}"))
+                    .and_then(|captured| captured.parse::<u64>().ok())
+                {
+                    *value = Value::from(number);
+                    return;
+                }
+            }
         }
         match value {
             Value::String(text) => {

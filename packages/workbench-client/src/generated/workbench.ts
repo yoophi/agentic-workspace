@@ -28,6 +28,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @enum {string} */
+        AccessPolicyDto: "readOnly";
         AgentCommandOverridesDto: {
             globalCommand?: string | null;
             agentCommands?: {
@@ -92,6 +94,25 @@ export interface components {
             /** @enum {string} */
             type: "http";
         };
+        /** @enum {string} */
+        AgentNodeCreatorDto: "user" | "coordinator";
+        AgentNodeDto: {
+            id: string;
+            kind: components["schemas"]["AgentNodeKindDto"];
+            parentNodeId?: string | null;
+            role: components["schemas"]["AgentRoleProfileDto"];
+            currentRunId?: string | null;
+            assignedTaskId?: string | null;
+            executionStatus: components["schemas"]["ExecutionStatusDto"];
+            presentationStatus: components["schemas"]["PresentationStatusDto"];
+            promotionPolicy: components["schemas"]["PromotionPolicyDto"];
+            runtimeProfile?: null | components["schemas"]["WorkerRuntimeProfileDto"];
+            lastActivityAt?: string | null;
+            createdBy: components["schemas"]["AgentNodeCreatorDto"];
+            createdAt: string;
+        };
+        /** @enum {string} */
+        AgentNodeKindDto: "main" | "child";
         AgentOptionDescriptorDto: {
             id: string;
             label: string;
@@ -118,6 +139,26 @@ export interface components {
             };
             enabled?: boolean;
             builtIn?: boolean;
+        };
+        AgentRoleDto: {
+            role?: null | components["schemas"]["AgentRoleKindDto"];
+            workspaceId?: string | null;
+            taskId?: string | null;
+        };
+        AgentRoleInput: {
+            runId: string;
+        };
+        /**
+         * @description 부른 run의 서버 상태상 역할(research R7). MCP `tools/list`가 이것으로 도구 목록을 고른다.
+         * @enum {string}
+         */
+        AgentRoleKindDto: "coordinator" | "child";
+        AgentRoleProfileDto: {
+            id: string;
+            name: string;
+            responsibility: string;
+            expectedOutput: string;
+            systemInstructions?: string | null;
         };
         AgentRunDto: {
             id: string;
@@ -204,6 +245,16 @@ export interface components {
         AgentToolCandidateSourceDto: "sessionTool" | "appCommand" | "extension";
         /** @enum {string} */
         AgentToolCandidateStatusDto: "loading" | "ready" | "empty" | "error";
+        /**
+         * @description agent orchestration 도구 operation 16개의 입력(041 US2). `arguments`는 오늘 MCP 도구 인자 객체 그대로다(도구별
+         *     스키마는 MCP `tools/list`가 싣는다, 검증 규칙·문구는 오늘과 같다). `runId`는 principal run과 같아야 한다.
+         */
+        AgentToolInput: {
+            runId: string;
+            arguments?: Record<string, never>;
+        };
+        /** @description 오늘 MCP 도구의 structuredContent와 같은 객체. */
+        AgentToolOutput: Record<string, never>;
         AgentWorkspaceSyncRequestDto: {
             worktreePath: string;
             /** Format: int64 */
@@ -215,6 +266,14 @@ export interface components {
             /** Format: int64 */
             revision: number;
             acceptedPanels: number;
+        };
+        /** @enum {string} */
+        ArtifactKindDto: "file" | "url" | "text";
+        ArtifactReferenceDto: {
+            kind: components["schemas"]["ArtifactKindDto"];
+            uri: string;
+            label: string;
+            description?: string | null;
         };
         BenchCloseInput: {
             benchId: string;
@@ -238,6 +297,14 @@ export interface components {
         BenchRequestTitleInput: {
             runId: string;
             title: string;
+        };
+        BindMainRunRequestDto: {
+            requestId: string;
+            panelId: string;
+            runId: string;
+            state: components["schemas"]["MainRunBindingStateDto"];
+            /** Format: int64 */
+            expectedRevision: number;
         };
         /**
          * @description 호출 응답. 037의 모든 operation은 동기 완료라 `Complete`만 발생한다.
@@ -649,6 +716,286 @@ export interface components {
             /** @enum {string} */
             operation: "exchange.getForRun";
             output: components["schemas"]["AgentExchangeDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.bootstrap";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.get";
+            output: components["schemas"]["OrchestrationSessionDto"] | null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.listRecoverable";
+            output: components["schemas"]["OrchestrationSessionDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.bindCoordinator";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.delegateGoal";
+            output: components["schemas"]["DelegateGoalOutcomeDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.adoptManualChild";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.listTasks";
+            output: components["schemas"]["OrchestrationTaskDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.collectReports";
+            output: components["schemas"]["TaskReportDto"][];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.setPresentation";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.sendChildCommand";
+            output: components["schemas"]["TaskCommandDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.respondInput";
+            output: components["schemas"]["TaskCommandDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.cancelTask";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.retryTask";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.reassignTask";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.handoffCoordinator";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.dispatchPrompt";
+            output: components["schemas"]["PromptDispatchDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.recover";
+            output: components["schemas"]["OrchestrationSessionDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.replay";
+            output: components["schemas"]["RunReplayDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.createChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.assignChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.listChildTasks";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.sendChildMessage";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.waitChildTasks";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.collectChildResults";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.interruptChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.cancelChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.retryChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.reassignChildTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.getOwnTask";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.reportProgress";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.reportResult";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.requestParentInput";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.reportBlocked";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.sendParentMessage";
+            output: components["schemas"]["AgentToolOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "orchestration.getAgentRole";
+            output: components["schemas"]["AgentRoleDto"];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
             revision?: number;
         } | {
@@ -1252,6 +1599,426 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "orchestration.bootstrap";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationBootstrapInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.get";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationBenchInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.listRecoverable";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationListRecoverableInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.bindCoordinator";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationBindCoordinatorInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.delegateGoal";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationDelegateGoalInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.adoptManualChild";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationAdoptManualChildInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.listTasks";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationListTasksInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.collectReports";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationBenchInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.setPresentation";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationSetPresentationInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.sendChildCommand";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationSendChildCommandInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.respondInput";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationTaskActionInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.cancelTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationTaskActionInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.retryTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationTaskActionInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.reassignTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationTaskActionInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.handoffCoordinator";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationHandoffCoordinatorInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.dispatchPrompt";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationDispatchPromptInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.recover";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["OrchestrationBenchInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.replay";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunReplayInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.createChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.assignChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.listChildTasks";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.sendChildMessage";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.waitChildTasks";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.collectChildResults";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.interruptChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.cancelChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.retryChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.reassignChildTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.getOwnTask";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.reportProgress";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.reportResult";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.requestParentInput";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.reportBlocked";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.sendParentMessage";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentToolInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "orchestration.getAgentRole";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["AgentRoleInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "system.describe";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["SystemDescribeInput"];
@@ -1261,8 +2028,103 @@ export interface components {
             /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
             timeoutMs?: number;
         };
+        CommandFailureDto: {
+            code: components["schemas"]["OrchestrationErrorCodeDto"];
+            message: string;
+            retryable: boolean;
+        };
         /** @enum {string} */
         ContextSizePreset: "default" | "medium" | "large" | "xLarge";
+        CoordinatorGenerationDto: {
+            id: string;
+            /** Format: int32 */
+            ordinal: number;
+            mainNodeId: string;
+            runId: string;
+            previousGenerationId?: string | null;
+            status: components["schemas"]["CoordinatorGenerationStatusDto"];
+            startedAt: string;
+            endedAt?: string | null;
+            handoffSummary?: string | null;
+            successorGenerationId?: string | null;
+        };
+        /** @enum {string} */
+        CoordinatorGenerationStatusDto: "active" | "ended" | "superseded";
+        CoordinatorHandoffRequestDto: {
+            requestId: string;
+            successorRunId: string;
+            summary: string;
+            confirmed: boolean;
+            /** Format: int64 */
+            expectedRevision: number;
+        };
+        CoordinatorNotificationDto: {
+            id: string;
+            reportId: string;
+            taskId: string;
+            reportType: components["schemas"]["TaskReportTypeDto"];
+            generationId: string;
+            mainRunId?: string | null;
+            status: components["schemas"]["CoordinatorNotificationStatusDto"];
+            /** Format: int32 */
+            attemptCount: number;
+            failure?: null | components["schemas"]["CommandFailureDto"];
+            collectedAt?: string | null;
+            createdAt: string;
+            updatedAt: string;
+        };
+        /** @enum {string} */
+        CoordinatorNotificationStatusDto: "pending" | "dispatching" | "accepted" | "delivered" | "processed" | "failed" | "superseded";
+        CreateChildTaskOutcomeDto: {
+            taskId: string;
+            nodeId: string;
+            status: components["schemas"]["TaskStatusDto"];
+            executionStatus: components["schemas"]["ExecutionStatusDto"];
+        };
+        CreateChildTaskRequestDto: {
+            requestId: string;
+            title: string;
+            role: components["schemas"]["AgentRoleProfileDto"];
+            objective: string;
+            constraints: string[];
+            expectedResult: string;
+            dependencyTaskIds: string[];
+            preferredNodeId?: string | null;
+        };
+        DelegateGoalOutcomeDto: {
+            rootTaskId: string;
+            generationId: string;
+            dispatchId: string;
+            status: string;
+        };
+        DelegateGoalRequestDto: {
+            requestId: string;
+            goal: string;
+            /** Format: int64 */
+            expectedRevision: number;
+        };
+        /** @description 오늘 `send_orchestration_child_command`의 입력(`DeliverTaskCommandInput`). 명령 출처는 화면(`ui`)으로 고정된다. */
+        DeliverTaskCommandInputDto: {
+            requestId: string;
+            taskId: string;
+            kind: components["schemas"]["TaskCommandKindDto"];
+            message?: string | null;
+            inputReportId?: string | null;
+            delivery: components["schemas"]["PromptDeliveryDto"];
+            /** Format: int64 */
+            expectedTaskRevision?: number | null;
+        };
+        DeliverTaskCommandRequestDto: {
+            requestId: string;
+            taskId: string;
+            kind: components["schemas"]["TaskCommandKindDto"];
+            message?: string | null;
+            inputReportId?: string | null;
+            delivery: components["schemas"]["PromptDeliveryDto"];
+            source: components["schemas"]["TaskCommandSourceDto"];
+            /** Format: int64 */
+            expectedTaskRevision?: number | null;
+        };
         /** @description `system.describe` 출력. 호출자에게 허용된 operation만 담는다. */
         DescribeOutput: {
             /** Format: int32 */
@@ -1272,6 +2134,16 @@ export interface components {
             operations: components["schemas"]["OperationDescriptor"][];
             /** @description principal에게 허용되고 구독 가능한 이벤트 스키마(039). */
             eventSchemas: components["schemas"]["EventSchemaDescriptor"][];
+        };
+        DispatchPromptRequestDto: {
+            requestId: string;
+            intent: components["schemas"]["PromptDispatchIntentDto"];
+            targetMode: components["schemas"]["PromptTargetModeDto"];
+            message: string;
+            delivery: components["schemas"]["PromptDeliveryDto"];
+            panelIds: string[];
+            /** Format: int64 */
+            expectedRevision: number;
         };
         /** @enum {string} */
         Effect: "read" | "modify";
@@ -1434,11 +2306,15 @@ export interface components {
             benchId: string;
             request: components["schemas"]["AgentWorkspaceSyncRequestDto"];
         };
+        /** @enum {string} */
+        ExecutionStatusDto: "unassigned" | "starting" | "active" | "idle" | "stopped";
         /**
          * @description 안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.
          * @enum {string}
          */
         FaultCode: "invalidArgument" | "unauthenticated" | "forbidden" | "notFound" | "conflict" | "interactionRequired" | "preconditionFailed" | "unsupportedProtocol" | "unsupportedSchema" | "rateLimited" | "draining" | "unavailable" | "deadlineExceeded" | "internal";
+        /** @enum {string} */
+        FindingSeverityDto: "info" | "warning" | "critical";
         /** @description gap 신호. 받은 쪽은 상태를 다시 조회해 동기화한다. 해당 스트림에는 그 구독에서 더 이상 이벤트가 오지 않는다. */
         GapNotice: {
             streamId: string;
@@ -1647,6 +2523,14 @@ export interface components {
             tokenBudget?: number | null;
         };
         IdempotencyKey: string;
+        IdempotencyRecordDto: {
+            actorKey: string;
+            operation: string;
+            requestId: string;
+            payloadFingerprint: string;
+            resultRef: string;
+            createdAt: string;
+        };
         /**
          * @description command의 멱등 기록 범위(040, ADR core 0005). `durable`은 SQLite 변경 기록(재시작 뒤에도 같은 결과),
          *     `epoch`은 서버 세대 안에서 작업대별로 기억한다(작업대가 닫히면 사라짐).
@@ -1655,6 +2539,8 @@ export interface components {
         IdempotencyScope: "durable" | "epoch";
         /** @enum {string} */
         LifecycleStatusDto: "started" | "initialized" | "sessionCreated" | "promptSent" | "promptCompleted" | "steerPending" | "steerAccepted" | "steerRejected" | "cancelled" | "completed";
+        /** @enum {string} */
+        MainRunBindingStateDto: "active" | "ended";
         /** @description operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다. */
         OperationDescriptor: {
             /** @description 예: `project.list` */
@@ -1674,6 +2560,34 @@ export interface components {
         };
         /** @enum {string} */
         OperationKind: "query" | "command";
+        OrchestrationAdoptManualChildInput: {
+            benchId: string;
+            panelId: string;
+            title: string;
+        };
+        /** @description `orchestration.get`·`collectReports`·`recover`: 작업대만 받는다. */
+        OrchestrationBenchInput: {
+            benchId: string;
+        };
+        OrchestrationBindCoordinatorInput: {
+            benchId: string;
+            request: components["schemas"]["BindMainRunRequestDto"];
+        };
+        OrchestrationBootstrapInput: {
+            benchId: string;
+            worktreePath: string;
+            resumeWorkspaceId?: string | null;
+        };
+        OrchestrationDelegateGoalInput: {
+            benchId: string;
+            request: components["schemas"]["DelegateGoalRequestDto"];
+        };
+        OrchestrationDispatchPromptInput: {
+            benchId: string;
+            request: components["schemas"]["DispatchPromptRequestDto"];
+        };
+        /** @enum {string} */
+        OrchestrationErrorCodeDto: "invalidInput" | "invalidTopology" | "invalidTransition" | "scopeMismatch" | "revisionConflict" | "duplicateConflict" | "notFound" | "unauthorized" | "capacityExceeded" | "runtimeLost" | "workerUnavailable" | "readOnlyViolation" | "coordinatorInactive" | "coordinatorBusy";
         OrchestrationEventDto: {
             workspaceId: string;
             /** Format: int64 */
@@ -1681,6 +2595,77 @@ export interface components {
             reason: string;
             taskId?: string | null;
             nodeId?: string | null;
+        };
+        OrchestrationHandoffCoordinatorInput: {
+            benchId: string;
+            request: components["schemas"]["CoordinatorHandoffRequestDto"];
+        };
+        OrchestrationListRecoverableInput: {
+            benchId: string;
+            worktreePath: string;
+        };
+        OrchestrationListTasksInput: {
+            benchId: string;
+            generationId: string;
+        };
+        OrchestrationSendChildCommandInput: {
+            benchId: string;
+            input: components["schemas"]["DeliverTaskCommandInputDto"];
+        };
+        OrchestrationSessionDto: {
+            /** Format: int32 */
+            schemaVersion: number;
+            id: string;
+            worktreePath: string;
+            /** @description 현재 묶임의 orchestration 스트림(`orchestration:<bindingId>`). 묶이지 않았으면 null. */
+            eventStreamId?: string | null;
+            mainNodeId: string;
+            activeCoordinatorGenerationId?: string | null;
+            nodes: components["schemas"]["AgentNodeDto"][];
+            generations: components["schemas"]["CoordinatorGenerationDto"][];
+            tasks: components["schemas"]["OrchestrationTaskDto"][];
+            reports: components["schemas"]["TaskReportDto"][];
+            commands?: components["schemas"]["TaskCommandDto"][];
+            coordinatorNotifications?: components["schemas"]["CoordinatorNotificationDto"][];
+            dispatches: components["schemas"]["PromptDispatchDto"][];
+            idempotencyRecords: components["schemas"]["IdempotencyRecordDto"][];
+            /** Format: int64 */
+            revision: number;
+            createdAt: string;
+            updatedAt: string;
+        };
+        OrchestrationSetPresentationInput: {
+            benchId: string;
+            request: components["schemas"]["SetPresentationRequestDto"];
+        };
+        /** @description `respondInput`·`cancelTask`·`retryTask`·`reassignTask`. */
+        OrchestrationTaskActionInput: {
+            benchId: string;
+            request: components["schemas"]["TaskActionRequestDto"];
+        };
+        OrchestrationTaskDto: {
+            id: string;
+            parentTaskId?: string | null;
+            coordinatorGenerationId: string;
+            assignedNodeId?: string | null;
+            title: string;
+            objective: string;
+            constraints: string[];
+            expectedResult: string;
+            dependencyTaskIds: string[];
+            status: components["schemas"]["TaskStatusDto"];
+            awaitingHandoff: boolean;
+            accessPolicy: components["schemas"]["AccessPolicyDto"];
+            /** Format: int32 */
+            attempt: number;
+            latestResultReportId?: string | null;
+            failure?: null | components["schemas"]["TaskFailureDto"];
+            /** Format: int64 */
+            revision: number;
+            createdAt: string;
+            startedAt?: string | null;
+            completedAt?: string | null;
+            updatedAt: string;
         };
         /**
          * @description mutation의 적용 여부. timeout·단절 뒤 같은 멱등성 키로 재확인할지 판단하는 근거다.
@@ -1698,6 +2683,8 @@ export interface components {
             status: string;
             content: string;
         };
+        /** @enum {string} */
+        PresentationStatusDto: "background" | "attentionRequired" | "promoting" | "panel" | "detached" | "archived";
         /** @description `project.create` input. 정규화(trim 등)는 core의 `project_service`가 한다. */
         ProjectCreateInput: {
             name: string;
@@ -1724,6 +2711,35 @@ export interface components {
             workingDirectory: string;
             description?: string | null;
         };
+        /** @enum {string} */
+        PromotionPolicyDto: "manual" | "onAttention" | "always" | "onFailure" | "onCompletion";
+        /** @enum {string} */
+        PromptDeliveryDto: "send" | "queue" | "draft";
+        PromptDispatchDto: {
+            id: string;
+            intent: components["schemas"]["PromptDispatchIntentDto"];
+            targetMode: components["schemas"]["PromptTargetModeDto"];
+            message: string;
+            delivery: components["schemas"]["PromptDeliveryDto"];
+            targets: components["schemas"]["PromptDispatchTargetDto"][];
+            createdBy: string;
+            createdAt: string;
+            updatedAt: string;
+        };
+        /** @enum {string} */
+        PromptDispatchIntentDto: "direct" | "delegate";
+        PromptDispatchTargetDto: {
+            panelId: string;
+            runId?: string | null;
+            requestId: string;
+            status: components["schemas"]["PromptDispatchTargetStatusDto"];
+            failureCode?: string | null;
+            failureReason?: string | null;
+        };
+        /** @enum {string} */
+        PromptDispatchTargetStatusDto: "pending" | "accepted" | "delivered" | "rejected" | "failed" | "cancelled";
+        /** @enum {string} */
+        PromptTargetModeDto: "focused" | "selected" | "all" | "coordinator";
         /** @description provider가 로컬에 남긴 네이티브 세션 하나의 요약. 시각은 RFC3339. */
         ProviderSessionDto: {
             agentId: string;
@@ -1750,6 +2766,21 @@ export interface components {
         };
         /** @enum {string} */
         RalphLoopStatusDto: "started" | "completed" | "failed" | "stopped";
+        ReportTaskRequestDto: {
+            requestId: string;
+            taskId: string;
+            reporterNodeId: string;
+            reporterRunId: string;
+            reportType: components["schemas"]["TaskReportTypeDto"];
+            /** Format: int32 */
+            progressPercent?: number | null;
+            summary: string;
+            findings: components["schemas"]["TaskFindingDto"][];
+            artifactRefs: components["schemas"]["ArtifactReferenceDto"][];
+            unresolved: string[];
+            /** Format: double */
+            confidence?: number | null;
+        };
         RequestId: string;
         /** @enum {string} */
         ResumePolicyDto: "fresh" | "resumeIfAvailable" | "resumeRequired";
@@ -1847,6 +2878,29 @@ export interface components {
             runId: string;
             prompt: string;
         };
+        /** @description core `RunReplay`의 미러(오늘 `RuntimeEventSnapshot`과 같은 JSON). */
+        RunReplayDto: {
+            runId: string;
+            events: components["schemas"]["RunReplayEventDto"][];
+            /** Format: int64 */
+            lastSequence: number;
+            terminal: boolean;
+            gapDetected: boolean;
+        };
+        RunReplayEventDto: {
+            runId: string;
+            /** Format: int64 */
+            sequence: number;
+            event: Record<string, never>;
+            terminal: boolean;
+        };
+        /** @description `run.replay`(041): 작업대가 소유했던 run(또는 작업대에 묶인 orchestration 작업 영역의 노드 run)의 journal. */
+        RunReplayInput: {
+            benchId: string;
+            runId: string;
+            /** Format: int64 */
+            afterSequence: number;
+        };
         RunRespondPermissionInput: {
             benchId: string;
             runId: string;
@@ -1887,7 +2941,7 @@ export interface components {
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}
          */
-        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "run:write" | "bench:read" | "bench:write" | "exchange:read" | "exchange:write" | "presentation:write" | "system:describe";
+        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "run:write" | "bench:read" | "bench:write" | "exchange:read" | "exchange:write" | "presentation:write" | "orchestration:read" | "orchestration:write" | "system:describe";
         SendAgentExchangeRequestDto: {
             requestId: string;
             sourcePanelId: string;
@@ -1896,6 +2950,13 @@ export interface components {
             targetRunId?: string | null;
             message: string;
             delivery: components["schemas"]["AgentExchangeDeliveryDto"];
+        };
+        SetPresentationRequestDto: {
+            requestId: string;
+            nodeId: string;
+            presentationStatus: components["schemas"]["PresentationStatusDto"];
+            /** Format: int64 */
+            expectedRevision: number;
         };
         /**
          * @description stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).
@@ -1918,6 +2979,72 @@ export interface components {
         };
         /** @description `system.describe` input. 필드가 없고 추가 필드는 거절한다. */
         SystemDescribeInput: Record<string, never>;
+        TaskActionRequestDto: {
+            requestId: string;
+            taskId: string;
+            /** Format: int64 */
+            expectedRevision: number;
+            message?: string | null;
+            targetNodeId?: string | null;
+        };
+        TaskCommandDto: {
+            id: string;
+            requestId: string;
+            payloadFingerprint: string;
+            taskId: string;
+            nodeId: string;
+            runId: string;
+            /** Format: int32 */
+            attempt: number;
+            kind: components["schemas"]["TaskCommandKindDto"];
+            message?: string | null;
+            inputReportId?: string | null;
+            delivery: components["schemas"]["PromptDeliveryDto"];
+            source: components["schemas"]["TaskCommandSourceDto"];
+            status: components["schemas"]["TaskCommandStatusDto"];
+            failure?: null | components["schemas"]["CommandFailureDto"];
+            createdAt: string;
+            updatedAt: string;
+        };
+        /** @enum {string} */
+        TaskCommandKindDto: "message" | "inputResponse" | "interrupt" | "cancel";
+        /** @enum {string} */
+        TaskCommandSourceDto: "user" | "coordinator" | "recovery";
+        /** @enum {string} */
+        TaskCommandStatusDto: "pending" | "dispatching" | "accepted" | "failed" | "cancelled";
+        TaskFailureDto: {
+            code: components["schemas"]["OrchestrationErrorCodeDto"];
+            message: string;
+            retryable: boolean;
+            partialResultReportIds: string[];
+        };
+        TaskFindingDto: {
+            title: string;
+            detail: string;
+            evidence: string[];
+            severity: components["schemas"]["FindingSeverityDto"];
+        };
+        TaskReportDto: {
+            id: string;
+            requestId: string;
+            taskId: string;
+            reporterNodeId: string;
+            reporterRunId: string;
+            type: components["schemas"]["TaskReportTypeDto"];
+            /** Format: int32 */
+            progressPercent?: number | null;
+            summary: string;
+            findings: components["schemas"]["TaskFindingDto"][];
+            artifactRefs: components["schemas"]["ArtifactReferenceDto"][];
+            unresolved: string[];
+            /** Format: double */
+            confidence?: number | null;
+            createdAt: string;
+        };
+        /** @enum {string} */
+        TaskReportTypeDto: "progress" | "result" | "inputRequest" | "blocked" | "message";
+        /** @enum {string} */
+        TaskStatusDto: "pending" | "ready" | "running" | "inputRequired" | "blocked" | "completed" | "failed" | "cancelled";
         /** @description 오늘 MCP 제목 도구의 `TitleChangeResult`와 같은 모양. */
         TitleChangeResultDto: {
             ok: boolean;
@@ -1951,6 +3078,13 @@ export interface components {
             outcome: components["schemas"]["Outcome"];
             requestId: components["schemas"]["RequestId"];
             details?: Record<string, never> | null;
+        };
+        WorkerRuntimeProfileDto: {
+            agentProfileId: string;
+            providerId: string;
+            modelId?: string | null;
+            accessPolicy: components["schemas"]["AccessPolicyDto"];
+            supportsReadOnly: boolean;
         };
         WorktreeChangeDto: {
             path: string;

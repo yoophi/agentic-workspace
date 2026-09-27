@@ -4,17 +4,12 @@
 //!
 //! run의 소유자는 작업대 id 문자열이다(acp-agent-core의 소유자는 원래 불투명한 문자열, ADR core 0004).
 
-use std::{fmt, sync::Arc};
+use std::fmt;
 
-use acp_agent_core::{
-    domain::run::{AgentRun, AgentRunRequest, PermissionMode},
-    infrastructure::agent_session_registry::AppState,
-};
+use acp_agent_core::domain::run::{AgentRun, AgentRunRequest, PermissionMode};
 use async_trait::async_trait;
 
-use crate::infrastructure::{
-    fs::acp_session_store::JsonAcpSessionStore, run::workbench_run_sink::WorkbenchRunSink,
-};
+use crate::infrastructure::run::workbench_run_sink::WorkbenchRunSink;
 
 /// 엔진 오류의 분류. fault 코드로 옮겨지고, `message`는 오늘 문자열 그대로다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +83,24 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError>;
 
+    /// orchestration(041): 지금 턴 뒤에 이어 붙이고 기다리지 않는다. 전달 실패는 run 오류 이벤트
+    /// (`queued prompt delivery failed: …`)로 낸다. run이 없으면 `unknown or finished run: <id>`.
+    async fn queue_prompt(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError>;
+
+    /// orchestration(041): 턴이 끝날 때까지 기다린다(coordinator 알림 전달). `queue`면 지금 턴 뒤에 이어 붙인다.
+    async fn send_and_wait(
+        &self,
+        run_id: &str,
+        prompt: String,
+        queue: bool,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError>;
+
     /// 이미 끝난 run도 성공(오늘과 같음). 취소 lifecycle 이벤트를 sink로 낸다.
     async fn cancel(&self, run_id: &str, sink: WorkbenchRunSink);
 
@@ -106,14 +119,4 @@ pub trait RunEngine: Send + Sync {
 
     /// 소유자의 run을 모두 취소하고 취소한 run id를 돌려준다.
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String>;
-
-    /// 041 전 과도기: AW orchestration이 같은 run 기계를 쓰기 위한 접근자. 041에서 제거한다.
-    fn acp_registry(&self) -> Option<AppState> {
-        None
-    }
-
-    /// 041 전 과도기: 같은 세션 저장소 인스턴스. 041에서 제거한다.
-    fn acp_session_store(&self) -> Option<Arc<JsonAcpSessionStore>> {
-        None
-    }
 }

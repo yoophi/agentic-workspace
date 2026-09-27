@@ -10,6 +10,7 @@ pub mod json_goal_repository;
 pub mod json_project_repository;
 pub mod json_saved_prompt_repository;
 pub mod json_store;
+pub mod orchestration;
 pub mod perf;
 pub mod run;
 pub mod sqlite_ledger;

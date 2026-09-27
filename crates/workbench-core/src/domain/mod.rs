@@ -1,4 +1,5 @@
 pub mod agent_exchange;
+pub mod agent_orchestration;
 pub mod agent_run_settings;
 pub mod errors;
 pub mod git_branch;

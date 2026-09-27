@@ -123,7 +123,7 @@ sequenceDiagram
 - **수명**: `bench.open`(작업 디렉터리 → `benchId`, 상한 256) · `bench.close`(멱등). 상태는 `Open`·`Closing` 둘뿐이고 메모리 전용이다(재시작하면 사라진다). 연결이 끊겨도 닫히지 않는다 — 닫기는 명시 호출뿐이다([ADR 0005](adr/0005-window-close-explicitly-closes-the-bench.md)).
 - **입장 경계**: 새 자원을 등록하는 동작(`run.start`의 소유 기록, 교환 쓰기, 과도기 orchestration 기동)은 작업대의 read guard를 얻어야 한다. registry lock 안에서 `try_read_owned`로 얻고 lock 밖에서 await한다. 닫기는 `Open → Closing`을 원자적으로 바꾼 뒤 write guard를 기다리고, 소유 run 취소 → 교환 작업 영역 삭제 → 스트림 제거(구독자 `Gap(evicted)`) → registry 삭제 순으로 끝낸다. 닫기가 `closed: true`로 돌아온 시점에 그 작업대 소유의 살아 있는 run은 0개다.
 - **멱등성**: `run.start`만 SQLite ledger(`durable`)를 쓰고, 나머지 command는 작업대 수명의 세대 범위 기록(`epoch`, 결과 1,024 + 요약 65,536)을 쓴다 — [core ADR 0005](../crates/workbench-core/docs/adr/0005-only-run-start-uses-the-operation-ledger.md). descriptor의 `idempotencyScope`로 드러난다.
-- **run 엔진**: `RunEngine` 포트. 운영 구현 `AcpRunEngine`(acp-agent-core `AppState`·runner·세션 저장소), 테스트는 대본 기반 가짜 엔진. `DesktopBridge`(전달)·`RunTerminalHook`(worktree 가드, 041 전 과도기)·`RunLaunchDecorator`(MCP 토큰·env)는 AW가 주입한다.
+- **run 엔진**: `RunEngine` 포트. 운영 구현 `AcpRunEngine`(acp-agent-core `AppState`·runner·세션 저장소), 테스트는 대본 기반 가짜 엔진. `DesktopBridge`(전달)·`RunLaunchDecorator`(run에 묶인 MCP 토큰·env, 토큰 폐기)는 AW가 주입한다. run 종료 후처리(orchestration worktree 감시)는 041부터 core가 소유한다.
 
 ### 데스크톱 대응
 
@@ -152,7 +152,40 @@ sequenceDiagram
 
 ### MCP 도구와 agent principal
 
-AW MCP 서버의 교환 도구 3개와 `set_window_title`은 run capability에서 만든 **agent principal**(`agent:<runId>`, scope `exchange:read`·`exchange:write`·`presentation:write`·`system:describe`)로 `Workbench.call`을 부른다 — [ADR 0006](adr/0006-mcp-tools-call-the-workbench-as-an-agent-principal.md). agent 전용 operation(`exchange.listPeers`·`sendFromRun`·`getForRun`·`bench.requestTitle`)은 주체의 run과 입력 `runId`가 같아야 한다. 제목 요청은 서버 상태를 바꾸지 않고 run의 작업대 알림 스트림(`bench.titleRequested.v1`)에 발행되어, 데스크톱이 그 작업대의 창에만 적용한다 — [ADR 0007](adr/0007-presentation-requests-are-bench-notifications.md). 도구 결과 형태(`TitleChangeResult`, 교환 `{code, message}`)는 fault `details.titleCode`·`details.exchangeCode`로 되돌려 오늘과 같다. orchestration 도구 16개는 041까지 그대로다.
+AW MCP 서버의 교환 도구 3개와 `set_window_title`은 run capability에서 만든 **agent principal**(`agent:<runId>`, scope `exchange:read`·`exchange:write`·`presentation:write`·`system:describe`)로 `Workbench.call`을 부른다 — [ADR 0006](adr/0006-mcp-tools-call-the-workbench-as-an-agent-principal.md). agent 전용 operation(`exchange.listPeers`·`sendFromRun`·`getForRun`·`bench.requestTitle`)은 주체의 run과 입력 `runId`가 같아야 한다. 제목 요청은 서버 상태를 바꾸지 않고 run의 작업대 알림 스트림(`bench.titleRequested.v1`)에 발행되어, 데스크톱이 그 작업대의 창에만 적용한다 — [ADR 0007](adr/0007-presentation-requests-are-bench-notifications.md). 도구 결과 형태(`TitleChangeResult`, 교환 `{code, message}`)는 fault `details.titleCode`·`details.exchangeCode`로 되돌려 오늘과 같다. orchestration 도구 16개도 041부터 같은 방식이다(아래 절).
+
+## orchestration (041)
+
+계약 정본: `specs/041-workbench-orchestration/contracts/{workbench-orchestration,tauri-compat}.md`, 결정 근거 `research.md` R1–R18.
+
+- **묶임**: orchestration 작업 영역은 창 label이 아니라 **작업대에 묶인다**(메모리 묶임 표, 서버 재시작 시 비어 모든 작업 영역이 복구 가능). 작업대 하나에 작업 영역 하나. 작업대를 닫으면 hook이 작업 영역을 복구 가능으로 바꾸고(열린 과제의 노드는 주의 필요), 다른 작업대가 `bootstrap`의 `resumeWorkspaceId`로 재개한다. 묶일 때마다 새 묶임 id가 생기며 그것이 스트림 key다.
+- **저장 경계**: `orchestration-sessions.json`은 작업 영역 전체를 한 파일에 담으므로, 모든 변경은 **파일 전체를 하나의 read-modify-write 경계**(경로별 단일 lock, 한 transaction) 안에서 일어난다 — [core ADR 0006](../crates/workbench-core/docs/adr/0006-orchestration-store-is-one-serialized-aggregate.md). 작업 영역 범위 async lock은 없다: 엔진 호출·대기·알림 전달은 경계 밖에서 하고, 결과는 상태 조건을 다시 확인하는 짧은 transaction으로 반영한다. 묶기(bootstrap·recover·release)만 binding mutex를 경계보다 먼저 잡는다(순서: binding mutex → 저장 경계).
+- **역할**: agent 도구의 권한은 토큰 주장이 아니라 **서버 상태**로 정한다 — coordinator는 활성 세대의 run, 자식은 coordinator가 만든 자식 노드의 현재(또는 기동 중) run — [core ADR 0007](../crates/workbench-core/docs/adr/0007-agent-orchestration-roles-come-from-server-state.md). MCP 토큰은 run 하나만 가리키고, `tools/list`는 `orchestration.getAgentRole`로 고른다.
+- **run 출처(R18)**: 작업 영역에 들어가는 run id는 이 작업대의 살아 있는 run, 흔적 없는 계획 id(화면은 Main run을 띄우기 전에 묶는다 — 묶을 때 hub 소유로 claim), agent principal run, 서버가 기동한 자식 run뿐이다. 모든 기동 경로는 claim에 실패하면 엔진을 부르기 전에 거절하고, 끝난 run id는 다시 쓸 수 없다.
+- **스트림**: `orchestration:<bindingId>`(상태 복원용, journal 256). 그 작업대를 연 주체만 구독하고, 묶임이 풀리면 스트림이 제거되어 구독자는 `Gap(evicted)`를 받는다. run 스트림(`run:<id>`)과 `run.replay`는 hub의 run 소유 작업대 기록(기동 시 claim, journal과 같은 수명)으로 판단한다 — 소유 작업대, 또는 그 run을 기록한 묶인 작업 영역의 작업대. 보관 한도로 제거된 run은 제거 표식으로 판정해 Evicted 형태를 준다.
+- **데스크톱**: command 18개는 호환 어댑터(창 → 작업대, 오류 `details.orchestrationError` JSON, 결과 `boundWindowLabel` 재구성). 창 전달은 발행과 같은 스트림 lock 안에서 그 작업대의 창에 한 번(`orchestration-workspace-updated-fallback` + 사유별 상세).
+
+```mermaid
+sequenceDiagram
+    participant UI as 세션 창
+    participant Cmd as Tauri compat
+    participant RT as OrchestrationRuntime
+    participant Store as 저장 경계 (파일 전체)
+    participant Eng as RunEngine
+    participant Hub as EventHub
+    UI->>Cmd: bind_main_coordinator_run(planned runId)
+    Cmd->>RT: orchestration.bindCoordinator {benchId}
+    RT->>Hub: claim_run(runId, bench)
+    RT->>Store: begin → 세대 기록 → commit
+    Store-->>Hub: publish orchestration:<bindingId> (창 전달 1회)
+    UI->>Cmd: start_agent_run(panel = Main)
+    Cmd->>Eng: run.start (claim 확인 → 역할 확인 → start)
+    Note over RT,Eng: 자식 기동·알림 전달은 저장 경계 밖에서 await
+```
+
+### 3단계 안내 (041 → HTTP/WS 어댑터)
+
+041로 2단계가 끝났다: command 인벤토리의 이연 항목이 0이고, 서버 상태를 바꾸는 모든 경로가 `Workbench.call`·`Workbench.events`를 거친다. 다음 단계는 같은 seam 위에 독립 HTTP/WS 서버 어댑터를 올리고(3단계), 프런트엔드를 그 클라이언트로 옮기고(4단계), standalone server 생명주기를 붙인 뒤(5단계), 데스크톱을 thin client로 줄이고 호환 어댑터를 지운다(8단계).
 
 ## 호출 규칙
 
@@ -303,7 +336,7 @@ flowchart LR
 
 ## command 인벤토리 (71)
 
-연번은 `lib.rs` `generate_handler!` 등록 순서다. 합계: 이관됨 45(037 2 + 038 29 + 039 2 + 040 12), 2단계로 이연 18(orchestration, 041), 데스크톱 유지 8.
+연번은 `lib.rs` `generate_handler!` 등록 순서다. 합계: 이관됨 63(037 2 + 038 29 + 039 2 + 040 12 + 041 18), 이연 0, 데스크톱 유지 8.
 
 | # | command | 분류 | operation / 이유 |
 |---|---|---|---|
@@ -360,24 +393,24 @@ flowchart LR
 | 51 | `send_agent_exchange` | 이관됨(040) | `exchange.send` (작업대 확보 후) |
 | 52 | `acknowledge_agent_exchange` | 이관됨(040) | `exchange.acknowledge` (작업대 확보 후) |
 | 53 | `list_agent_exchanges` | 이관됨(040) | `exchange.list` (작업대 확보 후) |
-| 54 | `bootstrap_orchestration_workspace` | 2단계로 이연(041) | 창 label·MCP 상태·메모리 journal 결합 |
-| 55 | `list_recoverable_orchestration_workspaces` | 2단계로 이연(041) | 조회지만 orchestration 도메인을 쪼개지 않음 |
-| 56 | `get_orchestration_workspace` | 2단계로 이연(041) | orchestration 도메인 |
-| 57 | `bind_main_coordinator_run` | 2단계로 이연(041) | orchestration 도메인 |
-| 58 | `delegate_orchestration_goal` | 2단계로 이연(041) | orchestration 도메인 |
-| 59 | `adopt_manual_orchestration_child` | 2단계로 이연(041) | orchestration 도메인 |
-| 60 | `list_orchestration_tasks` | 2단계로 이연(041) | orchestration 도메인 |
-| 61 | `collect_orchestration_reports` | 2단계로 이연(041) | orchestration 도메인 |
-| 62 | `set_orchestration_presentation` | 2단계로 이연(041) | orchestration 도메인 |
-| 63 | `replay_orchestration_runtime_events` | 2단계로 이연(041) | 조회지만 메모리 journal에 결합 |
-| 64 | `respond_orchestration_input` | 2단계로 이연(041) | orchestration 도메인 |
-| 65 | `send_orchestration_child_command` | 2단계로 이연(041) | orchestration 도메인 |
-| 66 | `cancel_orchestration_task` | 2단계로 이연(041) | orchestration 도메인 |
-| 67 | `retry_orchestration_task` | 2단계로 이연(041) | orchestration 도메인 |
-| 68 | `reassign_orchestration_task` | 2단계로 이연(041) | orchestration 도메인 |
-| 69 | `handoff_orchestration_coordinator` | 2단계로 이연(041) | orchestration 도메인 |
-| 70 | `dispatch_orchestration_prompt` | 2단계로 이연(041) | orchestration 도메인 |
-| 71 | `recover_orchestration_workspace` | 2단계로 이연(041) | orchestration 도메인 |
+| 54 | `bootstrap_orchestration_workspace` | 이관됨(041) | `orchestration.bootstrap` |
+| 55 | `list_recoverable_orchestration_workspaces` | 이관됨(041) | `orchestration.listRecoverable` |
+| 56 | `get_orchestration_workspace` | 이관됨(041) | `orchestration.get` |
+| 57 | `bind_main_coordinator_run` | 이관됨(041) | `orchestration.bindCoordinator` |
+| 58 | `delegate_orchestration_goal` | 이관됨(041) | `orchestration.delegateGoal` |
+| 59 | `adopt_manual_orchestration_child` | 이관됨(041) | `orchestration.adoptManualChild` |
+| 60 | `list_orchestration_tasks` | 이관됨(041) | `orchestration.listTasks` |
+| 61 | `collect_orchestration_reports` | 이관됨(041) | `orchestration.collectReports` |
+| 62 | `set_orchestration_presentation` | 이관됨(041) | `orchestration.setPresentation` |
+| 63 | `replay_orchestration_runtime_events` | 이관됨(041) | `run.replay` |
+| 64 | `respond_orchestration_input` | 이관됨(041) | `orchestration.respondInput` |
+| 65 | `send_orchestration_child_command` | 이관됨(041) | `orchestration.sendChildCommand` |
+| 66 | `cancel_orchestration_task` | 이관됨(041) | `orchestration.cancelTask` |
+| 67 | `retry_orchestration_task` | 이관됨(041) | `orchestration.retryTask` |
+| 68 | `reassign_orchestration_task` | 이관됨(041) | `orchestration.reassignTask` |
+| 69 | `handoff_orchestration_coordinator` | 이관됨(041) | `orchestration.handoffCoordinator` |
+| 70 | `dispatch_orchestration_prompt` | 이관됨(041) | `orchestration.dispatchPrompt` |
+| 71 | `recover_orchestration_workspace` | 이관됨(041) | `orchestration.recover` |
 
 ## 결정 기록
 
@@ -393,7 +426,9 @@ flowchart LR
 - [workbench-core ADR 0003 — 알림 이벤트는 replay하지 않는다](../crates/workbench-core/docs/adr/0003-notification-events-are-not-replayed.md)
 - [workbench-core ADR 0004 — run과 교환 작업 영역의 주인은 작업대이며, 연 principal에 묶인다](../crates/workbench-core/docs/adr/0004-benches-own-runs-and-exchanges.md)
 - [workbench-core ADR 0005 — `run.start`만 변경 기록을 쓰고 나머지는 세대 범위 멱등성을 쓴다](../crates/workbench-core/docs/adr/0005-only-run-start-uses-the-operation-ledger.md)
+- [workbench-core ADR 0006 — orchestration 저장소는 하나의 직렬화된 aggregate다](../crates/workbench-core/docs/adr/0006-orchestration-store-is-one-serialized-aggregate.md)
+- [workbench-core ADR 0007 — agent orchestration 역할은 서버 상태에서 나온다](../crates/workbench-core/docs/adr/0007-agent-orchestration-roles-come-from-server-state.md)
 
 ## 완료 기준
 
-037·038·039·040 spec의 성공 기준이 테스트 또는 수동 절차로 확인되었고, 프론트엔드 변경이 037·038·040은 0건, 039는 run 화면 순번 처리(`features/agent-run`, `entities/agent-run/{api,model}`)에 한정되며, `crates/git-core`·`crates/acp-agent-core`·`packages/agent-client` 변경이 0건이고, CI에 drift 검사 단계가 있다.
+037·038·039·040·041 spec의 성공 기준이 테스트 또는 수동 절차로 확인되었고, 프론트엔드 변경이 037·038·040·041은 0건, 039는 run 화면 순번 처리(`features/agent-run`, `entities/agent-run/{api,model}`)에 한정되며, `crates/git-core`·`crates/acp-agent-core`·`packages/agent-client` 변경이 0건이고, CI에 drift 검사 단계가 있다.

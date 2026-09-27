@@ -1,0 +1,240 @@
+//! AW `tests/orchestration_delegation.rs`에서 옮긴 서비스 흐름 테스트(041 T031): 직접 자식 셋 위임·구조화 결과 수집,
+//! 위임·보고 알림 시간 예산. 창 label 자리는 작업대 id다.
+
+use std::time::{Duration, Instant};
+
+use workbench_core::{
+    application::orchestration::service::{
+        BindMainRunRequest, CreateChildTaskRequest, MainRunBindingState, OrchestrationService,
+        ReportTaskRequest,
+    },
+    domain::agent_orchestration::{
+        AgentRoleProfile, OrchestrationError, TaskReportType, TaskStatus, MAIN_AGENT_NODE_ID,
+    },
+    ports::orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
+};
+
+use workbench_core::infrastructure::orchestration::memory_store::InMemoryOrchestrationRepository as MemoryRepository;
+
+#[derive(Clone, Default)]
+struct NoopSink;
+
+impl OrchestrationEventSink for NoopSink {
+    fn emit(
+        &self,
+        _window_label: &str,
+        _event: OrchestrationEvent,
+    ) -> Result<(), OrchestrationError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn delegates_three_direct_children_and_collects_structured_results() {
+    let service = OrchestrationService::new(MemoryRepository::default(), NoopSink);
+    let workspace = service.bootstrap("/repo", "window-1", None).unwrap();
+    let workspace = service
+        .bind_main_run(
+            "window-1",
+            BindMainRunRequest {
+                request_id: "bind-main".into(),
+                panel_id: MAIN_AGENT_NODE_ID.into(),
+                run_id: "run-main".into(),
+                state: MainRunBindingState::Active,
+                expected_revision: workspace.revision,
+            },
+        )
+        .unwrap();
+    let generation_id = workspace.active_coordinator_generation_id.unwrap();
+
+    for (index, role) in ["Researcher", "Reviewer", "Tester"].into_iter().enumerate() {
+        let outcome = service
+            .create_child_task(
+                "window-1",
+                &generation_id,
+                CreateChildTaskRequest {
+                    request_id: format!("create-{index}"),
+                    title: format!("{role} task"),
+                    role: AgentRoleProfile::new(
+                        role.to_lowercase(),
+                        role,
+                        "독립 관점 조사",
+                        "구조화 결과",
+                    )
+                    .unwrap(),
+                    objective: format!("{role} 관점으로 조사한다."),
+                    constraints: vec!["read-only".into()],
+                    expected_result: "summary와 findings".into(),
+                    dependency_task_ids: vec![],
+                    preferred_node_id: None,
+                },
+            )
+            .unwrap();
+        let run_id = format!("run-child-{index}");
+        service
+            .bind_child_run("window-1", &outcome.task_id, &outcome.node_id, &run_id)
+            .unwrap();
+        service
+            .report_task(
+                "window-1",
+                ReportTaskRequest {
+                    request_id: format!("result-{index}"),
+                    task_id: outcome.task_id,
+                    reporter_node_id: outcome.node_id,
+                    reporter_run_id: run_id,
+                    report_type: TaskReportType::Result,
+                    progress_percent: Some(100),
+                    summary: format!("{role} result"),
+                    findings: vec![],
+                    artifact_refs: vec![],
+                    unresolved: vec![],
+                    confidence: Some(0.9),
+                },
+            )
+            .unwrap();
+    }
+
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
+    assert_eq!(snapshot.nodes.len(), 4);
+    assert!(snapshot
+        .nodes
+        .iter()
+        .filter(|node| node.id != MAIN_AGENT_NODE_ID)
+        .all(|node| node.parent_node_id.as_deref() == Some(MAIN_AGENT_NODE_ID)));
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.status == TaskStatus::Completed)
+            .count(),
+        3
+    );
+    assert_eq!(snapshot.reports.len(), 3);
+    assert_eq!(snapshot.coordinator_notifications.len(), 3);
+    assert!(snapshot
+        .coordinator_notifications
+        .iter()
+        .zip(snapshot.reports.iter())
+        .all(|(notification, report)| notification.report_id == report.id));
+}
+
+/// SC-001 and SC-014 measurement intervals.
+///
+/// SC-001 measures goal submission until all three child tasks are assigned; SC-014 measures
+/// report storage until the active Main has a notification it can resolve to the report body.
+/// Both are asserted as bounded intervals *and* as transactional outcomes: the work completes
+/// inside the call, so neither depends on a polling loop.
+#[test]
+fn delegation_and_report_notification_stay_inside_their_measured_intervals() {
+    const ASSIGNMENT_BUDGET: Duration = Duration::from_secs(30);
+    const NOTIFICATION_BUDGET: Duration = Duration::from_secs(1);
+
+    let service = OrchestrationService::new(MemoryRepository::default(), NoopSink);
+    let workspace = service.bootstrap("/repo", "window-1", None).unwrap();
+    let workspace = service
+        .bind_main_run(
+            "window-1",
+            BindMainRunRequest {
+                request_id: "bind-main".into(),
+                panel_id: MAIN_AGENT_NODE_ID.into(),
+                run_id: "run-main".into(),
+                state: MainRunBindingState::Active,
+                expected_revision: workspace.revision,
+            },
+        )
+        .unwrap();
+    let generation_id = workspace.active_coordinator_generation_id.unwrap();
+
+    // SC-001: submission -> all three roles created and assigned.
+    let submitted_at = Instant::now();
+    let mut created = Vec::new();
+    for (index, role) in ["Researcher", "Reviewer", "Tester"].into_iter().enumerate() {
+        created.push(
+            service
+                .create_child_task(
+                    "window-1",
+                    &generation_id,
+                    CreateChildTaskRequest {
+                        request_id: format!("sc001-create-{index}"),
+                        title: format!("{role} task"),
+                        role: AgentRoleProfile::new(
+                            role.to_lowercase(),
+                            role,
+                            "독립 관점 조사",
+                            "구조화 결과",
+                        )
+                        .unwrap(),
+                        objective: format!("{role} 관점으로 조사한다."),
+                        constraints: vec!["read-only".into()],
+                        expected_result: "summary와 findings".into(),
+                        dependency_task_ids: vec![],
+                        preferred_node_id: None,
+                    },
+                )
+                .unwrap(),
+        );
+    }
+    let assignment_elapsed = submitted_at.elapsed();
+
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
+    assert_eq!(
+        snapshot
+            .tasks
+            .iter()
+            .filter(|task| task.assigned_node_id.is_some())
+            .count(),
+        3,
+        "all three child tasks must be assigned when the calls return"
+    );
+    assert!(
+        assignment_elapsed < ASSIGNMENT_BUDGET,
+        "assignment took {assignment_elapsed:?}, over the {ASSIGNMENT_BUDGET:?} budget"
+    );
+
+    // SC-014: report stored -> Main notification exists and resolves to the report body.
+    let first = created.remove(0);
+    let run_id = "run-child-sc014".to_string();
+    service
+        .bind_child_run("window-1", &first.task_id, &first.node_id, &run_id)
+        .unwrap();
+
+    let reported_at = Instant::now();
+    service
+        .report_task(
+            "window-1",
+            ReportTaskRequest {
+                request_id: "sc014-result".into(),
+                task_id: first.task_id.clone(),
+                reporter_node_id: first.node_id,
+                reporter_run_id: run_id,
+                report_type: TaskReportType::Result,
+                progress_percent: Some(100),
+                summary: "Researcher result".into(),
+                findings: vec![],
+                artifact_refs: vec![],
+                unresolved: vec![],
+                confidence: Some(0.9),
+            },
+        )
+        .unwrap();
+    let notification_elapsed = reported_at.elapsed();
+
+    let snapshot = service.get_for_bench("window-1").unwrap().unwrap();
+    let report = snapshot
+        .reports
+        .iter()
+        .find(|report| report.request_id == "sc014-result")
+        .expect("the report must be stored");
+    let notification = snapshot
+        .coordinator_notifications
+        .iter()
+        .find(|notification| notification.report_id == report.id)
+        .expect("storing a report must notify the active Main in the same transaction");
+
+    assert_eq!(notification.task_id, first.task_id);
+    assert_eq!(notification.generation_id, generation_id);
+    assert!(
+        notification_elapsed < NOTIFICATION_BUDGET,
+        "notification took {notification_elapsed:?}, over the {NOTIFICATION_BUDGET:?} budget"
+    );
+}

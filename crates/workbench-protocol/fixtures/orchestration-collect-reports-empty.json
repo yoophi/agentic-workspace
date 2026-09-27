@@ -1,0 +1,92 @@
+{
+  "name": "orchestration-collect-reports-empty",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-15",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-15"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bootstrap",
+        "requestId": "r-16",
+        "input": {
+          "benchId": "{{bench}}",
+          "worktreePath": "{{repo}}"
+        },
+        "idempotencyKey": "k-16"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "worktreePath": "{{repo}}",
+            "revision": 0
+          }
+        }
+      },
+      "capture": {
+        "workspace": "/output/id",
+        "stream": "/output/eventStreamId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.collectReports",
+        "requestId": "r-17",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": []
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

@@ -116,13 +116,83 @@ pub enum OperationId {
     ExchangeSendFromRun,
     #[serde(rename = "exchange.getForRun")]
     ExchangeGetForRun,
+    #[serde(rename = "orchestration.bootstrap")]
+    OrchestrationBootstrap,
+    #[serde(rename = "orchestration.get")]
+    OrchestrationGet,
+    #[serde(rename = "orchestration.listRecoverable")]
+    OrchestrationListRecoverable,
+    #[serde(rename = "orchestration.bindCoordinator")]
+    OrchestrationBindCoordinator,
+    #[serde(rename = "orchestration.delegateGoal")]
+    OrchestrationDelegateGoal,
+    #[serde(rename = "orchestration.adoptManualChild")]
+    OrchestrationAdoptManualChild,
+    #[serde(rename = "orchestration.listTasks")]
+    OrchestrationListTasks,
+    #[serde(rename = "orchestration.collectReports")]
+    OrchestrationCollectReports,
+    #[serde(rename = "orchestration.setPresentation")]
+    OrchestrationSetPresentation,
+    #[serde(rename = "orchestration.sendChildCommand")]
+    OrchestrationSendChildCommand,
+    #[serde(rename = "orchestration.respondInput")]
+    OrchestrationRespondInput,
+    #[serde(rename = "orchestration.cancelTask")]
+    OrchestrationCancelTask,
+    #[serde(rename = "orchestration.retryTask")]
+    OrchestrationRetryTask,
+    #[serde(rename = "orchestration.reassignTask")]
+    OrchestrationReassignTask,
+    #[serde(rename = "orchestration.handoffCoordinator")]
+    OrchestrationHandoffCoordinator,
+    #[serde(rename = "orchestration.dispatchPrompt")]
+    OrchestrationDispatchPrompt,
+    #[serde(rename = "orchestration.recover")]
+    OrchestrationRecover,
+    #[serde(rename = "run.replay")]
+    RunReplay,
+    #[serde(rename = "orchestration.createChildTask")]
+    OrchestrationCreateChildTask,
+    #[serde(rename = "orchestration.assignChildTask")]
+    OrchestrationAssignChildTask,
+    #[serde(rename = "orchestration.listChildTasks")]
+    OrchestrationListChildTasks,
+    #[serde(rename = "orchestration.sendChildMessage")]
+    OrchestrationSendChildMessage,
+    #[serde(rename = "orchestration.waitChildTasks")]
+    OrchestrationWaitChildTasks,
+    #[serde(rename = "orchestration.collectChildResults")]
+    OrchestrationCollectChildResults,
+    #[serde(rename = "orchestration.interruptChildTask")]
+    OrchestrationInterruptChildTask,
+    #[serde(rename = "orchestration.cancelChildTask")]
+    OrchestrationCancelChildTask,
+    #[serde(rename = "orchestration.retryChildTask")]
+    OrchestrationRetryChildTask,
+    #[serde(rename = "orchestration.reassignChildTask")]
+    OrchestrationReassignChildTask,
+    #[serde(rename = "orchestration.getOwnTask")]
+    OrchestrationGetOwnTask,
+    #[serde(rename = "orchestration.reportProgress")]
+    OrchestrationReportProgress,
+    #[serde(rename = "orchestration.reportResult")]
+    OrchestrationReportResult,
+    #[serde(rename = "orchestration.requestParentInput")]
+    OrchestrationRequestParentInput,
+    #[serde(rename = "orchestration.reportBlocked")]
+    OrchestrationReportBlocked,
+    #[serde(rename = "orchestration.sendParentMessage")]
+    OrchestrationSendParentMessage,
+    #[serde(rename = "orchestration.getAgentRole")]
+    OrchestrationGetAgentRole,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 50] = [
+    pub const ALL: [OperationId; 85] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -172,6 +242,41 @@ impl OperationId {
         OperationId::ExchangeListPeers,
         OperationId::ExchangeSendFromRun,
         OperationId::ExchangeGetForRun,
+        OperationId::OrchestrationBootstrap,
+        OperationId::OrchestrationGet,
+        OperationId::OrchestrationListRecoverable,
+        OperationId::OrchestrationBindCoordinator,
+        OperationId::OrchestrationDelegateGoal,
+        OperationId::OrchestrationAdoptManualChild,
+        OperationId::OrchestrationListTasks,
+        OperationId::OrchestrationCollectReports,
+        OperationId::OrchestrationSetPresentation,
+        OperationId::OrchestrationSendChildCommand,
+        OperationId::OrchestrationRespondInput,
+        OperationId::OrchestrationCancelTask,
+        OperationId::OrchestrationRetryTask,
+        OperationId::OrchestrationReassignTask,
+        OperationId::OrchestrationHandoffCoordinator,
+        OperationId::OrchestrationDispatchPrompt,
+        OperationId::OrchestrationRecover,
+        OperationId::RunReplay,
+        OperationId::OrchestrationCreateChildTask,
+        OperationId::OrchestrationAssignChildTask,
+        OperationId::OrchestrationListChildTasks,
+        OperationId::OrchestrationSendChildMessage,
+        OperationId::OrchestrationWaitChildTasks,
+        OperationId::OrchestrationCollectChildResults,
+        OperationId::OrchestrationInterruptChildTask,
+        OperationId::OrchestrationCancelChildTask,
+        OperationId::OrchestrationRetryChildTask,
+        OperationId::OrchestrationReassignChildTask,
+        OperationId::OrchestrationGetOwnTask,
+        OperationId::OrchestrationReportProgress,
+        OperationId::OrchestrationReportResult,
+        OperationId::OrchestrationRequestParentInput,
+        OperationId::OrchestrationReportBlocked,
+        OperationId::OrchestrationSendParentMessage,
+        OperationId::OrchestrationGetAgentRole,
         OperationId::SystemDescribe,
     ];
 
@@ -226,6 +331,41 @@ impl OperationId {
             OperationId::ExchangeListPeers => "exchange.listPeers",
             OperationId::ExchangeSendFromRun => "exchange.sendFromRun",
             OperationId::ExchangeGetForRun => "exchange.getForRun",
+            OperationId::OrchestrationBootstrap => "orchestration.bootstrap",
+            OperationId::OrchestrationGet => "orchestration.get",
+            OperationId::OrchestrationListRecoverable => "orchestration.listRecoverable",
+            OperationId::OrchestrationBindCoordinator => "orchestration.bindCoordinator",
+            OperationId::OrchestrationDelegateGoal => "orchestration.delegateGoal",
+            OperationId::OrchestrationAdoptManualChild => "orchestration.adoptManualChild",
+            OperationId::OrchestrationListTasks => "orchestration.listTasks",
+            OperationId::OrchestrationCollectReports => "orchestration.collectReports",
+            OperationId::OrchestrationSetPresentation => "orchestration.setPresentation",
+            OperationId::OrchestrationSendChildCommand => "orchestration.sendChildCommand",
+            OperationId::OrchestrationRespondInput => "orchestration.respondInput",
+            OperationId::OrchestrationCancelTask => "orchestration.cancelTask",
+            OperationId::OrchestrationRetryTask => "orchestration.retryTask",
+            OperationId::OrchestrationReassignTask => "orchestration.reassignTask",
+            OperationId::OrchestrationHandoffCoordinator => "orchestration.handoffCoordinator",
+            OperationId::OrchestrationDispatchPrompt => "orchestration.dispatchPrompt",
+            OperationId::OrchestrationRecover => "orchestration.recover",
+            OperationId::RunReplay => "run.replay",
+            OperationId::OrchestrationCreateChildTask => "orchestration.createChildTask",
+            OperationId::OrchestrationAssignChildTask => "orchestration.assignChildTask",
+            OperationId::OrchestrationListChildTasks => "orchestration.listChildTasks",
+            OperationId::OrchestrationSendChildMessage => "orchestration.sendChildMessage",
+            OperationId::OrchestrationWaitChildTasks => "orchestration.waitChildTasks",
+            OperationId::OrchestrationCollectChildResults => "orchestration.collectChildResults",
+            OperationId::OrchestrationInterruptChildTask => "orchestration.interruptChildTask",
+            OperationId::OrchestrationCancelChildTask => "orchestration.cancelChildTask",
+            OperationId::OrchestrationRetryChildTask => "orchestration.retryChildTask",
+            OperationId::OrchestrationReassignChildTask => "orchestration.reassignChildTask",
+            OperationId::OrchestrationGetOwnTask => "orchestration.getOwnTask",
+            OperationId::OrchestrationReportProgress => "orchestration.reportProgress",
+            OperationId::OrchestrationReportResult => "orchestration.reportResult",
+            OperationId::OrchestrationRequestParentInput => "orchestration.requestParentInput",
+            OperationId::OrchestrationReportBlocked => "orchestration.reportBlocked",
+            OperationId::OrchestrationSendParentMessage => "orchestration.sendParentMessage",
+            OperationId::OrchestrationGetAgentRole => "orchestration.getAgentRole",
             OperationId::SystemDescribe => "system.describe",
         }
     }

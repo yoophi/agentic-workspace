@@ -1,13 +1,10 @@
-//! Builds ACP launch requests for foreground and background agent runs.
+//! Injects the AW MCP server into ACP launch requests (041: background worker requests are built by core).
 
 use std::collections::BTreeMap;
 
 use crate::{
-    domain::run::{AgentRunRequest, ResumePolicy},
-    infrastructure::{
-        acp_agent_worker_adapter::AgentWorkerLaunchRequest,
-        mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
-    },
+    domain::run::AgentRunRequest,
+    infrastructure::mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
 };
 
 pub fn inject_mcp_launch_env(request: &mut AgentRunRequest, env: McpLaunchEnv) {
@@ -27,96 +24,35 @@ pub fn with_mcp_agent_instructions(goal: &str, instructions: &str) -> String {
     )
 }
 
-pub fn build_worker_request(
-    launch: &AgentWorkerLaunchRequest,
-    env: McpLaunchEnv,
-) -> AgentRunRequest {
-    let assignment = &launch.assignment;
-    let mut request = AgentRunRequest {
-        goal: launch.goal.clone(),
-        agent_id: assignment.runtime_profile.agent_profile_id.clone(),
-        workspace_id: None,
-        checkout_id: None,
-        cwd: Some(assignment.worktree_path.clone()),
-        agent_command: None,
-        agent_env: None,
-        mcp_servers: Vec::new(),
-        stdio_buffer_limit_mb: None,
-        auto_allow: Some(launch.auto_allow),
-        permission_mode: Some(launch.permission_mode),
-        model_id: assignment.runtime_profile.model_id.clone(),
-        effort_id: None,
-        context_size: None,
-        run_id: Some(assignment.planned_run_id.clone()),
-        resume_session_id: None,
-        resume_policy: Some(ResumePolicy::Fresh),
-        ralph_loop: None,
-    };
-    inject_mcp_launch_env(&mut request, env);
-    request
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        domain::{
-            agent_orchestration::{AccessPolicy, AgentRoleProfile, WorkerRuntimeProfile},
-            run::PermissionMode,
-        },
-        ports::agent_worker::WorkerAssignment,
-    };
-
-    fn worker_launch() -> AgentWorkerLaunchRequest {
-        AgentWorkerLaunchRequest {
-            assignment: WorkerAssignment {
-                workspace_id: "workspace-1".into(),
-                window_label: "window-1".into(),
-                worktree_path: "/repo".into(),
-                node_id: "child-1".into(),
-                task_id: "task-1".into(),
-                attempt: 1,
-                planned_run_id: "run-1".into(),
-                role: AgentRoleProfile::new("researcher", "Researcher", "조사", "구조화 결과")
-                    .unwrap(),
-                objective: "구조를 조사한다.".into(),
-                constraints: vec!["read-only".into()],
-                expected_result: "근거 목록".into(),
-                runtime_profile: WorkerRuntimeProfile {
-                    agent_profile_id: "codex".into(),
-                    provider_id: "codex".into(),
-                    model_id: None,
-                    access_policy: AccessPolicy::ReadOnly,
-                    supports_read_only: true,
-                },
-                mcp_capability: "awcap_test".into(),
-            },
-            permission_mode: PermissionMode::ReadOnly,
-            auto_allow: true,
-            goal: "조사한다.".into(),
-            worktree_fingerprint: "fingerprint".into(),
-        }
-    }
 
     #[test]
-    fn preserves_background_permission_policy_in_agent_run_request() {
-        let request = build_worker_request(
-            &worker_launch(),
+    fn injects_run_scoped_mcp_env_server_and_instructions() {
+        let mut request: AgentRunRequest = serde_json::from_value(serde_json::json!({
+            "goal": "조사한다.",
+            "agentId": "codex"
+        }))
+        .unwrap();
+        inject_mcp_launch_env(
+            &mut request,
             McpLaunchEnv {
                 url: "http://127.0.0.1:1234/".into(),
                 token: "secret".into(),
                 run_id: "run-1".into(),
             },
         );
-
-        assert_eq!(request.permission_mode, Some(PermissionMode::ReadOnly));
-        assert_eq!(request.auto_allow, Some(true));
-        assert_eq!(request.run_id.as_deref(), Some("run-1"));
-        assert!(
-            request
-                .agent_env
-                .as_ref()
-                .is_some_and(|env| env.contains_key(AW_MCP_TOKEN_ENV))
+        let env = request.agent_env.as_ref().unwrap();
+        assert_eq!(
+            env.get(AW_MCP_TOKEN_ENV).map(String::as_str),
+            Some("secret")
         );
+        assert_eq!(
+            env.get(AW_MCP_RUN_ID_ENV).map(String::as_str),
+            Some("run-1")
+        );
+        assert_eq!(request.mcp_servers.len(), 1);
+        assert!(request.goal.ends_with("User request:\n조사한다."));
     }
 }

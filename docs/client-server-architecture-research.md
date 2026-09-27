@@ -12,6 +12,8 @@
 
 > 진행 상태(2026-09-27): **040(2b-1) 완료** — `specs/040-workbench-owners`. 창 label에 묶였던 소유자를 서버가 발급하는 **작업대(Bench)** 로 바꿨다(연 주체에 묶임, 명시적 열기·닫기, 메모리 전용). run 8·교환 4 command와 MCP 교환·창 제목 도구가 `Workbench.call`을 통과해 operation은 50개가 됐고, MCP 도구는 run에 묶인 agent principal로 호출한다. 교환(상태 복원용)·작업대(알림용) 스트림이 구독 가능하다. 영속 변경 기록은 `run.start`만 쓰고 나머지는 작업대 수명의 멱등 기록을 쓴다. orchestration 18개와 `orchestration:*` 스트림은 041(2b-2)이다. 세부는 [Workbench Seam — 작업대](workbench-seam.md#작업대-040).
 
+> 진행 상태(2026-09-27): **041(2b-2) 완료** — `specs/041-workbench-orchestration`. orchestration command 18개와 MCP orchestration 도구 16개가 `Workbench.call`(데스크톱 17 + `run.replay` + agent 17, operation 85)을 통과한다. 작업 영역은 창 label 대신 작업대에 묶이고(닫으면 복구 가능), 저장은 파일 전체 단일 경계, agent 역할은 서버 상태로 판정한다. `orchestration:<bindingId>` 스트림이 열렸고 run 구독·재생은 작업대 소유로 제한된다. 2단계가 끝났다 — 다음은 3단계 HTTP/WS 어댑터다. 세부는 [Workbench Seam — orchestration](workbench-seam.md#orchestration-041).
+
 ## 결론
 
 권장 구조는 **로컬 우선 독립 AW 서버**다. 서버가 프로젝트·Git·파일 감시·ACP 에이전트·터미널 등 네이티브 프로세스와 영속 상태를 단독 소유하고, 데스크톱·TUI·CLI는 HTTP 요청과 클라이언트당 하나의 WebSocket 이벤트 스트림만 사용한다. Tauri는 서버의 배포·부트스트랩과 창·메뉴·다이얼로그 같은 데스크톱 고유 기능만 맡는다.

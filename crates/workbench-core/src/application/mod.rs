@@ -14,6 +14,7 @@ pub mod goal_service;
 pub mod handlers;
 pub mod idempotency;
 pub mod intent_first;
+pub mod orchestration;
 pub mod project_service;
 pub mod provider_session_service;
 pub mod reconcilers;

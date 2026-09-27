@@ -15,12 +15,18 @@ use acp_agent_core::{
         start_agent_run::StartAgentRunUseCase,
         steer_prompt::SteerPromptUseCase,
     },
+    domain::events::RunEvent,
     domain::run::{AgentRun, AgentRunRequest, PermissionMode},
     infrastructure::{
         acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
     },
-    ports::{permission::PermissionDecision, session_registry::ReserveRunError},
+    ports::{
+        event_sink::RunEventSink,
+        permission::PermissionDecision,
+        session_handle::SessionHandle,
+        session_registry::{ReserveRunError, SessionRegistry},
+    },
 };
 use async_trait::async_trait;
 
@@ -116,6 +122,55 @@ impl RunEngine for AcpRunEngine {
             .map_err(send_error)
     }
 
+    async fn queue_prompt(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        let session = self
+            .registry
+            .active_session(run_id)
+            .await
+            .ok_or_else(|| unknown_or_finished(run_id))?;
+        let run_id = run_id.to_owned();
+        let message = prompt.trim().to_owned();
+        tokio::spawn(async move {
+            if let Err(error) = session.queue_prompt(sink.clone(), message).await {
+                sink.emit(
+                    &run_id,
+                    RunEvent::Error {
+                        message: format!("queued prompt delivery failed: {error}"),
+                    },
+                );
+            }
+        });
+        Ok(())
+    }
+
+    async fn send_and_wait(
+        &self,
+        run_id: &str,
+        prompt: String,
+        queue: bool,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        let session = self
+            .registry
+            .active_session(run_id)
+            .await
+            .ok_or_else(|| unknown_or_finished(run_id))?;
+        let message = prompt.trim().to_owned();
+        let result = if queue {
+            session.queue_prompt(sink, message).await
+        } else {
+            session.send_prompt(sink, message).await
+        };
+        result
+            .map(|_| ())
+            .map_err(|error| RunEngineError::new(RunErrorKind::Internal, error.to_string()))
+    }
+
     async fn steer_prompt(
         &self,
         run_id: &str,
@@ -198,12 +253,11 @@ impl RunEngine for AcpRunEngine {
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String> {
         self.registry.cancel_runs_owned_by(owner).await
     }
+}
 
-    fn acp_registry(&self) -> Option<AppState> {
-        Some(self.registry.clone())
-    }
-
-    fn acp_session_store(&self) -> Option<Arc<JsonAcpSessionStore>> {
-        Some(self.session_store.clone())
-    }
+fn unknown_or_finished(run_id: &str) -> RunEngineError {
+    RunEngineError::new(
+        RunErrorKind::NotFound,
+        format!("unknown or finished run: {run_id}"),
+    )
 }

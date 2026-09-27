@@ -1,0 +1,68 @@
+# Contract: orchestration operation과 이벤트 (041)
+
+`Workbench.call` operation 35개를 추가한다(50 → 85: 데스크톱 18, agent 17). 모든 command는 멱등성 키 필수, `idempotencyScope: epoch`(영속 멱등은 작업 영역 내부 기록). 입력은 최상위 `deny_unknown_fields`. scope `orchestration:read`·`orchestration:write` 추가.
+
+## 공통 검사
+
+| operation 종류 | 검사 | fault |
+|---|---|---|
+| 데스크톱(`benchId` 입력) | 작업대 없음 | `notFound` `"bench not found."` |
+| 〃 | 작업대 연 주체 아님 | `forbidden` `"bench belongs to another principal."` |
+| 〃 | 작업대에 묶인 작업 영역 없음(`bootstrap`·`listRecoverable`·`get` 제외) | 오늘 서비스 오류(`OrchestrationError` `notFound`) |
+| agent(`runId` 입력) | 주체 run ≠ 입력 run | `forbidden` `"The requested run does not match the authenticated capability."` |
+| 〃 | 역할 불일치(coordinator 아님·다른 과제·이전 세대·수동 채택 자식) | `forbidden`, 오늘 도구 오류 그대로: `details.toolError = {code: "forbiddenActor", message: "The authenticated agent role cannot call this tool."}` |
+| 〃 | run이 어느 작업 영역에도 속하지 않음 | `forbidden`, `details.toolError = {code: "scopeMismatch", message: "This run is not bound to an orchestration workspace."}` |
+
+도메인 오류는 fault `message` = 도메인 message, `details.orchestrationError` = `{code, message, retryable}` 원본. fault 코드: `invalidInput`·`invalidTopology` → `invalidArgument`, `notFound` → `notFound`, `scopeMismatch`·`unauthorized`·`readOnlyViolation` → `forbidden`, `revisionConflict`·`duplicateConflict`·`invalidTransition` → `conflict`, `capacityExceeded` → `rateLimited`, `coordinatorInactive`·`coordinatorBusy`·`workerUnavailable`·`runtimeLost` → `unavailable`(retryable은 원본 값).
+
+## 데스크톱 operation (18)
+
+| operation | 종류 | scope | 입력 → 출력 |
+|---|---|---|---|
+| `orchestration.bootstrap` | command | `orchestration:write` | `{benchId, worktreePath, resumeWorkspaceId?}` → `OrchestrationSessionDto`. 작업대에 이미 묶인 작업 영역이 있으면 그것(다른 worktree면 `"The window is already bound to another worktree."`), `resumeWorkspaceId`가 있으면 그 복구 가능 작업 영역을 묶고(이미 묶였거나 worktree가 다르면 `"The workspace cannot be bound to this window."`), 없으면 새 작업 영역을 만든다 — 같은 worktree라도 작업대마다 따로(오늘 창마다 따로와 같음) |
+| `orchestration.get` | query | `orchestration:read` | `{benchId}` → `OrchestrationSessionDto \| null` |
+| `orchestration.listRecoverable` | query | `orchestration:read` | `{benchId, worktreePath}` → `[OrchestrationSessionDto]`(묶이지 않은 것) |
+| `orchestration.bindCoordinator` | command | `orchestration:write` | `{benchId, request: BindMainRunRequest}` → Session. 활성 연결의 `request.runId`는 이 작업대 소유의 살아 있는 run이거나 흔적 없는 계획 id여야 함(계획 id는 이 작업대 소유로 claim — 화면은 Main run을 띄우기 전에 묶는다). 그 외 `forbidden` `"run is owned by another bench."`, 상태 불변(research R18) |
+| `orchestration.delegateGoal` | command | `orchestration:write` | `{benchId, request: DelegateGoalRequest}` → `DelegateGoalOutcome`(coordinator run에 프롬프트 전송 포함) |
+| `orchestration.adoptManualChild` | command | `orchestration:write` | `{benchId, panelId, title}` → Session |
+| `orchestration.listTasks` | query | `orchestration:read` | `{benchId, generationId}` → `[OrchestrationTaskDto]` |
+| `orchestration.collectReports` | query | `orchestration:read` | `{benchId}` → `[TaskReportDto]` |
+| `orchestration.setPresentation` | command | `orchestration:write` | `{benchId, request}` → Session |
+| `orchestration.sendChildCommand` | command | `orchestration:write` | `{benchId, input: DeliverTaskCommandInput}` → `TaskCommandDto` |
+| `orchestration.respondInput` | command | `orchestration:write` | `{benchId, request: TaskActionRequest}` → TaskCommand |
+| `orchestration.cancelTask` · `retryTask` · `reassignTask` | command | `orchestration:write` | `{benchId, request: TaskActionRequest}` → Session |
+| `orchestration.handoffCoordinator` | command | `orchestration:write` | `{benchId, request: CoordinatorHandoffRequest}` → Session. `request.successorRunId`에 bindCoordinator와 같은 소유 검사(살아 있는 자기 run 또는 계획 id claim) |
+| `orchestration.dispatchPrompt` | command | `orchestration:write` | `{benchId, request: DispatchPromptRequest}` → `PromptDispatchDto` |
+| `orchestration.recover` | command | `orchestration:write` | `{benchId}` → Session. **이미 이 작업대에 묶인** 작업 영역을 재조정한다(살아 있는 run 반영·scheduler 재구성·중단된 명령/알림 복구·대기 알림 백그라운드 전달). 묶이지 않았으면 평문 `"Orchestration workspace is not bootstrapped."`. 복구 가능한 작업 영역을 묶는 것은 `bootstrap`의 `resumeWorkspaceId`다(오늘과 같음) |
+| `run.replay` | query | `run:read` | `{benchId, runId, afterSequence}` → `RunReplayDto`. 허용: run 스트림의 소유 작업대 기록(첫 발행 때 hub가 기록, journal과 같은 수명)이 호출자 작업대이거나, run이 호출자 작업대에 지금 묶인 작업 영역의 노드 run(노드·세대·과제 시도 run id — 모두 삽입 시점에 출처 검증됨, research R18)이다. 그 외 `forbidden` `"run is owned by another bench."`. 보관 한도로 제거된 run은 소유 검사 없이 오늘 Evicted 형태(`terminal: true, gapDetected: true`), 모르는 run은 Missing 형태(`gapDetected: afterSequence > 0`) |
+
+## agent operation (17, agent 전용)
+
+coordinator(현재 세대): `orchestration.createChildTask`·`assignChildTask`·`listChildTasks`·`sendChildMessage`·`waitChildTasks`(최대 30초 대기, 오늘 결과 형태)·`collectChildResults`·`interruptChildTask`·`cancelChildTask`·`retryChildTask`·`reassignChildTask`.
+
+자식(자기 과제): `orchestration.getOwnTask`·`reportProgress`·`reportResult`·`requestParentInput`·`reportBlocked`·`sendParentMessage`.
+
+역할 조회: `orchestration.getAgentRole`(query) `{runId}` → `{role: "coordinator" | "child" | null, workspaceId?, taskId?}` — AW MCP `tools/list`가 요청 시점 역할로 도구 목록을 고른다(research R7).
+
+입력 = `{runId, arguments}`(`arguments` = 오늘 도구 인자 객체 그대로)(보고의 `reporterRunId` 같은 run id는 principal run에서만 가져온다 — 입력 값이 다르면 `forbidden`), 출력 = 오늘 도구 결과 JSON(DTO). 보고류는 요청 id 멱등(작업 영역 내부 기록). `waitChildTasks`는 lock 없이 작업 영역 revision 알림으로 깨어나며 최대 30초(research R12) — 구독한 뒤 읽으므로 읽기와 대기 사이의 보고도 놓치지 않는다.
+
+## `run.start` 보강 (041)
+
+- 끝난 run의 id는 다시 쓸 수 없다: hub에 그 run의 발행 이력·제거 표식이 있거나 어떤 orchestration 작업 영역(묶임과 무관)이 노드·세대로 기록 중이면 `conflict` `"duplicate run id: <id>"`(오늘 살아 있는 중복과 같은 문구). 예외는 이 작업대가 묶기 전에 claim한 계획 id다. 다른 작업대가 claim한 id도 엔진을 부르기 전에 같은 `conflict`로 거절한다. 같은 멱등성 키의 재시도는 저장된 결과를 돌려준다(research R18).
+- Main 패널(`panelId = main-agent-run`) run은 작업대에 묶인 작업 영역의 활성 세대 run과 같아야 한다 — 아니면 `preconditionFailed`, 오늘 문구(`"Main Coordinator workspace is unavailable."` · `"Main Coordinator generation must be bound before launch."` · `"Active Main Coordinator generation is unavailable."` · `"Main Coordinator generation does not match the run being launched."`).
+
+## 이벤트
+
+| 스키마 | 스트림 | 본문 | 비고 |
+|---|---|---|---|
+| `orchestration.workspaceUpdated.v1` | `orchestration:<bindingId>` | `OrchestrationEventDto{workspaceId, revision, reason, taskId?, nodeId?}` | 상태 복원용, 묶임당 256 |
+
+- `StreamKind::Orchestration` 구독 가능. 스트림 key는 묶임 id(작업 영역 DTO `eventStreamId`).
+- 구독 권한: 묶임의 작업대를 연 주체만. 다른 주체·agent `forbidden`, 모르는 id `notFound`, 끝난 묶임 `Gap(evicted)`. cursor 하나라도 거절되면 구독 전체 거절(040 규칙).
+- **run 스트림 구독 권한(보강)**: `run:<runId>` 구독도 `run.replay`와 같은 소유 조건(040은 scope만 검사 — exchange·bench와 같은 누수). 발행 전 run은 엔진에 소유가 등록된 run만 대기 구독을 허용하고 그 외 `notFound`. 검사 위치는 seam `events` 진입점(hub 아님). 제거된 run은 hub 규칙대로 `Gap(evicted)`.
+- 발행: 작업 영역이 바뀌는 모든 자리(서비스 변경, 명령 전달 단계, 알림 전달). 작업대 닫기로 복구 가능 전환될 때는 따로 발행하지 않는다 — 묶임이 풀리는 commit에서 스트림이 제거되어 구독자는 `Gap(evicted)`를 받는다. 전환 저장이 실패해도 묶임은 풀리고(research R3) `bench.close`는 `closed: true`다.
+
+## 계약 조회
+
+- `system.describe`: 데스크톱 85, readonly(`:read`만), agent(교환·제목·orchestration agent 16·orchestration 조회 중 agent가 부를 수 있는 것 — scope 기준). `eventSchemas`에 orchestration 추가(구독 가능).
+- OpenAPI·TS `OperationMap`에 35개, `EventMap["orchestration.workspaceUpdated.v1"]`.

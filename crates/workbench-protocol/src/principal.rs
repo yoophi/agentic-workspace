@@ -89,13 +89,19 @@ pub enum Scope {
     /// 창 제목 같은 표현 요청(040, ADR 0007).
     #[serde(rename = "presentation:write")]
     PresentationWrite,
+    /// 041: orchestration 작업 영역 조회·스트림.
+    #[serde(rename = "orchestration:read")]
+    OrchestrationRead,
+    /// 041: orchestration 작업 영역 변경(데스크톱 동작·agent 도구).
+    #[serde(rename = "orchestration:write")]
+    OrchestrationWrite,
     #[serde(rename = "system:describe")]
     SystemDescribe,
 }
 
 impl Scope {
     /// 전체 scope. `desktop()`이 이 집합을 갖는다.
-    pub const ALL: [Scope; 20] = [
+    pub const ALL: [Scope; 22] = [
         Scope::ProjectRead,
         Scope::ProjectWrite,
         Scope::SavedPromptRead,
@@ -115,6 +121,8 @@ impl Scope {
         Scope::ExchangeRead,
         Scope::ExchangeWrite,
         Scope::PresentationWrite,
+        Scope::OrchestrationRead,
+        Scope::OrchestrationWrite,
         Scope::SystemDescribe,
     ];
 
@@ -139,6 +147,8 @@ impl Scope {
             Scope::ExchangeRead => "exchange:read",
             Scope::ExchangeWrite => "exchange:write",
             Scope::PresentationWrite => "presentation:write",
+            Scope::OrchestrationRead => "orchestration:read",
+            Scope::OrchestrationWrite => "orchestration:write",
             Scope::SystemDescribe => "system:describe",
         }
     }
@@ -156,6 +166,7 @@ impl Scope {
                 | Scope::BenchWrite
                 | Scope::ExchangeWrite
                 | Scope::PresentationWrite
+                | Scope::OrchestrationWrite
         )
     }
 }
@@ -189,10 +200,12 @@ impl fmt::Display for PrincipalSubject {
 const AGENT_SUBJECT_PREFIX: &str = "agent:";
 
 /// agent principal의 scope: 교환 조회·쓰기와 표현 요청만(ADR 0006).
-pub const AGENT_SCOPES: [Scope; 4] = [
+pub const AGENT_SCOPES: [Scope; 6] = [
     Scope::ExchangeRead,
     Scope::ExchangeWrite,
     Scope::PresentationWrite,
+    Scope::OrchestrationRead,
+    Scope::OrchestrationWrite,
     Scope::SystemDescribe,
 ];
 
@@ -283,14 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn desktop_has_all_20_and_readonly_has_only_reads() {
+    fn desktop_has_all_22_and_readonly_has_only_reads() {
         let desktop = AuthenticatedPrincipal::desktop();
-        assert_eq!(desktop.scopes.len(), 20);
+        assert_eq!(desktop.scopes.len(), 22);
         let readonly = AuthenticatedPrincipal::test_readonly();
         assert_eq!(
             readonly.scopes.len(),
-            11,
-            "read 10(run·bench·exchange 포함) + system:describe"
+            12,
+            "read 11(run·bench·exchange·orchestration 포함) + system:describe"
         );
         for scope in Scope::ALL {
             assert_eq!(readonly.has_scope(scope), scope.is_read(), "{scope}");
@@ -326,7 +339,7 @@ mod tests {
         );
         let other = AuthenticatedPrincipal::test_as("desktop2");
         assert_eq!(other.subject.as_str(), "test:desktop2");
-        assert_eq!(other.scopes.len(), 20);
+        assert_eq!(other.scopes.len(), 22);
 
         let agent = AuthenticatedPrincipal::agent("r1");
         assert_eq!(agent.kind.as_str(), "agent");
@@ -337,6 +350,8 @@ mod tests {
                 Scope::ExchangeRead,
                 Scope::ExchangeWrite,
                 Scope::PresentationWrite,
+                Scope::OrchestrationRead,
+                Scope::OrchestrationWrite,
                 Scope::SystemDescribe
             ]
         );

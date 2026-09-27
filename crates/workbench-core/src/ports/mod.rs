@@ -1,12 +1,16 @@
 pub mod agent_catalog_reader;
 pub mod agent_run_settings_repository;
+pub mod agent_worker;
 pub mod agent_workspace_registry;
 pub mod aggregate_lock;
+pub mod coordinator_notification;
 pub mod desktop_bridge;
 pub mod event_publisher;
 pub mod git_providers;
 pub mod goal_repository;
 pub mod operation_ledger;
+pub mod orchestration_event_sink;
+pub mod orchestration_repository;
 pub mod project_repository;
 pub mod provider_session_repository;
 pub mod run_engine;

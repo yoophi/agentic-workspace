@@ -1,0 +1,354 @@
+{
+  "name": "orchestration-agent-child-reports-ok",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-1",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bootstrap",
+        "requestId": "r-2",
+        "input": {
+          "benchId": "{{bench}}",
+          "worktreePath": "{{repo}}"
+        },
+        "idempotencyKey": "k-2"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "worktreePath": "{{repo}}",
+            "revision": 0
+          }
+        }
+      },
+      "capture": {
+        "workspace": "/output/id",
+        "stream": "/output/eventStreamId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-3",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "coord"
+          }
+        },
+        "idempotencyKey": "k-3"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "coord"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bindCoordinator",
+        "requestId": "r-4",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "requestId": "bind-coord",
+            "panelId": "main-agent-run",
+            "runId": "coord",
+            "state": "active",
+            "expectedRevision": 0
+          }
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "{{workspace}}",
+            "revision": 1
+          }
+        }
+      },
+      "capture": {
+        "generation": "/output/activeCoordinatorGenerationId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.createChildTask",
+        "requestId": "r-5",
+        "input": {
+          "runId": "coord",
+          "arguments": {
+            "requestId": "c1",
+            "title": "task c1",
+            "role": {
+              "name": "Reader",
+              "responsibility": "read",
+              "expectedOutput": "notes"
+            },
+            "objective": "read the repo",
+            "expectedResult": "summary"
+          }
+        },
+        "idempotencyKey": "k-5"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "principal": "agent:coord",
+      "capture": {
+        "task": "/output/taskId",
+        "child": "/output/runId",
+        "node": "/output/nodeId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.getOwnTask",
+        "requestId": "r-32",
+        "input": {
+          "runId": "{{child}}",
+          "arguments": {}
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "{{task}}"
+          }
+        }
+      },
+      "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.reportProgress",
+        "requestId": "r-33",
+        "input": {
+          "runId": "{{child}}",
+          "arguments": {
+            "requestId": "p1",
+            "summary": "half",
+            "progressPercent": 50
+          }
+        },
+        "idempotencyKey": "k-33"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "report": {
+              "type": "progress",
+              "progressPercent": 50,
+              "reporterRunId": "{{child}}"
+            }
+          }
+        }
+      },
+      "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-37",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.sendParentMessage",
+        "requestId": "r-34",
+        "input": {
+          "runId": "{{child}}",
+          "arguments": {
+            "requestId": "s1",
+            "summary": "fyi"
+          }
+        },
+        "idempotencyKey": "k-34"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "report": {
+              "type": "message"
+            }
+          }
+        }
+      },
+      "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-38",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/1/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.reportResult",
+        "requestId": "r-35",
+        "input": {
+          "runId": "{{child}}",
+          "arguments": {
+            "requestId": "r1",
+            "summary": "done",
+            "confidence": 0.9
+          }
+        },
+        "idempotencyKey": "k-35"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "report": {
+              "type": "result",
+              "taskId": "{{task}}"
+            }
+          }
+        }
+      },
+      "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-39",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/2/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-36",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "completed"
+              }
+            ]
+          }
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/2/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

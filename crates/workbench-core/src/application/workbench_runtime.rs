@@ -20,15 +20,26 @@ use crate::{
         authorization,
         bench_service::{BenchServices, MESSAGE_BENCH_FORBIDDEN, MESSAGE_BENCH_NOT_FOUND},
         epoch_idempotency::{EpochIdempotency, EpochIdempotencyLimits},
+        orchestration::{
+            binding::{BindingChange, OrchestrationBindings},
+            runtime::{OrchestrationConfig, OrchestrationRuntime, OrchestrationTerminalHook},
+        },
         reconcilers::ReconcilerRegistry,
         registry::{CallContext, Registry},
     },
     domain::project_error::ProjectError,
     infrastructure::event_hub::{EventHub, EventHubLimits},
     infrastructure::{
-        bench::in_memory_bench_registry::{BenchAdmission, BenchLimits, InMemoryBenchRegistry},
-        fs::acp_session_store::JsonAcpSessionStore,
-        run::{acp_run_engine::AcpRunEngine, workbench_run_sink::WorkbenchRunSink},
+        bench::in_memory_bench_registry::{BenchLimits, InMemoryBenchRegistry},
+        fs::{
+            acp_session_store::JsonAcpSessionStore,
+            orchestration_store::JsonOrchestrationRepository,
+        },
+        orchestration::{
+            bound_repository::BoundOrchestrationRepository,
+            delivery_sink::DeliveryOrchestrationSink, worktree_guard::WorktreeGuards,
+        },
+        run::acp_run_engine::AcpRunEngine,
     },
     infrastructure::{
         data_paths::DataPaths,
@@ -60,6 +71,8 @@ pub struct RuntimeAdapters {
     pub launch_decorator: Option<Arc<dyn RunLaunchDecorator>>,
     pub bench_limits: BenchLimits,
     pub idempotency_limits: EpochIdempotencyLimits,
+    /// orchestration 동시 자식 수·자식 프로필(041). 운영은 환경 변수, 테스트는 직접 지정.
+    pub orchestration: OrchestrationConfig,
 }
 
 impl RuntimeAdapters {
@@ -79,6 +92,7 @@ impl RuntimeAdapters {
             launch_decorator: None,
             bench_limits: BenchLimits::default(),
             idempotency_limits: EpochIdempotencyLimits::default(),
+            orchestration: OrchestrationConfig::from_env(),
         }
     }
 }
@@ -161,6 +175,11 @@ impl TestHooks {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CrashInjected(pub CrashPoint);
 
+/// 모르는 orchestration 묶임 스트림(041).
+pub const MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND: &str = "orchestration stream not found.";
+/// 소유가 등록되지 않은 run 스트림(041 research R17): 기동되지 않은 id는 기다릴 수 없다.
+pub const MESSAGE_RUN_STREAM_NOT_FOUND: &str = "run stream not found.";
+
 pub struct WorkbenchRuntime {
     paths: DataPaths,
     events: Arc<EventHub>,
@@ -170,6 +189,18 @@ pub struct WorkbenchRuntime {
     reconcilers: ReconcilerRegistry,
     hooks: Arc<TestHooks>,
     benches: Arc<BenchServices>,
+    orchestration: Arc<OrchestrationRuntime>,
+}
+
+/// run 종료 hook 여러 개를 차례로 부른다.
+struct ChainedTerminalHook(Vec<Arc<dyn RunTerminalHook>>);
+
+impl RunTerminalHook for ChainedTerminalHook {
+    fn on_terminal(&self, run_id: &str) {
+        for hook in &self.0 {
+            hook.on_terminal(run_id);
+        }
+    }
 }
 
 impl WorkbenchRuntime {
@@ -207,15 +238,67 @@ impl WorkbenchRuntime {
                 Arc::new(JsonAcpSessionStore::from_paths(&paths)),
             )),
         };
+        // orchestration(041): run 종료 hook은 core가 소유한다(worktree 감시). AW가 넘긴 hook이 있으면 뒤에 잇는다.
+        let orchestration_hook = Arc::new(OrchestrationTerminalHook::new());
+        let terminal_hook: Arc<dyn RunTerminalHook> = match adapters.terminal_hook.clone() {
+            Some(extra) => Arc::new(ChainedTerminalHook(vec![
+                orchestration_hook.clone() as Arc<dyn RunTerminalHook>,
+                extra,
+            ])),
+            None => orchestration_hook.clone(),
+        };
         let benches = Arc::new(BenchServices::new(
             Arc::new(InMemoryBenchRegistry::new(adapters.bench_limits)),
             engine,
             Arc::clone(&events),
             adapters.desktop.clone(),
-            adapters.terminal_hook.clone(),
+            Some(terminal_hook),
             adapters.launch_decorator.clone(),
             Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
         ));
+        let bindings = Arc::new(OrchestrationBindings::default());
+        let repository = BoundOrchestrationRepository::new(
+            JsonOrchestrationRepository::from_paths(&paths),
+            Arc::clone(&bindings),
+        );
+        {
+            // 묶임이 풀리면 그 묶임의 스트림을 지운다(구독자에게 `Gap(evicted)`, research R10). commit 안에서 불리므로
+            // hub만 만진다.
+            let hub = Arc::clone(&events);
+            repository.set_observer(Arc::new(move |changes: &[BindingChange]| {
+                for change in changes {
+                    if let BindingChange::Unbound { binding, .. } = change {
+                        hub.remove_stream(StreamKind::Orchestration, &binding.binding_id);
+                    }
+                }
+            }));
+        }
+        let orchestration = Arc::new(OrchestrationRuntime::new(
+            repository,
+            DeliveryOrchestrationSink::new(
+                Arc::clone(&events),
+                Arc::clone(&bindings),
+                adapters.desktop.clone(),
+            ),
+            Arc::clone(&benches),
+            Arc::new(WorktreeGuards::default()),
+            adapters.orchestration.clone(),
+        ));
+        orchestration_hook.attach(&orchestration);
+        {
+            // 작업대 닫기 → 묶인 작업 영역 복구 가능 전환(research R3). 동기 파일 입출력이라 blocking pool에서.
+            let orchestration = Arc::downgrade(&orchestration);
+            benches.add_close_hook(Arc::new(move |bench_id: String| {
+                let orchestration = orchestration.clone();
+                Box::pin(async move {
+                    if let Some(orchestration) = orchestration.upgrade() {
+                        let _ =
+                            tokio::task::spawn_blocking(move || orchestration.release(&bench_id))
+                                .await;
+                    }
+                })
+            }));
+        }
 
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
@@ -225,6 +308,7 @@ impl WorkbenchRuntime {
             &adapters,
             &epoch,
             &benches,
+            &orchestration,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -243,7 +327,13 @@ impl WorkbenchRuntime {
             reconcilers,
             hooks,
             benches,
+            orchestration,
         }))
+    }
+
+    /// orchestration 런타임(041).
+    pub fn orchestration(&self) -> &Arc<OrchestrationRuntime> {
+        &self.orchestration
     }
 
     /// 작업대·run·교환 서비스(040).
@@ -251,20 +341,9 @@ impl WorkbenchRuntime {
         &self.benches
     }
 
-    /// run 기계(040). AW 과도기 orchestration은 `acp_registry()`·`acp_session_store()`로 같은 기계를 빌린다.
+    /// run 기계(040). 서버 안(handler·orchestration)과 테스트만 쓴다 — 041에서 AW 과도기 접근자는 없앴다.
     pub fn run_engine(&self) -> &Arc<dyn RunEngine> {
         &self.benches.engine
-    }
-
-    /// 041 전 과도기: AW orchestration이 자식 run을 작업대 단위 sink로 발행하게 한다. 041에서 제거한다.
-    pub fn run_sink(&self, bench_id: &str) -> WorkbenchRunSink {
-        self.benches.run_sink(bench_id)
-    }
-
-    /// 041 전 과도기: AW orchestration이 run을 띄우는 동안 작업대 입장권을 잡는다(research R1·R12). 041에서 제거한다.
-    pub fn admit(&self, bench_id: &str) -> Result<BenchAdmission, WorkbenchFault> {
-        self.benches
-            .admit(&workbench_protocol::RequestId::random(), None, bench_id)
     }
 
     /// 작업대에 속한 스트림(`exchange:<id>`·`bench:<id>`)은 작업대를 연 주체만 구독한다(040). hub의 scope 검사는
@@ -280,8 +359,17 @@ impl WorkbenchRuntime {
             let Some((kind, bench_id)) = parse_stream_id(&cursor.stream_id) else {
                 continue;
             };
-            if !matches!(kind, StreamKind::Exchange | StreamKind::Bench) {
-                continue;
+            match kind {
+                StreamKind::Exchange | StreamKind::Bench => {}
+                StreamKind::Orchestration => {
+                    self.authorize_orchestration_stream(principal, bench_id, &cursor.stream_id)?;
+                    continue;
+                }
+                StreamKind::Run => {
+                    self.authorize_run_stream(principal, bench_id, &cursor.stream_id)?;
+                    continue;
+                }
+                _ => continue,
             }
             match self.benches.registry.owner(bench_id) {
                 Some(owner) if owner == principal.subject => {}
@@ -303,6 +391,76 @@ impl WorkbenchRuntime {
             }
         }
         Ok(())
+    }
+
+    fn owns_bench(&self, principal: &AuthenticatedPrincipal, bench_id: &str) -> bool {
+        self.benches
+            .registry
+            .owner(bench_id)
+            .is_some_and(|owner| owner == principal.subject)
+    }
+
+    /// `orchestration:<bindingId>`(041): 그 묶임의 작업대를 연 주체만. 풀린 묶임(제거 표식)은 `Gap(evicted)`로 보낸다.
+    fn authorize_orchestration_stream(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        binding_id: &str,
+        stream_id: &str,
+    ) -> Result<(), WorkbenchFault> {
+        match self.orchestration.bindings().bench_of_binding(binding_id) {
+            Some(bench) if self.owns_bench(principal, &bench) => Ok(()),
+            Some(_) => Err(WorkbenchFault::new(
+                FaultCode::Forbidden,
+                RequestId::random(),
+                MESSAGE_BENCH_FORBIDDEN,
+            )),
+            None if self.events.is_evicted(stream_id) => Ok(()),
+            None => Err(WorkbenchFault::new(
+                FaultCode::NotFound,
+                RequestId::random(),
+                MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND,
+            )),
+        }
+    }
+
+    /// `run:<id>`(041 research R17): 소유 작업대를 연 주체, 또는 그 run이 주체 작업대에 지금 묶인 작업 영역의 노드
+    /// run이면 허용. 보관 한도로 제거된 run은 내용이 없어 `Gap(evicted)`로 보낸다. 소유가 등록되지 않은 run(발행 전
+    /// 기동도 안 된 id)은 기다릴 수 없다.
+    fn authorize_run_stream(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        run_id: &str,
+        stream_id: &str,
+    ) -> Result<(), WorkbenchFault> {
+        if self.events.is_evicted(stream_id) {
+            return Ok(());
+        }
+        let owner = self.events.run_owner(run_id);
+        if owner
+            .as_deref()
+            .is_some_and(|bench| self.owns_bench(principal, bench))
+        {
+            return Ok(());
+        }
+        if self
+            .orchestration
+            .bench_with_workspace_run(run_id)
+            .is_some_and(|bench| self.owns_bench(principal, &bench))
+        {
+            return Ok(());
+        }
+        Err(match owner {
+            Some(_) => WorkbenchFault::new(
+                FaultCode::Forbidden,
+                RequestId::random(),
+                crate::application::orchestration::runtime::MESSAGE_RUN_OWNED_BY_OTHER_BENCH,
+            ),
+            None => WorkbenchFault::new(
+                FaultCode::NotFound,
+                RequestId::random(),
+                MESSAGE_RUN_STREAM_NOT_FOUND,
+            ),
+        })
     }
 
     /// 이벤트 hub(039). 발행은 `publish_run`을, 구독은 `Workbench::events`를 쓴다.
@@ -496,9 +654,9 @@ mod tests {
         assert_eq!(fault.code, FaultCode::Forbidden);
     }
 
-    /// 039: `events`가 구독을 연다. 037의 `events_are_unsupported_in_037`를 대체한다(계약이 뒤집혔다).
+    /// 039: `events`가 구독을 연다. 041: orchestration 스트림은 묶임 id로 찾고, 모르는 묶임은 `notFound`다.
     #[tokio::test]
-    async fn events_reject_unknown_stream_kind_and_describe_carries_epoch() {
+    async fn events_reject_unknown_orchestration_binding_and_describe_carries_epoch() {
         let (_dir, runtime) = runtime();
         let fault = runtime
             .events(
@@ -512,7 +670,10 @@ mod tests {
                 },
             )
             .unwrap_err();
-        assert_eq!(fault.code, FaultCode::InvalidArgument);
+        assert_eq!(
+            (fault.code, fault.message.as_str()),
+            (FaultCode::NotFound, MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND)
+        );
         assert!(!runtime.epoch().is_empty());
     }
 

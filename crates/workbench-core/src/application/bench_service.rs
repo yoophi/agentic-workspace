@@ -37,8 +37,12 @@ pub const MESSAGE_BENCH_FORBIDDEN: &str = "bench belongs to another principal.";
 pub const MESSAGE_BENCH_LIMIT: &str = "too many open benches.";
 pub const MESSAGE_NOT_DIRECTORY: &str = "Workspace path must be a directory.";
 
-/// 작업대가 닫힐 때 정리할 것(교환 작업 영역 등). 소유 run 취소 뒤, 스트림 제거 전에 불린다.
-pub type BenchCloseHook = Arc<dyn Fn(&str) + Send + Sync>;
+/// 작업대가 닫힐 때 정리할 것(orchestration 작업 영역 복구 가능 전환 등, 041). 소유 run 취소 뒤, 스트림 제거
+/// 전에 닫기 정리 task 안에서 차례로 await된다. 입장권·저장소 경계를 기다리는 흐름과 교착하지 않도록 hook은
+/// 입장권을 잡지 않는다(research R2·R3).
+pub type BenchCloseHook = Arc<
+    dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
+>;
 
 pub struct BenchServices {
     pub registry: Arc<InMemoryBenchRegistry>,
@@ -219,7 +223,16 @@ impl BenchServices {
 
     async fn finish_close(&self, ticket: CloseTicket, bench_id: &str) -> BenchCloseOutput {
         let drained = ticket.wait_admissions().await;
-        let cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
+        // 엔진은 소유 표 순회 순서로 돌려준다 — 결과는 run id 순으로 정렬해 결정적으로 둔다(041 계약 fixture).
+        let mut cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
+        cancelled_runs.sort();
+        // 닫힌 작업대의 run은 끝났다 — MCP 토큰도 폐기한다(041 Codex 리뷰: 다른 작업대가 작업 영역을 재개해도 이전
+        // 토큰이 다시 쓰이지 않게. 역할 판정도 살아 있는 소유를 요구해 이중으로 막는다).
+        if let Some(decorator) = &self.launch_decorator {
+            for run_id in &cancelled_runs {
+                decorator.revoke_run(run_id);
+            }
+        }
         let hooks = self
             .close_hooks
             .lock()
@@ -227,7 +240,7 @@ impl BenchServices {
             .clone();
         self.exchange_registry.remove_bench_now(bench_id);
         for hook in hooks {
-            hook(bench_id);
+            hook(bench_id.to_owned()).await;
         }
         self.hub.remove_stream(StreamKind::Exchange, bench_id);
         self.hub.remove_stream(StreamKind::Bench, bench_id);

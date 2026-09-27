@@ -1,25 +1,21 @@
 use std::net::Ipv4Addr;
 
 use crate::{
-    application::orchestration_scheduler::OrchestrationScheduler,
     domain::{
         mcp_title_control::{TitleChangeFailureCode, TitleChangeResult},
         run::{AgentMcpHttpHeader, AgentMcpServerConfig},
     },
-    infrastructure::{
-        agent_session_registry::AppState,
-        mcp::{
-            agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
-            capability_registry::{CapabilityPrincipal, CapabilityRegistry},
-            orchestration_tool::{
-                handle_tool as handle_orchestration_tool, is_orchestration_tool,
-                tool_definitions as orchestration_tool_definitions,
-            },
-            protocol::{JsonRpcResponse, initialize_result, parse_request},
-            title_tool::{
-                SET_WINDOW_TITLE_TOOL, origin_allowed, parse_title_change_request, tool_result,
-                tools_list_result, unsupported_tool_result,
-            },
+    infrastructure::mcp::{
+        agent_exchange_tool::{handle_tool as handle_exchange_tool, is_exchange_tool},
+        capability_registry::{CapabilityPrincipal, CapabilityRegistry},
+        orchestration_tool::{
+            agent_role, handle_tool as handle_orchestration_tool, is_orchestration_tool,
+            tool_definitions as orchestration_tool_definitions,
+        },
+        protocol::{JsonRpcResponse, initialize_result, parse_request},
+        title_tool::{
+            SET_WINDOW_TITLE_TOOL, origin_allowed, parse_title_change_request, tool_result,
+            tools_list_result, unsupported_tool_result,
         },
     },
 };
@@ -50,13 +46,11 @@ pub const AW_MCP_SERVER_NAME: &str = "agentic_workbench";
 pub struct McpServerState {
     base_url: String,
     capability_registry: CapabilityRegistry,
-    orchestration_scheduler: OrchestrationScheduler,
 }
 
 #[derive(Clone)]
 struct McpRouterState {
     app: AppHandle,
-    registry: AppState,
     mcp_state: McpServerState,
 }
 
@@ -108,8 +102,7 @@ Do not use this MCP server for file edits, Git operations, permission approval, 
 }
 
 impl McpServerState {
-    pub fn start(app: AppHandle, registry: AppState) -> Result<Self> {
-        let capability_registry = CapabilityRegistry::default();
+    pub fn start(app: AppHandle) -> Result<Self> {
         let std_listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .context("failed to bind MCP server to localhost")?;
         std_listener
@@ -120,20 +113,10 @@ impl McpServerState {
             .context("failed to read MCP server address")?;
         let server_state = Self {
             base_url: format!("http://{address}/mcp"),
-            capability_registry,
-            orchestration_scheduler: OrchestrationScheduler::new(
-                std::env::var("ACP_MAX_RUNS")
-                    .or_else(|_| std::env::var("ACP_WORKBENCH_MAX_RUNS"))
-                    .ok()
-                    .and_then(|value| value.parse::<usize>().ok())
-                    .unwrap_or(4)
-                    .saturating_sub(1)
-                    .max(1),
-            ),
+            capability_registry: CapabilityRegistry::default(),
         };
         let router_state = McpRouterState {
             app,
-            registry,
             mcp_state: server_state.clone(),
         };
         let router = Router::new()
@@ -157,56 +140,30 @@ impl McpServerState {
         Ok(server_state)
     }
 
+    /// run에 묶인 MCP 토큰을 만든다(041: 역할 주장 없음).
     pub fn launch_env(&self, run_id: &str) -> McpLaunchEnv {
-        self.launch_env_for_principal(CapabilityPrincipal::legacy_run(run_id))
-            .expect("MCP capability registry must be available")
-    }
-
-    pub fn launch_env_for_principal(
-        &self,
-        principal: CapabilityPrincipal,
-    ) -> Result<McpLaunchEnv, crate::domain::agent_orchestration::OrchestrationError> {
-        let run_id = principal.run_id.clone();
-        Ok(McpLaunchEnv {
+        McpLaunchEnv {
             url: self.base_url.clone(),
-            token: self.capability_registry.issue(principal)?,
-            run_id,
-        })
+            token: self.capability_registry.issue(run_id),
+            run_id: run_id.to_owned(),
+        }
     }
 
-    pub fn revoke_run_capability(
-        &self,
-        run_id: &str,
-    ) -> Result<(), crate::domain::agent_orchestration::OrchestrationError> {
-        self.capability_registry.revoke_run(run_id)
+    pub fn revoke_run_capability(&self, run_id: &str) {
+        self.capability_registry.revoke_run(run_id);
     }
 
-    pub fn revoke_generation_capabilities(
-        &self,
-        _workspace_id: &str,
-        generation_id: &str,
-    ) -> Result<(), crate::domain::agent_orchestration::OrchestrationError> {
-        self.capability_registry.revoke_generation(generation_id)
-    }
-
-    pub fn orchestration_scheduler(&self) -> OrchestrationScheduler {
-        self.orchestration_scheduler.clone()
-    }
-
-    pub fn bind_run_principal(
-        &self,
-        principal: CapabilityPrincipal,
-    ) -> Result<usize, crate::domain::agent_orchestration::OrchestrationError> {
-        let run_id = principal.run_id.clone();
-        self.capability_registry.bind_run(&run_id, principal)
-    }
-
-    fn resolve_capability(
-        &self,
-        token: &str,
-    ) -> Result<CapabilityPrincipal, crate::domain::agent_orchestration::OrchestrationError> {
+    fn resolve_capability(&self, token: &str) -> Option<CapabilityPrincipal> {
         self.capability_registry.resolve(token)
     }
+}
+
+fn workbench_runtime(
+    app: &AppHandle,
+) -> std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime> {
+    app.state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
+        .inner()
+        .clone()
 }
 
 async fn handle_get() -> Response {
@@ -253,8 +210,8 @@ async fn handle_post(
                 .into_response();
         };
         match state.mcp_state.resolve_capability(token) {
-            Ok(principal) => Some(principal),
-            Err(_) => {
+            Some(principal) => Some(principal),
+            None => {
                 let result = tool_result(TitleChangeResult::failure(
                     TitleChangeFailureCode::Unauthorized,
                     "MCP capability is invalid or expired.",
@@ -272,13 +229,14 @@ async fn handle_post(
         "initialize" => JsonRpcResponse::result(id, initialize_result()),
         "tools/list" => {
             let mut result = tools_list_result();
+            // 041: 도구 목록은 요청 시점의 서버 역할에서 고른다(research R7).
+            let role = agent_role(
+                &workbench_runtime(&state.app),
+                principal.as_ref().expect("authenticated tools list"),
+            )
+            .await;
             if let Some(tools) = result.get_mut("tools").and_then(Value::as_array_mut) {
-                tools.extend(orchestration_tool_definitions(
-                    principal
-                        .as_ref()
-                        .expect("authenticated tools list")
-                        .actor_kind,
-                ));
+                tools.extend(orchestration_tool_definitions(role));
             }
             JsonRpcResponse::result(id, result)
         }
@@ -318,9 +276,7 @@ async fn handle_tool_call(
     if is_orchestration_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
         return handle_orchestration_tool(
-            &state.app,
-            &state.registry,
-            &state.mcp_state,
+            &workbench_runtime(&state.app),
             principal,
             name,
             arguments,
@@ -328,13 +284,9 @@ async fn handle_tool_call(
         .await;
     }
     if is_exchange_tool(name) {
-        let runtime = state
-            .app
-            .state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
-            .inner()
-            .clone();
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_exchange_tool(&runtime, principal, name, arguments).await;
+        return handle_exchange_tool(&workbench_runtime(&state.app), principal, name, arguments)
+            .await;
     }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);
@@ -353,11 +305,7 @@ async fn handle_tool_call(
     }
     // 040 US3(ADR 0006·0007): 제목 요청은 agent principal로 `bench.requestTitle`을 부른다. 서버는 작업대 알림
     // 스트림에 발행하고, 데스크톱 bridge가 그 작업대의 창에 적용한다(네이티브 방송 없음).
-    let runtime = state
-        .app
-        .state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
-        .inner()
-        .clone();
+    let runtime = workbench_runtime(&state.app);
     let mut call = workbench_protocol::CallRequest::query(
         workbench_protocol::OperationId::BenchRequestTitle,
         serde_json::json!({ "runId": request.run_id, "title": request.title }),
@@ -408,7 +356,6 @@ mod tests {
         AW_MCP_RUN_ID_ENV, AW_MCP_SERVER_NAME, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpServerState,
         bearer_token,
     };
-    use crate::application::orchestration_scheduler::OrchestrationScheduler;
     use crate::domain::run::{AgentMcpHttpHeader, AgentMcpServerConfig};
     use crate::infrastructure::mcp::capability_registry::CapabilityRegistry;
     use axum::http::{HeaderMap, HeaderValue};
@@ -417,7 +364,6 @@ mod tests {
         McpServerState {
             base_url: "http://127.0.0.1:1/mcp".into(),
             capability_registry: CapabilityRegistry::default(),
-            orchestration_scheduler: OrchestrationScheduler::new(2),
         }
     }
 

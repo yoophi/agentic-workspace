@@ -17,10 +17,12 @@ use crate::{
         bench_service::BenchServices,
         handlers::epoch::{async_query_handler, epoch_handler, to_json, Scope},
         intent_first::{Applied, IntentFirst, MutationSpec, Reservation},
+        orchestration::runtime::OrchestrationRuntime,
         registry::{decode_input, CallContext, OperationHandler, Registry},
         run_dto::convert,
         run_service::{self, engine_fault, PromptKind},
     },
+    domain::agent_orchestration::MAIN_AGENT_NODE_ID,
     infrastructure::storage_coordinator::StorageCoordinator,
     ports::desktop_bridge::LaunchContext,
 };
@@ -32,6 +34,7 @@ struct StartHandler {
     runner: Arc<IntentFirst>,
     coordinator: Arc<StorageCoordinator>,
     services: Arc<BenchServices>,
+    orchestration: Arc<OrchestrationRuntime>,
 }
 
 #[async_trait]
@@ -67,6 +70,7 @@ impl OperationHandler for StartHandler {
         };
         let services = Arc::clone(&self.services);
         let panel_id = typed.panel_id.clone();
+        let orchestration = Arc::clone(&self.orchestration);
         let runtime = tokio::runtime::Handle::current();
         let spec = MutationSpec {
             operation: OperationId::RunStart,
@@ -82,11 +86,43 @@ impl OperationHandler for StartHandler {
                     .to_owned();
                 let mut request = request.clone();
                 request.run_id = Some(run_id.clone());
+                // research R18: 끝난 run의 id는 다시 쓰지 않는다. 같은 id가 다시 살아나면 그 id를 기록한 작업 영역(복구
+                // 가능 포함)과 hub journal이 다른 run을 가리키게 된다. 예외는 이 작업대가 묶기 전에 claim한 계획 id(발행
+                // 이력 없음)다 — 화면은 Main run을 띄우기 전에 그 id로 먼저 묶는다. 멱등 재시도는 apply 전에 저장된
+                // 결과로 끝나므로 여기(실제 실행)에서만 검사한다. 살아 있는 run의 중복은 엔진이 오늘 문구로 거절한다.
+                let prebound_here =
+                    services.hub.run_owner(&run_id).as_deref() == Some(bench_id.as_str());
+                if services.hub.has_run_history(&run_id)
+                    || (orchestration.references_run(&run_id) && !prebound_here)
+                {
+                    return Ok(Applied::Rejected(WorkbenchFault::new(
+                        FaultCode::Conflict,
+                        apply_ctx.request_id.clone(),
+                        format!("duplicate run id: {run_id}"),
+                    )));
+                }
+                // 041: Main 패널 run은 작업대에 묶인 작업 영역의 활성 세대와 맞아야 한다(오늘 AW decorator의 문구·fault).
+                let orchestration_role = match panel_id.as_deref() {
+                    Some(MAIN_AGENT_NODE_ID) => {
+                        match orchestration.coordinator_launch_role(&bench_id, &run_id) {
+                            Ok(role) => Some(role),
+                            Err(message) => {
+                                return Ok(Applied::Rejected(WorkbenchFault::new(
+                                    FaultCode::PreconditionFailed,
+                                    apply_ctx.request_id.clone(),
+                                    message,
+                                )))
+                            }
+                        }
+                    }
+                    _ => None,
+                };
                 if let Some(decorator) = &services.launch_decorator {
                     let context = LaunchContext {
                         bench_id: bench_id.clone(),
                         panel_id: panel_id.clone(),
                         run_id: run_id.clone(),
+                        orchestration: orchestration_role,
                     };
                     if let Err(message) = decorator.decorate(&mut request, &context) {
                         return Ok(Applied::Rejected(WorkbenchFault::new(
@@ -97,9 +133,24 @@ impl OperationHandler for StartHandler {
                     }
                 }
                 let sink = services.run_sink(&bench_id);
+                // 소유 등록(research R17·R18): 발행 전 run을 기다리는 구독도 소유 작업대로 판단한다. 다른 작업대가 이미
+                // claim한 id(그 작업대의 계획 id 등)면 엔진을 부르기 전에 거절한다 — 저장 전 경합에서도 소유가 뒤집히지 않는다.
+                if !services.hub.claim_run(&run_id, &bench_id) {
+                    return Ok(Applied::Rejected(WorkbenchFault::new(
+                        FaultCode::Conflict,
+                        apply_ctx.request_id.clone(),
+                        format!("duplicate run id: {run_id}"),
+                    )));
+                }
                 match runtime.block_on(services.engine.start(request, &bench_id, sink)) {
                     Ok(run) => Ok(Applied::Ok(convert::<_, AgentRunDto>(&run))),
-                    Err(error) => Ok(Applied::Rejected(engine_fault(apply_ctx.request_id, error))),
+                    Err(error) => {
+                        // 묶기 전 claim한 계획 id는 작업 영역이 기록 중이므로 되돌리지 않는다(같은 id로 다시 띄울 수 있게).
+                        if !prebound_here {
+                            services.hub.release_run_claim(&run_id, &bench_id);
+                        }
+                        Ok(Applied::Rejected(engine_fault(apply_ctx.request_id, error)))
+                    }
                 }
             }),
             is_store_corrupt: |_: &WorkbenchFault| false,
@@ -115,6 +166,7 @@ pub fn register(
     runner: &Arc<IntentFirst>,
     coordinator: &Arc<StorageCoordinator>,
     services: &Arc<BenchServices>,
+    orchestration: &Arc<OrchestrationRuntime>,
 ) {
     registry.register(
         OperationId::RunListToolCandidates,
@@ -141,6 +193,7 @@ pub fn register(
             runner: Arc::clone(runner),
             coordinator: Arc::clone(coordinator),
             services: Arc::clone(services),
+            orchestration: Arc::clone(orchestration),
         }),
     );
     for (operation, kind) in [

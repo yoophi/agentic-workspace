@@ -3,12 +3,17 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
+    pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
     time::Duration,
 };
+
+/// `send_and_wait` 턴 안에서 실행할 일(041 liveness ①): 가짜 agent가 턴 중에 도구를 부르는 것을 흉내 낸다.
+pub type TurnHook = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 use acp_agent_core::{
     domain::{
@@ -49,6 +54,9 @@ pub struct ScriptedRunEngine {
     runs: Mutex<HashMap<String, Slot>>,
     pub starts: AtomicUsize,
     pub prompts: AtomicUsize,
+    pub turn_hook: Mutex<Option<TurnHook>>,
+    /// `start`가 슬롯을 만든 뒤·돌아가기 전에 실행한다(자식 첫 턴이 바인딩 전에 도구를 부르는 경우).
+    pub start_hook: Mutex<Option<TurnHook>>,
 }
 
 fn not_active() -> RunEngineError {
@@ -158,6 +166,10 @@ impl RunEngine for ScriptedRunEngine {
                 },
             );
         }
+        let hook = self.start_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(run_id.clone()).await;
+        }
         Ok(AgentRun {
             id: run_id,
             goal: request.goal,
@@ -182,6 +194,38 @@ impl RunEngine for ScriptedRunEngine {
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        Ok(())
+    }
+
+    async fn queue_prompt(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        if !self.active(run_id) {
+            return Err(RunEngineError::new(
+                RunErrorKind::NotFound,
+                format!("unknown or finished run: {run_id}"),
+            ));
+        }
+        self.prompts.fetch_add(1, Ordering::SeqCst);
+        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        Ok(())
+    }
+
+    async fn send_and_wait(
+        &self,
+        run_id: &str,
+        prompt: String,
+        _queue: bool,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        self.queue_prompt(run_id, prompt, sink).await?;
+        let hook = self.turn_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(run_id.to_owned()).await;
+        }
         Ok(())
     }
 

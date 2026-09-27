@@ -131,14 +131,24 @@ async fn agent_send_is_rejected_while_the_bench_is_closing() {
     .unwrap();
 
     // 먼저 입장한 동작을 흉내 내 닫기를 `Closing`에 붙잡아 둔다.
-    let held = h.rt.runtime.admit(&bench).unwrap();
+    let held =
+        h.rt.runtime
+            .benches()
+            .admit(&workbench_protocol::RequestId::random(), None, &bench)
+            .unwrap();
     let closer = {
         let h = Arc::clone(&h);
         let bench = bench.clone();
         tokio::spawn(async move { h.close(&bench).await })
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while h.rt.runtime.admit(&bench).is_ok() {
+    while h
+        .rt
+        .runtime
+        .benches()
+        .admit(&workbench_protocol::RequestId::random(), None, &bench)
+        .is_ok()
+    {
         assert!(
             tokio::time::Instant::now() < deadline,
             "bench never entered Closing"

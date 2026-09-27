@@ -26,7 +26,11 @@ fn open(rt: &TestRuntime) -> String {
 async fn close_waits_for_admitted_work_and_rejects_new_admissions() {
     let rt = TestRuntime::new();
     let bench = open(&rt);
-    let admission = rt.runtime.admit(&bench).expect("admit while open");
+    let admission = rt
+        .runtime
+        .benches()
+        .admit(&workbench_protocol::RequestId::random(), None, &bench)
+        .expect("admit while open");
 
     let services = rt.runtime.benches().clone();
     let closing_bench = bench.clone();
@@ -47,7 +51,8 @@ async fn close_waits_for_admitted_work_and_rejects_new_admissions() {
     );
     let fault = rt
         .runtime
-        .admit(&bench)
+        .benches()
+        .admit(&workbench_protocol::RequestId::random(), None, &bench)
         .err()
         .expect("closing bench refuses admission");
     assert_eq!(fault.code, FaultCode::NotFound);
@@ -125,7 +130,11 @@ async fn long_control_does_not_block_close() {
 async fn close_completes_even_if_the_caller_is_cancelled() {
     let rt = TestRuntime::new();
     let bench = open(&rt);
-    let held = rt.runtime.admit(&bench).expect("admit while open");
+    let held = rt
+        .runtime
+        .benches()
+        .admit(&workbench_protocol::RequestId::random(), None, &bench)
+        .expect("admit while open");
     let caller = {
         let services = std::sync::Arc::clone(rt.runtime.benches());
         let bench = bench.clone();
@@ -140,7 +149,12 @@ async fn close_completes_even_if_the_caller_is_cancelled() {
         })
     };
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while rt.runtime.admit(&bench).is_ok() {
+    while rt
+        .runtime
+        .benches()
+        .admit(&workbench_protocol::RequestId::random(), None, &bench)
+        .is_ok()
+    {
         assert!(
             tokio::time::Instant::now() < deadline,
             "bench never entered Closing"

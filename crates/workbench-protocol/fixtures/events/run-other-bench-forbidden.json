@@ -1,0 +1,24 @@
+{
+  "name": "run-other-bench-forbidden",
+  "foreignRuns": [
+    "theirs"
+  ],
+  "setup": [
+    {
+      "publish": "run:theirs",
+      "count": 2
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:theirs",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "forbidden",
+      "message": "run is owned by another bench."
+    }
+  }
+}

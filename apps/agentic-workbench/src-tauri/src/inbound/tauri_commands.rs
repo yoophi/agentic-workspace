@@ -18,22 +18,10 @@ use crate::inbound::workbench_compat;
 use crate::{
     application::{
         appearance_preferences_service::AppearancePreferencesService,
-        coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
-        orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
-        orchestration_service::{
-            BindMainRunRequest, CoordinatorHandoffRequest, DelegateGoalOutcome,
-            DelegateGoalRequest, DispatchPromptRequest, OrchestrationService,
-            SetPresentationRequest, TaskActionRequest,
-        },
-        send_prompt::SendPromptUseCase,
         worktree_workspace_layout_service,
     },
     domain::{
         agent::AgentDescriptor,
-        agent_orchestration::{
-            AccessPolicy, MAIN_AGENT_NODE_ID, PromptDelivery, PromptDispatchTargetStatus,
-            TaskCommand, TaskCommandKind, TaskCommandSource, TaskReportType, WorkerRuntimeProfile,
-        },
         agent_run_settings::AgentRunSettings,
         agent_tool_candidate::{AgentToolCandidateQuery, AgentToolCandidateResponse},
         appearance_preferences::AppearancePreferences,
@@ -54,20 +42,11 @@ use crate::{
         worktree_workspace_layout::WorkspaceLayoutSettings,
     },
     infrastructure::{
-        acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
-        agent_session_registry::AppState,
         desktop_benches,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-        json_orchestration_repository::JsonOrchestrationRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
-        mcp::{McpServerState, capability_registry::CapabilityPrincipal},
         perf_log::{log_async_command, log_async_command_error, run_blocking_command},
-        tauri_orchestration_event_sink::TauriOrchestrationEventSink,
         window_manager,
-    },
-    ports::{
-        agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
-        orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
     },
 };
 
@@ -125,42 +104,110 @@ pub struct BootstrapOrchestrationInput {
     resume_workspace_id: Option<String>,
 }
 
-pub(crate) fn orchestration_error(
-    error: crate::domain::agent_orchestration::OrchestrationError,
-) -> String {
-    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+// ---- 041: orchestration command 18개는 `orchestration.*`·`run.replay` 호환 어댑터다 ----
+// 창은 작업대(Bench)로 바뀌고 흐름은 core `OrchestrationRuntime`에 있다(specs/041-workbench-orchestration/contracts/
+// tauri-compat.md). 인자·반환·오류 문자열은 오늘과 같다: 오류는 fault `details.orchestrationError` 원본의 JSON
+// 문자열(없으면 문구 그대로), 결과의 `boundWindowLabel`은 이 창 label로 다시 채우고 `eventStreamId`는 뺀다.
+
+/// fault → 오늘 orchestration command 오류 문자열.
+fn orchestration_fault_string(fault: &workbench_protocol::WorkbenchFault) -> String {
+    fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("orchestrationError"))
+        .map(|error| error.to_string())
+        .unwrap_or_else(|| fault.message.clone())
+}
+
+async fn orchestration_call(
+    app: &AppHandle,
+    operation: OperationId,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let runtime = workbench_runtime(app);
+    let request = if matches!(
+        workbench_protocol::operations::spec_for(operation).kind,
+        workbench_protocol::OperationKind::Query
+    ) {
+        workbench_compat::query_request(operation, input)
+    } else {
+        workbench_compat::command_request(operation, input)
+    };
+    match runtime
+        .call(workbench_compat::desktop_principal(), request)
+        .await
+    {
+        Ok(reply) => workbench_compat::decode_output(reply),
+        Err(fault) => Err(orchestration_fault_string(&fault)),
+    }
+}
+
+/// 창의 작업대. 없으면 연다(창의 Worktree 경로, 없으면 `hint`).
+async fn orchestration_bench(
+    app: &AppHandle,
+    window: &tauri::Window,
+    hint: Option<&str>,
+) -> Result<String, String> {
+    desktop_benches::ensure(&workbench_runtime(app), window.label(), hint).await
+}
+
+/// core 작업 영역 DTO → 오늘 결과 형태. `bound`면 이 창 label을 채운다.
+fn session_for_window(mut session: serde_json::Value, label: Option<&str>) -> serde_json::Value {
+    if let Some(object) = session.as_object_mut() {
+        object.remove("eventStreamId");
+        object.insert("boundWindowLabel".into(), json!(label));
+    }
+    session
+}
+
+/// 작업대에 묶인 작업 영역을 돌려주는 operation의 결과(이 창 label로 묶임 표시).
+async fn bound_session(
+    app: &AppHandle,
+    window: &tauri::Window,
+    operation: OperationId,
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let session = orchestration_call(app, operation, input).await?;
+    Ok(session_for_window(session, Some(window.label())))
 }
 
 #[tauri::command]
-pub fn bootstrap_orchestration_workspace(
+pub async fn bootstrap_orchestration_workspace(
     app: AppHandle,
     window: tauri::Window,
     input: BootstrapOrchestrationInput,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let canonical = std::fs::canonicalize(&input.worktree_path)
-        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
-    if !canonical.is_dir() {
-        return Err("Workspace path must be a directory.".into());
-    }
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .bootstrap(
-            canonical.to_string_lossy().as_ref(),
-            window.label(),
-            input.resume_workspace_id.as_deref(),
-        )
-        .map_err(orchestration_error)
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, Some(&input.worktree_path)).await?;
+    bound_session(
+        &app,
+        &window,
+        OperationId::OrchestrationBootstrap,
+        json!({ "benchId": bench, "worktreePath": input.worktree_path,
+                "resumeWorkspaceId": input.resume_workspace_id }),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn get_orchestration_workspace(
+pub async fn get_orchestration_workspace(
     app: AppHandle,
     window: tauri::Window,
-) -> Result<Option<crate::domain::agent_orchestration::OrchestrationSession>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .get_for_window(window.label())
-        .map_err(orchestration_error)
+) -> Result<serde_json::Value, String> {
+    // 작업대가 없는 창에는 묶인 작업 영역도 없다(오늘 `None`).
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(serde_json::Value::Null);
+    };
+    let session = orchestration_call(
+        &app,
+        OperationId::OrchestrationGet,
+        json!({ "benchId": bench }),
+    )
+    .await?;
+    Ok(if session.is_null() {
+        session
+    } else {
+        session_for_window(session, Some(window.label()))
+    })
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -170,97 +217,89 @@ pub struct ListRecoverableOrchestrationInput {
 }
 
 #[tauri::command]
-pub fn list_recoverable_orchestration_workspaces(
-    app: AppHandle,
-    input: ListRecoverableOrchestrationInput,
-) -> Result<Vec<crate::domain::agent_orchestration::OrchestrationSession>, String> {
-    let canonical = std::fs::canonicalize(&input.worktree_path)
-        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
-    if !canonical.is_dir() {
-        return Err("Workspace path must be a directory.".into());
-    }
-    let worktree_path = canonical.to_string_lossy().to_string();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service =
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
-    let stale_window_labels: Vec<_> = service
-        .list_for_worktree(&worktree_path)
-        .map_err(orchestration_error)?
-        .into_iter()
-        .filter_map(|session| session.bound_window_label)
-        .filter(|label| app.get_webview_window(label).is_none())
-        .collect();
-    for label in stale_window_labels {
-        service
-            .release_window(&label)
-            .map_err(orchestration_error)?;
-    }
-    service
-        .list_recoverable(&worktree_path)
-        .map_err(orchestration_error)
-}
-
-#[tauri::command]
-pub fn bind_main_coordinator_run(
+pub async fn list_recoverable_orchestration_workspaces(
     app: AppHandle,
     window: tauri::Window,
-    mcp_state: State<'_, McpServerState>,
-    input: BindMainRunRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let run_id = input.run_id.clone();
-    let binding_state = input.state;
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .bind_main_run(window.label(), input)
-        .map_err(orchestration_error)?;
-    if binding_state == crate::application::orchestration_service::MainRunBindingState::Active
-        && let Some(generation_id) = session.active_coordinator_generation_id.clone()
-    {
-        mcp_state
-            .bind_run_principal(
-                crate::infrastructure::mcp::capability_registry::CapabilityPrincipal::coordinator(
-                    session.id.clone(),
-                    window.label(),
-                    run_id,
-                    generation_id,
-                ),
-            )
-            .map_err(orchestration_error)?;
-    }
-    Ok(session)
+    input: ListRecoverableOrchestrationInput,
+) -> Result<serde_json::Value, String> {
+    // 사라진 창의 작업 영역은 창 `Destroyed` → 작업대 닫기가 이미 풀었다(오늘의 정리 단계가 필요 없다).
+    let bench = orchestration_bench(&app, &window, Some(&input.worktree_path)).await?;
+    let sessions = orchestration_call(
+        &app,
+        OperationId::OrchestrationListRecoverable,
+        json!({ "benchId": bench, "worktreePath": input.worktree_path }),
+    )
+    .await?;
+    Ok(match sessions {
+        serde_json::Value::Array(items) => serde_json::Value::Array(
+            items
+                .into_iter()
+                .map(|session| session_for_window(session, None))
+                .collect(),
+        ),
+        other => other,
+    })
 }
+
+/// `{benchId, request}` 모양 command 하나(작업 영역 결과).
+macro_rules! session_request_command {
+    ($name:ident, $operation:expr) => {
+        #[tauri::command]
+        pub async fn $name(
+            app: AppHandle,
+            window: tauri::Window,
+            input: serde_json::Value,
+        ) -> Result<serde_json::Value, String> {
+            let bench = orchestration_bench(&app, &window, None).await?;
+            bound_session(
+                &app,
+                &window,
+                $operation,
+                json!({ "benchId": bench, "request": input }),
+            )
+            .await
+        }
+    };
+}
+
+session_request_command!(
+    bind_main_coordinator_run,
+    OperationId::OrchestrationBindCoordinator
+);
+session_request_command!(
+    set_orchestration_presentation,
+    OperationId::OrchestrationSetPresentation
+);
+session_request_command!(
+    cancel_orchestration_task,
+    OperationId::OrchestrationCancelTask
+);
+session_request_command!(
+    retry_orchestration_task,
+    OperationId::OrchestrationRetryTask
+);
+session_request_command!(
+    reassign_orchestration_task,
+    OperationId::OrchestrationReassignTask
+);
+session_request_command!(
+    handoff_orchestration_coordinator,
+    OperationId::OrchestrationHandoffCoordinator
+);
 
 #[tauri::command]
 pub async fn delegate_orchestration_goal(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    input: DelegateGoalRequest,
-) -> Result<DelegateGoalOutcome, String> {
-    let goal = input.goal.clone();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service =
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
-    let outcome = service
-        .delegate_goal(window.label(), input)
-        .map_err(orchestration_error)?;
-    let snapshot = service
-        .get_for_window(window.label())
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
-    let run_id = snapshot
-        .nodes
-        .iter()
-        .find(|node| node.id == crate::domain::agent_orchestration::MAIN_AGENT_NODE_ID)
-        .and_then(|node| node.current_run_id.clone())
-        .ok_or_else(|| "Main Coordinator run is unavailable.".to_string())?;
-    // 040 과도기: Main run 이벤트는 그 창 작업대의 sink로(run 소유자 = 작업대).
-    let bench = desktop_benches::lookup(window.label()).unwrap_or_default();
-    SendPromptUseCase::new(state.inner().clone())
-        .execute(workbench_runtime(&app).run_sink(&bench), run_id, goal)
-        .await
-        .map_err(String::from)?;
-    Ok(outcome)
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    orchestration_call(
+        &app,
+        OperationId::OrchestrationDelegateGoal,
+        json!({ "benchId": bench, "request": input }),
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -271,15 +310,19 @@ pub struct AdoptManualChildInput {
 }
 
 #[tauri::command]
-pub fn adopt_manual_orchestration_child(
+pub async fn adopt_manual_orchestration_child(
     app: AppHandle,
     window: tauri::Window,
     input: AdoptManualChildInput,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .adopt_manual_child(window.label(), &input.panel_id, &input.title)
-        .map_err(orchestration_error)
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    bound_session(
+        &app,
+        &window,
+        OperationId::OrchestrationAdoptManualChild,
+        json!({ "benchId": bench, "panelId": input.panel_id, "title": input.title }),
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -289,434 +332,65 @@ pub struct ListOrchestrationTasksInput {
 }
 
 #[tauri::command]
-pub fn list_orchestration_tasks(
+pub async fn list_orchestration_tasks(
     app: AppHandle,
     window: tauri::Window,
     input: ListOrchestrationTasksInput,
-) -> Result<Vec<crate::domain::agent_orchestration::OrchestrationTask>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .list_child_tasks(window.label(), &input.generation_id)
-        .map_err(orchestration_error)
-}
-
-#[tauri::command]
-pub fn collect_orchestration_reports(
-    app: AppHandle,
-    window: tauri::Window,
-) -> Result<Vec<crate::domain::agent_orchestration::TaskReport>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    Ok(
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-            .get_for_window(window.label())
-            .map_err(orchestration_error)?
-            .map(|session| session.reports)
-            .unwrap_or_default(),
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    orchestration_call(
+        &app,
+        OperationId::OrchestrationListTasks,
+        json!({ "benchId": bench, "generationId": input.generation_id }),
     )
+    .await
 }
 
 #[tauri::command]
-pub fn set_orchestration_presentation(
+pub async fn collect_orchestration_reports(
     app: AppHandle,
     window: tauri::Window,
-    input: SetPresentationRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .set_presentation(window.label(), input)
-        .map_err(orchestration_error)
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DeliverTaskCommandInput {
-    request_id: String,
-    task_id: String,
-    kind: TaskCommandKind,
-    message: Option<String>,
-    input_report_id: Option<String>,
-    delivery: PromptDelivery,
-    expected_task_revision: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    // 작업 영역이 없으면 빈 목록(오늘과 같다).
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(json!([]));
+    };
+    orchestration_call(
+        &app,
+        OperationId::OrchestrationCollectReports,
+        json!({ "benchId": bench }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn send_orchestration_child_command(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: DeliverTaskCommandInput,
-) -> Result<TaskCommand, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app.clone(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-    ));
-    let command = OrchestrationCommandService::new(repository.clone(), adapter)
-        .deliver(
-            window.label(),
-            DeliverTaskCommandRequest {
-                request_id: input.request_id,
-                task_id: input.task_id,
-                kind: input.kind,
-                message: input.message,
-                input_report_id: input.input_report_id,
-                delivery: input.delivery,
-                source: TaskCommandSource::User,
-                expected_task_revision: input.expected_task_revision,
-            },
-        )
-        .await
-        .map_err(orchestration_error)?;
-    emit_orchestration_runtime_update(&app, &repository, window.label(), "taskCommandDelivery");
-    Ok(command)
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    orchestration_call(
+        &app,
+        OperationId::OrchestrationSendChildCommand,
+        json!({ "benchId": bench, "input": input }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn respond_orchestration_input(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: TaskActionRequest,
-) -> Result<TaskCommand, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let snapshot = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    )
-    .get_for_window(window.label())
-    .map_err(orchestration_error)?
-    .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
-    let input_report_id = snapshot
-        .reports
-        .iter()
-        .rev()
-        .find(|report| {
-            report.task_id == input.task_id && report.report_type == TaskReportType::InputRequest
-        })
-        .map(|report| report.id.clone());
-    let task_revision = snapshot
-        .tasks
-        .iter()
-        .find(|task| task.id == input.task_id)
-        .map(|task| task.revision);
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app,
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-    ));
-    OrchestrationCommandService::new(repository, adapter)
-        .deliver(
-            window.label(),
-            DeliverTaskCommandRequest {
-                request_id: input.request_id,
-                task_id: input.task_id,
-                kind: TaskCommandKind::InputResponse,
-                message: input.message,
-                input_report_id,
-                delivery: PromptDelivery::Queue,
-                source: TaskCommandSource::User,
-                expected_task_revision: task_revision,
-            },
-        )
-        .await
-        .map_err(orchestration_error)
-}
-
-#[tauri::command]
-pub async fn cancel_orchestration_task(
-    app: AppHandle,
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: TaskActionRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let snapshot = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    )
-    .get_for_window(window.label())
-    .map_err(orchestration_error)?
-    .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
-    let task = snapshot.tasks.iter().find(|task| task.id == input.task_id);
-    let task_revision = task.map(|task| task.revision);
-    let has_active_run = task
-        .and_then(|task| task.assigned_node_id.as_ref())
-        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
-        .and_then(|node| node.current_run_id.as_ref())
-        .is_some();
-    if !has_active_run {
-        return OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-            .cancel_task(window.label(), input)
-            .map_err(orchestration_error);
-    }
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app.clone(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-    ));
-    OrchestrationCommandService::new(repository.clone(), adapter)
-        .deliver(
-            window.label(),
-            DeliverTaskCommandRequest {
-                request_id: input.request_id,
-                task_id: input.task_id.clone(),
-                kind: TaskCommandKind::Cancel,
-                message: None,
-                input_report_id: None,
-                delivery: PromptDelivery::Queue,
-                source: TaskCommandSource::User,
-                expected_task_revision: task_revision,
-            },
-        )
-        .await
-        .map_err(orchestration_error)?;
-    let _ = mcp_state.orchestration_scheduler().release(&input.task_id);
-    OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .get_for_window(window.label())
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())
-}
-
-#[tauri::command]
-pub async fn retry_orchestration_task(
-    app: AppHandle,
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: TaskActionRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service =
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
-    stop_existing_task_worker(
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    orchestration_call(
         &app,
-        window.label(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-        &service,
-        &input.task_id,
-    )
-    .await?;
-    service
-        .retry_task(window.label(), input.clone())
-        .map_err(orchestration_error)?;
-    launch_orchestration_task_for_ui(
-        &app,
-        window.label(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-        &service,
-        &input.task_id,
+        OperationId::OrchestrationRespondInput,
+        json!({ "benchId": bench, "request": input }),
     )
     .await
-}
-
-#[tauri::command]
-pub async fn reassign_orchestration_task(
-    app: AppHandle,
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: TaskActionRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    );
-    stop_existing_task_worker(
-        &app,
-        window.label(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-        &service,
-        &input.task_id,
-    )
-    .await?;
-    service
-        .reassign_task(window.label(), input.clone())
-        .map_err(orchestration_error)?;
-    launch_orchestration_task_for_ui(
-        &app,
-        window.label(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-        &service,
-        &input.task_id,
-    )
-    .await
-}
-
-async fn stop_existing_task_worker(
-    app: &AppHandle,
-    window_label: &str,
-    state: AppState,
-    mcp_state: McpServerState,
-    service: &OrchestrationService<JsonOrchestrationRepository, TauriOrchestrationEventSink>,
-    task_id: &str,
-) -> Result<(), String> {
-    let Some(snapshot) = service
-        .get_for_window(window_label)
-        .map_err(orchestration_error)?
-    else {
-        return Ok(());
-    };
-    let Some(task) = snapshot.tasks.iter().find(|task| task.id == task_id) else {
-        return Ok(());
-    };
-    let Some(node) = task
-        .assigned_node_id
-        .as_ref()
-        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
-    else {
-        return Ok(());
-    };
-    let Some(run_id) = node.current_run_id.as_ref() else {
-        return Ok(());
-    };
-    let binding = WorkerBinding {
-        workspace_id: snapshot.id.clone(),
-        window_label: window_label.into(),
-        node_id: node.id.clone(),
-        task_id: task.id.clone(),
-        run_id: run_id.clone(),
-    };
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app.clone(),
-        state,
-        mcp_state.clone(),
-    ));
-    if adapter.is_active(&binding).await {
-        let _ = adapter.cancel_worker(&binding).await;
-    }
-    mcp_state
-        .revoke_run_capability(run_id)
-        .map_err(orchestration_error)
-}
-
-async fn launch_orchestration_task_for_ui(
-    app: &AppHandle,
-    window_label: &str,
-    state: AppState,
-    mcp_state: McpServerState,
-    service: &OrchestrationService<JsonOrchestrationRepository, TauriOrchestrationEventSink>,
-    task_id: &str,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    if let crate::application::orchestration_scheduler::LeaseOutcome::Queued { .. } = mcp_state
-        .orchestration_scheduler()
-        .acquire(task_id)
-        .map_err(orchestration_error)?
-    {
-        return service
-            .get_for_window(window_label)
-            .map_err(orchestration_error)?
-            .ok_or_else(|| "Orchestration workspace is unavailable.".to_string());
-    }
-    let snapshot = service
-        .get_for_window(window_label)
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
-    let task = snapshot
-        .tasks
-        .iter()
-        .find(|task| task.id == task_id)
-        .ok_or_else(|| "Task is unavailable.".to_string())?;
-    let node = task
-        .assigned_node_id
-        .as_ref()
-        .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
-        .ok_or_else(|| "Assigned Child is unavailable.".to_string())?;
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app.clone(),
-        state,
-        mcp_state.clone(),
-    ));
-    let planned_run_id = uuid::Uuid::new_v4().to_string();
-    let outcome = adapter
-        .start_worker(WorkerAssignment {
-            workspace_id: snapshot.id.clone(),
-            window_label: window_label.into(),
-            worktree_path: snapshot.worktree_path.clone(),
-            node_id: node.id.clone(),
-            task_id: task.id.clone(),
-            attempt: task.attempt,
-            planned_run_id,
-            role: node.role.clone(),
-            objective: task.objective.clone(),
-            constraints: task.constraints.clone(),
-            expected_result: task.expected_result.clone(),
-            runtime_profile: WorkerRuntimeProfile {
-                agent_profile_id: std::env::var("AW_ORCHESTRATION_AGENT_PROFILE")
-                    .unwrap_or_else(|_| "codex".into()),
-                provider_id: "acp".into(),
-                model_id: None,
-                access_policy: AccessPolicy::ReadOnly,
-                supports_read_only: true,
-            },
-            mcp_capability: String::new(),
-        })
-        .await
-        .map_err(orchestration_error)?;
-    match outcome {
-        StartWorkerOutcome::Started { run_id } => service
-            .bind_child_run(window_label, &task.id, &node.id, &run_id)
-            .map_err(orchestration_error),
-        StartWorkerOutcome::Queued { .. } => service
-            .get_for_window(window_label)
-            .map_err(orchestration_error)?
-            .ok_or_else(|| "Orchestration workspace is unavailable.".to_string()),
-        StartWorkerOutcome::Failed {
-            code: _,
-            message,
-            retryable: _,
-        } => {
-            let _ = mcp_state.orchestration_scheduler().release(task_id);
-            Err(message)
-        }
-    }
-}
-
-#[tauri::command]
-pub fn handoff_orchestration_coordinator(
-    app: AppHandle,
-    window: tauri::Window,
-    mcp_state: State<'_, McpServerState>,
-    input: CoordinatorHandoffRequest,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let previous_generation = {
-        let repository = JsonOrchestrationRepository::from_app(&app)?;
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
-            .get_for_window(window.label())
-            .map_err(orchestration_error)?
-            .and_then(|session| session.active_coordinator_generation_id)
-    };
-    let successor_run_id = input.successor_run_id.clone();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
-        .handoff_coordinator(window.label(), input)
-        .map_err(orchestration_error)?;
-    if let Some(generation_id) = previous_generation {
-        mcp_state
-            .revoke_generation_capabilities(&session.id, &generation_id)
-            .map_err(orchestration_error)?;
-    }
-    if let Some(generation_id) = session.active_coordinator_generation_id.clone() {
-        mcp_state
-            .bind_run_principal(
-                crate::infrastructure::mcp::capability_registry::CapabilityPrincipal::coordinator(
-                    session.id.clone(),
-                    window.label(),
-                    successor_run_id,
-                    generation_id,
-                ),
-            )
-            .map_err(orchestration_error)?;
-    }
-    Ok(session)
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -726,229 +400,64 @@ pub struct ReplayRuntimeEventsInput {
     after_sequence: u64,
 }
 
+/// 결과는 오늘처럼 항상 `RunReplay`다. 창에 작업대가 없거나 이 작업대가 재생할 수 없는 run이면 오늘의 Missing
+/// 형태 — 다른 창의 run이 재생되던 누수를 막는다(contracts tauri-compat).
 #[tauri::command]
-pub fn replay_orchestration_runtime_events(
+pub async fn replay_orchestration_runtime_events(
     app: AppHandle,
+    window: tauri::Window,
     input: ReplayRuntimeEventsInput,
-) -> RunReplay {
-    // 039: run journal은 core 이벤트 hub에 있다. 응답 형태는 오늘의 `RuntimeEventSnapshot`과 같다.
-    workbench_runtime(&app)
-        .events_hub()
-        .replay_run(&input.run_id, input.after_sequence)
+) -> Result<RunReplay, String> {
+    let missing = RunReplay {
+        run_id: input.run_id.clone(),
+        events: Vec::new(),
+        last_sequence: 0,
+        terminal: false,
+        gap_detected: input.after_sequence > 0,
+    };
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(missing);
+    };
+    let replay = orchestration_call(
+        &app,
+        OperationId::RunReplay,
+        json!({ "benchId": bench, "runId": input.run_id, "afterSequence": input.after_sequence }),
+    )
+    .await;
+    Ok(replay
+        .ok()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or(missing))
 }
 
 #[tauri::command]
 pub async fn dispatch_orchestration_prompt(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-    input: DispatchPromptRequest,
-) -> Result<crate::domain::agent_orchestration::PromptDispatch, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    );
-    let mut dispatch = service
-        .record_prompt_dispatch(window.label(), input)
-        .map_err(orchestration_error)?;
-    let snapshot = service
-        .get_for_window(window.label())
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is unavailable.".to_string())?;
-
-    for target in dispatch.targets.clone() {
-        let Some(node) = snapshot.nodes.iter().find(|node| {
-            node.id == target.panel_id
-                && node.kind == crate::domain::agent_orchestration::AgentNodeKind::Child
-        }) else {
-            continue;
-        };
-        let Some(task) = node
-            .assigned_task_id
-            .as_ref()
-            .and_then(|task_id| snapshot.tasks.iter().find(|task| task.id == *task_id))
-        else {
-            dispatch = service
-                .update_prompt_dispatch_target(
-                    window.label(),
-                    &dispatch.id,
-                    &target.request_id,
-                    PromptDispatchTargetStatus::Rejected,
-                    Some(("unknownTask".into(), "Child has no assigned task.".into())),
-                )
-                .map_err(orchestration_error)?;
-            continue;
-        };
-        let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-            app.clone(),
-            state.inner().clone(),
-            mcp_state.inner().clone(),
-        ));
-        let command = OrchestrationCommandService::new(repository.clone(), adapter)
-            .deliver(
-                window.label(),
-                DeliverTaskCommandRequest {
-                    request_id: target.request_id.clone(),
-                    task_id: task.id.clone(),
-                    kind: TaskCommandKind::Message,
-                    message: Some(dispatch.message.clone()),
-                    input_report_id: None,
-                    delivery: dispatch.delivery,
-                    source: TaskCommandSource::User,
-                    expected_task_revision: Some(task.revision),
-                },
-            )
-            .await;
-        dispatch = match command {
-            Ok(command)
-                if command.status
-                    == crate::domain::agent_orchestration::TaskCommandStatus::Accepted =>
-            {
-                service
-                    .update_prompt_dispatch_target(
-                        window.label(),
-                        &dispatch.id,
-                        &target.request_id,
-                        PromptDispatchTargetStatus::Delivered,
-                        None,
-                    )
-                    .map_err(orchestration_error)?
-            }
-            Ok(command) => service
-                .update_prompt_dispatch_target(
-                    window.label(),
-                    &dispatch.id,
-                    &target.request_id,
-                    PromptDispatchTargetStatus::Failed,
-                    command
-                        .failure
-                        .map(|failure| (format!("{:?}", failure.code), failure.message)),
-                )
-                .map_err(orchestration_error)?,
-            Err(error) => service
-                .update_prompt_dispatch_target(
-                    window.label(),
-                    &dispatch.id,
-                    &target.request_id,
-                    PromptDispatchTargetStatus::Failed,
-                    Some((format!("{:?}", error.code), error.message)),
-                )
-                .map_err(orchestration_error)?,
-        };
-    }
-    Ok(dispatch)
+    input: serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    orchestration_call(
+        &app,
+        OperationId::OrchestrationDispatchPrompt,
+        json!({ "benchId": bench, "request": input }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn recover_orchestration_workspace(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
-) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
-    let service = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    );
-    let snapshot = service
-        .get_for_window(window.label())
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())?;
-    let mut live_run_ids = Vec::new();
-    // 040 과도기: run 소유자는 창의 작업대다.
-    let bench = desktop_benches::lookup(window.label());
-    for run_id in snapshot
-        .nodes
-        .iter()
-        .filter_map(|node| node.current_run_id.as_ref())
-    {
-        if bench.is_some() && state.active_owner_of(run_id).await == bench {
-            live_run_ids.push(run_id.clone());
-        }
-    }
-    let reconciled = service
-        .reconcile_runtime(window.label(), &live_run_ids)
-        .map_err(orchestration_error)?;
-    let active_task_ids = reconciled
-        .tasks
-        .iter()
-        .filter(|task| {
-            task.status == crate::domain::agent_orchestration::TaskStatus::Running
-                && task
-                    .assigned_node_id
-                    .as_ref()
-                    .and_then(|node_id| reconciled.nodes.iter().find(|node| node.id == *node_id))
-                    .and_then(|node| node.current_run_id.as_ref())
-                    .is_some_and(|run_id| live_run_ids.contains(run_id))
-        })
-        .map(|task| task.id.clone())
-        .collect::<Vec<_>>();
-    let ready_task_ids = reconciled
-        .tasks
-        .iter()
-        .filter(|task| task.status == crate::domain::agent_orchestration::TaskStatus::Ready)
-        .map(|task| task.id.clone())
-        .collect::<Vec<_>>();
-    mcp_state
-        .orchestration_scheduler()
-        .reconcile(&active_task_ids, &ready_task_ids)
-        .map_err(orchestration_error)?;
-    let _ = repository.pending_outbox().map_err(orchestration_error)?;
-    let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
-        app.clone(),
-        state.inner().clone(),
-        mcp_state.inner().clone(),
-    ));
-    OrchestrationCommandService::new(repository.clone(), adapter.clone())
-        .reconcile_pending(window.label())
-        .map_err(orchestration_error)?;
-    let dispatcher = CoordinatorNotificationDispatcher::new(repository.clone(), adapter);
-    dispatcher
-        .recover_interrupted(window.label())
-        .map_err(orchestration_error)?;
-    let dispatch_app = app.clone();
-    let dispatch_repository = repository.clone();
-    let dispatch_window_label = window.label().to_string();
-    tokio::spawn(async move {
-        let _ = dispatcher.dispatch_pending(&dispatch_window_label).await;
-        emit_orchestration_runtime_update(
-            &dispatch_app,
-            &dispatch_repository,
-            &dispatch_window_label,
-            "notificationRecovery",
-        );
-    });
-    service
-        .get_for_window(window.label())
-        .map_err(orchestration_error)?
-        .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())
-}
-
-fn emit_orchestration_runtime_update(
-    app: &AppHandle,
-    repository: &JsonOrchestrationRepository,
-    window_label: &str,
-    reason: &str,
-) {
-    let service = OrchestrationService::new(
-        repository.clone(),
-        TauriOrchestrationEventSink::new(app.clone()),
-    );
-    if let Ok(Some(session)) = service.get_for_window(window_label) {
-        let _ = TauriOrchestrationEventSink::new(app.clone()).emit(
-            window_label,
-            OrchestrationEvent {
-                workspace_id: session.id,
-                revision: session.revision,
-                reason: reason.into(),
-                task_id: None,
-                node_id: None,
-            },
-        );
-    }
+) -> Result<serde_json::Value, String> {
+    let bench = orchestration_bench(&app, &window, None).await?;
+    bound_session(
+        &app,
+        &window,
+        OperationId::OrchestrationRecover,
+        json!({ "benchId": bench }),
+    )
+    .await
 }
 
 /// 창별 worktree 구독 task(039 US3). task를 abort하면 구독 스트림이 drop되어 hub의 감시 참조 수가 내려간다.
@@ -1811,58 +1320,6 @@ fn open_url_with_system_browser(url: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to open external URL: {error}"))
 }
 
-pub(crate) fn resolve_agent_run_launch_principal(
-    app: &AppHandle,
-    window_label: &str,
-    panel_id: Option<&str>,
-    run_id: &str,
-) -> Result<Option<CapabilityPrincipal>, String> {
-    if panel_id != Some(MAIN_AGENT_NODE_ID) {
-        return Ok(None);
-    }
-
-    let repository = JsonOrchestrationRepository::from_app(app)?;
-    let session =
-        OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
-            .get_for_window(window_label)
-            .map_err(orchestration_error)?;
-    coordinator_principal_for_bound_session(panel_id, run_id, window_label, session.as_ref())
-}
-
-fn coordinator_principal_for_bound_session(
-    panel_id: Option<&str>,
-    run_id: &str,
-    window_label: &str,
-    session: Option<&crate::domain::agent_orchestration::OrchestrationSession>,
-) -> Result<Option<CapabilityPrincipal>, String> {
-    if panel_id != Some(MAIN_AGENT_NODE_ID) {
-        return Ok(None);
-    }
-    let session =
-        session.ok_or_else(|| "Main Coordinator workspace is unavailable.".to_string())?;
-    let generation_id = session
-        .active_coordinator_generation_id
-        .clone()
-        .ok_or_else(|| "Main Coordinator generation must be bound before launch.".to_string())?;
-    let generation = session
-        .generations
-        .iter()
-        .find(|generation| generation.id == generation_id)
-        .ok_or_else(|| "Active Main Coordinator generation is unavailable.".to_string())?;
-    if generation.run_id != run_id {
-        return Err(
-            "Main Coordinator generation does not match the run being launched.".to_string(),
-        );
-    }
-
-    Ok(Some(CapabilityPrincipal::coordinator(
-        session.id.clone(),
-        window_label,
-        run_id,
-        generation_id,
-    )))
-}
-
 // 040 US1: run command 8개는 `Workbench.call`의 `run.*` 호환 어댑터다. 창은 작업대(Bench)로 바뀌고 소유 검사는
 // 서버가 한다(specs/040-workbench-owners/contracts/tauri-compat.md). 인자·반환·오류 문구는 이전과 같다.
 #[tauri::command]
@@ -2039,83 +1496,36 @@ mod tests {
         }
     }
 
-    fn coordinator_session(
-        run_id: &str,
-    ) -> crate::domain::agent_orchestration::OrchestrationSession {
-        use crate::domain::agent_orchestration::{
-            CoordinatorGeneration, CoordinatorGenerationStatus,
+    /// 041: orchestration command 오류는 fault `details.orchestrationError`에서 다시 만든다 — 오늘
+    /// `serde_json::to_string(&OrchestrationError)`와 바이트가 같아야 한다(화면이 JSON으로 파싱한다).
+    #[test]
+    fn orchestration_fault_string_is_byte_identical_to_the_domain_error_json() {
+        use workbench_core::domain::agent_orchestration::{
+            OrchestrationError, OrchestrationErrorCode,
         };
-
-        let mut session = crate::domain::agent_orchestration::OrchestrationSession::new(
-            "workspace-1",
-            "/repo",
-            "window-1",
-            "2026-07-27T00:00:00Z",
+        let error = OrchestrationError::new(
+            OrchestrationErrorCode::NotFound,
+            "Orchestration workspace is not bootstrapped.",
         );
-        session.active_coordinator_generation_id = Some("generation-1".into());
-        session.generations.push(CoordinatorGeneration {
-            id: "generation-1".into(),
-            ordinal: 1,
-            main_node_id: MAIN_AGENT_NODE_ID.into(),
-            run_id: run_id.into(),
-            previous_generation_id: None,
-            status: CoordinatorGenerationStatus::Active,
-            started_at: "2026-07-27T00:00:00Z".into(),
-            ended_at: None,
-            handoff_summary: None,
-            successor_generation_id: None,
-        });
-        session
-    }
-
-    #[test]
-    fn main_launch_uses_prebound_coordinator_principal() {
-        let session = coordinator_session("run-main");
-
-        let principal = coordinator_principal_for_bound_session(
-            Some(MAIN_AGENT_NODE_ID),
-            "run-main",
-            "window-1",
-            Some(&session),
+        let fault = workbench_protocol::WorkbenchFault::new(
+            workbench_protocol::FaultCode::NotFound,
+            workbench_protocol::RequestId::random(),
+            error.message.clone(),
         )
-        .unwrap()
-        .expect("Main should receive a Coordinator principal");
-
+        .with_details(serde_json::json!({ "orchestrationError": &error }));
         assert_eq!(
-            principal.actor_kind,
-            crate::infrastructure::mcp::capability_registry::CapabilityActorKind::Coordinator
+            orchestration_fault_string(&fault),
+            serde_json::to_string(&error).unwrap()
         );
-        assert_eq!(principal.run_id, "run-main");
-        assert_eq!(principal.generation_id.as_deref(), Some("generation-1"));
-    }
-
-    #[test]
-    fn main_launch_rejects_an_unbound_successor_run() {
-        let session = coordinator_session("run-current");
-
-        let error = coordinator_principal_for_bound_session(
-            Some(MAIN_AGENT_NODE_ID),
-            "run-successor",
-            "window-1",
-            Some(&session),
-        )
-        .unwrap_err();
-
-        assert!(error.contains("does not match"));
-    }
-
-    #[test]
-    fn non_main_launch_keeps_legacy_principal_path() {
-        let session = coordinator_session("run-main");
-        let principal = coordinator_principal_for_bound_session(
-            Some("extra-agent-run-1"),
-            "run-extra",
-            "window-1",
-            Some(&session),
-        )
-        .unwrap();
-
-        assert!(principal.is_none());
+        let plain = workbench_protocol::WorkbenchFault::new(
+            workbench_protocol::FaultCode::PreconditionFailed,
+            workbench_protocol::RequestId::random(),
+            "Orchestration workspace is not bootstrapped.",
+        );
+        assert_eq!(
+            orchestration_fault_string(&plain),
+            "Orchestration workspace is not bootstrapped."
+        );
     }
 
     #[test]

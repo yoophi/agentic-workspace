@@ -1,0 +1,208 @@
+{
+  "name": "orchestration-agent-unbound-workspace-scope-mismatch",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-1",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bootstrap",
+        "requestId": "r-2",
+        "input": {
+          "benchId": "{{bench}}",
+          "worktreePath": "{{repo}}"
+        },
+        "idempotencyKey": "k-2"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "worktreePath": "{{repo}}",
+            "revision": 0
+          }
+        }
+      },
+      "capture": {
+        "workspace": "/output/id",
+        "stream": "/output/eventStreamId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-3",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "coord"
+          }
+        },
+        "idempotencyKey": "k-3"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "coord"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bindCoordinator",
+        "requestId": "r-4",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "requestId": "bind-coord",
+            "panelId": "main-agent-run",
+            "runId": "coord",
+            "state": "active",
+            "expectedRevision": 0
+          }
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "{{workspace}}",
+            "revision": 1
+          }
+        }
+      },
+      "capture": {
+        "generation": "/output/activeCoordinatorGenerationId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.createChildTask",
+        "requestId": "r-5",
+        "input": {
+          "runId": "coord",
+          "arguments": {
+            "requestId": "c1",
+            "title": "task c1",
+            "role": {
+              "name": "Reader",
+              "responsibility": "read",
+              "expectedOutput": "notes"
+            },
+            "objective": "read the repo",
+            "expectedResult": "summary"
+          }
+        },
+        "idempotencyKey": "k-5"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      },
+      "principal": "agent:coord",
+      "capture": {
+        "task": "/output/taskId",
+        "child": "/output/runId",
+        "node": "/output/nodeId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-51",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-51"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": true
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.getOwnTask",
+        "requestId": "r-52",
+        "input": {
+          "runId": "{{child}}",
+          "arguments": {}
+        }
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden",
+          "details": {
+            "toolError": {
+              "code": "scopeMismatch",
+              "message": "This run is not bound to an orchestration workspace.",
+              "retryable": false
+            }
+          },
+          "message": "This run is not bound to an orchestration workspace."
+        }
+      },
+      "principal": "agent:{{child}}"
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt",
+    "cancelledRuns"
+  ]
+}

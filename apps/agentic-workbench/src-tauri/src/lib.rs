@@ -4,10 +4,7 @@ mod inbound;
 mod infrastructure;
 pub mod ports;
 
-use application::{
-    appearance_preferences_service::AppearancePreferencesService,
-    orchestration_service::OrchestrationService,
-};
+use application::appearance_preferences_service::AppearancePreferencesService;
 use inbound::tauri_commands::{
     WorktreeWatcherState, acknowledge_agent_exchange, adjust_font_size_step,
     adopt_manual_orchestration_child, bind_main_coordinator_run, bootstrap_orchestration_workspace,
@@ -32,10 +29,8 @@ use inbound::tauri_commands::{
     update_goal, update_project, update_saved_prompt,
 };
 use infrastructure::{
-    agent_session_registry::AppState,
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-    json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
-    tauri_orchestration_event_sink::TauriOrchestrationEventSink,
+    mcp::McpServerState,
 };
 use std::sync::Arc;
 use tauri::{
@@ -83,23 +78,17 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-            // 040: 데스크톱 포트(창 삽입 전달·run 종료 후처리·run 시작 보강)를 주입한다. run 기계(AppState)는
-            // 런타임이 소유하고, 041 전까지 AW orchestration이 같은 인스턴스를 빌린다(research R12).
+            // 040: 데스크톱 포트(창 삽입 전달·run 시작 보강)를 주입한다. run 종료 후처리와 orchestration은 core가
+            // 소유한다(041).
             let desktop_bridge = infrastructure::tauri_desktop_bridge::TauriDesktopBridge::new(
                 _app.handle().clone(),
             );
             let mut adapters = RuntimeAdapters::production();
             adapters.desktop = Some(desktop_bridge.clone());
-            adapters.terminal_hook = Some(desktop_bridge.clone());
             adapters.launch_decorator = Some(desktop_bridge.clone());
             let workbench_runtime: Arc<WorkbenchRuntime> =
                 WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
                     .map_err(|error| error.to_string())?;
-            let app_state: AppState = workbench_runtime
-                .run_engine()
-                .acp_registry()
-                .ok_or("production run engine exposes the ACP registry")?;
-            _app.manage(app_state);
             _app.manage(workbench_runtime);
 
             let appearance_repository =
@@ -108,10 +97,7 @@ pub fn run() {
                 AppearancePreferencesService::bootstrap(appearance_repository)?;
             _app.manage(appearance_service);
 
-            let mcp_state = McpServerState::start(
-                _app.handle().clone(),
-                _app.state::<AppState>().inner().clone(),
-            )?;
+            let mcp_state = McpServerState::start(_app.handle().clone())?;
             desktop_bridge.bind_mcp(mcp_state.clone());
             _app.manage(mcp_state);
 
@@ -148,17 +134,10 @@ pub fn run() {
                     let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
-                    let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
                         // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
+                        // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
                         infrastructure::desktop_benches::close(&runtime, &label).await;
-                        if let Ok(repository) = JsonOrchestrationRepository::from_app(&app) {
-                            let _ = OrchestrationService::new(
-                                repository,
-                                TauriOrchestrationEventSink::new(app),
-                            )
-                            .release_window(&label);
-                        }
                     });
                 }
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
