@@ -766,11 +766,20 @@ export interface components {
         DescribeOutput: {
             /** Format: int32 */
             protocolVersion: number;
+            /** @description 현재 서버 세대(039). 모든 이벤트·gap이 같은 값을 싣는다. */
+            epoch: string;
             operations: components["schemas"]["OperationDescriptor"][];
+            /** @description principal에게 허용되고 구독 가능한 이벤트 스키마(039). */
+            eventSchemas: components["schemas"]["EventSchemaDescriptor"][];
         };
         /** @enum {string} */
         Effect: "read" | "modify";
-        /** @description 공통 이벤트 봉투. 2단계에서 채운다. */
+        /**
+         * @description 상태 복원용(보관·replay) 또는 알림용(보관 없음, 구독 시작 이후만).
+         * @enum {string}
+         */
+        EventClass: "state" | "notification";
+        /** @description 공통 이벤트 봉투. `sequence`는 스트림 안에서 1부터 1씩 증가한다. */
         EventEnvelope: {
             eventId: string;
             streamId: string;
@@ -781,6 +790,13 @@ export interface components {
             occurredAt: string;
             correlationId?: null | components["schemas"]["RequestId"];
             body: unknown;
+        };
+        /** @description `system.describe.eventSchemas`의 항목. 구독 가능하고 principal에게 허용된 것만 나온다. */
+        EventSchemaDescriptor: {
+            schema: string;
+            streamKind: components["schemas"]["StreamKind"];
+            class: components["schemas"]["EventClass"];
+            requiredScopes: components["schemas"]["Scope"][];
         };
         /**
          * @description 안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.
@@ -1066,15 +1082,23 @@ export interface components {
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}
          */
-        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "system:describe";
-        /** @description stream별 재연결 cursor. 정본 §WebSocket, replay 계약. 037은 시그니처만 둔다. */
+        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "system:describe";
+        /**
+         * @description stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).
+         *     알림용 스트림(`worktree:*`)은 `afterSequence`를 보지 않고 live부터 전달한다.
+         */
         StreamCursor: {
             streamId: string;
             epoch: string;
             /** Format: int64 */
             afterSequence: number;
         };
-        /** @description 이벤트 구독 요청. 037은 `events`가 항상 `unsupportedSchema`를 돌려준다. */
+        /**
+         * @description 스트림 식별자 `<kind>:<key>`의 kind.
+         * @enum {string}
+         */
+        StreamKind: "run" | "worktree" | "orchestration" | "exchange";
+        /** @description 이벤트 구독 요청. cursor는 1–64개. */
         Subscription: {
             cursors?: components["schemas"]["StreamCursor"][];
         };

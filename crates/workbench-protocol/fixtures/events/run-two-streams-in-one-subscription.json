@@ -1,0 +1,41 @@
+{
+  "name": "run-two-streams-in-one-subscription",
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 2
+    },
+    {
+      "publish": "run:r2",
+      "count": 1
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 1
+    },
+    {
+      "streamId": "run:r2",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 2,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r2",
+          "sequence": 1,
+          "schema": "run.event.v1"
+        }
+      }
+    ]
+  }
+}

@@ -2647,7 +2647,9 @@
         "description": "`system.describe` 출력. 호출자에게 허용된 operation만 담는다.",
         "required": [
           "protocolVersion",
-          "operations"
+          "epoch",
+          "operations",
+          "eventSchemas"
         ],
         "properties": {
           "protocolVersion": {
@@ -2655,11 +2657,22 @@
             "format": "int32",
             "minimum": 0
           },
+          "epoch": {
+            "type": "string",
+            "description": "현재 서버 세대(039). 모든 이벤트·gap이 같은 값을 싣는다."
+          },
           "operations": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/OperationDescriptor"
             }
+          },
+          "eventSchemas": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EventSchemaDescriptor"
+            },
+            "description": "principal에게 허용되고 구독 가능한 이벤트 스키마(039)."
           }
         }
       },
@@ -2670,9 +2683,17 @@
           "modify"
         ]
       },
+      "EventClass": {
+        "type": "string",
+        "description": "상태 복원용(보관·replay) 또는 알림용(보관 없음, 구독 시작 이후만).",
+        "enum": [
+          "state",
+          "notification"
+        ]
+      },
       "EventEnvelope": {
         "type": "object",
-        "description": "공통 이벤트 봉투. 2단계에서 채운다.",
+        "description": "공통 이벤트 봉투. `sequence`는 스트림 안에서 1부터 1씩 증가한다.",
         "required": [
           "eventId",
           "streamId",
@@ -2714,6 +2735,33 @@
             ]
           },
           "body": {}
+        }
+      },
+      "EventSchemaDescriptor": {
+        "type": "object",
+        "description": "`system.describe.eventSchemas`의 항목. 구독 가능하고 principal에게 허용된 것만 나온다.",
+        "required": [
+          "schema",
+          "streamKind",
+          "class",
+          "requiredScopes"
+        ],
+        "properties": {
+          "schema": {
+            "type": "string"
+          },
+          "streamKind": {
+            "$ref": "#/components/schemas/StreamKind"
+          },
+          "class": {
+            "$ref": "#/components/schemas/EventClass"
+          },
+          "requiredScopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          }
         }
       },
       "FaultCode": {
@@ -3794,12 +3842,13 @@
           "git:write",
           "worktree:read",
           "agent:read",
+          "run:read",
           "system:describe"
         ]
       },
       "StreamCursor": {
         "type": "object",
-        "description": "stream별 재연결 cursor. 정본 §WebSocket, replay 계약. 037은 시그니처만 둔다.",
+        "description": "stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).\n알림용 스트림(`worktree:*`)은 `afterSequence`를 보지 않고 live부터 전달한다.",
         "required": [
           "streamId",
           "epoch",
@@ -3819,9 +3868,19 @@
           }
         }
       },
+      "StreamKind": {
+        "type": "string",
+        "description": "스트림 식별자 `<kind>:<key>`의 kind.",
+        "enum": [
+          "run",
+          "worktree",
+          "orchestration",
+          "exchange"
+        ]
+      },
       "Subscription": {
         "type": "object",
-        "description": "이벤트 구독 요청. 037은 `events`가 항상 `unsupportedSchema`를 돌려준다.",
+        "description": "이벤트 구독 요청. cursor는 1–64개.",
         "properties": {
           "cursors": {
             "type": "array",

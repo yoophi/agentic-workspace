@@ -1,0 +1,27 @@
+{
+  "name": "run-epoch-changed-gap",
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 5
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 3,
+      "epoch": "previous-epoch"
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "gap": {
+          "streamId": "run:r1",
+          "reason": "epochChanged"
+        }
+      }
+    ],
+    "end": true
+  }
+}

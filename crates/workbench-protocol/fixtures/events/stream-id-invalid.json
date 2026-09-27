@@ -1,0 +1,14 @@
+{
+  "name": "stream-id-invalid",
+  "subscribe": [
+    {
+      "streamId": "nope",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "invalidArgument"
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "subscriptions-over-limit-rate-limited",
+  "limits": {
+    "maxSubscriptions": 1
+  },
+  "setup": [
+    {
+      "hold": [
+        {
+          "streamId": "run:held",
+          "afterSequence": 0
+        }
+      ]
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "rateLimited",
+      "retryable": true
+    }
+  }
+}

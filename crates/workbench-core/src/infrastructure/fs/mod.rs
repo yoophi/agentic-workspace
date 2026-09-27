@@ -2,6 +2,7 @@
 
 pub mod provider_session_repository;
 pub mod worktree_file_provider;
+pub mod worktree_watcher;
 
 /// 파일 목록 스캔(`worktree_file_provider`)과 AW worktree watcher가 공유하는 제외 디렉터리 목록.
 /// 화면에 표시되지 않는 디렉터리의 변경이 rescan을 유발하지 않도록 단일 소스로 관리한다(AW specs/007 research R3).

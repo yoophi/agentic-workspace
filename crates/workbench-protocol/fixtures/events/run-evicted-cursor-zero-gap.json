@@ -1,0 +1,35 @@
+{
+  "name": "run-evicted-cursor-zero-gap",
+  "limits": {
+    "maxRetainedRuns": 1
+  },
+  "setup": [
+    {
+      "publish": "run:old",
+      "count": 1,
+      "terminal": true
+    },
+    {
+      "publish": "run:new",
+      "count": 1,
+      "terminal": true
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:old",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "gap": {
+          "streamId": "run:old",
+          "reason": "evicted"
+        }
+      }
+    ],
+    "end": true
+  }
+}

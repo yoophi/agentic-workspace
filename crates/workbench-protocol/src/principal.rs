@@ -57,13 +57,16 @@ pub enum Scope {
     WorktreeRead,
     #[serde(rename = "agent:read")]
     AgentRead,
+    /// run 이벤트 스트림 구독(039). 2b에서 run 제어용 `run:write`가 추가된다.
+    #[serde(rename = "run:read")]
+    RunRead,
     #[serde(rename = "system:describe")]
     SystemDescribe,
 }
 
 impl Scope {
     /// 전체 scope. `desktop()`이 이 집합을 갖는다.
-    pub const ALL: [Scope; 13] = [
+    pub const ALL: [Scope; 14] = [
         Scope::ProjectRead,
         Scope::ProjectWrite,
         Scope::SavedPromptRead,
@@ -76,6 +79,7 @@ impl Scope {
         Scope::GitWrite,
         Scope::WorktreeRead,
         Scope::AgentRead,
+        Scope::RunRead,
         Scope::SystemDescribe,
     ];
 
@@ -93,6 +97,7 @@ impl Scope {
             Scope::GitWrite => "git:write",
             Scope::WorktreeRead => "worktree:read",
             Scope::AgentRead => "agent:read",
+            Scope::RunRead => "run:read",
             Scope::SystemDescribe => "system:describe",
         }
     }
@@ -173,17 +178,22 @@ mod tests {
     }
 
     #[test]
-    fn desktop_has_all_13_and_readonly_has_only_reads() {
+    fn desktop_has_all_14_and_readonly_has_only_reads() {
         let desktop = AuthenticatedPrincipal::desktop();
-        assert_eq!(desktop.scopes.len(), 13);
+        assert_eq!(desktop.scopes.len(), 14);
         let readonly = AuthenticatedPrincipal::test_readonly();
-        assert_eq!(readonly.scopes.len(), 8, "read 7 + system:describe");
+        assert_eq!(
+            readonly.scopes.len(),
+            9,
+            "read 8(run:read 포함) + system:describe"
+        );
         for scope in Scope::ALL {
             assert_eq!(readonly.has_scope(scope), scope.is_read(), "{scope}");
             assert_eq!(serde_json::to_value(scope).unwrap(), scope.as_str());
         }
         assert!(!readonly.has_scope(Scope::GitWrite));
         assert!(readonly.has_scope(Scope::WorktreeRead));
+        assert!(readonly.has_scope(Scope::RunRead));
     }
 
     #[test]

@@ -1,0 +1,33 @@
+{
+  "name": "run-unknown-cursor-zero-waits",
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "after": [
+    {
+      "publish": "run:r1",
+      "count": 2
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 1,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 2,
+          "schema": "run.event.v1"
+        }
+      }
+    ]
+  }
+}

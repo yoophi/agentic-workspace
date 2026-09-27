@@ -1,0 +1,15 @@
+{
+  "name": "stream-kind-not-available",
+  "subscribe": [
+    {
+      "streamId": "orchestration:w1",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "stream kind is not available yet."
+    }
+  }
+}

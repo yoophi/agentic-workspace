@@ -10,6 +10,7 @@
 
 pub mod call;
 pub mod descriptor;
+pub mod events;
 pub mod fault;
 pub mod openapi;
 pub mod operations;
@@ -23,4 +24,7 @@ pub use call::{
 pub use descriptor::{DescribeOutput, Effect, OperationDescriptor, OperationKind};
 pub use fault::{FaultCode, Outcome, WorkbenchFault};
 pub use principal::{AuthenticatedPrincipal, PrincipalKind, Scope};
-pub use workbench::{EventEnvelope, EventStream, StreamCursor, Subscription, Workbench};
+pub use workbench::{
+    EventEnvelope, EventItem, EventStream, GapNotice, GapReason, StreamCursor, Subscription,
+    Workbench,
+};

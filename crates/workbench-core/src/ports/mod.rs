@@ -1,6 +1,7 @@
 pub mod agent_catalog_reader;
 pub mod agent_run_settings_repository;
 pub mod aggregate_lock;
+pub mod event_publisher;
 pub mod git_providers;
 pub mod goal_repository;
 pub mod operation_ledger;

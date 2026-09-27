@@ -1,0 +1,55 @@
+{
+  "name": "run-evicted-while-subscribed-gap",
+  "limits": {
+    "maxRetainedRuns": 1
+  },
+  "setup": [
+    {
+      "publish": "run:r1",
+      "count": 1
+    }
+  ],
+  "subscribe": [
+    {
+      "streamId": "run:r1",
+      "afterSequence": 0
+    }
+  ],
+  "after": [
+    {
+      "publish": "run:r1",
+      "count": 1,
+      "terminal": true
+    },
+    {
+      "publish": "run:other",
+      "count": 1,
+      "terminal": true
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 1,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "event": {
+          "streamId": "run:r1",
+          "sequence": 2,
+          "schema": "run.event.v1"
+        }
+      },
+      {
+        "gap": {
+          "streamId": "run:r1",
+          "reason": "evicted"
+        }
+      }
+    ],
+    "end": true
+  }
+}

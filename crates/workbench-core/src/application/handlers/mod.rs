@@ -248,6 +248,7 @@ pub fn build_registry(
     coordinator: Arc<StorageCoordinator>,
     hooks: Arc<TestHooks>,
     adapters: &RuntimeAdapters,
+    epoch: &str,
 ) -> (Registry, ReconcilerRegistry) {
     let runner = Arc::new(IntentFirst::new(
         Arc::clone(&ledger),
@@ -271,7 +272,7 @@ pub fn build_registry(
     );
     registry.register(
         OperationId::SystemDescribe,
-        Arc::new(system::describe::SystemDescribeHandler),
+        Arc::new(system::describe::SystemDescribeHandler::new(epoch)),
     );
     (registry, reconcilers)
 }
