@@ -12,6 +12,8 @@
 
 **창 재사용(incarnation) — 사용자 검토**: label만 subject로 쓰면 창을 닫고 **같은 label로 다시 열었을 때** 만료 전 옛 토큰이 새 창의 작업대를 조작할 수 있다(세션 창 label은 Worktree 경로에서 나와 재사용될 수 있다). 그래서 subject에 **창 incarnation**을 넣는다: `desktop:window:<label>:<incarnation>` — incarnation은 창 생성(첫 `get_workbench_connection`·`ensure_window_bench`) 때 만든 uuid이고 창 수명 동안 고정이다. 창 `Destroyed`에서 (a) 그 incarnation을 폐기하고 (b) 그 주체로 발급한 토큰을 모두 폐기한다(`DesktopTokenIssuer::revoke_principal`). 같은 label로 다시 연 창은 새 incarnation을 받는다. 시험: 닫힌 창의 미만료 토큰으로 호출 → `unauthenticated`(폐기), 폐기를 뺀 변이에서도 새 창 작업대 조작은 소유 판정으로 거절(incarnation이 다름).
 
+**호환 경로도 창 주체로(설계 리뷰 D2)**: 작업대를 창 주체가 열므로 작업대 범위 호환 command(run·교환·orchestration·`bench.*`)도 호출 창의 주체로 불러야 한다 — 지금처럼 `desktop_principal()`로 부르면 소유 판정에 걸려 호환 경로 창이 깨진다. 전역 command도 창 주체로 부른다(scope 동일, 결과 같음).
+
 **Consequences**: 창 label은 주체 subject 문자열에만 나타나고 작업대·계약에는 없다. 연구 표기와 CONTEXT: "데스크톱 창 주체". 시험: 다른 창 토큰으로 작업대·run·교환·orchestration 조작·구독 → `forbidden`/`notFound`(오늘 문구), 같은 창 두 경로는 같은 소유, 창 닫고 같은 label 재개 뒤 옛 토큰 거절.
 
 ## R2. 창의 작업대 id를 화면에 건네기
@@ -32,7 +34,7 @@
 
 ## R4. 네트워크 경로 창에는 앱 내부 전달을 끈다
 
-**Decision**: `get_workbench_connection` 성공(그리고 화면이 네트워크 경로를 확정) 뒤 화면이 `declare_network_delivery()`를 부르면 Rust가 그 창 label을 "네트워크 전달" 표에 올리고, `TauriDesktopBridge`는 그 창에 run·교환·제목·orchestration fallback 이벤트를 넣지 않는다. Worktree는 화면이 `start_worktree_watcher`를 부르지 않고 `worktree:<path>` 스트림을 구독한다. 호환 경로 창은 선언하지 않으므로 오늘 그대로 받는다. 창이 닫히면 표에서 뺀다.
+**Decision**: `get_workbench_connection` 성공(그리고 화면이 네트워크 경로를 확정) 뒤 화면이 `declare_network_delivery()`를 부르면 Rust가 그 창 **incarnation**을 "네트워크 전달" 표에 올리고(label이 아니라 — 같은 label로 다시 연 호환 경로 창이 전달을 잃지 않게, 설계 리뷰 D4), `TauriDesktopBridge`는 그 창에 run·교환·제목·orchestration fallback 이벤트를 넣지 않는다. Worktree는 화면이 `start_worktree_watcher`를 부르지 않고 `worktree:<path>` 스트림을 구독한다. 호환 경로 창은 선언하지 않으므로 오늘 그대로 받는다. 창이 닫히면 표에서 뺀다.
 
 **Rationale**: 같은 창에 두 경로로 이벤트가 오면 중복이다(SC-003). 전달 코드를 지우지 않고(8단계) 창 단위로 끈다.
 
@@ -47,8 +49,8 @@
 ## R6. 보내기 전 offline과 응답 유실 구분 (사용자 검토 1)
 
 **Decision**: 호출 결과를 세 가지로 나눈다.
-1. **보내기 전 거절(notApplied)**: 연결 상태가 `disconnected`(마지막 handshake/구독 실패 뒤 복구 전)면 요청을 보내지 않고 `unavailable`·`outcome: notApplied`를 오늘 문구 형태로 돌려준다. 조회도 같다.
-2. **응답 유실(unknown)**: 요청을 보낸 뒤 네트워크 오류·연결 끊김으로 응답을 못 받음. 변경이면 호출 시 만든 멱등성 키를 유지하고, 재연결 뒤 **같은 서버 세대**(handshake `serverEpoch` 동일)면 같은 키로 한 번 재시도해 저장된 결과를 받는다(042: 세대 범위는 기다림, ledger 경로는 retryable conflict → 짧게 반복). **세대가 바뀌었으면 자동 재전송하지 않고** `outcome: unknown`으로 알리고 화면 상태 재조회를 트리거한다. 조회는 새 요청으로 다시 보내도 안전하다.
+1. **보내기 전 거절(notApplied)**: **클라이언트가 스스로 보내지 않은 경우만** — 연결 상태가 이미 `reconnecting`/`disconnected`(마지막 handshake·구독·호출 실패 뒤 복구 전)면 요청을 보내지 않고 `unavailable`·`outcome: notApplied`를 오늘 문구 형태로 돌려준다. 조회도 같다.
+2. **응답 유실(unknown)**: 보내기를 **시도한 뒤**의 모든 실패(브라우저 `fetch` 거절은 "보내지 못함"과 "응답 유실"을 구별하지 못하므로 — 설계 리뷰 D1 — 모두 여기로). 변경이면 호출 시 만든 멱등성 키를 유지하고, 재연결 뒤 **같은 서버 세대**(handshake `serverEpoch` 동일)면 같은 키로 한 번 재시도해 저장된 결과를 받는다(042: 세대 범위는 기다림, ledger 경로는 retryable conflict → 짧게 반복). **세대가 바뀌었으면 자동 재전송하지 않고** `outcome: unknown`으로 알리고 화면 상태 재조회를 트리거한다. 조회는 새 요청으로 다시 보내도 안전하다.
 3. **서버 fault**: 그대로 문자열로.
 재시도는 사용자 조작 한 번당 최대 한 번, 요청 id는 새로, 멱등성 키는 같게.
 
@@ -61,7 +63,7 @@
 **Decision**: `createEventClient({ baseUrl, credentials })`. 구독 단위는 **스트림 하나당 WebSocket 하나**(표에 cursor 하나). 스트림마다 상태 `{ streamId, epoch, appliedSequence, queue, listeners }`.
 - **반영 완료 기준**: 프레임을 받으면 큐에 넣고, 등록된 수신자에게 순서대로 넘긴다. 수신자 콜백은 **동기**다 — 반환이 곧 반영 완료이며 Promise를 돌려도 기다리지 않는다(화면 상태 갱신은 동기 setter). 재연결 표의 cursor는 `appliedSequence`다 — 받았지만 넘기지 못한 이벤트는 다시 받는다.
 - **여러 수신자와 예외(사용자 검토)**: 수신자마다 자기 `deliveredSequence`를 가진다. 스트림의 `appliedSequence` = 붙어 있는 수신자들의 `deliveredSequence` 최솟값. 재연결 뒤 다시 받은 프레임은 `deliveredSequence`가 그 순번보다 작은 수신자에게만 넘긴다 — 이미 성공한 수신자에게 중복 적용하지 않는다. 수신자 콜백이 예외를 던지면 그 순번은 그 수신자에게 **넘긴 것으로 친다**(예외는 기록하고 화면 오류 신호로 올림, 같은 프레임을 그 수신자에게 무한 재시도하지 않는다) — 예외가 스트림 전체를 멈추거나 다른 수신자에게 중복을 만들지 않는다. 새로 붙는 수신자는 붙는 시점의 큐부터 받는다(`deliveredSequence` = 붙기 직전 `appliedSequence`).
-- **수신자 교체**: 수신자가 0명인 동안 도착한 이벤트는 큐에 남는다(cursor 안 올림). 새 수신자가 붙으면 큐부터 넘긴다. 구독 해제는 마지막 수신자가 떠나고 유예(React StrictMode·재마운트) 뒤에 한다.
+- **수신자 교체**: 수신자가 0명인 동안 도착한 이벤트는 큐에 남는다(cursor 안 올림). 새 수신자가 붙으면 큐부터 넘긴다. 구독 해제는 마지막 수신자가 떠나고 유예(React StrictMode·재마운트) 뒤에 한다. 큐 상한은 스트림당 1,024 프레임 — 넘으면 연결을 닫고 `appliedSequence`에서 다시 구독한다(설계 리뷰 D3).
 - **준비**: `hello`를 받은 뒤를 구독 시작으로 본다(042). 그 전 상태는 `connecting`.
 - **중복 방지**: 넘긴 순번 이하 프레임은 버린다(재연결 경계).
 
@@ -85,7 +87,8 @@
 
 **Decision**: 사유·스트림별:
 - **run** + `Evicted`·`RetentionExceeded`·`UnknownStream`: **스냅샷을 먼저** — `run.replay(after: 0)`로 화면을 맞추고 `lastSequence`를 기준점으로 `after = lastSequence` 새 표(hub가 기록→실시간 경계를 원자적으로 잇는다, 039). 기준점이 이미 보관 밖이면 다시 gap → 같은 절차(최대 3회 뒤 오류 표시). `Evicted`는 run이 보관 한도로 지워졌다는 뜻이라 replay도 `gapDetected`·빈 events — 화면은 "기록 일부 없음"을 오늘 방식으로 표시하고 종료 상태로 둔다.
-- **교환·orchestration** + 같은 사유: 순번 기준점이 없으므로 **구독을 먼저** 연다 — `after: 0`(보관된 기록부터) 표로 `hello`를 받고, 그 뒤 상태 스냅샷(`exchange.list`/`orchestration.get`)을 조회해 화면을 맞춘다. 스냅샷 뒤에 오는 이벤트는 이벤트 본문의 작업 영역 `revision`이 스냅샷 `revision` 이하면 버린다(중복 방지). **이 규칙은 두 스트림 이벤트 본문에 `revision`이 실리는지 tasks 첫 단계에서 코드로 확인한 뒤 확정한다** — 없으면 "구독 후 재조회, 이벤트는 재조회 트리거로만 사용"으로 낮춘다.
+- **orchestration** + 같은 사유: 순번 기준점이 없으므로 **구독을 먼저** — `after: 0` 표로 `hello`를 받고 `orchestration.get` 스냅샷으로 화면을 맞춘다. 이벤트 본문 `OrchestrationEventDto{workspaceId, revision, reason, taskId, nodeId}`는 상태가 아니라 변경 신호다(설계 리뷰 D5 확인) — 스냅샷 `revision` 이하는 버리고, 그보다 큰 것은 재조회 트리거.
+- **교환** + 같은 사유: 구독(hello) → `exchange.list` 스냅샷. 이벤트(`ExchangeRequestedDto`·`AgentExchangeDto`, `revision` 없음)는 `requestId` 기준 멱등 upsert — 상태는 스냅샷보다 늦은 `updatedAt`만 적용(설계 리뷰 D5).
 - **알림**(`worktree:`, `bench:`): 구독(`hello`) → 재조회(worktree만, bench는 재조회 대상 없음). 알림은 "다시 읽어라" 신호라 중복 알림은 재조회 한 번 더일 뿐이다.
 - `epochChanged`(또는 재연결 handshake의 `serverEpoch` 변경): 창 전체 재동기 — 작업대 id 다시 받기(R2), 열린 run·교환·orchestration 목록 재조회, 모든 구독을 새 세대 기준으로 다시. 응답 유실 변경은 R6대로 재전송 없음.
 - `subscriberLagged`: 같은 cursor(`appliedSequence`)로 재연결.

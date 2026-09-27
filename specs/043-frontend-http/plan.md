@@ -90,7 +90,7 @@ apps/agentic-workbench/src-tauri/src/
 ## Phases (tasks 입력)
 
 1. **Setup**: 기준선 게이트 기록, 호환 command 인벤토리에서 서버 소유/데스크톱 표현 구분 표(저장소 함수 ↔ command ↔ operation).
-2. **Foundational**: 창별 주체(protocol·server·AW 조립·호환 경로), 격리 시험(시험 먼저), `ensure_window_bench`·`declare_network_delivery`, 전달 표.
+2. **Foundational**: 창별 주체(incarnation 포함, protocol·server·AW 조립), **호환 경로 command 전부를 창 주체로**(설계 리뷰 D2, command별 주체 열 인벤토리), 창 닫힘 토큰 폐기, 격리 시험(시험 먼저 — 다른 창·같은 label 재개), `ensure_window_bench`·`declare_network_delivery`, incarnation 키 전달 표.
 3. **US1(P1)**: 호출 클라이언트(R5·R6, 시험 먼저), Transport 인터페이스·두 구현, 저장소 이관(모듈별, 동등성 시험), 부팅 경로 선택(R3).
 4. **US2(P1)**: 이벤트 클라이언트(R7, 시험 먼저), run·교환·제목·orchestration·Worktree 구독 이관, 전달 끄기 확인(SC-003).
 5. **US3(P2)**: 재연결·gap 복구·세대 재동기(R8·R9, 강제 끊김 100회), 응답 유실 재시도 규칙(SC-004b), 연결 상태 표시(R10).
