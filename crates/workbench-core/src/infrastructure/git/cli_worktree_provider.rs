@@ -65,6 +65,9 @@ impl GitWorktreeProvider for GitCliWorktreeProvider {
             command.args(["-b", branch]);
         }
 
+        // `--` 뒤의 path·reference는 옵션으로 해석되지 않는다. 호출자 입력(예: reference `--detach`)이
+        // git 옵션으로 주입되는 것을 막는다 — Workbench는 3단계에서 HTTP 호출자를 받는다.
+        command.arg("--");
         command.arg(&draft.path);
 
         if let Some(reference) = &draft.reference {

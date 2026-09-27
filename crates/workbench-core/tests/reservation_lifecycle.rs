@@ -210,3 +210,26 @@ async fn concurrent_creates_on_different_paths_all_apply() {
     }
     assert_eq!(git_repo::worktree_count(&repo.root), 6);
 }
+
+/// 호출자가 준 reference·경로는 git 옵션으로 해석되지 않는다(`--` 구분자). `--detach`가 옵션으로 먹히면
+/// git은 "-b와 --detach를 함께 쓸 수 없다"로 실패하고, 구분자가 있으면 없는 reference로 실패한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn option_like_reference_is_not_parsed_as_a_git_option() {
+    let rt = TestRuntime::new();
+    let repo = build_repo(&rt);
+    let fault = rt
+        .call(command_request(
+            OperationId::GitCreateWorktree,
+            "opt",
+            create_input(&repo, "b1", Some("--detach")),
+        ))
+        .await
+        .unwrap_err();
+    assert_eq!(fault.code, FaultCode::Internal, "{fault}");
+    assert!(
+        !fault.message.contains("cannot be used together"),
+        "reference must not be parsed as an option: {}",
+        fault.message
+    );
+    assert_eq!(git_repo::worktree_count(&repo.root), 1);
+}
