@@ -61,9 +61,12 @@ specs/043-frontend-http/
 crates/workbench-protocol/src/principal.rs     # AuthenticatedPrincipal::desktop_window(label)
 crates/workbench-server/src/auth.rs            # DesktopTokenIssuer: 토큰에 주체를 묶는 발급
 crates/workbench-core/tests/window_isolation.rs # 다른 창 주체의 작업대·run·교환·orchestration 조작·구독 거절
+crates/workbench-core/tests/retention_resubscribe.rs # 보관 한도 초과 gap의 lastSequence로 재구독 → live 등록
+crates/workbench-core/examples/http_test_host.rs    # TS 통합 suite용 시험 host(작은 보관 한도, 고정 토큰, 운영 router)
 
 packages/workbench-client/src/
 ├── call-client.ts        # createWorkbenchClient: call(), 세 결과, 같은 세대 재시도, 401 갱신
+├── test/integration/     # 시험 host(실제 042 router·hub, 작은 보관 한도)에 붙는 복구 통합 suite
 ├── event-client.ts       # createEventClient: 스트림당 WS, 반영 완료 cursor, 수신자 큐, gap 복구 hook
 ├── connection.ts         # 자격 증명 수명(80% 갱신), 연결 상태, backoff
 ├── fault-string.ts       # faultToString (호환 층과 같은 규칙)
@@ -92,8 +95,8 @@ apps/agentic-workbench/src-tauri/src/
 1. **Setup**: 기준선 게이트 기록, 호환 command 인벤토리에서 서버 소유/데스크톱 표현 구분 표(저장소 함수 ↔ command ↔ operation).
 2. **Foundational**: 창별 주체(incarnation 포함, protocol·server·AW 조립), **호환 경로 command 전부를 창 주체로**(설계 리뷰 D2, command별 주체 열 인벤토리), 창 닫힘 토큰 폐기, 격리 시험(시험 먼저 — 다른 창·같은 label 재개), `ensure_window_bench`·`declare_network_delivery`, incarnation 키 전달 표.
 3. **US1(P1)**: 호출 클라이언트(R5·R6, 시험 먼저), Transport 인터페이스·두 구현, 저장소 이관(모듈별, 동등성 시험), 부팅 경로 선택(R3).
-4. **US2(P1)**: 이벤트 클라이언트(R7, 시험 먼저), run·교환·제목·orchestration·Worktree 구독 이관, 전달 끄기 확인(SC-003).
-5. **US3(P2)**: 재연결·gap 복구·세대 재동기(R8·R9, 강제 끊김 100회), 응답 유실 재시도 규칙(SC-004b), 연결 상태 표시(R10).
+4. **US2(P1)**: 이벤트 클라이언트(R7 — Promise settle·수신자별 cursor·부분 실패 재동기, 시험 먼저), run·교환·제목·orchestration·Worktree 구독 이관, 교환 원장·재조정과 `exchange-delivery:<requestId>` 키, 전달 끄기 확인(SC-003).
+5. **US3(P2)**: 재연결·gap 복구(R8 — gap `lastSequence`로 live 먼저·버퍼·스냅샷 병합)·세대 재동기(R9, 강제 끊김 100회), **실제 042 hub 보관 한도 초과 시험**(Rust + 시험 host에 붙는 TS 통합 suite), 응답 유실 재시도 규칙(SC-004b), 연결 상태 표시(R10).
 6. **US4(P3)**: 창·작업대 수명(두 세션 창 격리·창 닫기), 서버 판정 시험 재확인.
 7. **US5(P3)**: 부팅 실패 시 호환 경로(끝점 기동 실패 주입), 자동 전환 없음 시험.
 8. **Polish**: probe 확장·실제 앱 스모크(개발·배포 출처, 강제 끊김·재연결), docs·ADR, 게이트, SC 증거, PR.

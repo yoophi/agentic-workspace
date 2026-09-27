@@ -45,10 +45,39 @@ stateDiagram-v2
 |---|---|
 | `streamId` | `run:<id>` · `exchange:<bench>` · `bench:<bench>` · `orchestration:<binding>` · `worktree:<path>` |
 | `epoch` | 받은 세대 |
-| `appliedSequence` | 수신자에게 넘기기를 마친 마지막 순번 — 재연결 cursor |
-| `queue` | 받았지만 아직 넘기지 않은 프레임(수신자 0명·처리 중) |
-| `listeners` | 화면 수신자와 수신자별 `deliveredSequence`. `appliedSequence` = 최솟값. 0명이면 유예 뒤 해제 |
-| `state` | `connecting`(표 발급·hello 전) · `live` · `recovering`(gap 복구 중) |
+| `cursor` | 붙은 수신자 `deliveredSequence` 최솟값 — 재연결 표 cursor |
+| `backlog` | 수신자 0명 동안 받은 프레임(상한 1,024) |
+| `recovery` | 보관 gap 복구 중: `{ baseline L, buffer[], attempt }` |
+| `state` | `connecting`(표·hello 전) · `live` · `recovering` |
+
+## 수신자 (StreamListener)
+
+| 필드 | 설명 |
+|---|---|
+| `callback` | `(event) => void \| Promise<void>` — settle까지 기다림 |
+| `deliveredSequence` | 이 수신자가 반영을 마친 순번 |
+| `queue` | 이 수신자에게 넘길 프레임(순서대로 하나씩) |
+| `state` | `ready` · `busy` · `failed`(스냅샷 재동기 중) |
+
+```mermaid
+stateDiagram-v2
+    [*] --> ready
+    ready --> busy: 프레임 넘김
+    busy --> ready: 이행(deliveredSequence 전진)
+    busy --> failed: 거절·동기 예외
+    failed --> ready: 스냅샷 재동기 성공(deliveredSequence = 기준점)
+    failed --> failed: 재동기 실패(backoff, 상한 뒤 화면 오류)
+```
+
+## 교환 원장 (ExchangeLedger, 창 메모리)
+
+| 필드 | 설명 |
+|---|---|
+| `requestId` | 교환 요청 id |
+| `routedAt` | 대상 패널에 라우팅한 시각(없으면 미라우팅) |
+| `ackedOutcome` | 서버가 확인한 ack 결과(`delivered`·`rejected`, 없으면 미확인) |
+
+교환 prompt의 run 전송 멱등성 키: `exchange-delivery:<requestId>`.
 
 ## 창 작업대 (WindowBench)
 

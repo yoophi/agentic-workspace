@@ -16,3 +16,11 @@ OCR 검토 대상은 `.specify/feature.json` 하나(설계 문서는 확장자�
 | D8 | 확인 | R7(메모): 여러 수신자 중 일부 예외 | 수신자별 `deliveredSequence`, 콜백 동기, 예외는 넘긴 것으로 침(research R7 반영) |
 | D9 | 확인 | R11(메모): 호환 기본값만으로는 FR-012 근거 부족 | 화면 시험 harness를 transport 매개변수화해 HTTP 경로에서도 같은 기대값(research R11 반영) |
 | D10 | 확인 | MCP·agent 경로와 충돌 | 없음 — agent 주체·MCP 토큰은 그대로, 작업대 소유 판정은 연 주체만 본다(`close_all_benches`는 연 주체로 닫음) |
+
+## 2. Codex adversarial review (branch diff against main) — verdict: needs-attention
+
+| # | 등급 | 지적 | 반영 |
+|---|---|---|---|
+| H1 | High | `after: 0` 재구독으로는 보관 gap에서 복구되지 않는다 — `event_hub/stream.rs::decide_existing`은 첫 보관 순번 > 1이면 `after = 0`에도 `RetentionExceeded`이고 live 수신자를 등록하지 않는다. hello는 등록 실패에도 오므로 성공 판정 근거가 아니다 | 코드 확인. `GapNotice`가 `lastSequence`를 싣는다 → gap의 `lastSequence`로 새 표를 열어 live를 먼저 확보(hub는 `Replay{after: L}`), 그동안 이벤트 버퍼, 스트림별 스냅샷 조회 뒤 기준으로 걸러 병합. 성공은 hello가 아니라 gap 없이 이어짐으로 판정(gap이 오면 절차 재시작, 최대 3회). 시험: 실제 hub 작은 보관 한도의 Rust 시험 + 시험 host에 붙는 TS 통합 suite. research R8·contracts §5·plan·spec FR-009 |
+| H2 | High | Promise 반환·예외를 반영 완료로 치면 미적용 이벤트를 잃는다 — 실제 orchestration 수신자(`worktree-agent-run-area.tsx`)는 `getOrchestrationWorkspace()`를 await한다 | 수신자 Promise를 settle까지 기다리고 이행 때만 그 수신자의 cursor 전진, 수신자마다 순서대로 하나씩. 거절·동기 예외는 그 수신자만 실패 → 스냅샷 재동기 뒤 기준점으로 전진, 다른 수신자는 계속. research R7·contracts §5·data-model(수신자 상태도)·spec FR-009a. 시험: Promise 거절·동기 예외·수신자 교체를 클라이언트 단위와 HttpTransport 화면 통합 둘 다 |
+| H3 | High | 교환 스냅샷 upsert만으로는 유실된 메시지 전달을 복구하지 못한다 — 서버는 agent에 직접 전달하지 않고 requested 이벤트를 화면이 받아 라우팅·ack한다 | 창 교환 원장(`requestId → routed/acked`)과 재조정: 스냅샷의 `Accepted` 교환은 미라우팅이면 라우팅+ack, 라우팅 뒤 ack 미확인이면 ack만(서버 ack는 `requestId` 멱등 — `agent_exchange_service.rs::acknowledge` 확인). agent 중복 전달은 교환 prompt의 run 전송 멱등성 키 `exchange-delivery:<requestId>`로 막는다(원장이 사라진 창 새로고침에도 같은 세대에서 1회). research R8·contracts §5·data-model·spec FR-009b·SC-004d. 시험: 요청 유실·ack 실패·새로고침에서 가짜 ACP agent prompt 수 1 |

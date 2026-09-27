@@ -31,11 +31,13 @@
 
 ## 5. 구독 규칙
 
-- 스트림당 WebSocket 하나. 스트림당 큐 상한 1,024 — 넘으면 닫고 `appliedSequence`에서 재구독. 표 발급 cursor = `appliedSequence`(처음이면 호출자가 준 기준점, 없으면 0).
-- `hello` 뒤 `live`. 순번 ≤ `appliedSequence` 프레임은 버린다.
-- 수신자 콜백은 동기(Promise를 기다리지 않음). 수신자마다 `deliveredSequence`, 스트림 cursor = 붙은 수신자 최솟값. 다시 받은 프레임은 아직 받지 않은 수신자에게만 넘긴다. 콜백 예외는 기록하고 그 수신자에게 넘긴 것으로 친다(무한 재시도·다른 수신자 중복 없음). 수신자 0명이면 큐에 보관(유예 뒤 해제).
-- gap 사유·스트림별 복구(research R8 대응표): run은 `run.replay` 스냅샷(기준점) → 기준점 뒤 구독, orchestration은 구독(hello) → `orchestration.get` → 스냅샷 `revision` 이하 이벤트 버림·이후는 재조회 트리거, 교환은 구독(hello) → `exchange.list` → `requestId` 멱등 upsert(늦은 `updatedAt`만), 알림은 구독 → 재조회, 세대 변경은 창 전체 재동기, 지연은 같은 cursor로 재연결.
-- 연결 종료(서버 닫음·오류)는 재연결 루프(backoff 250ms→10s, jitter).
+- 스트림당 WebSocket 하나. 표 발급 cursor = 수신자 `deliveredSequence` 최솟값(처음이면 호출자가 준 기준점, 없으면 0).
+- 수신자: `(event) => void | Promise<void>`. Promise는 settle까지 기다린다. 수신자마다 순서대로 하나씩. 이행 = 반영 완료(`deliveredSequence` 전진), 거절·동기 예외 = 그 수신자만 실패 → 그 수신자 스냅샷 재동기 후 기준점으로 전진, 다른 수신자는 계속. 이미 넘긴 순번은 그 수신자에게 다시 넘기지 않는다.
+- 수신자 0명 동안은 스트림 대기열(상한 1,024 — 넘으면 닫고 cursor에서 재구독). 해제는 마지막 수신자가 떠나고 유예 뒤.
+- `hello`는 복구 성공 신호가 아니다. gap은 언제 와도 절차를 다시 시작한다.
+- 보관 범위 gap(`retentionExceeded`·`evicted`·`unknownStream`): ① gap의 `lastSequence`로 새 표(live 확보) ② 도착 이벤트 버퍼 ③ 스트림별 스냅샷(run `run.replay`, orchestration `orchestration.get`, 교환 `exchange.list`) ④ 스냅샷을 초기화로 넘기고 버퍼를 기준으로 걸러 이어 넘김(run 순번, orchestration `revision`, 교환 `requestId`+`updatedAt`). 재시도 최대 3회.
+- 교환 재조정: 창 원장 `requestId → routed/acked`. 스냅샷의 `Accepted` 교환(이 창 패널 대상): 라우팅 전이면 라우팅+ack, 라우팅 뒤 ack 미확인이면 ack만(서버 ack는 `requestId` 멱등). 교환 prompt의 run 전송은 멱등성 키 `exchange-delivery:<requestId>`.
+- 알림 스트림: 구독(hello) → 재조회. `epochChanged`: 창 전체 재동기. `subscriberLagged`: 같은 cursor로 재연결. 연결 종료: 재연결 루프(backoff 250ms→10s, jitter).
 
 ## 6. 연결 상태 표시
 
