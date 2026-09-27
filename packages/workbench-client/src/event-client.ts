@@ -95,6 +95,8 @@ interface ListenerState {
 
 interface Recovery {
   after: number;
+  /** 세대가 바뀐 복구: 옛 세대의 반영 순번은 새 세대에서 뜻이 없다(재설정에 0을 넘긴다). */
+  epochReset: boolean;
   buffer: EventEnvelope[];
   terminal: boolean;
   helloSeen: boolean;
@@ -198,8 +200,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         resync: Promise.resolve(),
       };
       if (this.recovery) {
-        // gap 복구 중 합류: 복구가 끝나면 자기 스냅샷으로 재설정한 뒤 이어 받는다(복구 버퍼는 그 스냅샷 기준으로 걸러진다).
-        state.delivered = state.lastQueued = this.recovery.after;
+        // gap 복구 중 합류: 복구가 끝나면 복구 스냅샷으로 재설정한 뒤 버퍼·live를 이어 받는다.
         state.resetting = true;
       }
       const firstListener = this.listeners.size === 0;
@@ -363,7 +364,11 @@ export function createEventClient(options: EventClientOptions): EventClient {
         this.highest = event.sequence;
       }
       if (this.recovery) {
-        this.recovery.buffer.push(event);
+        // 복구 중 재연결은 기준점부터 다시 재생한다: 순번이 늘어나는 이벤트만 버퍼에 둔다.
+        const buffer = this.recovery.buffer;
+        if (event.sequence > (buffer[buffer.length - 1]?.sequence ?? this.recovery.after)) {
+          buffer.push(event);
+        }
         return;
       }
       if (this.listeners.size === 0) {
@@ -500,7 +505,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         case "epochChanged":
           this.epoch = gap.epoch;
           options.onEpochChanged?.(gap.epoch);
-          this.startRecovery(0, false);
+          this.startRecovery(0, false, true);
           return;
         case "evicted":
           this.startRecovery(this.highest, true);
@@ -511,7 +516,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
     }
 
-    startRecovery(after: number, terminal: boolean) {
+    startRecovery(after: number, terminal: boolean, epochReset = false) {
       this.recoveryAttempts += 1;
       if (this.recoveryAttempts > maxRecoveryAttempts) {
         this.recovery = undefined;
@@ -520,7 +525,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         options.onStreamError?.(this.id, "stream recovery failed repeatedly");
         return;
       }
-      this.recovery = { after, buffer: [], terminal, helloSeen: false };
+      this.recovery = { after, epochReset, buffer: [], terminal, helloSeen: false };
       this.closeSocket();
       if (terminal) {
         void this.completeRecovery(this.recovery);
@@ -536,7 +541,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       } catch (error) {
         if (this.recovery === recovery) {
           options.onStreamError?.(this.id, `snapshot failed: ${String(error)}`);
-          this.startRecovery(recovery.after, recovery.terminal);
+          this.startRecovery(recovery.after, recovery.terminal, recovery.epochReset);
         }
         return;
       }
@@ -557,24 +562,37 @@ export function createEventClient(options: EventClientOptions): EventClient {
         this.cursorWhenEmpty = recovery.after;
       }
       for (const state of this.listeners) {
-        this.applyRecoverySnapshot(state, recovery.after, data, pending);
+        this.applyRecoverySnapshot(state, recovery, data, pending);
       }
     }
 
-    applyRecoverySnapshot(state: ListenerState, after: number, data: unknown, pending: EventEnvelope[]) {
+    applyRecoverySnapshot(state: ListenerState, recovery: Recovery, data: unknown, pending: EventEnvelope[]) {
       const snapshot = this.snapshot;
+      const after = Math.max(recovery.after, 0);
       state.resetting = true;
       state.generation += 1;
       const generation = state.generation;
       state.covered = undefined;
-      state.queue = pending.slice();
-      state.delivered = Math.max(after, 0);
-      state.lastQueued = pending.length > 0 ? pending[pending.length - 1].sequence : state.delivered;
+      // 재설정에는 이 수신자가 실제로 반영한 순번을 넘긴다(run은 그 뒤 스냅샷 이벤트를 다시 반영한다). 반영 완료 cursor는
+      // 재설정이 끝난 뒤에 기준점으로 올린다. 대기열 중복 방지(lastQueued)는 곧바로 기준점·버퍼 기준이다.
+      const appliedBefore = recovery.epochReset ? 0 : state.delivered;
+      if (recovery.epochReset) {
+        state.delivered = 0;
+      }
+      state.queue = [];
+      state.lastQueued = after;
+      for (const event of pending) {
+        if (event.sequence > state.lastQueued) {
+          state.queue.push(event);
+          state.lastQueued = event.sequence;
+        }
+      }
       void this.serialize(state, generation, async () => {
-        await state.listener.onReset?.(data, { delivered: state.delivered });
+        await state.listener.onReset?.(data, { delivered: appliedBefore });
         if (this.isStale(state, generation)) {
           return;
         }
+        state.delivered = Math.max(state.delivered, after);
         state.covered = snapshot ? (event) => !snapshot.passes(event, data) : undefined;
         state.resetting = false;
         void this.pump(state);

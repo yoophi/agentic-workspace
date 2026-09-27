@@ -112,3 +112,20 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 
 시험: "recovery isolation" — B 재설정 보류 → B 제거 → A가 live 6을 받고 cursor 6. red 1(`timed out waiting for A keeps receiving live events`) → green 0. C2 시험은 첫 구현에서 종료 1(`B gets its own snapshot` 시간 초과: gap 기준점이 최고 순번에 반영되지 않아 합류자가 다시 구독하지 않음) → 최고 순번 반영 뒤 0.
 회귀(각 1회, 종료 0): workbench-client 66 tests·통합 7, AW 626 tests·통합 1.
+
+## T057 Codex 후속 집중 리뷰 3 (`--wait --base 4f4f939`, 대상 `23d9859`)
+
+판정: needs-attention. G1의 전역 막힘은 해소됐다고 확인했다. G1 수정이 만든 회귀 High 2건:
+
+| # | 문제(Codex 메모리 내 재현) | 조치 |
+|---|---|---|
+| H1 | 복구 재설정 **전에** 반영 cursor를 gap 기준점으로 올려 `onReset`에 기준점(5)을 넘겼다(실제 반영 0). run 소비자는 `delivered` 뒤의 스냅샷 이벤트만 다시 반영하므로 1–5를 잃는다 | 재설정에는 실제 반영 순번을 넘기고, 기준점으로의 전진은 재설정 성공 뒤에 한다. 세대 변경 복구는 0을 넘긴다(`epochReset`). 대기열 중복 방지(`lastQueued`)는 곧바로 기준점·버퍼 기준이다 |
+| H2 | 복구 버퍼를 대기열에 그대로 복사해 중복 제거가 사라졌다. 적재 중 재연결로 기준점부터 다시 재생되면 `[6,7,6,7]`이 된다 | 버퍼에는 순번이 늘어나는 이벤트만 둔다. 대기열에 옮길 때도 순번 증가만 받는다 |
+
+시험(먼저 작성·실패 확인, "recovery cursors"):
+| 시험 | red | green |
+|---|---|---|
+| H1 재설정 context가 실제 반영 순번(0), 재설정 뒤 cursor 5 | 1: `expected [ 5 ] to deeply equal [ +0 ]` | 0 |
+| H2 적재 중 재연결에도 `[6, 7]` 한 번씩 | 1: `expected [ 6, 7, 6, 7 ] to deeply equal [ 6, 7 ]` | 0 |
+
+회귀(각 1회, 종료 0): workbench-client 68 tests·통합 7, AW 626 tests·통합 1.

@@ -372,3 +372,68 @@ describe("event client recovery isolation (Codex follow-up review 2)", () => {
     client.close();
   });
 });
+
+describe("event client recovery cursors (Codex follow-up review 3)", () => {
+  it("passes the listener's actual applied cursor to the recovery reset, not the gap boundary", async () => {
+    const hub = new FakeEventHub(2);
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s");
+    }
+    const client = clientFor(hub);
+    const contexts: number[] = [];
+    client.subscribe(
+      "s",
+      { onEvent: () => undefined, onReset: (_data, context) => void contexts.push(context.delivered) },
+      {
+        snapshot: {
+          load: async () => ({ lastSequence: hub.lastSequence("s") }),
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+      },
+    );
+    await until(() => contexts.length === 1, "recovery reset");
+    expect(contexts).toEqual([0]); // run 소비자는 이 값 뒤의 스냅샷 이벤트(1–5)를 다시 반영한다
+    await until(() => client.debugCursor("s") === 5, "cursor moves to the gap boundary after the reset");
+    client.close();
+  });
+
+  it("delivers buffered recovery events once and in order when the socket reconnects during the snapshot load", async () => {
+    const hub = new FakeEventHub(2);
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s");
+    }
+    const client = clientFor(hub);
+    const holdLoad = deferred();
+    let loads = 0;
+    const events: number[] = [];
+    client.subscribe(
+      "s",
+      { onEvent: (event) => void events.push(event.sequence), onReset: () => undefined },
+      {
+        snapshot: {
+          load: async () => {
+            loads += 1;
+            await holdLoad.promise;
+            return { lastSequence: 5 };
+          },
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+      },
+    );
+    await until(() => loads === 1, "recovery snapshot loading");
+    hub.publish("s"); // 6 (버퍼)
+    hub.publish("s"); // 7 (버퍼)
+    expect(client.debugDropSockets()).toBe(1); // 복구 기준점 5에서 다시 연결 → 6·7 재생
+    await until(() => hub.sockets.length === 3 && hub.sockets[2].readyState === 1, "reconnected during recovery");
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve();
+    }
+    holdLoad.resolve();
+    await until(() => events.length >= 2, "buffered events delivered");
+    for (let i = 0; i < 20; i += 1) {
+      await Promise.resolve();
+    }
+    expect(events).toEqual([6, 7]);
+    client.close();
+  });
+});
