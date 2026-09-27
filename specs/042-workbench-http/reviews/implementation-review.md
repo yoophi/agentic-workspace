@@ -70,3 +70,21 @@
 ## 5. Codex adversarial review 최종 — verdict: approve
 
 "main 2e7f359 대비 재검토에서 출하를 막을 실질적 결함을 찾지 못했습니다." Codex는 읽기 전용 환경이라 `acp_permission_exit`를 재실행하지 못했다 — 최종 HEAD 전체 게이트(747 passed)에서 이 시험이 통과했다.
+
+## 6. CI에서 드러난 시험 가정 — terminal 결과와 가짜 agent의 권한 처리
+
+PR #205 첫 CI(run 36323437391, macos-15)에서 `exit_releases_permission_waits_then_drains`가 실패했다: 받아들인 `run.cancelAndSend`가 오류가 아니라 `Complete { output: Null }`로 끝났다. 로컬에서는 매번 `ACP connection closed` 오류였다.
+
+**원인은 미확정이다.** 그 CI 실행에는 agent 기록이 없어 `Complete`의 출처를 확인하지 못했다. 코드로 확인한 후보 두 가지:
+1. 권한 대기 제거(`clear_run`)로 client의 권한 대기가 닫히면 `permission_flow`가 오류를 돌려주고 client는 agent의 `session/request_permission`에 JSON-RPC **오류**로 응답한다(`client.rs` `handle_request`). 당시 가짜 agent는 권한 응답의 내용을 보지 않고 어떤 응답이든 `end_turn`으로 prompt를 끝냈다 — 오류를 승인처럼 처리하는 **가짜 agent 결함**이며, 그러면 교체 prompt가 정상 완료된다(유력하지만 미확인). 또 첫 prompt의 늦은 권한 응답이 교체 prompt를 끝낼 수도 있었다.
+2. agent가 취소 요청(`$/cancel_request`)에 교체 prompt를 `cancelled`로 먼저 답하는 경로.
+
+**가짜 agent 수정**: 권한 요청 id를 prompt id에 대응(끝난 prompt의 늦은 응답 무시), 승인(`selected` + allow)일 때만 `end_turn`, 오류·거절이면 `cancelled`. 모든 동작을 **응답을 보내기 전에** 기록·flush(`prompt:<id>`, `end_turn:<id>`, `cancelled:<id>:<cancel-request|permission-error|permission-refused>`).
+
+**시험 의미 수정(허용을 근거로 한정)**:
+- 정상 완료는 `Complete(Null)`이고 agent 기록에 교체 prompt의 `cancelled:<id>:<사유>`가 **있어야** 허용
+- 오류는 메시지가 `ACP connection closed`일 때만 허용
+- 두 경우 모두 prompt 2개 도달, 교체 prompt에 `end_turn` 없음(권한 승인 없이 끝남)
+- 유지한 핵심 단정: 두 번째 권한 요청 도달 → 종료 완료 → `calls.active() == 0` → run 소유 없음 → 같은 키 재시도 `notFound`(재실행 없음)
+
+**검증 범위**: 수정한 agent·시험으로 로컬 10/10, CPU 포화(`yes` × 12) 10/10 통과 — 20회 모두 연결 종료 경로(agent `cancelled` 기록 없음). **정상 완료 분기는 로컬에서 한 번도 재현되지 않아 이 반복으로 검증되지 않았다.** 그 분기의 대조 단정은 CI 등에서 그 경로가 나올 때만 실행된다. (앞선 반복 한 번은 헬퍼 이름이 `PathBuf` 바인딩에 가려 빌드가 실패한 채 이전 바이너리로 돌린 것이라 무효 — 이름을 `read_agent_log`로 바꾼 뒤 다시 실행.)

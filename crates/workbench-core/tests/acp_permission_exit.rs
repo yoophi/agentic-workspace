@@ -17,10 +17,19 @@ use workbench_protocol::{AuthenticatedPrincipal, OperationId, Workbench};
 
 mod support;
 
-fn agent_command() -> String {
+fn agent_command(log: &std::path::Path) -> String {
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/support/agents/fake_acp_permission_agent.py");
-    format!("python3 {}", script.display())
+    format!("python3 {} --log {}", script.display(), log.display())
+}
+
+/// 가짜 agent가 남긴 기록 한 줄씩.
+fn read_agent_log(path: &std::path::Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .map(str::to_owned)
+        .collect()
 }
 
 async fn desktop(rt: &TestRuntime, operation: OperationId, input: Value) -> Value {
@@ -60,6 +69,7 @@ async fn wait_for_permission_requests(rt: &TestRuntime, count: usize) {
 
 struct Waiting {
     rt: TestRuntime,
+    agent_log: std::path::PathBuf,
     bench: String,
     request: workbench_protocol::CallRequest,
     harness: Harness,
@@ -71,6 +81,7 @@ struct Waiting {
 /// run을 띄워 첫 prompt가 권한을 기다리게 하고, HTTP로 `run.cancelAndSend`를 받아들여 교체 prompt도 권한을 기다리게 한다.
 async fn cancel_and_send_waiting_for_permission() -> Waiting {
     let rt = TestRuntime::with_adapters(RuntimeAdapters::production());
+    let agent_log = rt.dir.path().join("agent.log");
     let work = rt.dir.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
     let work = std::fs::canonicalize(work)
@@ -90,7 +101,7 @@ async fn cancel_and_send_waiting_for_permission() -> Waiting {
         &rt,
         OperationId::RunStart,
         json!({ "benchId": bench, "request": {
-            "goal": "first", "agentId": "fake-acp", "agentCommand": agent_command(),
+            "goal": "first", "agentId": "fake-acp", "agentCommand": agent_command(&agent_log),
             "cwd": work, "runId": "r1", "permissionMode": "default" } }),
     )
     .await;
@@ -132,6 +143,7 @@ async fn cancel_and_send_waiting_for_permission() -> Waiting {
     );
     Waiting {
         rt,
+        agent_log,
         bench,
         request,
         harness,
@@ -144,6 +156,7 @@ async fn cancel_and_send_waiting_for_permission() -> Waiting {
 async fn exit_without_releasing_work_waits_forever() {
     let Waiting {
         rt,
+        agent_log: _,
         bench,
         request: _,
         mut harness,
@@ -171,6 +184,7 @@ async fn exit_without_releasing_work_waits_forever() {
 async fn exit_releases_permission_waits_then_drains() {
     let Waiting {
         rt,
+        agent_log,
         bench: _,
         request,
         harness,
@@ -193,8 +207,51 @@ async fn exit_releases_permission_waits_then_drains() {
         .expect("client got an answer")
         .unwrap()
         .expect("the connection stayed open until the call ended");
-    let fault = reply.expect_err("the cancelled run fails the replacement prompt");
-    eprintln!("terminal fault: {:?} {}", fault.code, fault.message);
+    // terminal 결과는 run 취소 경로에 따라 둘 중 하나다 — 가짜 agent가 응답 전에 남긴 기록과 대조해 그 경로만 허용한다.
+    // (a) agent가 교체 prompt를 `cancelled`로 답함(취소 요청 또는 권한 대기 제거로 온 권한 오류) → 정상 완료
+    //     (`Complete`, 출력 없음). (b) run task abort로 ACP 연결이 먼저 닫힘 → `ACP connection closed` 오류.
+    // 어느 경로든 사용자가 권한을 승인하지 않았으므로 교체 prompt는 `end_turn`으로 끝나지 않는다.
+    let log = read_agent_log(&agent_log);
+    let prompts: Vec<&String> = log
+        .iter()
+        .filter(|line| line.starts_with("prompt:"))
+        .collect();
+    assert_eq!(
+        prompts.len(),
+        2,
+        "first prompt and the replacement reached the agent: {log:?}"
+    );
+    let replacement = prompts[1].trim_start_matches("prompt:");
+    assert!(
+        !log.contains(&format!("end_turn:{replacement}")),
+        "the replacement never completed with a granted permission: {log:?}"
+    );
+    let cancelled_reason = log
+        .iter()
+        .find_map(|line| line.strip_prefix(&format!("cancelled:{replacement}:")))
+        .map(str::to_owned);
+    match &reply {
+        Ok(reply) => {
+            assert_eq!(
+                reply,
+                &workbench_protocol::CallReply::complete(Value::Null, None),
+                "{reply:?}"
+            );
+            let reason = cancelled_reason.as_deref().unwrap_or_else(|| {
+                panic!("a successful reply must come from the agent's cancelled answer: {log:?}")
+            });
+            eprintln!("terminal path: agent answered cancelled ({reason})");
+        }
+        Err(fault) => {
+            assert!(
+                fault.message.contains("ACP connection closed"),
+                "only a closed ACP connection may fail the call: {fault:?}"
+            );
+            eprintln!(
+                "terminal path: connection closed (agent cancelled answer: {cancelled_reason:?})"
+            );
+        }
+    }
     assert_eq!(
         rt.runtime.run_engine().owner_of("r1").await,
         None,
