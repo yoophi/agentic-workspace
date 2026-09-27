@@ -640,8 +640,26 @@ pub struct GoalProgressInput {
     pub(crate) time_used_seconds: u64,
 }
 
-fn workbench_runtime(app: &AppHandle) -> Arc<WorkbenchRuntime> {
-    app.state::<Arc<WorkbenchRuntime>>().inner().clone()
+/// 앱 안의 런타임(embedded 모드). 외부 서버 모드에는 없다 — 호환 command는 정해진 오류를 돌려준다(044 T029).
+fn workbench_runtime(app: &AppHandle) -> Result<Arc<WorkbenchRuntime>, String> {
+    app.try_state::<Arc<WorkbenchRuntime>>()
+        .map(|runtime| runtime.inner().clone())
+        .ok_or_else(|| {
+            crate::infrastructure::workbench_mode::MESSAGE_EXTERNAL_UNAVAILABLE.to_owned()
+        })
+}
+
+fn workbench_mode(app: &AppHandle) -> crate::infrastructure::workbench_mode::WorkbenchMode {
+    app.try_state::<crate::infrastructure::workbench_mode::WorkbenchMode>()
+        .map(|mode| *mode)
+        .unwrap_or(crate::infrastructure::workbench_mode::WorkbenchMode::Embedded)
+}
+
+fn external_server(
+    app: &AppHandle,
+) -> Option<Arc<crate::infrastructure::server_client::ExternalServer>> {
+    app.try_state::<Arc<crate::infrastructure::server_client::ExternalServer>>()
+        .map(|server| server.inner().clone())
 }
 
 /// 호환 경로 호출자: 호출한 창의 주체로 부른다(043 D2 — 네트워크 경로와 같은 창 주체, 작업대 소유가 창별로 갈린다).
@@ -652,7 +670,7 @@ fn caller(app: &AppHandle, window: &tauri::Window) -> Result<workbench_compat::C
             crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
         })?;
     Ok(workbench_compat::Caller {
-        runtime: workbench_runtime(app),
+        runtime: workbench_runtime(app)?,
         principal,
     })
 }
@@ -1326,17 +1344,59 @@ pub fn open_worktree_window(
     window_manager::open_session_window(&app, &project_id, &project_name, &worktree_path, &mode)
 }
 
-/// 042·043: 이 창의 WebView 출처와 창 주체(incarnation)에 묶인 Workbench HTTP 연결 정보(짧은 토큰).
-#[tauri::command]
-pub fn get_workbench_connection(
-    window: tauri::WebviewWindow,
-    http: State<'_, crate::infrastructure::workbench_http::WorkbenchHttp>,
-) -> Result<crate::infrastructure::workbench_http::WorkbenchConnection, String> {
+fn window_origin(window: &tauri::WebviewWindow) -> Result<String, String> {
     let url = window.url().map_err(|error| error.to_string())?;
-    let origin = crate::infrastructure::workbench_http::origin_of(&url).ok_or_else(|| {
-        crate::infrastructure::workbench_http::MESSAGE_ORIGIN_NOT_ALLOWED.to_owned()
-    })?;
-    http.connection_for(&origin, window.label())
+    crate::infrastructure::workbench_http::origin_of(&url)
+        .ok_or_else(|| crate::infrastructure::workbench_http::MESSAGE_ORIGIN_NOT_ALLOWED.to_owned())
+}
+
+/// 042·043·044: 이 창의 WebView 출처와 창 주체(incarnation)에 묶인 Workbench HTTP 연결 정보(짧은 토큰). 외부 서버 모드는
+/// 서버를 찾거나 띄운 뒤(임대 포함) 소유자 자격 증명으로 창 토큰을 받는다. 출력 모양은 043과 같다.
+#[tauri::command]
+pub async fn get_workbench_connection(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<crate::infrastructure::workbench_http::WorkbenchConnection, String> {
+    let origin = window_origin(&window)?;
+    let label = window.label().to_owned();
+    if let Some(server) = external_server(&app) {
+        let incarnation = crate::infrastructure::window_principals::incarnation(&label)
+            .ok_or_else(|| {
+                crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
+            })?;
+        let (base_url, token, expires_at) = server
+            .issue_window_token(&label, &incarnation, &origin)
+            .await?;
+        return Ok(crate::infrastructure::workbench_http::WorkbenchConnection {
+            base_url,
+            token,
+            expires_at,
+            incarnation: Some(incarnation),
+        });
+    }
+    app.state::<crate::infrastructure::workbench_http::WorkbenchHttp>()
+        .connection_for(&origin, &label)
+}
+
+/// 044: 이 앱의 Workbench 모드(`external`·`embedded`). 화면이 부팅 실패 때 호환 경로로 갈지(embedded만) 정한다.
+#[tauri::command]
+pub fn get_workbench_mode(app: AppHandle) -> String {
+    workbench_mode(&app).as_str().to_owned()
+}
+
+/// 044 T029: 창 제목 적용(데스크톱 표현): 창 제목과 네이티브 Window 메뉴 동기화. 외부 서버 모드에서는 서버가 창에 넣지
+/// 않으므로 화면이 제목 이벤트를 받아 이 command를 부른다(R3).
+#[tauri::command]
+pub fn apply_window_title(
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+    title: String,
+) -> Result<(), String> {
+    window
+        .set_title(&title)
+        .map_err(|error| error.to_string())?;
+    crate::infrastructure::native_window_menu::sync_window_menu(&app)
+        .map_err(|error| error.to_string())
 }
 
 /// 043: 네트워크 경로 창이 자기 작업대 id를 얻는다(호환 경로가 창 label로 넣던 값). `open`이면 없을 때 연다(경로는 창의
@@ -1345,10 +1405,30 @@ pub fn get_workbench_connection(
 #[tauri::command]
 pub async fn ensure_window_bench(
     app: AppHandle,
-    window: tauri::Window,
+    window: tauri::WebviewWindow,
     open: bool,
     hint: Option<String>,
 ) -> Result<Option<String>, String> {
+    if let Some(server) = external_server(&app) {
+        if !open {
+            return Ok(desktop_benches::lookup(window.label()));
+        }
+        let incarnation = crate::infrastructure::window_principals::incarnation(window.label())
+            .ok_or_else(|| {
+                crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
+            })?;
+        let origin = window_origin(&window)?;
+        return desktop_benches::ensure_external(
+            &server,
+            window.label(),
+            &incarnation,
+            &origin,
+            hint.as_deref(),
+        )
+        .await
+        .map(Some);
+    }
+    let window = window.as_ref().window();
     let caller = caller(&app, &window)?;
     if !open {
         return Ok(desktop_benches::lookup(window.label()));
@@ -1360,7 +1440,14 @@ pub async fn ensure_window_bench(
 
 /// 043: 이 창(현재 incarnation)은 이벤트를 네트워크 구독으로 받는다 — 앱 내부 삽입 전달을 끈다(중복 금지, FR-007).
 #[tauri::command]
-pub fn declare_network_delivery(window: tauri::Window, incarnation: String) -> Result<(), String> {
+pub fn declare_network_delivery(
+    app: AppHandle,
+    window: tauri::Window,
+    incarnation: String,
+) -> Result<(), String> {
+    if workbench_mode(&app) == crate::infrastructure::workbench_mode::WorkbenchMode::External {
+        return Ok(()); // 044: 외부 서버 모드에는 삽입 전달이 없다
+    }
     crate::infrastructure::tauri_desktop_bridge::declare_network_delivery(
         window.label(),
         &incarnation,
@@ -1369,7 +1456,10 @@ pub fn declare_network_delivery(window: tauri::Window, incarnation: String) -> R
 
 /// 창의 페이지가 호환 경로로 부팅했을 때(043): 이전 페이지가 남긴 네트워크 전달 선언을 거둔다.
 #[tauri::command]
-pub fn withdraw_network_delivery(window: tauri::Window) {
+pub fn withdraw_network_delivery(app: AppHandle, window: tauri::Window) {
+    if workbench_mode(&app) == crate::infrastructure::workbench_mode::WorkbenchMode::External {
+        return;
+    }
     crate::infrastructure::tauri_desktop_bridge::withdraw_network_delivery(window.label());
 }
 

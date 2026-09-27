@@ -89,6 +89,49 @@ pub async fn ensure(
     Ok(output.bench_id)
 }
 
+/// 외부 서버 모드(044 T029): `ensure`와 같되 작업대를 서버에 창 토큰으로 연다(작업대는 창 주체 소유).
+pub async fn ensure_external(
+    server: &std::sync::Arc<crate::infrastructure::server_client::ExternalServer>,
+    label: &str,
+    incarnation: &str,
+    origin: &str,
+    hint: Option<&str>,
+) -> Result<String, String> {
+    let lock = label_lock(label);
+    let _guard = lock.lock().await;
+    {
+        let table = table();
+        if table.closed_labels.contains(label) {
+            return Err(MESSAGE_WINDOW_UNAVAILABLE.to_owned());
+        }
+        if let Some(bench) = table.by_label.get(label) {
+            return Ok(bench.clone());
+        }
+    }
+    let path = crate::infrastructure::window_manager::session_worktree_path(label)
+        .or_else(|| hint.map(str::to_owned))
+        .filter(|path| !path.trim().is_empty())
+        .ok_or_else(|| "A working directory is required to start agent work.".to_owned())?;
+    let bench = server.open_bench(label, incarnation, origin, &path).await?;
+    let mut table = table();
+    table.by_label.insert(label.to_owned(), bench.clone());
+    table.by_bench.insert(bench.clone(), label.to_owned());
+    Ok(bench)
+}
+
+/// 외부 서버 모드의 창 `Destroyed`(044 T031): 닫힌 창으로 표시하고 대응만 지운다. 작업대 닫기 여부는 서버의
+/// `desktop.retireWindow{closeBench}`가 정한다(창 닫기 의도, R8).
+pub async fn forget_window(label: &str) {
+    let lock = label_lock(label);
+    let _guard = lock.lock().await;
+    let mut table = table();
+    table.closed_labels.insert(label.to_owned());
+    if let Some(bench) = table.by_label.remove(label) {
+        table.by_bench.remove(&bench);
+    }
+    table.locks.remove(label);
+}
+
 /// 창이 `Destroyed`될 때: 닫힌 창으로 표시 → 작업대 닫기(소유 run 취소·교환 삭제) → 대응 제거. `principal`은 작업대를
 /// 연 창 주체다(043: 창 incarnation을 거둬들이기 전에 받아 둔 값 — 작업대는 연 주체만 닫을 수 있다).
 pub async fn close(
