@@ -92,6 +92,8 @@ pub struct WorkbenchHttpState {
     issuer: Arc<DesktopTokenIssuer>,
     shutdown: std::sync::Mutex<Option<oneshot::Sender<()>>>,
     served: tokio::sync::Mutex<Option<oneshot::Receiver<()>>>,
+    /// 받아들인 HTTP 호출 추적기 — 종료 시작 때 곧바로 닫는다.
+    http_calls: Arc<DetachedCalls>,
     drain_warn_after: Duration,
 }
 
@@ -130,6 +132,7 @@ impl WorkbenchHttpState {
             drain_warn_after: assembly.drain_warn_after,
         };
         let server = workbench_server::build_router(assembly.workbench, config, address.port());
+        let http_calls = Arc::clone(&server.calls);
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let (served_tx, served_rx) = oneshot::channel::<()>();
         tauri::async_runtime::spawn(async move {
@@ -152,6 +155,7 @@ impl WorkbenchHttpState {
             issuer,
             shutdown: std::sync::Mutex::new(Some(shutdown_tx)),
             served: tokio::sync::Mutex::new(Some(served_rx)),
+            http_calls,
             drain_warn_after: assembly.drain_warn_after,
         })
     }
@@ -179,9 +183,12 @@ impl WorkbenchHttpState {
         }
     }
 
-    /// 종료(research R17, T033): 새 호출 거절 → `serve` 완료(받아들인 HTTP 호출 drain) → MCP 도구 호출 drain.
-    /// 상한 없이 기다리고 경고 간격마다 남은 수를 기록한다. 소유자(앱 종료 경로)는 이 future가 끝난 뒤에 종료한다.
+    /// 종료(research R17, T033): **먼저 HTTP·MCP 양쪽의 새 호출 수락을 닫고**(종료 중 들어온 변경은 `503`), 그다음
+    /// 종료 신호 → `serve` 완료(받아들인 HTTP 호출 drain) → 받아들인 MCP 도구 호출 drain. 상한 없이 기다리고 경고
+    /// 간격마다 남은 수를 기록한다. 소유자(앱 종료 경로)는 이 future가 끝난 뒤에 종료한다.
     pub async fn shutdown(&self, mcp_calls: &DetachedCalls) {
+        self.http_calls.close();
+        mcp_calls.close();
         if let Some(tx) = self
             .shutdown
             .lock()
@@ -426,11 +433,12 @@ mod tests {
         )
     }
 
-    /// T033: 앱 종료 경로(`shutdown`)는 연결이 이미 끊긴 받아들인 호출과 진행 중 MCP 호출이 끝나기 전에 끝나지
-    /// 않는다. 지연(400ms)은 경고 간격(20ms)보다 길다.
+    /// T033: 앱 종료 경로(`shutdown`)는 연결이 이미 끊긴 받아들인 HTTP 호출(700ms)과 진행 중 MCP 호출(300ms)이
+    /// 끝나기 전에 끝나지 않고, 종료를 시작하자마자 MCP 새 호출은 거절된다(HTTP drain이 더 오래 걸려도). 지연은
+    /// 경고 간격(20ms)보다 길다.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn exit_waits_for_accepted_http_and_mcp_calls() {
-        let (workbench, entered, finished) = slow(Duration::from_millis(400));
+        let (workbench, entered, finished) = slow(Duration::from_millis(700));
         let state = WorkbenchHttpState::start(HttpAssembly {
             workbench,
             mcp_registry: CapabilityRegistry::default(),
@@ -470,7 +478,7 @@ mod tests {
         {
             let mcp_finished = mcp_finished.clone();
             tokio::spawn(workbench_server::drain::spawn_accepted(guard, async move {
-                tokio::time::sleep(Duration::from_millis(600)).await;
+                tokio::time::sleep(Duration::from_millis(300)).await;
                 mcp_finished.store(true, Ordering::Release);
             }));
         }
@@ -484,6 +492,17 @@ mod tests {
             !exiting.is_finished(),
             "exit completed while calls were running"
         );
+        // HTTP drain이 아직 진행 중인데도 MCP는 이미 새 호출을 받지 않는다.
+        assert!(
+            mcp_calls.accept().is_none(),
+            "MCP accepted a new call while the HTTP drain was still running"
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        assert!(
+            mcp_finished.load(Ordering::Acquire),
+            "the earlier MCP call ran to completion"
+        );
+        assert!(!exiting.is_finished(), "HTTP call (700ms) still draining");
         exiting.await.unwrap();
         assert!(
             finished.load(Ordering::Acquire),
