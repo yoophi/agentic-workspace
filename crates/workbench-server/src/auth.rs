@@ -63,9 +63,21 @@ pub const DESKTOP_TOKEN_CAPACITY: usize = 256;
 
 /// 메모리 데스크톱 토큰 발급기. 상한을 넘으면 가장 먼저 만료될 토큰부터 버린다.
 pub struct DesktopTokenIssuer {
-    entries: Mutex<HashMap<[u8; 32], DesktopEntry>>,
+    inner: Mutex<IssuerInner>,
     capacity: usize,
 }
+
+#[derive(Default)]
+struct IssuerInner {
+    entries: HashMap<[u8; 32], DesktopEntry>,
+    /// 폐기한 창 주체(044 Codex 설계 리뷰 C4). 발급과 같은 잠금 아래에서 확인하므로 폐기보다 늦게 도착한 발급이 토큰을
+    /// 되살리지 못한다. 서버 세대 동안 유지한다(발급기는 세대마다 새로 만든다).
+    retired: std::collections::HashSet<PrincipalSubject>,
+}
+
+/// 폐기한 주체에 발급하려 함.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubjectRetired;
 
 impl Default for DesktopTokenIssuer {
     fn default() -> Self {
@@ -76,7 +88,7 @@ impl Default for DesktopTokenIssuer {
 impl DesktopTokenIssuer {
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
+            inner: Mutex::new(IssuerInner::default()),
             capacity,
         }
     }
@@ -93,9 +105,45 @@ impl DesktopTokenIssuer {
         origin: TokenOrigin,
         ttl: Duration,
     ) -> IssuedToken {
+        let mut inner = lock(&self.inner);
+        self.insert(&mut inner, principal, origin, ttl)
+    }
+
+    /// 창 토큰(044): 폐기한 주체(tombstone)면 발급하지 않는다. 확인과 발급이 한 잠금 아래에서 일어난다.
+    pub fn issue_window(
+        &self,
+        principal: AuthenticatedPrincipal,
+        origin: TokenOrigin,
+        ttl: Duration,
+    ) -> Result<IssuedToken, SubjectRetired> {
+        let mut inner = lock(&self.inner);
+        if inner.retired.contains(&principal.subject) {
+            return Err(SubjectRetired);
+        }
+        Ok(self.insert(&mut inner, principal, origin, ttl))
+    }
+
+    /// 창 폐기(044): 주체의 토큰을 모두 지우고 tombstone을 세운다. 지운 개수.
+    pub fn retire_subject(&self, subject: &PrincipalSubject) -> usize {
+        let mut inner = lock(&self.inner);
+        inner.retired.insert(subject.clone());
+        let before = inner.entries.len();
+        inner
+            .entries
+            .retain(|_, entry| entry.principal.subject != *subject);
+        before - inner.entries.len()
+    }
+
+    fn insert(
+        &self,
+        inner: &mut IssuerInner,
+        principal: AuthenticatedPrincipal,
+        origin: TokenOrigin,
+        ttl: Duration,
+    ) -> IssuedToken {
         let token = random_token();
         let now = Instant::now();
-        let mut entries = lock(&self.entries);
+        let entries = &mut inner.entries;
         entries.retain(|_, entry| entry.expires_at > now);
         while entries.len() >= self.capacity {
             let Some(oldest) = entries
@@ -125,14 +173,16 @@ impl DesktopTokenIssuer {
 
     /// 주체의 토큰을 모두 지운다(창 Destroyed). 지운 개수.
     pub fn revoke_subject(&self, subject: &PrincipalSubject) -> usize {
-        let mut entries = lock(&self.entries);
-        let before = entries.len();
-        entries.retain(|_, entry| entry.principal.subject != *subject);
-        before - entries.len()
+        let mut inner = lock(&self.inner);
+        let before = inner.entries.len();
+        inner
+            .entries
+            .retain(|_, entry| entry.principal.subject != *subject);
+        before - inner.entries.len()
     }
 
     pub fn len(&self) -> usize {
-        lock(&self.entries).len()
+        lock(&self.inner).entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -142,8 +192,8 @@ impl DesktopTokenIssuer {
 
 impl CredentialResolver for DesktopTokenIssuer {
     fn resolve(&self, bearer: &str, origin: Option<&str>) -> Option<AuthenticatedPrincipal> {
-        let entries = lock(&self.entries);
-        let entry = entries.get(&digest(bearer))?;
+        let inner = lock(&self.inner);
+        let entry = inner.entries.get(&digest(bearer))?;
         if entry.expires_at <= Instant::now() {
             return None;
         }
@@ -255,7 +305,10 @@ mod tests {
         let issuer = DesktopTokenIssuer::default();
         let issued = issuer.issue(TokenOrigin::NoOrigin, Duration::from_millis(0));
         assert!(issuer.resolve(&issued.token, None).is_none());
-        let kept = format!("{:?}", lock(&issuer.entries).keys().collect::<Vec<_>>());
+        let kept = format!(
+            "{:?}",
+            lock(&issuer.inner).entries.keys().collect::<Vec<_>>()
+        );
         assert!(!kept.contains(&issued.token));
     }
 

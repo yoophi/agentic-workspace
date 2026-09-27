@@ -31,6 +31,8 @@ pub struct EventTicket {
 pub enum IssueError {
     TooManyCursors,
     Exhausted,
+    /// 폐기한 주체(044 tombstone).
+    Retired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,9 +44,16 @@ pub enum TakeError {
 }
 
 pub struct EventTicketStore {
-    entries: Mutex<HashMap<[u8; 32], EventTicket>>,
+    inner: Mutex<TicketInner>,
     ttl: Duration,
     capacity: usize,
+}
+
+#[derive(Default)]
+struct TicketInner {
+    entries: HashMap<[u8; 32], EventTicket>,
+    /// 폐기한 창 주체(044). 폐기 전에 받은 인증으로 늦게 발급 요청이 와도, 폐기 전에 받은 표를 늦게 써도 거절한다.
+    retired: std::collections::HashSet<PrincipalSubject>,
 }
 
 impl Default for EventTicketStore {
@@ -56,7 +65,7 @@ impl Default for EventTicketStore {
 impl EventTicketStore {
     pub fn new(ttl: Duration, capacity: usize) -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
+            inner: Mutex::new(TicketInner::default()),
             ttl,
             capacity,
         }
@@ -72,7 +81,11 @@ impl EventTicketStore {
             return Err(IssueError::TooManyCursors);
         }
         let now = Instant::now();
-        let mut entries = lock(&self.entries);
+        let mut inner = lock(&self.inner);
+        if inner.retired.contains(&principal.subject) {
+            return Err(IssueError::Retired);
+        }
+        let entries = &mut inner.entries;
         entries.retain(|_, ticket| ticket.expires_at > now);
         if entries.len() >= self.capacity {
             return Err(IssueError::Exhausted);
@@ -94,17 +107,38 @@ impl EventTicketStore {
 
     /// 주체의 남은 표를 모두 지운다(043: 창 Destroyed — 폐기 전에 받은 표로 구독하지 못하게). 지운 개수.
     pub fn revoke_subject(&self, subject: &PrincipalSubject) -> usize {
-        let mut entries = lock(&self.entries);
-        let before = entries.len();
-        entries.retain(|_, ticket| ticket.principal.subject != *subject);
-        before - entries.len()
+        let mut inner = lock(&self.inner);
+        let before = inner.entries.len();
+        inner
+            .entries
+            .retain(|_, ticket| ticket.principal.subject != *subject);
+        before - inner.entries.len()
+    }
+
+    /// 창 폐기(044): 주체의 남은 표를 지우고 tombstone을 세운다. 지운 개수.
+    pub fn retire_subject(&self, subject: &PrincipalSubject) -> usize {
+        let mut inner = lock(&self.inner);
+        inner.retired.insert(subject.clone());
+        let before = inner.entries.len();
+        inner
+            .entries
+            .retain(|_, ticket| ticket.principal.subject != *subject);
+        before - inner.entries.len()
     }
 
     /// 원자적으로 꺼낸다 — 같은 표로 두 연결이 동시에 와도 하나만 성공한다.
     pub fn take(&self, token: &str, origin: Option<&str>) -> Result<EventTicket, TakeError> {
-        let ticket = lock(&self.entries)
-            .remove(&digest(token))
-            .ok_or(TakeError::Invalid)?;
+        let ticket = {
+            let mut inner = lock(&self.inner);
+            let ticket = inner
+                .entries
+                .remove(&digest(token))
+                .ok_or(TakeError::Invalid)?;
+            if inner.retired.contains(&ticket.principal.subject) {
+                return Err(TakeError::Invalid);
+            }
+            ticket
+        };
         if ticket.expires_at <= Instant::now() {
             return Err(TakeError::Invalid);
         }
