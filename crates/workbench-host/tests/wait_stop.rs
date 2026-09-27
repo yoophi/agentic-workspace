@@ -482,14 +482,14 @@ fn a_waiting_task_is_assigned_as_a_continuation_and_the_server_stops() {
         "aw_assign_child_task",
         json!({ "taskId": second["taskId"], "requestId": "a1" }),
     );
-    if let Ok(assigned) = &assigned {
-        if let Some(run) = assigned["runId"].as_str() {
-            let _ = server.tool(
-                run,
-                "aw_report_result",
-                json!({ "requestId": "r1", "summary": "done" }),
-            );
-        }
+    if let Ok(assigned) = &assigned
+        && let Some(run) = assigned["runId"].as_str()
+    {
+        let _ = server.tool(
+            run,
+            "aw_report_result",
+            json!({ "requestId": "r1", "summary": "done" }),
+        );
     }
     assert!(
         server.stops_within(STOP_BOUND),

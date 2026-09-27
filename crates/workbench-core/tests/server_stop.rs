@@ -5,6 +5,8 @@
 //! - `default`: 활동 작업이 있으면 `conflict` + `details.activeWork`. `wait`: 비운 뒤 활동이 0이 되면 정지.
 //!   `force`: 작업대를 모두 닫고 정지. 임대 획득은 유휴 비우기를 서빙으로 되돌린다.
 
+#![allow(clippy::result_large_err)]
+
 mod support;
 
 use std::time::Duration;

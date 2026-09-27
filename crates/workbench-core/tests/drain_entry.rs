@@ -6,6 +6,8 @@
 //!
 //! 표는 `OperationId::ALL`을 돈다 — 분류가 바뀌거나 새 operation이 생기면 이 시험이 같이 본다.
 
+#![allow(clippy::result_large_err)]
+
 mod support;
 
 use std::sync::Arc;
