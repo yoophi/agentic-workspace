@@ -3,6 +3,8 @@
 //! `system.describe.eventSchemas`, OpenAPI `EventBySchema`, TS `EventMap`이 모두 `EVENT_SCHEMAS`를 읽는다.
 //! 분류(상태 복원용/알림용)는 ADR `crates/workbench-core/docs/adr/0003`.
 
+pub mod run;
+
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

@@ -6,8 +6,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
-use workbench_core::application::{
-    agent_run_settings_service, workbench_runtime::WorkbenchRuntime,
+use workbench_core::{
+    application::{agent_run_settings_service, workbench_runtime::WorkbenchRuntime},
+    infrastructure::event_hub::RunReplay,
 };
 use workbench_protocol::OperationId;
 
@@ -73,7 +74,6 @@ use crate::{
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
-        in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
         json_acp_session_store::JsonAcpSessionStore,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
@@ -89,7 +89,6 @@ use crate::{
         agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
         permission::PermissionDecision,
-        runtime_event_journal::{RuntimeEventJournal, RuntimeEventSnapshot},
     },
 };
 
@@ -750,10 +749,13 @@ pub struct ReplayRuntimeEventsInput {
 
 #[tauri::command]
 pub fn replay_orchestration_runtime_events(
-    journal: State<'_, InMemoryRuntimeEventJournal>,
+    app: AppHandle,
     input: ReplayRuntimeEventsInput,
-) -> RuntimeEventSnapshot {
-    journal.replay(&input.run_id, input.after_sequence)
+) -> RunReplay {
+    // 039: run journal은 core 이벤트 hub에 있다. 응답 형태는 오늘의 `RuntimeEventSnapshot`과 같다.
+    workbench_runtime(&app)
+        .events_hub()
+        .replay_run(&input.run_id, input.after_sequence)
 }
 
 #[tauri::command]

@@ -718,6 +718,31 @@ mod tests {
         assert!(unknown.gap_detected && !unknown.terminal);
     }
 
+    /// 호환 replay의 JSON은 화면의 `RuntimeEventSnapshot` 타입과 같다(키 이름·중첩).
+    #[test]
+    fn run_replay_json_matches_the_desktop_snapshot_shape() {
+        let hub = hub(EventHubLimits::default());
+        hub.publish_state(
+            StreamKind::Run,
+            "r1",
+            RUN_EVENT_V1,
+            json!({"type": "lifecycle", "status": "completed", "message": ""}),
+            true,
+            &mut |_| {},
+        );
+        let value = serde_json::to_value(hub.replay_run("r1", 0)).unwrap();
+        assert_eq!(
+            value,
+            json!({
+                "runId": "r1",
+                "events": [{"runId": "r1", "sequence": 1, "event": {"type": "lifecycle", "status": "completed", "message": ""}, "terminal": true}],
+                "lastSequence": 1,
+                "terminal": true,
+                "gapDetected": false
+            })
+        );
+    }
+
     #[tokio::test]
     async fn replay_then_live_without_gap_or_duplicate() {
         let hub = hub(EventHubLimits::default());

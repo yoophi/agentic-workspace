@@ -111,21 +111,21 @@ description: "Task list for implementing the Workbench event stream (stage 2a)"
 
 ### Tests for User Story 2 ⚠️ (구현 전 작성, 실패 확인)
 
-- [ ] T024 [P] [US2] `crates/workbench-core/src/application/event_dto.rs`(신규) 테스트: `run_event_wire_parity` — acp-agent-core `RunEvent` 14 variant 전부(Lifecycle 10 status 포함)를 serde JSON과 `RunEventDto` JSON으로 비교
-- [ ] T025 [P] [US2] `crates/workbench-core/tests/run_delivery_order.rs`(신규): 두 thread가 같은 run에 발행, `deliver`가 순번 11에서 50ms 멈추는 동안 다른 thread 발행 → 기록된 전달 순서 오름차순·빈틈 없음. 무작위 지연 1,000회
-- [ ] T026 [P] [US2] `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.test.ts`: research R7 regression 6건(① loading 중 live 11 → snapshot 1–10 → 1–11 ② 역순 12·11 ③ 10 중복 ④ 13 빈틈 → gap ⑤ ready에서 12 → gap ⑥ 재수화 실패 → 버퍼 적용·runtimeLost)
-- [ ] T027 [P] [US2] `apps/agentic-workbench/src-tauri/src/infrastructure/tauri_run_event_sink.rs` 단위 테스트: 삽입 payload JSON이 `{runId, event, sequence, epoch, streamId, eventId}`이고 `{runId, event}`가 이전과 바이트 동일(스크립트 생성 함수를 순수 함수로 분리해 테스트)
+- [X] T024 [P] [US2] `crates/workbench-core/src/application/event_dto.rs`(신규) 테스트: `run_event_wire_parity` — acp-agent-core `RunEvent` 14 variant 전부(Lifecycle 10 status 포함)를 serde JSON과 `RunEventDto` JSON으로 비교
+- [X] T025 [P] [US2] `crates/workbench-core/tests/run_delivery_order.rs`(신규): 두 thread가 같은 run에 발행, `deliver`가 순번 11에서 50ms 멈추는 동안 다른 thread 발행 → 기록된 전달 순서 오름차순·빈틈 없음. 무작위 지연 1,000회
+- [X] T026 [P] [US2] `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.test.ts`: research R7 regression 6건(① loading 중 live 11 → snapshot 1–10 → 1–11 ② 역순 12·11 ③ 10 중복 ④ 13 빈틈 → gap ⑤ ready에서 12 → gap ⑥ 재수화 실패 → 버퍼 적용·runtimeLost)
+- [X] T027 [P] [US2] `apps/agentic-workbench/src-tauri/src/infrastructure/tauri_run_event_sink.rs` 단위 테스트: 삽입 payload JSON이 `{runId, event, sequence, epoch, streamId, eventId}`이고 `{runId, event}`가 이전과 바이트 동일(스크립트 생성 함수를 순수 함수로 분리해 테스트)
 
 ### Implementation for User Story 2
 
-- [ ] T028 [P] [US2] `crates/workbench-protocol/src/events/run.rs`(신규): `RunEventDto` + 보조 DTO(`LifecycleStatus` 등 acp-agent-core `domain/events.rs`의 serde 속성 그대로). `utoipa::ToSchema`. T024 통과 (depends T006)
-- [ ] T029 [US2] runtime `publish_run` 구현: `serde_json::to_value(RunEvent)` → hub `publish_state(run:<id>, "run.event.v1", body, terminal, deliver)`. terminal 판정은 오늘과 같음(`Lifecycle Completed|Cancelled`). T025 통과 (depends T020, T028)
-- [ ] T030 [US2] `apps/agentic-workbench/src-tauri/src/infrastructure/tauri_run_event_sink.rs`: journal append·Tauri `emit`·`emit_to`·`target_label=None` 분기 제거, `app.state::<Arc<WorkbenchRuntime>>()`의 `publish_run(…, deliver)`에서 창 `eval`(창 없으면 생략). worktree guard 검증은 `publish_run` 뒤. T027 통과 (depends T029)
-- [ ] T031 [US2] `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`: `replay_orchestration_runtime_events`가 runtime hub `replay_run` 사용(입출력 형태 불변). `lib.rs`의 `.manage(InMemoryRuntimeEventJournal)` 제거. 삭제: `infrastructure/in_memory_runtime_event_journal.rs`, `ports/runtime_event_journal.rs`(+ `mod.rs` 정리). `RuntimeEventSnapshot` TS 타입이 기대하는 JSON과 같은지 AW 단위 테스트 (depends T021)
-- [ ] T032 [P] [US2] `apps/agentic-workbench/src/entities/agent-run/model/types.ts`: `DeliveredRunEvent = RunEventEnvelope & {sequence: number; epoch: string; streamId: string; eventId: string}`; `entities/agent-run/api/agent-run-repository.ts`: `listenRunEvents` 콜백 타입만 교체
-- [ ] T033 [US2] `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.ts`: `pendingLive` 버퍼·drain·gap 규칙을 순수 함수로(`applyLiveRuntimeEvent`·`applyRuntimeSnapshot` 확장, `drainPendingLive` 신규), 버퍼 상한 512. T026 통과 (depends T032)
-- [ ] T034 [US2] `apps/agentic-workbench/src/features/agent-run/ui/agent-run-runtime-host.tsx`: `sequence: envelope.sequence`(추정 제거). `terminal` 계산 유지 (depends T033)
-- [ ] T035 [US2] `cargo test -p workbench-core -p agentic-workbench`, `pnpm --filter agentic-workbench test`·`check-types`. 기존 run 테스트 무수정 통과. 커밋(`feat(aw): publish run events through the event hub with ordered, sequenced desktop delivery (039 US2)`)
+- [X] T028 [P] [US2] `crates/workbench-protocol/src/events/run.rs`(신규): `RunEventDto` + 보조 DTO(`LifecycleStatus` 등 acp-agent-core `domain/events.rs`의 serde 속성 그대로). `utoipa::ToSchema`. T024 통과 (depends T006)
+- [X] T029 [US2] runtime `publish_run` 구현: `serde_json::to_value(RunEvent)` → hub `publish_state(run:<id>, "run.event.v1", body, terminal, deliver)`. terminal 판정은 오늘과 같음(`Lifecycle Completed|Cancelled`). T025 통과 (depends T020, T028)
+- [X] T030 [US2] `apps/agentic-workbench/src-tauri/src/infrastructure/tauri_run_event_sink.rs`: journal append·Tauri `emit`·`emit_to`·`target_label=None` 분기 제거, `app.state::<Arc<WorkbenchRuntime>>()`의 `publish_run(…, deliver)`에서 창 `eval`(창 없으면 생략). worktree guard 검증은 `publish_run` 뒤. T027 통과 (depends T029)
+- [X] T031 [US2] `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs`: `replay_orchestration_runtime_events`가 runtime hub `replay_run` 사용(입출력 형태 불변). `lib.rs`의 `.manage(InMemoryRuntimeEventJournal)` 제거. 삭제: `infrastructure/in_memory_runtime_event_journal.rs`, `ports/runtime_event_journal.rs`(+ `mod.rs` 정리). `RuntimeEventSnapshot` TS 타입이 기대하는 JSON과 같은지 AW 단위 테스트 (depends T021)
+- [X] T032 [P] [US2] `apps/agentic-workbench/src/entities/agent-run/model/types.ts`: `DeliveredRunEvent = RunEventEnvelope & {sequence: number; epoch: string; streamId: string; eventId: string}`; `entities/agent-run/api/agent-run-repository.ts`: `listenRunEvents` 콜백 타입만 교체
+- [X] T033 [US2] `apps/agentic-workbench/src/features/agent-run/model/agent-run-controller.ts`: `pendingLive` 버퍼·drain·gap 규칙을 순수 함수로(`applyLiveRuntimeEvent`·`applyRuntimeSnapshot` 확장, `drainPendingLive` 신규), 버퍼 상한 512. T026 통과 (depends T032)
+- [X] T034 [US2] `apps/agentic-workbench/src/features/agent-run/ui/agent-run-runtime-host.tsx`: `sequence: envelope.sequence`(추정 제거). `terminal` 계산 유지 (depends T033)
+- [X] T035 [US2] `cargo test -p workbench-core -p agentic-workbench`, `pnpm --filter agentic-workbench test`·`check-types`. 기존 run 테스트 무수정 통과. 커밋(`feat(aw): publish run events through the event hub with ordered, sequenced desktop delivery (039 US2)`)
 
 **Checkpoint**: quickstart §3 1·2 수동 확인 가능.
 

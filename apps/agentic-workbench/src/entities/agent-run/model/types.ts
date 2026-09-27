@@ -6,6 +6,7 @@ import type {
   ContextSizePreset,
   PermissionMode,
   RunEvent,
+  RunEventEnvelope,
 } from "@yoophi/agent-client";
 
 export type {
@@ -243,4 +244,15 @@ export type TimelineItem = {
   tone?: "info" | "success" | "warning" | "danger";
   createdAt: number;
   event: RunEvent;
+};
+
+/**
+ * 데스크톱이 받는 run 이벤트(039): 공유 봉투에 서버가 부여한 순번·세대·스트림·이벤트 id를 더한 상위 집합.
+ * `sequence`는 live와 replay에서 같은 값이다.
+ */
+export type DeliveredRunEvent = RunEventEnvelope & {
+  sequence: number;
+  epoch: string;
+  streamId: string;
+  eventId: string;
 };

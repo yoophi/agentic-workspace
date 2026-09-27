@@ -2,6 +2,7 @@ pub mod agent_dto;
 pub mod agent_run_settings_service;
 pub mod authorization;
 pub mod dto;
+pub mod event_dto;
 pub mod git_dto;
 pub mod git_service;
 pub mod git_worktree_service;
