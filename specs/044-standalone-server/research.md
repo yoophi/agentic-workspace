@@ -225,7 +225,7 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 - 오늘 자식 보고 도구는 결과를 저장하고 알림 전달기를 `tokio::spawn`한 뒤 곧바로 돌아간다(`agent_tools.rs:540-570`). 전달기가 처음 돌기 전에 자식 turn과 보고 호출이 끝나면, 예약만으로 세는 활동이 0이 되어 wait-stop이 `stopping`으로 넘어갈 수 있다. 그 뒤 전달기의 `send_and_wait`는 2'로 거절되어 알림을 잃는다.
 - 수정:
   - 저장된 미전달 알림(대상 coordinator run이 살아 있음)을 활동에 센다(저장소 파생). 알림은 보고 호출이 돌아가기 전에 저장되므로 공백이 없다.
-  - 보고 도구는 C-call을 놓기 전에 N-notify 예약을 만들어 전달기로 넘긴다. 전달기가 `send_and_wait`에 들어가면 A-turn으로 인계한다.
+  - 보고 도구는 C-call을 놓기 전에 N-notify 예약을 만들어 전달기로 넘긴다. N-notify는 결과 저장 transaction commit까지 유지한다. `send_and_wait`는 그 안에서 별도의 A-turn을 잡고 prompt 실행이 끝나면 놓는다(인계하지 않음).
   - 비우기에 들어갈 때와 전달 실패 뒤(재시도 가능 실패), 서버가 알림 전달 한 바퀴를 스스로 돈다(backoff). 저장된 미전달 알림이 외부 계기 없이 남아 wait를 영원히 막지 않게 한다.
   - **중단된 전달의 회수(Codex 재검토 4 G1)**: 전달기는 전달 전에 `Dispatching`을 저장하고, 다음 전달은 `Pending`·재시도 가능 `Failed`만 고른다(`notification_dispatcher.rs`). 그래서 `Dispatching` 저장 뒤 future가 drop되거나 결과 저장이 실패하면, 그 알림은 활동으로 남는데 재시도에서는 고르지 않아 wait가 끝나지 않는다(`recover_interrupted`는 재시작 복구 경로라 여기서 돌지 않는다).
     - 전달 시도마다 `attemptId`를 발급해 `Dispatching{attemptId}`로 저장한다. 그 시도의 N-notify 예약이 **결과 저장 commit까지** G의 활동 표에 있다(Codex 재검토 5 G2: A-turn으로 인계하면 prompt 완료 뒤·결과 저장 전에 예약 없는 구간이 생겨, 회수가 정상 시도를 되돌리고 coordinator turn을 한 번 더 만든다).

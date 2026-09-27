@@ -75,3 +75,13 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 | # | 문제 | 근거 | 반영 |
 |---|---|---|---|
 | G2 | 6'는 N-notify를 `send_and_wait` 시작 때 A-turn으로 인계하는데, 2행은 A-turn을 실행 future 끝에 놓는다. 전달기는 `notify_coordinator().await` 뒤 별도 transaction으로 결과를 저장하므로, prompt 완료 뒤·결과 저장 전에 `Dispatching`만 있고 예약은 없는 구간이 생긴다. 그때 회수가 돌면 정상 시도를 되돌리고 coordinator turn을 한 번 더 만든다 | `notification_dispatcher.rs` | N-notify를 결과 저장 commit까지 A-turn과 별개로 유지한다(인계하지 않음). 회수 조건은 N-notify 예약 유무만 본다. 결과 transaction 직전 gate 시험(회수 → 변경 0, abort → 회수) |
+
+## Codex 설계 재검토 6 (`--wait --base 4d6d3ff`, 대상 `7cc3202`)
+
+판정: needs-attention(Medium 1건, High 없음). G2의 "결과 commit까지 독립 예약" 방식은 타당하다고 확인했다. X→A·T→A 인계에서는 같은 해제 공백을 찾지 못했다.
+
+| # | 등급 | 문제 | 반영 |
+|---|---|---|---|
+| G3 | Medium | 알림 전달 절 본문에 "`send_and_wait`에 들어가면 A-turn으로 인계"라는 옛 지시가 남아 예약 정의·6'행과 모순된다 | 문장을 고쳐 "N-notify는 결과 commit까지 유지, `send_and_wait`는 별도 A-turn"으로 통일했다 |
+
+설계 리뷰 종결: 재검토 6의 남은 지적은 문서 불일치 하나였다. 이를 고친 뒤 High 지적 없이 tasks로 진행한다. 구현 리뷰(OCR → Codex)에서 R14 표의 각 칸과 결정적 시험을 다시 대조한다.
