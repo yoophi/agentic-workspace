@@ -233,6 +233,26 @@ flowchart LR
 - **연결 상태**: `shared/ui/connection-status.tsx`. 끊겼을 때만 보인다.
 - **증거**: `specs/043-frontend-http/reviews/implementation-evidence.md`, `app-smoke.md`(개발·배포 출처, 새로고침 1회 전달).
 
+## 독립 서버 (044, 5단계 첫 증분)
+
+Workbench 런타임·HTTP/WS 어댑터·MCP 서버를 데스크톱 밖의 독립 프로세스로 옮겼다([ADR 0009](adr/0009-standalone-server-and-owner-principal.md)). 데스크톱은 기본(외부 서버) 모드에서 thin client다. 5단계 전체 완료는 아니며, 남은 항목은 `specs/044-standalone-server/reviews/implementation-review.md`의 후속 미완료 표에 있다.
+
+- **조립**: `crates/workbench-host`가 런타임 + HTTP 상태 + MCP + launch decorator + 생명주기를 조립한다. 실행 파일 `apps/agentic-workbench-server`(`serve --data-dir`)는 명령줄과 `main`만 갖는다. AW embedded 모드(`AW_WORKBENCH_MODE=embedded`, 개발·시험, 8단계 제거)도 같은 조립을 쓴다.
+- **단일 writer**: `<data>/workbench/server/`(0700)의 `owner.lock`(실행 내내), `startup.lock`(ensure 직렬화), `server.json`(0600, 준비 뒤 원자적 쓰기).
+  - 클라이언트는 인증 없는 `identify`의 HMAC 증명을 확인한 뒤에만 소유자 자격 증명을 보낸다.
+  - 외부 모드 데스크톱은 in-process 경로를 쓸 수 없다. 서버를 찾거나 띄우지 못하면 연결 실패 화면(이유 + 다시 시도)을 보인다.
+- **소유자 주체** `local:owner`: 모든 scope, `server:admin`, 작업대 소유 우회(agent 전용 operation 제외).
+  - 데스크톱은 소유자로 `desktop.issueWindowToken`(창 주체 토큰)과 `desktop.retireWindow`(토큰·표 폐기, 요청 시 작업대 닫기)를 부른다.
+  - 폐기한 창 주체에는 tombstone이 서서 늦은 발급을 거절한다.
+- **생명주기**: 서빙 → 비우기(`drainingWait`) → 정지. `server.stop{default|wait|force}`, `lease.acquire/renew/release`, `server.status`.
+  - 비우기 분류: 조회 Q·끝내는 제어 C·조건부 이어 가기 K(교환 전달 continuation, 배정할 쪽이 있는 대기 task 배정)·새 작업 N(거절). operation별 분류는 `contracts/drain-classification.md`이고, 문서 파싱 시험이 코드와 대조한다.
+  - 작업 관문(`WorkGate`, 한 잠금): turn·전달·task 기동·알림·호출 예약과 정지 판정을 직렬화한다.
+  - 활동 작업에서 ledger `unknown`은 빠진다(`unresolvedOperations`로 보고). 아직 파생하지 못한 값(`null`)은 활동으로 본다.
+  - 배정할 쪽이 없는 대기 task는 `deferredTasks`로 보고만 하고 저장된 채 남는다(재시작 뒤 복구·재배정).
+- **창·앱 수명**([ADR 0010](adr/0010-app-quit-is-not-window-close.md)): 종료 의도 전 그 창의 `CloseRequested`가 있으면 `retireWindow{closeBench:true}`, 없으면 `{closeBench:false}`. 외부 모드의 앱 종료는 임대만 푼다(`close_all_benches` 없음). `SIGTERM`은 임대 TTL로 거둔다.
+- **네이티브 삽입 전달 제거**: 외부 모드 host는 no-op 브리지다. 창 제목은 `bench.titleRequested.v1`을 받은 화면이 `apply_window_title`로 적용한다.
+- **증거**: `specs/044-standalone-server/reviews/implementation-evidence.md`, `app-smoke.md`(외부 모드 043 스모크, 종료 경로별 run 지속, 창 닫기 토큰 거절, 연결 실패).
+
 ## 호출 규칙
 
 | 항목 | 규칙 |
@@ -468,6 +488,8 @@ flowchart LR
 - [ADR 0006 — MCP 도구는 agent principal로 `Workbench.call`을 거친다](adr/0006-mcp-tools-call-the-workbench-as-an-agent-principal.md)
 - [ADR 0007 — 창 제목 같은 표현 요청은 작업대 알림 스트림으로 보낸다](adr/0007-presentation-requests-are-bench-notifications.md)
 - [ADR 0008 — 데스크톱 창은 창마다 별도의 principal(창 주체)이다](adr/0008-desktop-windows-are-separate-principals.md)
+- [ADR 0009 — Workbench는 독립 서버 프로세스가 소유하고, 데스크톱 없는 접근은 소유자 주체로 한다](adr/0009-standalone-server-and-owner-principal.md)
+- [ADR 0010 — 앱 종료는 창 닫기가 아니다](adr/0010-app-quit-is-not-window-close.md)
 - [workbench-core ADR 0001 — 외부 부작용의 종료 상태 판정](../crates/workbench-core/docs/adr/0001-end-state-reconciliation-for-external-side-effects.md)
 - [workbench-core ADR 0002 — 이벤트 journal은 메모리에 두고 서버 세대로 구별한다](../crates/workbench-core/docs/adr/0002-event-journal-is-in-memory-with-server-epoch.md)
 - [workbench-core ADR 0003 — 알림 이벤트는 replay하지 않는다](../crates/workbench-core/docs/adr/0003-notification-events-are-not-replayed.md)
