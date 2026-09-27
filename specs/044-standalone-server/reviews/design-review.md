@@ -38,3 +38,15 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 | E1 | run 이벤트만으로는 활동을 정확히 셀 수 없다. 대기열 등록 이벤트가 없고, RPC 오류는 `PromptCompleted` 없이 끝나며, 시작 중·Ralph 반복 사이가 드러나지 않는다 | `acp_run_engine.rs:125-148`, `runner.rs:748·794-799` | 실행 수명 계약: 진입점에서 동기 예약, 실행 future 종료에서 해제. 초기 prompt 순서는 acp-agent-core runner가 순서 끝에서 guard를 놓는다(선택 인자, ask-code·hushline 검증). 정지 판정과 예약을 한 잠금으로 직렬화 |
 | E2 | 소비를 `run.sendPrompt` 성공에 묶으면, 전송이 spawn 뒤 바쁨으로 실패해도 소비·멱등 성공이 남아 교환을 잃는다 | `send_prompt.rs:46-58`, `runner.rs:787-790` | `continuation` prompt는 엔진 대기열 경로로 보내고, 소비 표시와 대기열 등록을 한 번에 한다. 활동 예약이 전달 끝까지 남는다. 알림 prompt와 경합하는 실제 경로 시험 |
 | E3 | 배정은 원자적이지 않다(동시 배정이면 run 둘, `reserve_child_run`이 덮어씀). K의 "상태 전이로 1회"가 성립하지 않는다. 기존 결함이다 | `agent_tools.rs` assign, `service.rs:802-828` | 저장소 단일 RMW 경계 안에서 비교 후 변경(`Ready`·예약 없음 → `Starting`). 기존 예약이면 그 결과를 돌려준다. 동시 배정·취소 경합 시험 |
+
+## Codex 설계 재검토 2 (`--wait --base 54b31a8`, 대상 `7902e15`)
+
+판정: needs-attention. E1의 실행 guard와 E2의 엔진 대기열 전환은 원인에 직접 대응한다고 확인했다. High 1건:
+
+| # | 문제 | 근거 | 반영 |
+|---|---|---|---|
+| E4 | 저장소 비교 후 변경은 중복 배정만 막는다. `Starting` 예약 뒤·엔진 등록 전(`fingerprint_worktree` 대기)에 취소하면, 취소는 accepted로 끝나고 task가 `Cancelled`가 된다. 그런데 기동 경로는 취소를 확인하지 않고 run을 띄우며, `bind_child_run`도 취소된 task를 거절하지 않는다 | `agent_tools.rs:798-824`, `engine_agent_worker.rs:155-159` | 기동 토큰(`Pending→Registered|Cancelled|Failed`)으로 취소와 엔진 등록의 인계를 G 아래에서 직렬화한다. 등록 전 취소는 기동을 막고, 등록이 먼저면 실제 run을 취소한다. `bind_child_run`은 취소된 task를 거절한다. 등록 직전 gate 결정적 시험 |
+
+**사용자 검토 5 반영**: 개별 조건을 덧붙이지 않고, 활동 예약·교환 전달 수락·task 기동 예약·정지 판정을 한 경계(작업 관문 G)와 한 상태 전이 표로 정리했다(research R14). 표는 성공·오류·취소 해제와, 닫는 실패 순서·검증을 함께 적는다.
+
+아직 데스크톱 UI에 의존하는 교환 전달(창 원장 라우팅·패널 대기열)은 plan·spec의 후속 미완료 표에 적었다. 5단계 (a) 완료로 세지 않는다.

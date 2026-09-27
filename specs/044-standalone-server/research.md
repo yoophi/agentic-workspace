@@ -187,6 +187,64 @@
   11. **배정 원자성(E3)**: 서로 다른 키의 동시 배정 100회에서 run은 task마다 1개, 배정과 취소의 경합.
   9. **창 폐기 단조성(C4)**: 폐기 완료 뒤 지연된 발급 → `forbidden`. 같은 label 새 incarnation 발급 → 성공. 발급·폐기 동시 100회 → 폐기 뒤 유효 토큰 0.
 
+## R14. 작업 예약의 원자성 경계와 상태 전이 표 (사용자 검토 5, Codex 재검토 E1–E4)
+
+R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 예약, 정지 판정)을 **한 경계**로 묶는다. 개별 조건을 덧붙이는 대신, 모든 전이를 아래 표 하나로 정한다.
+
+### 경계: 작업 관문(`WorkGate`, core)
+
+- 한 잠금 G 아래에 다음을 둔다: 서버 상태(`serving`·`draining{mode}`·`stopping`), 활동 예약 표(예약 id → 종류·run), 교환 전달 소비 표, task 기동 토큰 표.
+- G는 짧게만 잡는다(await를 걸치지 않음). 비동기 작업(엔진 등록·대기열 등록·저장소 쓰기)은 **G 아래에서 예약을 먼저 만들고**, G 밖에서 수행하고, 결과를 다시 G 아래에서 확정·해제한다.
+- 예약은 **드롭하면 해제되는 guard**다. 성공·오류·취소·abort(future drop) 어느 쪽으로 끝나도 해제가 빠지지 않는다.
+- 정지 판정은 G 아래에서만 한다. 판정 뒤(`stopping`)의 예약은 실패한다.
+
+### 예약 종류
+
+| 종류 | 만드는 곳 | 정확히 무엇을 덮나 |
+|---|---|---|
+| A-turn | 엔진의 prompt 실행 진입점(`start` 초기 순서·`send_prompt`·`queue_prompt`·`steer`·`send_and_wait`, orchestration 작업자·알림 전달기 경로) | 그 prompt 실행 future 전체(권한 대기 포함). 초기 순서는 runner가 순서 끝에서 놓는다 |
+| X-deliver | `run.sendPrompt(continuation)` | 교환 전달 prompt의 엔진 대기열 등록부터 그 prompt 실행이 끝날 때까지(등록 뒤 A-turn으로 인계) |
+| T-start | `orchestration.assignChildTask`(대기 task 배정) | `Starting` 예약부터 엔진 등록까지(등록 뒤 A-turn으로 인계) |
+| C-call | HTTP·MCP 받아들인 분리 호출 | 호출 처리 끝까지(042) |
+
+활동 작업 = 예약 수 합계 + 이 프로세스의 ledger `pending` + (데스크톱 임대가 있을 때) 미소비 교환 + 비우기 시작 전 대기 task(K로 배정 가능).
+
+### 상태 전이 표
+
+| # | 사건 | G 아래 조건 | G 아래 효과 | G 밖 동작 | 성공 | 오류 | 취소·abort |
+|---|---|---|---|---|---|---|---|
+| 1 | 새 작업 호출(N) | 상태 `serving` | C-call 예약 | 호출 처리(→ 필요 시 2·3·4) | 해제 | 해제 | 해제 |
+| 1' | 새 작업 호출(N) | 상태 `draining`/`stopping` | 없음 | `draining` 거절 / 503 | — | — | — |
+| 2 | prompt 실행 시작(엔진 진입점) | 상태 ≠ `stopping` | A-turn 예약 | 세션 실행 future(초기 순서·대기열 차례 기다림 포함) | future 끝에서 해제 | future 끝에서 해제(RPC 오류 포함) | drop으로 해제 |
+| 2' | prompt 실행 시작 | 상태 `stopping` | 없음 | 실행하지 않음(내부 경로는 run 취소로 처리) | — | — | — |
+| 3 | 교환 전달(`sendPrompt` + continuation) | K 조건 모두 참(R7) + 미소비 + 상태 ≠ `stopping` | 소비 표시 + X-deliver 예약 | 엔진 대기열 등록 | 등록 성공 → A-turn으로 인계(X 해제는 인계와 원자적으로) | 등록 실패(run 없음) → X 해제, 소비는 유지, `failedExchangeDeliveries` 기록 | drop → X 해제, 소비 유지 + 실패 기록 |
+| 3' | 같은 교환으로 둘째 전달 | 소비 표시 있음 | 없음 | 같은 키면 기존 멱등 결과, 다른 키면 N 거절 | — | — | — |
+| 4 | 대기 task 배정 | 상태 ≠ `stopping` + (비우기 중이면 비우기 전 생성) | 기동 토큰 `Pending` 만들기 + T-start 예약 | 저장소 RMW: `Ready`·예약 없음 → `Starting{token}`(아니면 기존 예약 반환하고 T 해제) → 엔진 등록 준비(fingerprint 등) | 토큰 `Pending→Registered`(G 아래, 엔진 등록과 인계) → A-turn으로 인계, T 해제 | 등록 실패 → 토큰 `Failed`, T 해제, task는 오늘 규칙의 실패 상태 | drop → 토큰 `Failed`, T 해제 |
+| 5 | task 취소(배정 전후) | 토큰 상태 | `Pending`이면 `Cancelled`로 바꾸고 기동을 막음. `Registered`면 run id를 넘김 | `Pending→Cancelled`: 엔진 등록 없음, task `Cancelled`. `Registered`: 실제 run 취소 | — | — | — |
+| 5' | 기동 경로가 등록하려는 순간 | 토큰이 `Cancelled` | 등록하지 않음 | 준비한 자원 정리, T 해제 | — | — | — |
+| 6 | 자식 run 바인딩(`bind_child_run`) | task가 `Cancelled`면 거절 | — | — | — | — | — |
+| 7 | 정지 판정(wait·idle) | 활동 작업 0(임대 조건 포함) | 상태 `stopping` | 받아들인 호출 drain → 쉬는 세션 취소 → 안내 파일 삭제 | — | — | — |
+| 8 | 강제 정지·SIGTERM | 항상 | 상태 `stopping` 직전 `close_all_benches` 예약 | 작업대 닫기(모든 run 취소 → A-turn들이 drop으로 해제) → 7의 G 밖 동작 | — | — | — |
+
+### 이 표가 닫는 실패 순서
+
+| 실패 순서 | 닫는 칸 | 검증 |
+|---|---|---|
+| E1: 대기열 prompt만 남은 순간 활동 0으로 보여 멈춤 | 2(대기열 차례를 기다리는 동안도 A-turn) | 이전 완료와 다음 전송 사이에서 wait-stop 요청 → 멈추지 않음 |
+| E1: RPC 오류 뒤 활동이 영구히 남음 | 2(future 끝에서 해제) | RPC 오류 주입 → 활동 0 |
+| E1: 정지 판정과 동시 예약 | 2'·7(G 직렬화) | 판정·예약 교차 반복 → "멈춘 뒤 실행" 0 |
+| E2: 즉시 전송이 바쁨으로 실패해 교환 유실 | 3(대기열 경로) | 알림 prompt와 경합하는 실제 경로 |
+| C5: 한 교환으로 prompt 반복 | 3' | 다른 키·동시 요청 |
+| E3: 동시 배정으로 run 둘 | 4(RMW 비교 후 변경) | 서로 다른 키 동시 배정 100회 |
+| E4: 예약 뒤·등록 전 취소가 성공했는데 run이 뜸 | 5·5'·6(토큰 인계) | 엔진 등록 직전 gate로 멈춤 → 취소 완료 → gate 해제 → prompt 실행 0, task `Cancelled` |
+| E4: 등록이 먼저면 취소가 실제 run을 멈춤 | 5(`Registered`) | 등록 뒤 취소 → run 취소 확인 |
+
+### 데스크톱 없이 실행을 유지한다는 목표와의 관계
+
+- 서버가 소유하는 것: A-turn(엔진 실행과 엔진 대기열), T-start, 알림 전달기, 대기 자식 명령. 데스크톱이 없어도 이미 시작한 turn·대기열 prompt·orchestration 알림은 끝까지 간다.
+- **아직 데스크톱 UI에 의존하는 것**: 교환 요청의 라우팅·패널 대기열(043). 교환 요청은 창의 원장이 받아 대상 패널로 라우팅하고, 패널 대기열이 `run.sendPrompt`를 부른다. 데스크톱이 없으면 새 교환은 전달되지 않는다(서버는 `undeliverableExchanges`로 보고하고 활동에 세지 않는다).
+- 따라서 "교환 전달의 서버 소유(서버가 `send`/`queue` 교환을 대상 run 엔진 대기열에 직접 넣기)"는 **044 밖**이다. 후속 미완료 표(plan)에 두고 5단계 (a) 완료로 세지 않는다.
+
 ## R8. 앱 전체 종료 대 창 닫기 — 실제 종료 이벤트 순서 (사용자 검토 2·4)
 
 - **사실(현재 코드·042 기록)**:
