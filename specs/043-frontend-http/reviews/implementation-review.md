@@ -40,3 +40,27 @@ CI(`.github/workflows/quality.yml`)와 같은 명령에 통합 suite 두 개를 
 
 - Windows 출처, 배포 출처 새로고침 시나리오, 실제 앱 compat 경로 run 흐름
 - 최종 release 산출물 검증, standalone 서버 수명 검증(5단계)
+
+## T057 OCR 구현 리뷰 (`ocr delegate`, `--from b682c6b --to 0fedafb`)
+
+OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영 코드를 직접 검토했다. 이벤트 클라이언트, 호출 클라이언트, 연결, network-events, http-transport, bootstrap, 교환 원장, 창 주체·수명·토큰 폐기, 전달 선언, Tauri command 호출자를 보았다. Low는 버렸다.
+
+| # | 등급 | 위치 | 문제 | 조치 |
+|---|---|---|---|---|
+| O1 | High | `event-client.ts` `pump`·`resetListener`·`completeRecovery` | 재동기(재연결 재조회·gap 복구)가 진행 중인 `onEvent`와 겹치면, 늦게 끝난 옛 `onEvent`가 재동기가 새로 정한 대기열의 첫 항목을 지운다(**유실**). cursor도 옛 순번으로 올린다(새 세대 복구에서는 새 세대 이벤트를 건너뛰는 cursor가 된다) | 수신자별 `generation`. 재동기마다 올리고, 늦게 끝난 전달은 대기열·cursor를 건드리지 않는다 |
+| O2 | Medium | 같은 파일 | 재동기 스냅샷이 이미 반영한 이벤트의 프레임이 재동기 **뒤에** 도착하면 다시 넘긴다(**중복**). 스냅샷 기준 걸러내기가 그때의 대기열에만 적용됐다 | 수신자별 `covered`(스냅샷 `passes` 반대)를 다음 재동기까지 유지한다. 덮인 이벤트는 넘기지 않고 cursor만 올린다 |
+| O3 | Medium | 같은 파일 `resetListener` | 스냅샷 적재가 계속 실패하면, 내려간 수신자나 닫힌 클라이언트도 재시도 타이머를 끝없이 돈다 | 수신자 제거·클라이언트 닫힘·스트림 종결이면 멈춘다 |
+| O4 | Medium | 같은 파일 `add` | 재연결 표를 받는 중에 더 앞선 cursor(`after`)로 수신자가 합류하면, 표는 이미 옛 cursor로 요청돼 합류 수신자가 그 사이 순번을 받지 못한다 | `reopen` 표시. 받은 표를 버리고 새 cursor로 다시 연다 |
+| O5 | Medium | `tauri_desktop_bridge`·`bootstrap-transport.ts` | 네트워크 전달을 선언한 창을 새로고침했는데(incarnation 그대로) 부팅이 호환 경로로 떨어지면, 선언이 남아 앱 내부 삽입이 꺼진 채 이벤트를 전혀 받지 못한다 | Tauri command `withdraw_network_delivery`를 추가했다. 호환 경로로 부팅하면 부른다(실패해도 호환 경로 유지·기록) |
+
+시험(먼저 작성·실패 확인):
+| 시험 | red(종료 코드) | green |
+|---|---|---|
+| `event-client.races.test.ts` O1 | 1: `timed out waiting for event 2 delivered after the late settle` | 0 |
+| 같은 파일 O2 | 1: `expected [ 2, 3 ] to deeply equal [ 3 ]` | 0 |
+| 같은 파일 O3 | 1: `expected 11 to be 1`(내려간 뒤 적재 10회 더) | 0 |
+| 같은 파일 O4 | 수정과 함께 작성. 수정을 끈 변이에서 1: `timed out waiting for joining listener receives from its own cursor` | 0 |
+| `bootstrap-transport.test.ts` O5(철회 호출, 철회 실패에도 호환 유지) | 1(동작 실패) | 0, 10 passed |
+| `tauri_desktop_bridge` O5 Rust | 101(컴파일 실패: 함수 없음. 동작 red가 아님) | 0 |
+
+회귀: workbench-client 61 tests·통합 7, AW 624 tests·통합 1, AW `tsc` 0. **O5 철회는 실제 앱에서 새로고침 + 기동 실패로 확인하지 않았다(미검증).**

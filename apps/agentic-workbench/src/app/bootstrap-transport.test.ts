@@ -28,6 +28,7 @@ function deps(overrides: Partial<BootstrapDeps> = {}): BootstrapDeps & { logs: s
     })),
     ensureWindowBench: vi.fn(async () => "bench-1"),
     declareNetworkDelivery: vi.fn(async () => undefined),
+    withdrawNetworkDelivery: vi.fn(async () => undefined),
     windowLabel: () => "session-1",
     fetch: vi.fn(async () => handshake()) as unknown as typeof fetch,
     log: (line: string) => logs.push(line),
@@ -62,6 +63,24 @@ describe("bootstrapTransport", () => {
     expect(getTransport()).toBe(compatTransport);
     expect(d.logs).toHaveLength(1);
     expect(d.logs[0]).toMatch(/^\[workbench-client\] using compat path: /);
+  });
+
+  it("withdraws a delivery declaration left by the previous page when it falls back to compat (reloaded window)", async () => {
+    setTransport(compatTransport);
+    const d = deps({ fetch: vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch });
+    await bootstrapTransport(d);
+    expect(d.withdrawNetworkDelivery).toHaveBeenCalledTimes(1);
+  });
+
+  it("stays on compat even when withdrawing the declaration fails", async () => {
+    setTransport(compatTransport);
+    const d = deps({
+      fetch: vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch,
+      withdrawNetworkDelivery: vi.fn(async () => { throw "withdraw failed"; }),
+    });
+    const result = await bootstrapTransport(d);
+    expect(result.kind).toBe("compat");
+    expect(getTransport()).toBe(compatTransport);
   });
 
   it("does not declare network delivery when the handshake fails (events stay on the compat path)", async () => {

@@ -84,6 +84,10 @@ interface ListenerState {
   busy: boolean;
   resetting: boolean;
   removed: boolean;
+  /** 재동기마다 늘린다. 재동기 전에 시작된 onEvent가 늦게 끝나면 새 대기열·cursor를 건드리지 않는다. */
+  generation: number;
+  /** 마지막 재동기 스냅샷 기준: 스냅샷이 이미 반영한 이벤트는 넘기지 않고 cursor만 올린다(다음 재동기까지). */
+  covered?: (event: EventEnvelope) => boolean;
 }
 
 interface Recovery {
@@ -139,6 +143,8 @@ export function createEventClient(options: EventClientOptions): EventClient {
     suspended = false;
     socket: SocketLike | undefined;
     opening = false;
+    /** 표를 받는 중에 더 앞선 cursor가 필요해졌다(수신자 합류): 받은 표를 버리고 새 cursor로 다시 연다. */
+    reopen = false;
     failures = 0;
     recovery: Recovery | undefined;
     recoveryAttempts = 0;
@@ -185,6 +191,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         busy: false,
         resetting: false,
         removed: false,
+        generation: 0,
       };
       const firstListener = this.listeners.size === 0;
       this.listeners.add(state);
@@ -196,6 +203,8 @@ export function createEventClient(options: EventClientOptions): EventClient {
         this.connect();
       } else if (!this.socket && !this.opening) {
         this.connect();
+      } else if (state.lastQueued < this.highest && !this.recovery && this.opening) {
+        this.reopen = true;
       } else if (state.lastQueued < this.highest && !this.recovery) {
         // 대기열로 받지 못한 지난 순번부터 받겠다는 수신자: cursor(최솟값)에서 다시 연결한다(다른 수신자는 lastQueued로
         // 중복을 건너뛴다). 대기열을 넘겨받아 최고 순번까지 받은 수신자는 다시 연결하지 않는다.
@@ -261,6 +270,11 @@ export function createEventClient(options: EventClientOptions): EventClient {
           if (closed || this.terminal) {
             return;
           }
+          if (this.reopen) {
+            this.reopen = false;
+            this.connect();
+            return;
+          }
           const socket = openSocket(socketUrl(ticket));
           this.socket = socket;
           socket.onmessage = (message) => this.onFrame(socket, JSON.parse(message.data) as EventFrame);
@@ -307,6 +321,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           this.connections += 1;
           if (
             !this.recovery &&
+            this.snapshot &&
             ((this.resyncOnReconnect && this.connections > 1) || (this.resyncOnStart && this.connections === 1))
           ) {
             for (const state of this.listeners) {
@@ -377,9 +392,22 @@ export function createEventClient(options: EventClientOptions): EventClient {
       try {
         while (state.queue.length > 0 && !state.resetting && !state.removed) {
           const event = state.queue[0];
+          if (state.covered?.(event)) {
+            state.queue.shift();
+            state.delivered = Math.max(state.delivered, event.sequence);
+            continue;
+          }
+          const generation = state.generation;
+          let failed = false;
           try {
             await state.listener.onEvent(event);
           } catch {
+            failed = true;
+          }
+          if (generation !== state.generation) {
+            continue; // 그 사이 재동기됐다: 대기열·cursor는 재동기가 정했다
+          }
+          if (failed) {
             state.busy = false;
             void this.resetListener(state);
             return;
@@ -394,7 +422,11 @@ export function createEventClient(options: EventClientOptions): EventClient {
 
     /** 수신자 하나의 재동기: 스냅샷을 불러 `onReset` → 스냅샷이 덮은 순번 뒤만 이어서. */
     async resetListener(state: ListenerState, attempt = 0): Promise<void> {
+      if (state.removed || closed || this.terminal) {
+        return;
+      }
       state.resetting = true;
+      state.generation += 1;
       const coveredUpTo = this.highest;
       try {
         if (!this.snapshot) {
@@ -404,6 +436,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           const data = await this.snapshot.load();
           await state.listener.onReset?.(data, { delivered: state.delivered });
           const snapshot = this.snapshot;
+          state.covered = (event) => !snapshot.passes(event, data);
           state.queue = state.queue.filter((event) => snapshot.passes(event, data));
           state.delivered = Math.max(state.delivered, coveredUpTo);
         }
@@ -471,8 +504,11 @@ export function createEventClient(options: EventClientOptions): EventClient {
       if (this.recovery !== recovery) {
         return; // 그 사이 새 gap으로 절차가 다시 시작됐다
       }
+      const snapshot = this.snapshot;
       for (const state of this.listeners) {
         state.resetting = true;
+        state.generation += 1;
+        state.covered = snapshot ? (event) => !snapshot.passes(event, data) : undefined;
       }
       await Promise.all(
         [...this.listeners].map(async (state) => {
@@ -496,7 +532,6 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
       this.recovery = undefined;
       this.recoveryAttempts = 0;
-      const snapshot = this.snapshot;
       const pending = recovery.buffer.filter((event) => (snapshot ? snapshot.passes(event, data) : true));
       if (recovery.terminal) {
         this.terminal = true;

@@ -27,7 +27,7 @@ use inbound::tauri_commands::{
     send_agent_exchange, send_orchestration_child_command, send_prompt_to_run, set_font_size_step,
     set_orchestration_presentation, set_run_permission_mode, start_agent_run,
     start_worktree_watcher, steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace,
-    update_goal, update_project, update_saved_prompt,
+    update_goal, update_project, update_saved_prompt, withdraw_network_delivery,
 };
 use infrastructure::{
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
@@ -133,6 +133,7 @@ macro_rules! app_invoke_handler {
             get_workbench_connection,
             ensure_window_bench,
             declare_network_delivery,
+            withdraw_network_delivery,
             infrastructure::http_probe::report_http_probe,
             infrastructure::http_probe::report_app_probe
         ]
@@ -216,7 +217,8 @@ macro_rules! app_invoke_handler {
             recover_orchestration_workspace,
             get_workbench_connection,
             ensure_window_bench,
-            declare_network_delivery
+            declare_network_delivery,
+            withdraw_network_delivery
         ]
     };
 }

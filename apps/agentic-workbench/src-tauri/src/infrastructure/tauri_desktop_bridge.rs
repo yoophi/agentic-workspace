@@ -73,6 +73,12 @@ pub fn forget_network_delivery(label: &str, incarnation: &str) {
     }
 }
 
+/// 창의 페이지가 호환 경로로 부팅했다(043): 이전 페이지(같은 incarnation, 새로고침 전)가 남긴 선언을 거둬 삽입 전달을
+/// 되살린다. 부르는 창은 살아 있으므로 label의 선언을 incarnation과 상관없이 지운다.
+pub fn withdraw_network_delivery(label: &str) {
+    network_windows().remove(label);
+}
+
 /// 이 창에 삽입 전달을 건너뛸지(현재 incarnation이 네트워크 경로를 선언함).
 pub fn is_network_delivery(label: &str) -> bool {
     let Some(current) = crate::infrastructure::window_principals::incarnation(label) else {
@@ -237,5 +243,20 @@ mod tests {
         forget_network_delivery(&label, &new);
         assert!(!is_network_delivery(&label));
         window_principals::retire(&label, &new);
+    }
+
+    /// 선언한 창을 새로고침했는데 부팅이 호환 경로로 떨어지면(같은 incarnation) 선언을 거둬 삽입 전달을 되살린다.
+    #[test]
+    fn a_window_that_falls_back_to_compat_withdraws_its_declaration() {
+        let label = label();
+        let inc = window_principals::register(&label);
+        declare_network_delivery(&label, &inc).unwrap();
+        assert!(is_network_delivery(&label));
+        withdraw_network_delivery(&label);
+        assert!(
+            !is_network_delivery(&label),
+            "the compat page receives injections again"
+        );
+        window_principals::retire(&label, &inc);
     }
 }

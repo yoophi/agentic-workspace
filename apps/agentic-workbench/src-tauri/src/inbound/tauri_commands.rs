@@ -1367,6 +1367,12 @@ pub fn declare_network_delivery(window: tauri::Window, incarnation: String) -> R
     )
 }
 
+/// 창의 페이지가 호환 경로로 부팅했을 때(043): 이전 페이지가 남긴 네트워크 전달 선언을 거둔다.
+#[tauri::command]
+pub fn withdraw_network_delivery(window: tauri::Window) {
+    crate::infrastructure::tauri_desktop_bridge::withdraw_network_delivery(window.label());
+}
+
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
     window_manager::open_settings_window(&app)

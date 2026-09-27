@@ -21,6 +21,8 @@ export interface BootstrapDeps {
   getConnection: () => Promise<ConnectionInfo>;
   ensureWindowBench: (open: boolean, hint?: string | null) => Promise<string | null>;
   declareNetworkDelivery: (incarnation: string) => Promise<void>;
+  /** 호환 경로로 부팅할 때: 새로고침 전 페이지가 남긴 선언을 거둬 앱 내부 삽입 전달을 되살린다. */
+  withdrawNetworkDelivery: () => Promise<void>;
   windowLabel: () => string;
   fetch?: typeof fetch;
   log?: (line: string) => void;
@@ -40,6 +42,7 @@ export const desktopBootstrapDeps: BootstrapDeps = {
   getConnection: () => invokeDesktop<ConnectionInfo>("get_workbench_connection"),
   ensureWindowBench: (open, hint) => invokeDesktop<string | null>("ensure_window_bench", { open, hint: hint ?? null }),
   declareNetworkDelivery: (incarnation) => invokeDesktop<void>("declare_network_delivery", { incarnation }),
+  withdrawNetworkDelivery: () => invokeDesktop<void>("withdraw_network_delivery"),
   windowLabel: () => getCurrentWindow().label,
 };
 
@@ -64,6 +67,11 @@ export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapD
     connection.close();
     setTransport(compatTransport);
     log(`[workbench-client] using compat path: ${reason(error)}`);
+    try {
+      await deps.withdrawNetworkDelivery();
+    } catch (withdrawError) {
+      log(`[workbench-client] could not withdraw network delivery: ${reason(withdrawError)}`);
+    }
     exposeDebugProbe(undefined, undefined);
     return { kind: "compat" };
   }
