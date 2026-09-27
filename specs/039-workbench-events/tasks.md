@@ -169,11 +169,11 @@ description: "Task list for implementing the Workbench event stream (stage 2a)"
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T047 [P] `crates/workbench-core/tests/event_latency.rs`(#[ignore]): `publish_run`(deliver no-op) p95와 구독자 수신 p95 1,000회, 기준선 = 같은 `Value`를 AW 방식(Mutex+VecDeque append)으로 넣는 비용. 결과를 Notes에(SC-006)
-- [ ] T048 [P] `docs/workbench-seam.md`: "이벤트 스트림" 절(봉투·구독 순서·cursor 판정 표·gap·세대·제거 표식·한도·분류·lock 순서), 데스크톱 전달(삽입 경로·순번 순서·재수화 버퍼링), worktree 구독 호환, Mermaid 갱신, 인벤토리 표에서 watcher 2개를 "이관됨(039)"로, ADR 4건 링크. `docs/client-server-architecture-research.md` 진행 각주에 "039(2a) 완료"
-- [ ] T049 전체 게이트: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p workbench-core --lib -- -D warnings`, `cargo test --workspace --all-targets`, `pnpm run check-types`, `pnpm run test`, `pnpm run generate:contracts && git status --short`(변경 없음), quickstart §2 경계 grep. 결과 Notes
-- [ ] T050 앱 스모크(quickstart §3): 수행 가능한 항목은 수행, UI 조작 항목은 리뷰어 수동 항목으로 정직하게 기록
-- [ ] T051 SC 증거 매핑(SC-001~008)과 spec·contract 대비 어긋난 점을 Notes에, PR 본문 초안(push·PR은 사용자 지시 후). 커밋(`docs(aw): record 039 event seam status`)
+- [X] T047 [P] `crates/workbench-core/tests/event_latency.rs`(#[ignore]): `publish_run`(deliver no-op) p95와 구독자 수신 p95 1,000회, 기준선 = 같은 `Value`를 AW 방식(Mutex+VecDeque append)으로 넣는 비용. 결과를 Notes에(SC-006)
+- [X] T048 [P] `docs/workbench-seam.md`: "이벤트 스트림" 절(봉투·구독 순서·cursor 판정 표·gap·세대·제거 표식·한도·분류·lock 순서), 데스크톱 전달(삽입 경로·순번 순서·재수화 버퍼링), worktree 구독 호환, Mermaid 갱신, 인벤토리 표에서 watcher 2개를 "이관됨(039)"로, ADR 4건 링크. `docs/client-server-architecture-research.md` 진행 각주에 "039(2a) 완료"
+- [X] T049 전체 게이트: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo clippy -p workbench-core --lib -- -D warnings`, `cargo test --workspace --all-targets`, `pnpm run check-types`, `pnpm run test`, `pnpm run generate:contracts && git status --short`(변경 없음), quickstart §2 경계 grep. 결과 Notes
+- [X] T050 앱 스모크(quickstart §3): 수행 가능한 항목은 수행, UI 조작 항목은 리뷰어 수동 항목으로 정직하게 기록
+- [X] T051 SC 증거 매핑(SC-001~008)과 spec·contract 대비 어긋난 점을 Notes에, PR 본문 초안(push·PR은 사용자 지시 후). 커밋(`docs(aw): record 039 event seam status`)
 
 ---
 
@@ -256,4 +256,17 @@ T027 sink payload 단위 테스트 (apps/agentic-workbench/src-tauri/src/infrast
 - 기준선·실측 기록 (T001, T047, T049, T050, T051):
   - (T001, 2026-09-27) 기준선: `cargo test --workspace --all-targets` 567 passed / 0 failed / 5 ignored, `pnpm --filter agentic-workbench test` 81 files / 423 tests, `pnpm run check-types` 13/13.
   - (Foundational·US1 구현 중 결정) `WorkbenchFault::events_unsupported`는 deprecated로 남기지 않고 제거했다(사용처가 037 runtime 하나뿐이고 계약이 뒤집혔다). cursor `afterSequence == 0`은 **세대를 보지 않는다** — "처음부터"는 어느 세대에서든 의미가 있다(contracts §4에 반영 필요). 존재하는 스트림을 cursor 0으로 구독했는데 앞부분이 보관 한도로 사라졌으면 `Gap(retentionExceeded)`. 정리(eviction)와 경합해 고아가 된 스트림은 `removed` 표시로 발행·구독을 거절한다. 대기열이 넘치면 그 구독 전체를 `Gap(subscriberLagged)`로 즉시 닫는다(남은 대기열도 버림 — 빠진 이벤트 뒤의 것은 신뢰하지 않음). hub 한도는 `RuntimeAdapters.event_limits`로 주입한다(테스트가 낮춤). worktree 감시 이동(T038)은 runtime이 `start_watch`를 주입해야 해서 Foundational로 앞당겼다(AW 쪽 삭제·command 교체는 T041 그대로). describe fixture 2개는 runtime마다 세대가 달라 `ignoreFields: ["epoch"]`. 테스트 WebSocket은 세대를 `system.describe`로 얻는다(Workbench trait만 사용). WS 경로에서 대기열 초과는 재현할 수 없어(서버가 동시에 비움) `run-subscriber-lagged-gap`은 `inMemoryOnly`. fixture 21개, race 1,000회 + 다중 스트림 100회, deadlock watchdog 3초 통과. 체커가 틀린 순번·빠진 끝을 잡는지 일부러 깨뜨려 확인했다.
-
+  - (US2·US3·US4 구현 중 결정) 데스크톱 payload는 공유 봉투의 상위 집합 `{runId, event, sequence, epoch, streamId, eventId}`(`DeliveredRunEvent`, `@yoophi/agent-client`는 불변). 재수화 버퍼(`pendingLive`, 상한 512)는 `idle`·`loading`에서만 쓰고, 재수화 실패는 버퍼를 적용하되 `runtimeLost`를 유지한다. snapshot이 컨트롤러보다 뒤처져도 재수화 중이면 `ready`로 올린 뒤 버퍼를 비운다. `EventStream::next_item()`을 protocol에 두어 AW가 스트림 유틸 crate 없이 소비한다. worktree 구독은 실제 경로로 공유되므로 AW가 본문 `workingDirectory`를 호출자 문자열로 되돌린다(화면 필터 호환). fixture 실행기는 fault 문구에도 `{{tmp}}`를 치환·정규화한다. `EventSchemaSpec.body_schema`로 본문 DTO가 있는 스키마만 `EventBySchema`에 싣는다(exchange는 DTO 없음 → 제외). AW `log_watcher`·`WORKSPACE_EXCLUDED_DIRS` 재노출은 사용처가 사라져 삭제.
+  - (T047, 2026-09-27) `event_latency`(#[ignore], 1,000회 p95): release — 기준선(Mutex+VecDeque append) 125ns, hub 발행 3.2µs, 발행→구독자 수신 4.3µs. debug — 292ns / 5.3µs / 12.0µs. 증가분은 µs 단위로 SC-006 예산(10ms)의 0.1% 미만.
+  - (T049, 2026-09-27) `cargo fmt --all -- --check` ok · `cargo clippy --workspace --all-targets -- -D warnings` ok · `cargo clippy -p workbench-core --lib -- -D warnings` ok · `cargo test --workspace --all-targets` 590 passed / 0 failed(기준선 567 → +23) · `pnpm run check-types` 13/13 · `pnpm run test` 전부 통과(agentic-workbench 429, workbench-client 15 typecheck) · `pnpm run generate:contracts` 뒤 생성물 diff 0 · 경계: `crates/acp-agent-core`·`packages/agent-client`·`crates/git-core` diff 0, 프론트 변경은 `features/agent-run`·`entities/agent-run/{api,model}`만.
+  - (T050, 2026-09-27) 자동으로 확인한 것: AW `cargo build` 경고 0, run 전달 순서(`run_delivery_order.rs` 4×250 동시 발행), worktree 참조 수·경로 별칭·debounce(`worktree_stream.rs`, 실제 git 저장소·FSEvents). quickstart §3의 1–5(tauri dev 창 조작: 재수화 중 메시지 보존, 세션 창 격리, worktree 창 2개, 창 모두 닫으면 감시 종료, 재시작 복원)는 이 세션에서 UI를 조작할 수 없어 **리뷰어 수동 확인 항목**으로 남긴다.
+  - (T051) SC 증거:
+    - SC-001: `tests/event_subscription_race.rs` 1,000회 + 다중 스트림 100회, 누락·중복 0.
+    - SC-002: `agent-run-controller.test.ts` 버퍼링 6건(snapshot 전 live·역순·중복·빈틈·ready 중 빈틈·실패) + live/replay 같은 순번(`replay_run` = hub journal, 데스크톱 payload `sequence`).
+    - SC-003: fixture `run-retention-exceeded-gap`·`run-epoch-changed-gap`·`run-subscriber-lagged-gap`·`run-evicted-*` — gap 뒤 해당 스트림 전달 없음(`end: true`).
+    - SC-004: `event_contract_suite.rs` fixture 25개 × (in-memory, WS) 결과 비교(대기열 초과 1개는 `inMemoryOnly`).
+    - SC-005: `worktree_stream.rs` 구독 0→1→2→1→0 시작 1·중지 1, 경로 별칭 3개 → 감시 1, 파일 3개 변경 → 알림 1. fixture `worktree-*` 4개.
+    - SC-006: 기존 run·worktree 테스트 수정 없이 통과(AW watcher 단위 테스트는 core로 이동), 지연 증가 µs 단위(T047).
+    - SC-007: describe fixture `eventSchemas`, OpenAPI `EventBySchema` golden 테스트, `operation-map.test-d.ts`의 `EventMap`·`@ts-expect-error`, drift는 037 이후 CI 검사가 그대로 잡는다(US4 중 실제로 golden 실패 → 재생성으로 확인).
+    - SC-008: `git diff --name-only main -- apps/agentic-workbench/src` = `features/agent-run/**`·`entities/agent-run/{api,model}/**`만.
+  - (T051) spec·contract 대비 어긋난 점: (1) cursor 0이 세대를 무시하는 규칙은 구현 중 확정해 contracts §4에 추가했다. (2) `entities/agent-run/model/types.ts`(데스크톱 payload 타입)를 바꿨다 — grill Q2 허용 범위(`entities/agent-run/{api,model}`) 안이지만 SC-008 문구는 `api`만 적고 있다. (3) 데스크톱은 구독자가 아니라 발행 결과 전달자(ADR 0003) — 2b에서 창 정체 분해 뒤 구독자로 바뀔 수 있다.

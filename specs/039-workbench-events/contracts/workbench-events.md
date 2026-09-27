@@ -37,6 +37,7 @@ fault가 없으면 스트림은 cursor마다 research R2 표대로 replay/gap을
 
 - `system.describe.output.epoch` = 현재 세대. 모든 봉투·gap에 같은 값.
 - 이전 세대 cursor → `Gap(epochChanged)`. 클라이언트는 재조회하고 진행 중이던 run을 "실행 정보 유실"로 표시한다.
+- `afterSequence == 0`인 cursor는 세대를 보지 않는다: "처음부터"는 어느 세대에서나 같은 뜻이다(구현 중 확정).
 
 ## 5. 계약 조회 확장
 
