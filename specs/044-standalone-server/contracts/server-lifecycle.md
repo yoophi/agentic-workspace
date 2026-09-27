@@ -46,6 +46,7 @@ research R4–R6·R9·R10.
 
 1. `startup.lock` 배타 잠금(상한 20초, 넘으면 실패).
 2. `server.json`이 있으면:
+   - **먼저 `POST /v1/system/identify {nonce}`(인증 없음)로 신원을 확인한다.** 응답 `{instanceId, proof}`의 `proof`를 안내 파일의 `ownerToken`으로 검증한다(`HMAC-SHA256(ownerToken, nonce ‖ instanceId)`). 틀리면 그 끝점에 자격 증명을 보내지 않고 "확인 실패"로 3단계로 간다.
    - handshake로 `instanceId`가 일치하는지, 프로토콜·저장 형식을 지원하는지 확인한다.
    - 소유자 토큰으로 `server.status`를 불러 인증과 상태를 확인한다.
    - 상태가 `serving`이면 3을 건너뛰고 끝낸다.
@@ -65,11 +66,15 @@ research R4–R6·R9·R10.
 | `lease.renew` | command | 소유자 | `{leaseId}` → `{ttlSeconds}`. 모르는 임대는 `notFound` |
 | `lease.release` | command | 소유자 | `{leaseId}` → `{}`(없어도 성공) |
 | `desktop.issueWindowToken` | command | 소유자 | `{label, incarnation, origin}` → `{token, expiresAt}`. 출처는 WebView 허용 목록만 |
-| `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBench}` |
+| `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBenches}`. `closeBench`면 그 창 주체가 **연** 작업대를 모두 닫는다(레지스트리의 `opened_by` 조회) |
 | `bench.list` | query | 모든 주체 | `{}` → `[{benchId, workingDirectory, owner, runs:[{runId, state}]}]`. 소유자는 전부, 그 밖은 자기 작업대만 |
 
 - 새 scope `server:admin`은 소유자만 갖는다.
-- 소유자 주체(`PrincipalKind::Owner`, 주체 `local:owner`)는 작업대 소유 판정을 통과한다: 모든 작업대의 run 조회·구독·취소와 `bench.close`.
+- 소유자 주체(`PrincipalKind::Owner`, 주체 `local:owner`)는 작업대 소유 판정을 통과한다: 모든 작업대의 run 조회·구독·취소와 `bench.close`. 우회 지점은 다음 두 곳이며 각각 시험한다(설계 리뷰 D2):
+  - 작업대 레지스트리의 `resolve`·`admit`·`close_as`(주체 비교)
+  - 이벤트 hub의 스트림 구독 판정(`run:`·`exchange:`·`bench:`·`orchestration:` claim)
+- 소유자는 agent 전용 operation(orchestration 자식 보고 도구 등, 호출자 run이 필요한 것)에는 우회를 받지 않는다(`forbidden`).
+- `/v1/system/identify`(인증 없음): `{nonce}` → `{instanceId, proof}`. 자격 증명을 보내기 전 신원 확인용이다(§3).
 - `run.sendPrompt` 입력에 `continuation?: {exchangeRequestId}`를 더한다(`drain-classification.md` K).
 
 ## 5. 상태 기계

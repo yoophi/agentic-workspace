@@ -53,9 +53,13 @@
 ## R5. 시작 절차(ensure)·복구·버전 확인
 
 - **Decision**:
+  - **자격 증명을 보내기 전에 서버 신원부터 확인한다(설계 리뷰 D1)**: 안내 파일이 남아 있고 원래 서버가 죽었다면, 그 포트를 다른 프로세스가 차지하고 있을 수 있다. 확인 없이 소유자 자격 증명을 보내면 그 프로세스에 자격 증명이 새어 나간다.
+    - 인증 없는 `POST /v1/system/identify {nonce}` → `{instanceId, proof}`. `proof`는 `HMAC-SHA256(ownerToken, nonce ‖ instanceId)`다.
+    - 클라이언트는 안내 파일의 `ownerToken`으로 `proof`를 검증한다. 맞을 때만 bearer로 소유자 자격 증명을 보낸다.
+    - 서버는 `ownerToken`을 알기 때문에 증명을 만들 수 있다. 자격 증명 자체는 오가지 않는다.
   - 클라이언트 `ensure(data_dir, exe)`:
     1. `startup.lock` 획득(상한 대기, 기본 20초).
-    2. `server.json`이 있으면 끝점에 버전 확인과 **소유자 인증 상태 조회**를 한다. 인스턴스 식별자가 일치하고 준비 상태이면 붙는다.
+    2. `server.json`이 있으면 `identify`로 신원을 증명받은 뒤에만 버전 확인과 **소유자 인증 상태 조회**를 한다. 인스턴스 식별자가 일치하고 준비 상태이면 붙는다.
     3. 확인이 실패하면 `owner.lock`을 잠깐 `try_lock`해 본다. 잡히면 서버가 없다는 뜻이다. 남은 안내 파일을 지우고 풀어 준 뒤 서버를 띄운다. 잡히지 않으면 서버는 살아 있지만 준비 전이거나 비우는 중이다. 준비나 정지를 기다린다.
     4. 서버를 띄운 뒤 안내 파일이 생기고 확인을 통과할 때까지 기다린다.
     5. `startup.lock` 해제.
@@ -111,13 +115,13 @@
 - **orchestration 후속 경로(사용자 검토 3)**:
   - coordinator 알림 전달은 서버 내부의 알림 전달기(`notification_dispatcher`)가 한다. 호출이 아니라서 입구 판정을 받지 않는다.
   - 화면의 `orchestration.dispatchPrompt`·`sendChildCommand`는 사용자가 새로 보내는 prompt다(N).
-  - 대기 중인 자식 명령(`delivery: queue`)을 자식이 쉴 때 서버가 스스로 넘기는지, 아니면 클라이언트 호출이 필요한지는 **구현 전 확인 항목(R7-check)**이다.
-    - 클라이언트 호출이 필요하면 그 호출을 K로 분류하고, 대기 항목 id를 입력으로 확인한다.
-    - 확인 결과와 근거(코드 위치)를 이 절에 적는다.
-- **활성 작업(`ActiveWork`)**:
-  - 진행·예약 run 수
-  - 권한 대기 수
-  - 진행 중 orchestration task 수
+  - **R7-check 결과(설계 리뷰 D3, 코드 판독)**:
+    - 대기 자식 명령(`PromptDelivery::Queue`)은 명령 서비스가 받아들이는 순간 run 엔진의 대기열에 넣는다(`engine_agent_worker.rs:197` `engine.queue_prompt`). 엔진이 현재 turn 뒤 스스로 넘긴다. 서버 내부 경로이며 클라이언트 호출이 필요 없다.
+    - 동시 실행 상한으로 대기한 task(`LeaseOutcome::Queued`, `runtime.rs:642`)는 자리가 나면 스케줄러의 `release`(`scheduler.rs:56`)가 다음 task를 돌려주고 런타임이 띄운다. 이것도 서버 내부다.
+    - 그래서 대기 항목을 위한 추가 K operation은 없다. 대신 비우기 시작 전에 받아들인 대기 명령·대기 task는 **활성 작업에 센다**. 엔진 대기열의 prompt는 그 run이 활성인 동안 세지고, 대기 task는 스케줄러 대기열 수로 센다.
+- **활성 작업(`ActiveWork`)과 출처(설계 리뷰 D5)**:
+  - 진행·예약 run 수: `AgentSessionRegistry::active_run_count`(`agent_session_registry.rs:195`). 권한 대기 중인 run도 활성 run이라 따로 세지 않는다(`acp-agent-core` 변경 없이). `server.status`에는 표시용으로 run별 상태를 싣는다.
+  - 진행 중 orchestration task 수 + 스케줄러 대기 task 수: `Scheduler::active_count`(`scheduler.rs:71`) + 대기열 길이(같은 crate에 accessor 추가)
   - **확인 전 교환 중 대상 run이 살아 있는 것**의 수
   - 이 프로세스가 적용 중인 ledger `pending` 수
   - 받아들인 분리 호출 수(HTTP·MCP)

@@ -7,7 +7,7 @@ research R3·R6·R8·R11.
 | `AW_WORKBENCH_MODE` | 동작 |
 |---|---|
 | 없음·`external`(기본) | 서버를 찾거나 띄워(`ensure`) 붙는다. 앱 안에 런타임을 두지 않는다. compat command는 "외부 서버 모드에서는 쓸 수 없음" 오류를 돌려준다 |
-| `embedded`(개발·시험) | 043 경로(앱 안 런타임 + HTTP + compat). host crate로 조립하고 같은 `owner.lock`을 잡는다. 못 잡으면 부팅 실패 |
+| `embedded`(개발·시험) | 043 경로(앱 안 런타임 + HTTP + compat). host crate로 조립하고 같은 `owner.lock`을 잡는다. 못 잡으면 부팅 실패. 잡으면 안내 파일(`mode: "embedded"`)도 쓴다. 다른 클라이언트의 `ensure`가 20초를 헛기다리지 않고, 이 앱 안 서버에 붙거나 "embedded 서버가 소유 중"을 알게 한다(설계 리뷰 D4) |
 
 서버 실행 파일 탐색(외부 모드) 순서:
 1. `AW_WORKBENCH_SERVER_PATH`
