@@ -319,6 +319,10 @@ where
                 Applied::Ok(output) => output,
             };
             // 여기부터는 부작용이 끝났다. 어떤 실패도 `notApplied`로 보고하면 안 된다.
+            hooks.pause_at(
+                CrashPoint::AfterJsonSave,
+                ctx.idempotency_key.as_ref().map(|key| key.as_str()),
+            );
             if hooks.crash_if(CrashPoint::AfterJsonSave).is_err()
                 || hooks.crash_if(CrashPoint::BeforeApplied).is_err()
             {

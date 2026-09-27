@@ -241,3 +241,92 @@ async fn bench_open_retry_after_restart_opens_a_new_bench() {
         "the pre-restart bench is gone"
     );
 }
+
+fn git_init(dir: &str) {
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+}
+
+/// agent 주체 orchestration 변경(`Scope::RunOwner`): 재시작 뒤 run이 없으므로 역할을 얻지 못해 거절되고,
+/// 작업 영역 파일·자식 기동은 다시 일어나지 않는다. HTTP로도 같은 거절.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn agent_orchestration_commands_are_rejected_after_restart_without_effect() {
+    let h = BenchHarness::new(RunScript::default());
+    git_init(&h.dir);
+    let bench = h.open().await;
+    let session = h
+        .call(
+            &desktop(),
+            OperationId::OrchestrationBootstrap,
+            json!({ "benchId": bench, "worktreePath": h.dir }),
+        )
+        .await
+        .unwrap();
+    h.start(&bench, "coord").await.unwrap();
+    h.call(
+        &desktop(),
+        OperationId::OrchestrationBindCoordinator,
+        json!({ "benchId": bench, "request": {
+            "requestId": "bind-1", "panelId": "main-agent-run", "runId": "coord",
+            "state": "active", "expectedRevision": session["revision"] } }),
+    )
+    .await
+    .unwrap();
+    let create = command_request(
+        OperationId::OrchestrationCreateChildTask,
+        "child-1",
+        json!({ "runId": "coord", "arguments": {
+            "requestId": "child-req", "title": "task",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read the repo", "expectedResult": "summary" } }),
+    );
+    let agent = AuthenticatedPrincipal::agent("coord");
+    let created =
+        h.rt.runtime
+            .call(agent.clone(), create.clone())
+            .await
+            .unwrap();
+    assert!(
+        created.output().unwrap()["runId"].is_string(),
+        "child started"
+    );
+    let starts = h.engine.starts.load(Ordering::SeqCst);
+
+    let h = h.restart();
+    let at_restart = orchestration_file(&h);
+    let local = h.rt.runtime.call(agent.clone(), create.clone()).await;
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let remote = harness
+        .call(Some(&Harness::token_string(&agent)), &create)
+        .await;
+    let local = local.expect_err("no role after restart");
+    let remote = remote.expect_err("no role after restart over http");
+    assert_eq!(remote.code, local.code, "http parity");
+    assert_eq!(remote.message, local.message, "http parity");
+    assert_eq!(orchestration_file(&h), at_restart, "no workspace write");
+    assert_eq!(
+        h.engine.starts.load(Ordering::SeqCst),
+        starts,
+        "no child relaunch"
+    );
+}

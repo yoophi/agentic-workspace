@@ -133,6 +133,14 @@ pub struct TestHooks {
     crash_point: std::sync::Mutex<Option<CrashPoint>>,
     #[cfg(feature = "test-hooks")]
     fail_point: std::sync::Mutex<Option<FailPoint>>,
+    /// 042: 지점에서 멈출 시간(프로세스는 산다). 효과 뒤·기록 전 구간을 늘려 연결 단절을 재현한다.
+    #[cfg(feature = "test-hooks")]
+    pause: std::sync::Mutex<Option<(CrashPoint, std::time::Duration)>>,
+    /// 042: 멈춤 구간에 들어간 요청의 멱등성 키.
+    #[cfg(feature = "test-hooks")]
+    paused: std::sync::Mutex<Vec<String>>,
+    #[cfg(feature = "test-hooks")]
+    paused_notify: tokio::sync::Notify,
 }
 
 impl TestHooks {
@@ -144,6 +152,54 @@ impl TestHooks {
     #[cfg(feature = "test-hooks")]
     pub fn set_fail_point(&self, point: Option<FailPoint>) {
         *self.fail_point.lock().unwrap() = point;
+    }
+
+    #[cfg(feature = "test-hooks")]
+    pub fn set_pause(&self, pause: Option<(CrashPoint, std::time::Duration)>) {
+        *self.pause.lock().unwrap() = pause;
+    }
+
+    /// `key` 요청이 멈춤 구간에 들어갈 때까지 기다린다.
+    #[cfg(feature = "test-hooks")]
+    pub async fn wait_paused(&self, key: &str, wait: std::time::Duration) {
+        tokio::time::timeout(wait, async {
+            loop {
+                let notified = self.paused_notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if self
+                    .paused
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|entered| entered == key)
+                {
+                    return;
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("request reached the pause point");
+    }
+
+    /// 설정된 지점이면 표지를 남기고 그 시간만큼 멈춘다(blocking 구간에서 부른다).
+    pub fn pause_at(&self, point: CrashPoint, key: Option<&str>) {
+        #[cfg(feature = "test-hooks")]
+        {
+            let pause = *self.pause.lock().unwrap();
+            if let Some((at, duration)) = pause {
+                if at == point {
+                    self.paused
+                        .lock()
+                        .unwrap()
+                        .push(key.unwrap_or_default().to_owned());
+                    self.paused_notify.notify_waiters();
+                    std::thread::sleep(duration);
+                }
+            }
+        }
+        let _ = (point, key);
     }
 
     /// 설정된 지점이면 true. handler는 해당 저장 단계를 실패한 것으로 처리한다.

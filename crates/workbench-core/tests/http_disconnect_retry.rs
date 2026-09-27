@@ -14,11 +14,12 @@ use std::{
 
 use serde_json::{json, Value};
 use support::{
-    command_request,
+    command_request, create_request,
     http_harness::{Harness, HarnessOptions, TOKEN_DESKTOP},
     scripted_run_engine::RunScript,
-    uuid_key, BenchHarness,
+    uuid_key, BenchHarness, TestRuntime,
 };
+use workbench_core::application::workbench_runtime::CrashPoint;
 use workbench_protocol::{AuthenticatedPrincipal, FaultCode, OperationId, Workbench};
 
 const DELAY_MS: u64 = 600;
@@ -258,4 +259,150 @@ async fn calls_after_the_shutdown_signal_are_rejected_without_effect() {
         workbench_server::drain::MESSAGE_SHUTTING_DOWN
     );
     assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before);
+}
+
+/// 영속 ledger 경로(intent-first, `spawn_blocking`): JSON 저장 뒤·ledger 확정 전 구간에서 연결을 끊고 같은 키로
+/// 재시도 → 진행 중이면 retryable conflict, 끝나면 저장된 결과. 프로젝트는 하나만 생긴다. 14개 영속 operation이
+/// 이 경로를 공유한다(`application/intent_first.rs`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disconnected_ledger_write_retry_applies_once() {
+    let rt = TestRuntime::new();
+    let dir = rt.dir.path().join("wt");
+    std::fs::create_dir_all(&dir).unwrap();
+    let dir = dir.to_string_lossy().into_owned();
+    rt.runtime.hooks().set_pause(Some((
+        CrashPoint::AfterJsonSave,
+        Duration::from_millis(DELAY_MS),
+    )));
+    let harness = Harness::spawn(rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let key = uuid_key();
+    let request = create_request(&key, "Disconnected", &dir);
+    harness
+        .send_then_disconnect(
+            TOKEN_DESKTOP,
+            &request,
+            rt.runtime.hooks().wait_paused(&key, ENTRY_WAIT),
+        )
+        .await;
+    assert_eq!(
+        rt.projects().len(),
+        1,
+        "the JSON write happened before the disconnect"
+    );
+    let mut in_progress = 0;
+    let retried = loop {
+        match harness.call(Some(TOKEN_DESKTOP), &request).await {
+            Err(fault) if fault.code == FaultCode::Conflict && fault.retryable => {
+                in_progress += 1;
+                assert!(in_progress < 100, "never settled");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            other => break other,
+        }
+    };
+    let retried = output(retried.expect("retry returns the stored result"));
+    assert!(
+        in_progress > 0,
+        "the first retry overlapped the running write"
+    );
+    let projects = rt.projects();
+    assert_eq!(projects.len(), 1, "created once");
+    assert_eq!(retried["id"], projects[0]["id"]);
+}
+
+fn git_init(dir: &str) {
+    for args in [
+        vec!["init", "-q"],
+        vec![
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@example.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "init",
+        ],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+}
+
+/// agent 주체 변경(`Scope::RunOwner`, 15개 공유): coordinator가 자식 과제를 만들고 자식 run이 기동된 뒤·결과
+/// 기록 전에 연결이 끊긴다 → 같은 키 재시도 → 저장된 결과, 자식은 한 번만 기동.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disconnected_agent_child_creation_retry_starts_one_child() {
+    let h = BenchHarness::new(RunScript {
+        start_settle_ms: DELAY_MS,
+        ..RunScript::default()
+    });
+    git_init(&h.dir);
+    let (_bench, _) = {
+        let bench = h.open().await;
+        let session = h
+            .call(
+                &AuthenticatedPrincipal::desktop(),
+                OperationId::OrchestrationBootstrap,
+                json!({ "benchId": bench, "worktreePath": h.dir }),
+            )
+            .await
+            .unwrap();
+        h.start(&bench, "coord").await.unwrap();
+        let bound = h
+            .call(
+                &AuthenticatedPrincipal::desktop(),
+                OperationId::OrchestrationBindCoordinator,
+                json!({ "benchId": bench, "request": {
+                    "requestId": "bind-1", "panelId": "main-agent-run", "runId": "coord",
+                    "state": "active", "expectedRevision": session["revision"] } }),
+            )
+            .await
+            .unwrap();
+        (bench, bound)
+    };
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let agent = AuthenticatedPrincipal::agent("coord");
+    let token = Harness::token_string(&agent);
+    let starts = h.engine.starts.load(Ordering::SeqCst);
+    let request = command_request(
+        OperationId::OrchestrationCreateChildTask,
+        &uuid_key(),
+        json!({ "runId": "coord", "arguments": {
+            "requestId": "child-req", "title": "task",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read the repo", "expectedResult": "summary" } }),
+    );
+    let child = harness
+        .send_then_disconnect(
+            &token,
+            &request,
+            h.engine.wait_applied(
+                |l| l.starts_with("start:") && l != "start:coord",
+                ENTRY_WAIT,
+            ),
+        )
+        .await;
+    let retried = output(
+        harness
+            .call(Some(&token), &request)
+            .await
+            .expect("retry returns the stored result"),
+    );
+    assert_eq!(
+        format!("start:{}", retried["runId"].as_str().unwrap()),
+        child,
+        "the stored result names the child started by the original request"
+    );
+    assert_eq!(
+        h.engine.starts.load(Ordering::SeqCst),
+        starts + 1,
+        "one child"
+    );
 }

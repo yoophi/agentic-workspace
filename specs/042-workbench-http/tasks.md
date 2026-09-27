@@ -59,8 +59,8 @@
 - [X] T015 [US1] `crates/workbench-server/src/routes/handshake.rs` + `/v1/system/handshake` 등록
 - [X] T016 [US1] `crates/workbench-core/tests/support/http_harness.rs`를 운영 router 래퍼로 교체: 고정 토큰 resolver(`test-desktop`·`test-readonly`·`test-noscope`·`test-desktop2`·`test-agent:<run>`), 허용 Origin 없음, 수집 기록, `ExposurePolicy::all()`(테스트는 전체), 기존 API(`spawn`·`call`·`token_for`) 유지. core `Cargo.toml` dev-dependency에 workbench-server
 - [X] T017 [US1] 계약 suite가 운영 router로 통과(`contract_suite.rs` 변경 없음이 목표), 결과 Notes
-- [ ] T018 [US1] T009–T011 통과 확인 뒤 `ExposurePolicy::all()`을 운영 기본값으로(변경 53개 공개), **분리 실행 제거 변이**(T014의 spawn을 직접 await로)로 T009가 실패함을 확인해 Notes에 기록
-- [ ] T019 [US1] 커밋 `feat(workbench-server): network calls with detached execution and crash/disconnect evidence (042 US1)`
+- [X] T018 [US1] T009–T011 통과 확인 뒤 `ExposurePolicy::all()`을 운영 기본값으로(변경 53개 공개), **분리 실행 제거 변이**(T014의 spawn을 직접 await로)로 T009가 실패함을 확인해 Notes에 기록
+- [X] T019 [US1] 커밋 `feat(workbench-server): network calls with detached execution and crash/disconnect evidence (042 US1)`
 
 ---
 
@@ -181,3 +181,5 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T012**: `http_mixed_paths.rs` status=0 — 프로젝트 생성 in-process 60 + HTTP 60 동시 → 120개 손실 0, orchestration `delegateGoal` 두 경로 각 20 동시(revision 경합은 conflict 후 새 revision 재시도) → 받아들인 40개 모두 작업 영역에 기록
 - **T013**: `http_handshake.rs` status=0. **시험이 먼저 실패**: `/v1/calls`가 본문을 인증보다 먼저 해석해 자격 증명 없는 빈 본문에 `400` → 인증 먼저(본문이 올바르면 그 requestId를 unauthenticated 응답에 싣는다)로 고친 뒤 통과
 - **T014·T015**: calls(분리 실행·drain·503·인증 우선)·handshake 경로. US1 게이트: `cargo test -p workbench-server -p workbench-core --all-targets --no-fail-fast` status=0(403 passed, 0 failed, 7 ignored), clippy 두 크레이트 status=0
+- **T018 공개 근거(사용자 검토 4)**: 변경 53개 operation별 증거 표 = `reviews/exposure-evidence.md`(영속 ledger 14 / 세대 멱등 39, 범위 Bench·Open·RunOwner·None, 공유 코드 경로와 대표 시험, 한계). 표 작성 중 대표 시험으로 덮이지 않던 경로에 시험 추가: ledger 경로 단절(`disconnected_ledger_write_retry_applies_once`, `TestHooks::pause_at` — 효과 뒤·ledger 확정 전, 멱등성 키로 식별), agent 주체 RunOwner 단절(`disconnected_agent_child_creation_retry_starts_one_child`)·재시작(`agent_orchestration_commands_are_rejected_after_restart_without_effect`), orchestration 파일 끊긴 쓰기(`legacy_json_store` 단위). 분리 실행 제거 변이: D-E·D-O·D-A 효과 2회·D-S 조기 반환 실패, D-L·D-R 통과(L 경로는 `spawn_blocking`+ledger 보호). 그 뒤 `ExposurePolicy::network_default()` = 전체
+- **US1 게이트(T018 뒤)**: `cargo test -p workbench-server -p workbench-core --all-targets --no-fail-fast` status=0(407 passed, 0 failed, 7 ignored), clippy 두 크레이트 status=0, `workbench-core --features test-hooks --lib` clippy status=0
