@@ -230,15 +230,29 @@ async fn reconnecting_with_a_new_ticket_resumes_after_the_last_cursor() {
     }
 }
 
-/// 열린 구독이 있어도 서버 종료는 끝난다(upgrade된 연결이 graceful shutdown을 붙잡지 않는다).
+/// hello는 구독 준비 완료 신호다: hello를 받은 직후의 변경은 재생 없는 알림 스트림(worktree)에서도 전달된다.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn shutdown_completes_with_open_subscriptions() {
+async fn hello_means_the_subscription_is_ready() {
     let (h, epoch) = prepared().await;
     let harness = spawn(&h, HarnessOptions::default()).await;
-    let mut ws = harness.subscribe(TOKEN_DESKTOP, cursor(&epoch, 0)).await;
+    let dir = tempfile::tempdir().unwrap();
+    let path = std::fs::canonicalize(dir.path()).unwrap();
+    let mut ws = harness
+        .subscribe(
+            TOKEN_DESKTOP,
+            vec![StreamCursor {
+                stream_id: format!("worktree:{}", path.display()),
+                epoch,
+                after_sequence: 0,
+            }],
+        )
+        .await;
     assert!(matches!(ws.hello, EventFrame::Hello { .. }));
-    tokio::time::timeout(Duration::from_secs(5), harness.shutdown())
-        .await
-        .expect("shutdown finished while a WebSocket was open");
-    let _ = ws.next_frame(Duration::from_millis(100)).await;
+    std::fs::write(path.join("after-hello.txt"), "x").unwrap();
+    match ws.next_frame(Duration::from_secs(5)).await {
+        Some(EventFrame::Event { event }) => {
+            assert_eq!(event.schema, "worktree.changed.v1");
+        }
+        other => panic!("the change right after hello was lost: {other:?}"),
+    }
 }

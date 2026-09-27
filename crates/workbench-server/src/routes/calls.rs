@@ -3,10 +3,13 @@
 
 use std::{sync::Arc, time::Instant};
 
-use axum::{body::Bytes, extract::State, http::HeaderMap, response::Response};
+use axum::{
+    extract::{Request, State},
+    response::Response,
+};
 use workbench_protocol::{CallRequest, FaultCode, OperationId, RequestId, WorkbenchFault};
 
-use super::{authenticate, json_response, problem, record, unauthenticated};
+use super::{authenticate, json_response, problem, read_body, record, unauthenticated};
 use crate::{
     drain::{spawn_accepted, MESSAGE_SHUTTING_DOWN},
     AppState, MESSAGE_NOT_EXPOSED,
@@ -14,32 +17,23 @@ use crate::{
 
 pub const MESSAGE_BAD_BODY: &str = "invalid request body.";
 
-pub async fn call(State(state): State<Arc<AppState>>, headers: HeaderMap, body: Bytes) -> Response {
+pub async fn call(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let started = Instant::now();
-    // 인증이 먼저다: 자격 증명 없는 요청은 본문이 어떻든 `401`. 본문이 올바르면 그 requestId를 싣는다.
-    let parsed = serde_json::from_slice::<CallRequest>(&body);
-    let principal = authenticate(&state, &headers);
-    let Some(principal) = principal else {
-        let request_id = parsed
-            .as_ref()
-            .map(|request| request.request_id.clone())
-            .unwrap_or_else(|_| RequestId::random());
+    // 인증이 먼저다: 자격 증명 없는 요청은 본문을 읽지 않고 `401`(느린 본문으로 연결·종료를 붙잡지 못한다).
+    let Some(principal) = authenticate(&state, request.headers()) else {
+        let request_id = RequestId::random();
         let response = unauthenticated(&request_id);
-        let operation = parsed
-            .as_ref()
-            .map(|request| request.operation.as_str())
-            .unwrap_or("calls");
-        record(
-            &state,
-            started,
-            Some(&request_id),
-            operation,
-            None,
-            &response,
-        );
+        record(&state, started, Some(&request_id), "calls", None, &response);
         return response;
     };
-    let request = match parsed {
+    let body = match read_body(&state, request, &RequestId::random()).await {
+        Ok(body) => body,
+        Err(response) => {
+            record(&state, started, None, "calls", Some(&principal), &response);
+            return response;
+        }
+    };
+    let request = match serde_json::from_slice::<CallRequest>(&body) {
         Ok(request) => request,
         Err(_) => {
             let response = problem(&WorkbenchFault::new(

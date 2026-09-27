@@ -43,8 +43,8 @@
 ## 4. WebSocket
 
 1. upgrade 전: Host·Origin(§1) 검사 → 표를 원자적으로 꺼내 소모. 없음·만료·이미 사용 → `401`; 표의 Origin과 요청 Origin 불일치 → `403`. 이때 upgrade하지 않는다.
-2. upgrade 뒤 서버가 `hello{protocolVersion, epoch}`를 보낸다.
-3. 서버가 표의 cursor로 구독한다. 거절이면 `fault{fault}` 뒤 close(오늘 `events` 판정과 같음).
+2. upgrade 뒤 서버가 표의 cursor로 구독을 등록한다(오늘 `events` 판정과 같음).
+3. 서버가 `hello{protocolVersion, epoch}`를 보낸다 — **hello는 구독 준비 완료 신호**다: hello 뒤에 일어난 변경은 재생 없는 알림 스트림에서도 전달된다. 등록이 거절됐으면 hello 뒤 `fault{fault}`를 보내고 close한다(구현 리뷰 중 발견: 처음에는 등록 전에 hello를 보내 worktree 알림을 잃을 수 있었다).
 4. 이어서 `event`/`gap` 프레임. 클라이언트가 보내는 것은 close뿐이다(수신 메시지 상한 64 KiB).
 5. 연결 종료 = 구독 해제. 재연결은 새 표 + 마지막 cursor.
 

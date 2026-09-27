@@ -7,6 +7,10 @@ description = "Workbench HTTP/WebSocket 어댑터(042, 3단계): 계약(`Workben
 [dependencies]
 workbench-protocol = { path = "../workbench-protocol" }
 axum = { version = "0.7", features = ["ws"] }
+# serve: 연결 task를 직접 소유해 종료 때 해제를 보장한다(axum::serve는 연결을 detach한다).
+hyper = { version = "1", features = ["http1", "server"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service", "http1"] }
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors", "limit"] }
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net"] }
 futures-util = "0.3"

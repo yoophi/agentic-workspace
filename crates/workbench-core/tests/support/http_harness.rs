@@ -71,6 +71,8 @@ pub struct HarnessOptions {
     pub drain_warn_after: Duration,
     /// 고정 토큰 앞에 이어 붙일 운영 resolver(예: `DesktopTokenIssuer`).
     pub extra_resolver: Option<Arc<dyn workbench_server::auth::CredentialResolver>>,
+    pub body_read_timeout: Duration,
+    pub connection_grace: Duration,
 }
 
 impl Default for HarnessOptions {
@@ -81,6 +83,8 @@ impl Default for HarnessOptions {
             ticket_ttl: TICKET_TTL,
             drain_warn_after: Duration::from_secs(30),
             extra_resolver: None,
+            body_read_timeout: workbench_server::DEFAULT_BODY_READ_TIMEOUT,
+            connection_grace: workbench_server::DEFAULT_CONNECTION_GRACE,
         }
     }
 }
@@ -148,6 +152,8 @@ impl Harness {
             tickets: Arc::new(EventTicketStore::new(options.ticket_ttl, TICKET_CAPACITY)),
             body_limit: DEFAULT_BODY_LIMIT,
             drain_warn_after: options.drain_warn_after,
+            body_read_timeout: options.body_read_timeout,
+            connection_grace: options.connection_grace,
         };
         let server = workbench_server::build_router(workbench, config, addr.port());
         let calls = Arc::clone(&server.calls);

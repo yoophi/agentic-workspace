@@ -2,11 +2,15 @@
 
 use std::{sync::Arc, time::Instant};
 
-use axum::{body::Bytes, extract::State, http::HeaderMap, response::Response};
+use axum::{
+    extract::{Request, State},
+    response::Response,
+};
 use workbench_protocol::{FaultCode, Outcome, RequestId, WorkbenchFault};
 
 use super::{
-    authenticate, calls::MESSAGE_BAD_BODY, json_response, problem, record, unauthenticated,
+    authenticate, calls::MESSAGE_BAD_BODY, json_response, problem, read_body, record,
+    unauthenticated,
 };
 use crate::{
     handshake::{
@@ -15,18 +19,28 @@ use crate::{
     AppState,
 };
 
-pub async fn handshake(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    body: Bytes,
-) -> Response {
+pub async fn handshake(State(state): State<Arc<AppState>>, request: Request) -> Response {
     let started = Instant::now();
     let request_id = RequestId::random();
-    let principal = match authenticate(&state, &headers) {
+    let principal = match authenticate(&state, request.headers()) {
         Some(principal) => principal,
         None => {
             let response = unauthenticated(&request_id);
             record(&state, started, None, "handshake", None, &response);
+            return response;
+        }
+    };
+    let body = match read_body(&state, request, &request_id).await {
+        Ok(body) => body,
+        Err(response) => {
+            record(
+                &state,
+                started,
+                None,
+                "handshake",
+                Some(&principal),
+                &response,
+            );
             return response;
         }
     };

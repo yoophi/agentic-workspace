@@ -131,6 +131,8 @@ impl WorkbenchHttpState {
             tickets: Arc::new(EventTicketStore::default()),
             body_limit: workbench_server::DEFAULT_BODY_LIMIT,
             drain_warn_after: assembly.drain_warn_after,
+            body_read_timeout: workbench_server::DEFAULT_BODY_READ_TIMEOUT,
+            connection_grace: workbench_server::DEFAULT_CONNECTION_GRACE,
         };
         let server = workbench_server::build_router(assembly.workbench, config, address.port());
         let http_calls = Arc::clone(&server.calls);

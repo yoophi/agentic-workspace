@@ -39,6 +39,13 @@ use crate::{
 
 pub const PROTOCOL_HEADER: &str = "aw-protocol-version";
 pub const DEFAULT_BODY_LIMIT: usize = 1024 * 1024;
+/// 본문 읽기 제한 시간(느린 본문으로 연결을 붙잡지 못하게).
+pub const DEFAULT_BODY_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// 종료 신호 뒤 받아들이지 않은 연결(헤더·본문을 보내다 멈춘 연결 등)을 기다리는 시간. 받아들인 호출은 이와
+/// 무관하게 끝까지 drain한다.
+pub const DEFAULT_CONNECTION_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+/// 종료 때 구독에 close 프레임을 보내는 제한 시간(읽지 않는 클라이언트가 정리를 막지 못하게).
+pub const SUBSCRIPTION_CLOSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 pub const WS_MAX_MESSAGE: usize = 64 * 1024;
 pub const MESSAGE_HOST_NOT_ALLOWED: &str = "host is not allowed.";
 pub const MESSAGE_ORIGIN_NOT_ALLOWED: &str = "origin is not allowed.";
@@ -90,6 +97,10 @@ pub struct ServerConfig {
     pub body_limit: usize,
     /// 종료 drain 경고 간격(`drain::DEFAULT_DRAIN_WARN_AFTER`). 상한이 아니다.
     pub drain_warn_after: std::time::Duration,
+    /// 본문 읽기 제한 시간(`DEFAULT_BODY_READ_TIMEOUT`).
+    pub body_read_timeout: std::time::Duration,
+    /// 종료 신호 뒤 받아들이지 않은 연결을 기다리는 시간(`DEFAULT_CONNECTION_GRACE`).
+    pub connection_grace: std::time::Duration,
 }
 
 pub(crate) struct AppState {
@@ -98,13 +109,17 @@ pub(crate) struct AppState {
     pub host: HostPolicy,
     pub instance_id: String,
     pub calls: Arc<DetachedCalls>,
+    pub subscriptions: Arc<DetachedCalls>,
 }
 
-/// 조립된 서버: router와 받아들인 호출 추적기. [`serve`]가 둘 다 쓴다.
+/// 조립된 서버: router와 받아들인 호출·열린 구독 추적기. [`serve`]가 모두 쓴다.
 pub struct WorkbenchServer {
     pub router: Router,
     pub calls: Arc<DetachedCalls>,
+    /// 열린 WebSocket 구독(upgrade task). 종료 때 닫고 `serve` 반환 전에 0이 될 때까지 기다린다.
+    pub subscriptions: Arc<DetachedCalls>,
     pub drain_warn_after: std::time::Duration,
+    pub connection_grace: std::time::Duration,
 }
 
 /// 루프백 임의 포트에 bind한다(다른 주소는 받지 않는다).
@@ -132,13 +147,16 @@ pub fn build_router(
         .max_age(std::time::Duration::from_secs(600));
     let body_limit = config.body_limit;
     let drain_warn_after = config.drain_warn_after;
+    let connection_grace = config.connection_grace;
     let calls = Arc::new(DetachedCalls::default());
+    let subscriptions = Arc::new(DetachedCalls::default());
     let state = Arc::new(AppState {
         workbench,
         config,
         host: HostPolicy::new(port),
         instance_id: uuid::Uuid::new_v4().to_string(),
         calls: Arc::clone(&calls),
+        subscriptions: Arc::clone(&subscriptions),
     });
     let router = Router::new()
         .route("/health/live", get(routes::health::live))
@@ -156,7 +174,9 @@ pub fn build_router(
     WorkbenchServer {
         router,
         calls,
+        subscriptions,
         drain_warn_after,
+        connection_grace,
     }
 }
 
@@ -187,27 +207,96 @@ async fn protocol_header(mut response: Response) -> Response {
     response
 }
 
-/// 종료 순서(R17): 신호 → 새 호출 `503`(추적기 close) → 새 연결 중단·진행 중 요청 마무리 → **받아들인 분리 호출
-/// drain**(연결이 이미 끊긴 호출 포함) → 반환. drain에는 상한이 없다 — 경고 간격마다 남은 수를 기록하고 계속
-/// 기다린다. 소유 런타임(AW 종료 수명, 5단계 서버)은 이 future가 끝난 뒤에만 런타임을 내려야 한다.
+/// 종료 순서(R17, 구현 리뷰 반영):
+/// 1. 신호 → 새 연결 받기 중단, 호출·구독 추적기를 닫는다: 새 호출 `503`, 본문을 읽던 받아들이지 않은 요청은 곧바로
+///    `503`, 새 구독 거절, 열린 구독은 close를 보내고 스트림을 놓는다.
+/// 2. 연결마다 graceful shutdown을 걸고 최대 `connection_grace` 기다린 뒤 남은 연결 task를 abort하고 모두 join한다 —
+///    헤더를 보내다 멈춘 연결도 소켓·router·`Workbench` 참조까지 해제된다. (`axum::serve`는 연결 task를 detach해
+///    future를 버려도 남으므로 같은 구성 — hyper-util `auto::Builder` + upgrade — 으로 연결을 직접 소유한다.)
+/// 3. 열린 구독 task가 모두 끝날 때까지(소켓·EventStream 해제).
+/// 4. **받아들인 분리 호출 drain** — 연결과 무관하게 추적기로, 상한 없음, 경고 간격마다 남은 수를 기록.
+///
+/// 소유 런타임(AW 종료 수명, 5단계 서버)은 이 future가 끝난 뒤에만 런타임을 내려야 한다.
 pub async fn serve(
     listener: tokio::net::TcpListener,
     server: WorkbenchServer,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) -> std::io::Result<()> {
+    use hyper_util::{
+        rt::{TokioExecutor, TokioIo},
+        server::conn::auto::Builder,
+        service::TowerToHyperService,
+    };
+    use tower::ServiceExt as _;
+
     let WorkbenchServer {
         router,
         calls,
+        subscriptions,
         drain_warn_after,
+        connection_grace,
     } = server;
-    let closing = Arc::clone(&calls);
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            closing.close();
-        })
-        .await?;
+    let (graceful_tx, graceful_rx) = tokio::sync::watch::channel(false);
+    let mut connections = tokio::task::JoinSet::new();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            () = &mut shutdown => break,
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
+            accepted = listener.accept() => {
+                let tcp = match accepted {
+                    Ok((tcp, _)) => tcp,
+                    Err(error) => {
+                        eprintln!("[workbench-http] accept failed: {error}");
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        continue;
+                    }
+                };
+                let service = TowerToHyperService::new(
+                    router
+                        .clone()
+                        .map_request(|request: Request<hyper::body::Incoming>| {
+                            request.map(axum::body::Body::new)
+                        }),
+                );
+                let mut graceful = graceful_rx.clone();
+                connections.spawn(async move {
+                    let builder = Builder::new(TokioExecutor::new());
+                    let connection =
+                        builder.serve_connection_with_upgrades(TokioIo::new(tcp), service);
+                    tokio::pin!(connection);
+                    tokio::select! {
+                        _ = connection.as_mut() => return,
+                        _ = graceful.wait_for(|stop| *stop) => {}
+                    }
+                    connection.as_mut().graceful_shutdown();
+                    let _ = connection.await;
+                });
+            }
+        }
+    }
+    drop(listener);
     calls.close();
+    subscriptions.close();
+    graceful_tx.send_replace(true);
+    let finished = tokio::time::timeout(connection_grace, async {
+        while connections.join_next().await.is_some() {}
+    })
+    .await;
+    if finished.is_err() {
+        eprintln!(
+            "[workbench-http] shutdown: closing {} connection(s) still open after the grace period",
+            connections.len()
+        );
+        connections.abort_all();
+        while connections.join_next().await.is_some() {}
+    }
+    drop(router);
+    subscriptions
+        .drain_until_idle(drain_warn_after, |left| {
+            eprintln!("[workbench-http] shutdown waiting for {left} subscription(s) to close");
+        })
+        .await;
     calls
         .drain_until_idle(drain_warn_after, |left| {
             eprintln!("[workbench-http] shutdown waiting for {left} accepted call(s) to finish");

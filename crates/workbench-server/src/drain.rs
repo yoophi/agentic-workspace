@@ -31,11 +31,24 @@ where
     .await
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct DetachedCalls {
     closing: AtomicBool,
     active: AtomicUsize,
     idle: Notify,
+    /// 닫힘 알림(본문 읽기·구독 루프가 기다린다).
+    closed: tokio::sync::watch::Sender<bool>,
+}
+
+impl Default for DetachedCalls {
+    fn default() -> Self {
+        Self {
+            closing: AtomicBool::new(false),
+            active: AtomicUsize::new(0),
+            idle: Notify::new(),
+            closed: tokio::sync::watch::Sender::new(false),
+        }
+    }
 }
 
 /// 받아들인 호출 하나. drop(완료·panic 모두)될 때 활성 수를 줄인다.
@@ -70,6 +83,13 @@ impl DetachedCalls {
 
     pub fn close(&self) {
         self.closing.store(true, Ordering::Release);
+        self.closed.send_replace(true);
+    }
+
+    /// 닫힐 때까지(이미 닫혔으면 곧바로).
+    pub async fn closed(&self) {
+        let mut closed = self.closed.subscribe();
+        let _ = closed.wait_for(|closed| *closed).await;
     }
 
     pub fn is_closing(&self) -> bool {
