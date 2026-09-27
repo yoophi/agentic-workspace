@@ -27,8 +27,10 @@ pub const AGENT_EXCHANGE_REQUESTED_EVENT: &str = "agent-exchange-requested";
 pub const AGENT_EXCHANGE_STATUS_EVENT: &str = "agent-exchange-status";
 
 impl AgentRunOwnerLookup for crate::infrastructure::agent_session_registry::AppState {
+    /// 040 과도기(US2 전): run 소유자는 작업대 id다. 교환 registry는 아직 창 label로 키를 잡으므로 창으로 바꾼다.
     async fn active_owner_for_exchange(&self, run_id: &str) -> Option<String> {
-        self.active_owner_of(run_id).await
+        let bench = self.active_owner_of(run_id).await?;
+        crate::infrastructure::desktop_benches::label_for(&bench)
     }
 }
 

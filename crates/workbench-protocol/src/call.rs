@@ -86,13 +86,29 @@ pub enum OperationId {
     BenchClose,
     #[serde(rename = "bench.requestTitle")]
     BenchRequestTitle,
+    #[serde(rename = "run.listToolCandidates")]
+    RunListToolCandidates,
+    #[serde(rename = "run.start")]
+    RunStart,
+    #[serde(rename = "run.sendPrompt")]
+    RunSendPrompt,
+    #[serde(rename = "run.steer")]
+    RunSteer,
+    #[serde(rename = "run.cancelAndSend")]
+    RunCancelAndSend,
+    #[serde(rename = "run.setPermissionMode")]
+    RunSetPermissionMode,
+    #[serde(rename = "run.cancel")]
+    RunCancel,
+    #[serde(rename = "run.respondPermission")]
+    RunRespondPermission,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 35] = [
+    pub const ALL: [OperationId; 43] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -127,6 +143,14 @@ impl OperationId {
         OperationId::BenchOpen,
         OperationId::BenchClose,
         OperationId::BenchRequestTitle,
+        OperationId::RunListToolCandidates,
+        OperationId::RunStart,
+        OperationId::RunSendPrompt,
+        OperationId::RunSteer,
+        OperationId::RunCancelAndSend,
+        OperationId::RunSetPermissionMode,
+        OperationId::RunCancel,
+        OperationId::RunRespondPermission,
         OperationId::SystemDescribe,
     ];
 
@@ -166,6 +190,14 @@ impl OperationId {
             OperationId::BenchOpen => "bench.open",
             OperationId::BenchClose => "bench.close",
             OperationId::BenchRequestTitle => "bench.requestTitle",
+            OperationId::RunListToolCandidates => "run.listToolCandidates",
+            OperationId::RunStart => "run.start",
+            OperationId::RunSendPrompt => "run.sendPrompt",
+            OperationId::RunSteer => "run.steer",
+            OperationId::RunCancelAndSend => "run.cancelAndSend",
+            OperationId::RunSetPermissionMode => "run.setPermissionMode",
+            OperationId::RunCancel => "run.cancel",
+            OperationId::RunRespondPermission => "run.respondPermission",
             OperationId::SystemDescribe => "system.describe",
         }
     }

@@ -1,0 +1,90 @@
+{
+  "name": "run-list-tool-candidates-ready",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-61",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-61"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-62",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-62"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.listToolCandidates",
+        "requestId": "r-63",
+        "input": {
+          "benchId": "{{bench}}",
+          "query": {
+            "runId": "r1",
+            "agentId": "codex",
+            "workingDirectory": "{{dir}}",
+            "sessionMode": "new"
+          }
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "status": "ready",
+            "candidates": [
+              {
+                "name": "set_window_title",
+                "source": "sessionTool",
+                "insertText": "$set_window_title",
+                "scope": {
+                  "runId": "r1"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

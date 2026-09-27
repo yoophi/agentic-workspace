@@ -7,7 +7,11 @@ use std::{
     process::Command,
     sync::{Arc, Mutex, OnceLock},
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use workbench_core::{
+    application::workbench_runtime::WorkbenchRuntime,
+    infrastructure::run::workbench_run_sink::WorkbenchRunSink,
+};
 
 use crate::{
     application::{
@@ -23,8 +27,8 @@ use crate::{
         acp_agent_launch_factory::build_worker_request,
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
+        desktop_benches,
         mcp::{McpServerState, capability_registry::CapabilityPrincipal},
-        tauri_run_event_sink::TauriRunEventSink,
     },
     ports::agent_worker::{
         AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding, WorkerCommandOutcome,
@@ -150,8 +154,15 @@ impl TauriAcpWorkerRuntime {
         Self { app, registry, mcp }
     }
 
-    fn sink(&self, window_label: &str) -> TauriRunEventSink {
-        TauriRunEventSink::with_target(self.app.clone(), self.registry.clone(), window_label.into())
+    fn runtime(&self) -> Arc<WorkbenchRuntime> {
+        self.app.state::<Arc<WorkbenchRuntime>>().inner().clone()
+    }
+
+    /// 040 과도기: 자식 run 이벤트도 그 창 작업대의 sink로 발행한다(전달 경로 하나). 작업대가 없으면(창 닫힘)
+    /// run 스트림에만 기록되고 창 전달은 없다.
+    fn sink(&self, window_label: &str) -> WorkbenchRunSink {
+        let bench = desktop_benches::lookup(window_label).unwrap_or_default();
+        self.runtime().run_sink(&bench)
     }
 }
 
@@ -169,21 +180,32 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
             ))
             .map_err(|error| error.to_string())?;
         let run_request = build_worker_request(&request, env);
-        let session_store = crate::infrastructure::acp_session_store_for(&self.app)?;
+        // 040 과도기(research R12): 자식 run의 소유자는 그 창의 작업대다. 창을 닫으면 `bench.close`가 자식 run도
+        // 취소한다. 기동은 작업대 입장권 안에서(닫기와 직렬화), 세션 저장소는 런타임의 같은 인스턴스를 쓴다.
+        let runtime = self.runtime();
+        let bench = desktop_benches::ensure(
+            &runtime,
+            &assignment.window_label,
+            Some(assignment.worktree_path.as_str()),
+        )
+        .await?;
+        let admission = runtime
+            .admit(&bench)
+            .map_err(|_| desktop_benches::MESSAGE_WINDOW_UNAVAILABLE.to_owned())?;
+        let session_store = runtime
+            .run_engine()
+            .acp_session_store()
+            .ok_or_else(|| "production run engine exposes the ACP session store".to_owned())?;
         let runner = AcpAgentRunner::new(
             ConfigurableAgentCatalog::from_env(),
             self.registry.permissions(),
-            Arc::new(session_store),
+            session_store,
         );
         let run = StartAgentRunUseCase::new(self.registry.clone())
-            .execute(
-                runner,
-                self.sink(&assignment.window_label),
-                run_request,
-                Some(assignment.window_label.clone()),
-            )
+            .execute(runner, runtime.run_sink(&bench), run_request, Some(bench))
             .await
             .map_err(String::from)?;
+        drop(admission);
         Ok(run.id)
     }
 
@@ -271,11 +293,14 @@ impl AcpWorkerRuntime for TauriAcpWorkerRuntime {
     }
 
     async fn is_active(&self, binding: &WorkerBinding) -> bool {
+        let Some(bench) = desktop_benches::lookup(&binding.window_label) else {
+            return false;
+        };
         self.registry
             .active_owner_of(&binding.run_id)
             .await
             .as_deref()
-            == Some(binding.window_label.as_str())
+            == Some(bench.as_str())
     }
 }
 

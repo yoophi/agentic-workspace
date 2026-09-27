@@ -4,7 +4,6 @@ pub use acp_agent_core::application::{
 };
 
 pub mod agent_exchange_service;
-pub mod agent_tool_candidate_service;
 pub mod appearance_preferences_service;
 pub mod coordinator_notification_dispatcher;
 pub mod mcp_title_control_service;

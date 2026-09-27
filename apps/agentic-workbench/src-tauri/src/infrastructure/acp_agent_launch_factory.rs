@@ -3,22 +3,12 @@
 use std::collections::BTreeMap;
 
 use crate::{
-    domain::run::{AgentRunRequest, RalphLoopRequest, ResumePolicy},
+    domain::run::{AgentRunRequest, ResumePolicy},
     infrastructure::{
         acp_agent_worker_adapter::AgentWorkerLaunchRequest,
         mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
     },
 };
-
-pub fn normalize_run_request(mut request: AgentRunRequest) -> AgentRunRequest {
-    if request.run_id.as_deref().is_none_or(str::is_empty) {
-        request.run_id = Some(uuid::Uuid::new_v4().to_string());
-    }
-    request.workspace_id = None;
-    request.checkout_id = None;
-    request.ralph_loop = request.ralph_loop.map(RalphLoopRequest::sanitized);
-    request
-}
 
 pub fn inject_mcp_launch_env(request: &mut AgentRunRequest, env: McpLaunchEnv) {
     let agent_env = request.agent_env.get_or_insert_with(BTreeMap::new);

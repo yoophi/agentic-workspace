@@ -46,7 +46,8 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use workbench_core::{
-    application::workbench_runtime::WorkbenchRuntime, infrastructure::data_paths::DataPaths,
+    application::workbench_runtime::{RuntimeAdapters, WorkbenchRuntime},
+    infrastructure::data_paths::DataPaths,
 };
 
 const ABOUT_MENU_ID: &str = "about-agentic-workbench";
@@ -59,7 +60,6 @@ const BUILD_COMMIT_TAG: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_TAG");
 const BUILD_COMMIT_FALLBACK: &str = "unknown";
 
 pub fn run() {
-    let app_state = AppState::default();
     let agent_workspace_registry = InMemoryAgentWorkspaceRegistry::default();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -86,9 +86,23 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+            // 040: 데스크톱 포트(창 삽입 전달·run 종료 후처리·run 시작 보강)를 주입한다. run 기계(AppState)는
+            // 런타임이 소유하고, 041 전까지 AW orchestration이 같은 인스턴스를 빌린다(research R12).
+            let desktop_bridge = infrastructure::tauri_desktop_bridge::TauriDesktopBridge::new(
+                _app.handle().clone(),
+            );
+            let mut adapters = RuntimeAdapters::production();
+            adapters.desktop = Some(desktop_bridge.clone());
+            adapters.terminal_hook = Some(desktop_bridge.clone());
+            adapters.launch_decorator = Some(desktop_bridge.clone());
             let workbench_runtime: Arc<WorkbenchRuntime> =
-                WorkbenchRuntime::bootstrap(DataPaths::new(app_data_dir))
+                WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
                     .map_err(|error| error.to_string())?;
+            let app_state: AppState = workbench_runtime
+                .run_engine()
+                .acp_registry()
+                .ok_or("production run engine exposes the ACP registry")?;
+            _app.manage(app_state);
             _app.manage(workbench_runtime);
 
             let appearance_repository =
@@ -104,6 +118,7 @@ pub fn run() {
                     .inner()
                     .clone(),
             )?;
+            desktop_bridge.bind_mcp(mcp_state.clone());
             _app.manage(mcp_state);
 
             #[cfg(debug_assertions)]
@@ -136,7 +151,7 @@ pub fn run() {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
                     infrastructure::window_manager::forget_session_window(&label);
-                    let state = window.state::<AppState>().inner().clone();
+                    let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
                     let workspace_registry = window
                         .state::<InMemoryAgentWorkspaceRegistry>()
                         .inner()
@@ -145,7 +160,8 @@ pub fn run() {
                     let _ = watcher_state.stop_for_window(&label);
                     let app = window.app_handle().clone();
                     tauri::async_runtime::spawn(async move {
-                        state.cancel_runs_owned_by(&label).await;
+                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소, ADR 0005).
+                        infrastructure::desktop_benches::close(&runtime, &label).await;
                         workspace_registry.remove_window(&label).await;
                         if let Ok(repository) = JsonOrchestrationRepository::from_app(&app) {
                             let _ = OrchestrationService::new(
@@ -159,7 +175,6 @@ pub fn run() {
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }
         })
-        .manage(app_state)
         .manage(agent_workspace_registry)
         .manage(WorktreeWatcherState::new())
         .invoke_handler(tauri::generate_handler![

@@ -1,0 +1,55 @@
+{
+  "name": "run-list-tool-candidates-inactive-empty",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-64",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-64"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.listToolCandidates",
+        "requestId": "r-65",
+        "input": {
+          "benchId": "{{bench}}",
+          "query": {
+            "runId": "r9",
+            "agentId": "codex",
+            "workingDirectory": "{{dir}}",
+            "sessionMode": "new"
+          }
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "status": "empty",
+            "candidates": []
+          }
+        }
+      }
+    }
+  ]
+}

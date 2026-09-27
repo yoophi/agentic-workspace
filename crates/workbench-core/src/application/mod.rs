@@ -16,6 +16,8 @@ pub mod project_service;
 pub mod provider_session_service;
 pub mod reconcilers;
 pub mod registry;
+pub mod run_dto;
+pub mod run_service;
 pub mod saved_prompt_service;
 pub mod workbench_runtime;
 pub mod worktree_changes_service;

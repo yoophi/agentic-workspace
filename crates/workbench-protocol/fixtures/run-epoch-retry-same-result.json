@@ -1,0 +1,111 @@
+{
+  "name": "run-epoch-retry-same-result",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-69",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-69"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-70",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-70"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.sendPrompt",
+        "requestId": "r-71",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "hi"
+        },
+        "idempotencyKey": "k-send"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.sendPrompt",
+        "requestId": "r-72",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "hi"
+        },
+        "idempotencyKey": "k-send"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.sendPrompt",
+        "requestId": "r-73",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "other"
+        },
+        "idempotencyKey": "k-send"
+      },
+      "expect": {
+        "fault": {
+          "code": "conflict",
+          "message": "같은 멱등성 키로 다른 내용의 요청이 이미 처리되었습니다."
+        }
+      }
+    }
+  ]
+}

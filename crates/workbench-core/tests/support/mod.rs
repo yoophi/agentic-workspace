@@ -214,3 +214,109 @@ impl TestRuntime {
         read_store(&self.paths.agent_run_settings_file())
     }
 }
+
+/// 040: 가짜 엔진·기록형 데스크톱과 함께 만든 런타임. 작업대 대상 디렉터리도 만든다.
+pub struct BenchHarness {
+    pub rt: TestRuntime,
+    pub engine: Arc<scripted_run_engine::ScriptedRunEngine>,
+    pub desktop: Arc<recording_desktop::RecordingDesktop>,
+    pub dir: String,
+}
+
+impl BenchHarness {
+    pub fn new(script: scripted_run_engine::RunScript) -> Self {
+        Self::with(|_| {}, script)
+    }
+
+    pub fn with(
+        configure: impl FnOnce(&mut RuntimeAdapters),
+        script: scripted_run_engine::RunScript,
+    ) -> Self {
+        let (mut adapters, engine, desktop) = stub_adapters_with(Vec::new(), Vec::new(), script);
+        configure(&mut adapters);
+        let rt = TestRuntime::with_adapters(adapters);
+        let dir = rt.paths.app_data_dir().join("bench-work");
+        fs::create_dir_all(&dir).unwrap();
+        let dir = fs::canonicalize(dir)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            rt,
+            engine,
+            desktop,
+            dir,
+        }
+    }
+
+    pub async fn call(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        operation: OperationId,
+        input: Value,
+    ) -> Result<Value, WorkbenchFault> {
+        let request = if matches!(
+            workbench_protocol::operations::spec_for(operation).kind,
+            workbench_protocol::OperationKind::Query
+        ) {
+            query_request(operation, input)
+        } else {
+            command_request(operation, &uuid_key(), input)
+        };
+        self.rt
+            .runtime
+            .call(principal.clone(), request)
+            .await
+            .map(|reply| reply.output().cloned().unwrap_or(Value::Null))
+    }
+
+    pub async fn keyed(
+        &self,
+        operation: OperationId,
+        key: &str,
+        input: Value,
+    ) -> Result<Value, WorkbenchFault> {
+        self.rt
+            .runtime
+            .call(
+                AuthenticatedPrincipal::desktop(),
+                command_request(operation, key, input),
+            )
+            .await
+            .map(|reply| reply.output().cloned().unwrap_or(Value::Null))
+    }
+
+    pub async fn open(&self) -> String {
+        let output = self
+            .call(
+                &AuthenticatedPrincipal::desktop(),
+                OperationId::BenchOpen,
+                json!({ "workingDirectory": self.dir }),
+            )
+            .await
+            .expect("bench.open");
+        output["benchId"].as_str().unwrap().to_owned()
+    }
+
+    pub async fn start(&self, bench: &str, run: &str) -> Result<Value, WorkbenchFault> {
+        self.call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::RunStart,
+            json!({ "benchId": bench, "request": { "goal": "g", "agentId": "codex", "runId": run } }),
+        )
+        .await
+    }
+
+    pub async fn close(&self, bench: &str) -> Result<Value, WorkbenchFault> {
+        self.call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::BenchClose,
+            json!({ "benchId": bench }),
+        )
+        .await
+    }
+}
+
+pub fn uuid_key() -> String {
+    format!("k-{}", uuid::Uuid::new_v4())
+}

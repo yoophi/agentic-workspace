@@ -268,6 +268,69 @@
             "idempotencyScope": "epoch"
           },
           {
+            "id": "run.listToolCandidates",
+            "kind": "query",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "id": "run.start",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "durable"
+          },
+          {
+            "id": "run.sendPrompt",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.steer",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.cancelAndSend",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.setPermissionMode",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.cancel",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.respondPermission",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

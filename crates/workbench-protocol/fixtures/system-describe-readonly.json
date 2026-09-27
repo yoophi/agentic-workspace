@@ -140,6 +140,13 @@
             ]
           },
           {
+            "id": "run.listToolCandidates",
+            "kind": "query",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

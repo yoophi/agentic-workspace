@@ -8,6 +8,7 @@ pub(crate) mod epoch;
 pub mod git;
 pub mod goal;
 pub mod project;
+pub mod run;
 pub mod saved_prompt;
 pub mod system;
 pub mod worktree;
@@ -274,6 +275,7 @@ pub fn build_registry(
         &adapters.provider_sessions,
     );
     bench::register(&mut registry, benches);
+    run::register(&mut registry, &runner, &coordinator, benches);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler::new(epoch)),

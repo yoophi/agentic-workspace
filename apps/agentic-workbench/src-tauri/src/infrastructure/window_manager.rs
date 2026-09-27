@@ -54,7 +54,7 @@ fn remember_session_worktree_path(label: &str, worktree_path: &str) {
     }
 }
 
-fn session_worktree_path(label: &str) -> Option<String> {
+pub fn session_worktree_path(label: &str) -> Option<String> {
     session_worktree_paths()
         .lock()
         .ok()

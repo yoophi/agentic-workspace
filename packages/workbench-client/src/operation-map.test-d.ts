@@ -57,6 +57,14 @@ test("operation ids are exactly the registered operations (037 + 038 + 040)", ()
     | "bench.open"
     | "bench.close"
     | "bench.requestTitle"
+    | "run.listToolCandidates"
+    | "run.start"
+    | "run.sendPrompt"
+    | "run.steer"
+    | "run.cancelAndSend"
+    | "run.setPermissionMode"
+    | "run.cancel"
+    | "run.respondPermission"
     | "system.describe"
   >();
 });

@@ -53,6 +53,17 @@ export interface components {
             agentId: string;
             cwd?: string | null;
         };
+        AgentMcpHttpHeaderDto: {
+            name: string;
+            value: string;
+        };
+        AgentMcpServerConfigDto: {
+            name: string;
+            url: string;
+            headers?: components["schemas"]["AgentMcpHttpHeaderDto"][];
+            /** @enum {string} */
+            type: "http";
+        };
         AgentOptionDescriptorDto: {
             id: string;
             label: string;
@@ -67,6 +78,34 @@ export interface components {
             };
             enabled?: boolean;
             builtIn?: boolean;
+        };
+        AgentRunDto: {
+            id: string;
+            goal: string;
+            agentId: string;
+        };
+        /** @description 새 run 요청. 프론트 `AgentRunRequest`와 필드·표기가 같다. */
+        AgentRunRequestDto: {
+            goal: string;
+            agentId: string;
+            workspaceId?: string | null;
+            checkoutId?: string | null;
+            cwd?: string | null;
+            agentCommand?: string | null;
+            agentEnv?: {
+                [key: string]: string;
+            } | null;
+            mcpServers?: components["schemas"]["AgentMcpServerConfigDto"][];
+            stdioBufferLimitMb?: number | null;
+            autoAllow?: boolean | null;
+            permissionMode?: null | components["schemas"]["PermissionMode"];
+            modelId?: string | null;
+            effortId?: string | null;
+            contextSize?: null | components["schemas"]["ContextSizePreset"];
+            runId?: string | null;
+            resumeSessionId?: string | null;
+            resumePolicy?: null | components["schemas"]["ResumePolicyDto"];
+            ralphLoop?: null | components["schemas"]["RalphLoopRequestDto"];
         };
         /** @enum {string} */
         AgentRunSessionMode: "new" | "reuse";
@@ -98,6 +137,33 @@ export interface components {
         AgentRunSettingsSaveInput: {
             settings: components["schemas"]["AgentRunSettingsDto"];
         };
+        AgentToolCandidateDto: {
+            id: string;
+            name: string;
+            description?: string | null;
+            insertText: string;
+            source: components["schemas"]["AgentToolCandidateSourceDto"];
+            scope: components["schemas"]["AgentToolCandidateScopeDto"];
+        };
+        AgentToolCandidateQueryDto: {
+            runId?: string | null;
+            agentId: string;
+            workingDirectory: string;
+            sessionMode: string;
+        };
+        AgentToolCandidateResponseDto: {
+            status: components["schemas"]["AgentToolCandidateStatusDto"];
+            candidates: components["schemas"]["AgentToolCandidateDto"][];
+        };
+        AgentToolCandidateScopeDto: {
+            runId?: string | null;
+            agentId?: string | null;
+            workingDirectory?: string | null;
+        };
+        /** @enum {string} */
+        AgentToolCandidateSourceDto: "sessionTool" | "appCommand" | "extension";
+        /** @enum {string} */
+        AgentToolCandidateStatusDto: "loading" | "ready" | "empty" | "error";
         BenchCloseInput: {
             benchId: string;
         };
@@ -411,6 +477,70 @@ export interface components {
             /** @enum {string} */
             operation: "bench.requestTitle";
             output: components["schemas"]["TitleChangeResultDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.listToolCandidates";
+            output: components["schemas"]["AgentToolCandidateResponseDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.start";
+            output: components["schemas"]["AgentRunDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.sendPrompt";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.steer";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.cancelAndSend";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.setPermissionMode";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.cancel";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "run.respondPermission";
+            output: null;
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
             revision?: number;
         } | {
@@ -825,6 +955,102 @@ export interface components {
             operation: "bench.requestTitle";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["BenchRequestTitleInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.listToolCandidates";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunListToolCandidatesInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.start";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunStartInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.sendPrompt";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunPromptInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.steer";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunPromptInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.cancelAndSend";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunPromptInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.setPermissionMode";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunSetPermissionModeInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.cancel";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunCancelInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.respondPermission";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunRespondPermissionInput"];
             idempotencyKey: components["schemas"]["IdempotencyKey"];
             /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
             expectedRevision?: number;
@@ -1253,9 +1479,24 @@ export interface components {
             branch?: string | null;
             source?: string | null;
         };
+        RalphLoopRequestDto: {
+            enabled: boolean;
+            maxIterations: number;
+            promptTemplate: string;
+            stopOnError: boolean;
+            stopOnPermission: boolean;
+            /** Format: int64 */
+            delayMs: number;
+        };
         /** @enum {string} */
         RalphLoopStatusDto: "started" | "completed" | "failed" | "stopped";
         RequestId: string;
+        /** @enum {string} */
+        ResumePolicyDto: "fresh" | "resumeIfAvailable" | "resumeRequired";
+        RunCancelInput: {
+            benchId: string;
+            runId: string;
+        };
         RunEventDto: {
             status: components["schemas"]["LifecycleStatusDto"];
             message: string;
@@ -1335,6 +1576,33 @@ export interface components {
             message: string;
             /** @enum {string} */
             type: "error";
+        };
+        RunListToolCandidatesInput: {
+            benchId: string;
+            query: components["schemas"]["AgentToolCandidateQueryDto"];
+        };
+        /** @description 프롬프트를 받는 run 제어(`sendPrompt`·`steer`·`cancelAndSend`) 공통 입력. */
+        RunPromptInput: {
+            benchId: string;
+            runId: string;
+            prompt: string;
+        };
+        RunRespondPermissionInput: {
+            benchId: string;
+            runId: string;
+            permissionId: string;
+            optionId: string;
+        };
+        RunSetPermissionModeInput: {
+            benchId: string;
+            runId: string;
+            mode: components["schemas"]["PermissionMode"];
+        };
+        RunStartInput: {
+            benchId: string;
+            request: components["schemas"]["AgentRunRequestDto"];
+            /** @description 패널 식별자. Main Coordinator 패널이면 데스크톱이 orchestration principal로 MCP 토큰을 만든다. */
+            panelId?: string | null;
         };
         SavedPromptCreateInput: {
             label: string;

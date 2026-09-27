@@ -1,0 +1,98 @@
+{
+  "name": "run-respond-permission-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-52",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-52"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-53",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-53"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.respondPermission",
+        "requestId": "r-54",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "permissionId": "p1",
+          "optionId": "allow"
+        },
+        "idempotencyKey": "k-54"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.respondPermission",
+        "requestId": "r-55",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "permissionId": "p1",
+          "optionId": "allow"
+        },
+        "idempotencyKey": "k-55"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "unknown or already answered permission: p1"
+        }
+      }
+    }
+  ],
+  "runScript": {
+    "permissionId": "p1"
+  }
+}

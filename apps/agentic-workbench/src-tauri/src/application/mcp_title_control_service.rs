@@ -16,8 +16,10 @@ pub trait TitleControlRegistry {
 }
 
 impl TitleControlRegistry for crate::infrastructure::agent_session_registry::AppState {
+    /// 040 과도기(US3 전): run 소유자는 작업대 id다. 제목은 창에 적용하므로 창 label로 바꾼다.
     async fn active_owner_for_run(&self, run_id: &str) -> Option<String> {
-        self.active_owner_of(run_id).await
+        let bench = self.active_owner_of(run_id).await?;
+        crate::infrastructure::desktop_benches::label_for(&bench)
     }
 }
 

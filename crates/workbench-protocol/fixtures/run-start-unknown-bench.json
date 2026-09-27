@@ -1,0 +1,30 @@
+{
+  "name": "run-start-unknown-bench",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-17",
+        "input": {
+          "benchId": "nope",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-17"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "bench not found."
+        }
+      }
+    }
+  ]
+}

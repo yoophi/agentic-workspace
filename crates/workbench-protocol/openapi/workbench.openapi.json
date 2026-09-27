@@ -153,6 +153,53 @@
         },
         "additionalProperties": false
       },
+      "AgentMcpHttpHeaderDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "value"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentMcpServerConfigDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "url",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "headers": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentMcpHttpHeaderDto"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "http"
+                ]
+              }
+            }
+          }
+        ]
+      },
       "AgentOptionDescriptorDto": {
         "type": "object",
         "required": [
@@ -204,6 +251,160 @@
           },
           "builtIn": {
             "type": "boolean"
+          }
+        }
+      },
+      "AgentRunDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "goal",
+          "agentId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentRunRequestDto": {
+        "type": "object",
+        "description": "새 run 요청. 프론트 `AgentRunRequest`와 필드·표기가 같다.",
+        "required": [
+          "goal",
+          "agentId"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkoutId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cwd": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentCommand": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentEnv": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "mcpServers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentMcpServerConfigDto"
+            }
+          },
+          "stdioBufferLimitMb": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "autoAllow": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "permissionMode": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PermissionMode"
+              }
+            ]
+          },
+          "modelId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effortId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "contextSize": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ContextSizePreset"
+              }
+            ]
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resumeSessionId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "resumePolicy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ResumePolicyDto"
+              }
+            ]
+          },
+          "ralphLoop": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/RalphLoopRequestDto"
+              }
+            ]
           }
         }
       },
@@ -307,6 +508,122 @@
           }
         },
         "additionalProperties": false
+      },
+      "AgentToolCandidateDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "insertText",
+          "source",
+          "scope"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "insertText": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/AgentToolCandidateSourceDto"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AgentToolCandidateScopeDto"
+          }
+        }
+      },
+      "AgentToolCandidateQueryDto": {
+        "type": "object",
+        "required": [
+          "agentId",
+          "workingDirectory",
+          "sessionMode"
+        ],
+        "properties": {
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentId": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "sessionMode": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentToolCandidateResponseDto": {
+        "type": "object",
+        "required": [
+          "status",
+          "candidates"
+        ],
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/AgentToolCandidateStatusDto"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentToolCandidateDto"
+            }
+          }
+        }
+      },
+      "AgentToolCandidateScopeDto": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "agentId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "workingDirectory": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AgentToolCandidateSourceDto": {
+        "type": "string",
+        "enum": [
+          "sessionTool",
+          "appCommand",
+          "extension"
+        ]
+      },
+      "AgentToolCandidateStatusDto": {
+        "type": "string",
+        "enum": [
+          "loading",
+          "ready",
+          "empty",
+          "error"
+        ]
       },
       "BenchCloseInput": {
         "type": "object",
@@ -1497,6 +1814,246 @@
               },
               "output": {
                 "$ref": "#/components/schemas/TitleChangeResultDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_listToolCandidates",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.listToolCandidates"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/AgentToolCandidateResponseDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_start",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.start"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/AgentRunDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_sendPrompt",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.sendPrompt"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_steer",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.steer"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_cancelAndSend",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.cancelAndSend"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_setPermissionMode",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.setPermissionMode"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_cancel",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.cancel"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_respondPermission",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.respondPermission"
+                ]
+              },
+              "output": {
+                "type": "null"
               },
               "revision": {
                 "type": "integer",
@@ -2866,6 +3423,325 @@
               },
               "input": {
                 "$ref": "#/components/schemas/BenchRequestTitleInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_listToolCandidates",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.listToolCandidates"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunListToolCandidatesInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_start",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.start"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunStartInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_sendPrompt",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.sendPrompt"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunPromptInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_steer",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.steer"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunPromptInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_cancelAndSend",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.cancelAndSend"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunPromptInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_setPermissionMode",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.setPermissionMode"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunSetPermissionModeInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_cancel",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.cancel"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunCancelInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_respondPermission",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.respondPermission"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunRespondPermissionInput"
               },
               "idempotencyKey": {
                 "$ref": "#/components/schemas/IdempotencyKey"
@@ -4472,6 +5348,40 @@
           }
         }
       },
+      "RalphLoopRequestDto": {
+        "type": "object",
+        "required": [
+          "enabled",
+          "maxIterations",
+          "promptTemplate",
+          "stopOnError",
+          "stopOnPermission",
+          "delayMs"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "maxIterations": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "promptTemplate": {
+            "type": "string"
+          },
+          "stopOnError": {
+            "type": "boolean"
+          },
+          "stopOnPermission": {
+            "type": "boolean"
+          },
+          "delayMs": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "RalphLoopStatusDto": {
         "type": "string",
         "enum": [
@@ -4485,6 +5395,30 @@
         "type": "string",
         "maxLength": 128,
         "minLength": 1
+      },
+      "ResumePolicyDto": {
+        "type": "string",
+        "enum": [
+          "fresh",
+          "resumeIfAvailable",
+          "resumeRequired"
+        ]
+      },
+      "RunCancelInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "runId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "RunEventDto": {
         "oneOf": [
@@ -4850,6 +5784,110 @@
             }
           }
         ]
+      },
+      "RunListToolCandidatesInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "query"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "query": {
+            "$ref": "#/components/schemas/AgentToolCandidateQueryDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunPromptInput": {
+        "type": "object",
+        "description": "프롬프트를 받는 run 제어(`sendPrompt`·`steer`·`cancelAndSend`) 공통 입력.",
+        "required": [
+          "benchId",
+          "runId",
+          "prompt"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunRespondPermissionInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "runId",
+          "permissionId",
+          "optionId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "permissionId": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunSetPermissionModeInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "runId",
+          "mode"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PermissionMode"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RunStartInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/AgentRunRequestDto"
+          },
+          "panelId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "패널 식별자. Main Coordinator 패널이면 데스크톱이 orchestration principal로 MCP 토큰을 만든다."
+          }
+        },
+        "additionalProperties": false
       },
       "SavedPromptCreateInput": {
         "type": "object",

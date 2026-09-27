@@ -94,6 +94,21 @@ pub async fn call_command<Out: DeserializeOwned>(
     dispatch(runtime, command_request(operation, input)).await
 }
 
+// ---- 040 US1: run 입력 변환 ----
+
+/// `start_agent_run` → `run.start` 입력. 요청은 acp `AgentRunRequest`를 그대로 싣는다(protocol DTO와 wire 동일).
+pub fn run_start_input(
+    bench_id: &str,
+    request: &crate::domain::run::AgentRunRequest,
+    panel_id: Option<&str>,
+) -> Value {
+    let mut input = serde_json::json!({ "benchId": bench_id, "request": request });
+    if let Some(panel_id) = panel_id {
+        input["panelId"] = Value::String(panel_id.to_owned());
+    }
+    input
+}
+
 // ---- 038 US1: 저장 단위 4 도메인의 `*Input → CallRequest.input` 변환 (contracts/tauri-compat-commands.md 변환 규칙) ----
 
 pub fn project_update_input(id: String, input: ProjectInput) -> Value {
@@ -355,6 +370,21 @@ pub async fn call_create_project(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_start_input_carries_bench_request_and_optional_panel() {
+        let request: crate::domain::run::AgentRunRequest =
+            serde_json::from_value(serde_json::json!({
+                "goal": "g", "agentId": "codex", "runId": "r1"
+            }))
+            .unwrap();
+        let input = super::run_start_input("b1", &request, None);
+        assert_eq!(input["benchId"], "b1");
+        assert_eq!(input["request"]["runId"], "r1");
+        assert!(input.get("panelId").is_none());
+        let input = super::run_start_input("b1", &request, Some("main"));
+        assert_eq!(input["panelId"], "main");
+    }
+
     use std::{fs, path::PathBuf};
 
     use serde_json::{Value, json};
