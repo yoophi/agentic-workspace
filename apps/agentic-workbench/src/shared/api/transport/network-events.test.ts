@@ -474,6 +474,55 @@ describe("network events — run snapshot replay after retention recovery", () =
     events.close();
   }, 20_000);
 
+  it("forgets the old epoch's applied position when a new epoch arrives as a retention gap on a cursor-0 reconnect", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    const base = runClient(hub, stream);
+    const gate = deferred<void>();
+    let gated = false;
+    const client: WorkbenchClient = {
+      call: vi.fn(async (operation: string, input: unknown) => {
+        if (operation === "run.replay" && hub.epoch === "epoch-2" && !gated) {
+          gated = true;
+          await gate.promise; // 세대 변경 복구(기준점 0)의 적재 중에 새 세대 출력 1–5가 생긴다
+        }
+        return base.client.call(operation as never, input as never);
+      }) as never,
+    };
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    await network.listen("agent-run-event", (payload) => void received.push(payload));
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    for (let i = 1; i <= 3; i += 1) {
+      hub.publish(stream, { out: `e${hub.epoch}-${i}` });
+    }
+    await vi.waitFor(() => expect(received).toHaveLength(3));
+    hub.ticketsDown = true;
+    hub.restart("epoch-2");
+    hub.ticketsDown = false;
+    await vi.waitFor(() => expect(gated).toBe(true), { timeout: 5_000 });
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `eepoch-2-${i}` });
+    }
+    gate.resolve();
+    await vi.waitFor(() => expect(outputs(received)).toContain("eepoch-2-5"), { timeout: 5_000 });
+    // 다시 재기동: 재연결 cursor는 0(세대 변경 복구의 기준점) → 새 세대는 epochChanged가 아니라 보관 gap으로 알려진다.
+    hub.ticketsDown = true;
+    hub.restart("epoch-3");
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `eepoch-3-${i}` });
+    }
+    hub.ticketsDown = false;
+    await vi.waitFor(() => expect(hub.ticketRequests.some((request) => request[0].afterSequence === 5 && request[0].epoch === "epoch-3")).toBe(true), { timeout: 5_000 });
+    hub.publish(stream, { out: "eepoch-3-6" });
+    await vi.waitFor(() => expect(outputs(received)).toContain("eepoch-3-6"), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received).filter((out) => out.startsWith("eepoch-3-"))).toEqual([1, 2, 3, 4, 5, 6].map((n) => `eepoch-3-${n}`));
+    events.close();
+  }, 20_000);
+
   it("replays the new epoch from its first output when an epoch change is followed by a retention gap", async () => {
     const hub = new FakeEventHub(2);
     const stream = "run:r1";

@@ -185,3 +185,18 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 
 후속 5절의 한계("끝난 옛 onReset이 applied를 올리는 경로만 따로 겨냥한 시험 없음")는 K1·K2 소비자 시험으로 겨냥했다. 교환·orchestration·worktree 스냅샷은 재설정 context를 쓰지 않아 `position`이 없다.
 회귀(각 1회, 종료 0): workbench-client 70 tests·통합 7, AW 631 tests·통합 1.
+
+## T057 Codex 후속 집중 리뷰 7 (`--wait --base 4f4f939`, 대상 `4d621f5`)
+
+판정: needs-attention. K1·K2 시험이 각 방어를 직접 겨냥하고, 후속 6절의 변이 결과가 맞다고 확인했다(Codex는 메모리 실행으로 확인했고, 정식 Vitest는 그 환경의 파일시스템 제한으로 돌리지 못했다). High 1건:
+
+| # | 문제(Codex 재현, 실제 서버 `decide_existing`도 같은 판정) | 조치 |
+|---|---|---|
+| L1 | 세대 변경 복구(기준점 0) 뒤 재연결 cursor는 0인데 `applied`는 5다. 여기서 서버가 다시 재기동하면 cursor 0 요청에는 `epochChanged`가 아니라 보관 gap(`retentionExceeded`)이 온다. 이 분기는 세대만 바꾸고 순번 상태를 잊지 않아, 새 세대 재설정에 5를 넘기고 새 세대 1–5를 잃는다(`a553aa0`에서는 모두 전달됐다) | gap의 세대가 스트림 세대와 다르면 **사유와 상관없이** 순번 상태를 잊는다(`forgetEpochSequences`). 알려진 세대에서 바뀐 경우에만 `onEpochChanged`를 알린다. 첫 연결 전 세대가 비어 있는 경우는 제외한다 |
+
+실제 `createNetworkEvents` run 소비자 시험: "forgets the old epoch's applied position when a new epoch arrives as a retention gap on a cursor-0 reconnect".
+- red(종료 1): `expected [ 'eepoch-3-6' ] to deeply equal [ 'eepoch-3-1', …]`. green 0.
+- 변이 1(세대 확인을 `epochChanged`로 한정)은 **통과했다(종료 0). 이 변이는 옛 코드와 같지 않았다.** default 분기의 세대 갱신까지 빠뜨려, 복구가 옛 세대로 연결되고 서버가 따로 `epochChanged`를 보냈다.
+- 옛 동작과 같은 변이 2(한정 + default 분기가 세대만 갱신)는 종료 1로, 위와 같은 실패였다.
+
+회귀(각 1회, 종료 0): workbench-client 70 tests·통합 7, AW 632 tests·통합 1.

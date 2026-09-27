@@ -510,22 +510,28 @@ export function createEventClient(options: EventClientOptions): EventClient {
     }
 
     onGap(gap: GapNotice & { type: "gap" }) {
-      switch (gap.reason) {
-        case "subscriberLagged":
-        case "shutdown":
-          this.reconnectNow();
-          return;
-        case "epochChanged":
-          this.epoch = gap.epoch;
+      if (gap.reason === "subscriberLagged" || gap.reason === "shutdown") {
+        this.reconnectNow();
+        return;
+      }
+      // 서버 세대가 바뀌었다는 것은 사유와 상관없이 알 수 있다(cursor 0 재연결에는 epochChanged 대신 보관 gap이 온다):
+      // 옛 세대의 순번 상태를 모두 잊는다.
+      if (gap.epoch && gap.epoch !== this.epoch) {
+        const known = this.epoch !== "";
+        this.epoch = gap.epoch;
+        this.forgetEpochSequences();
+        if (known) {
           options.onEpochChanged?.(gap.epoch);
-          this.forgetEpochSequences();
+        }
+      }
+      switch (gap.reason) {
+        case "epochChanged":
           this.startRecovery(0, false);
           return;
         case "evicted":
           this.startRecovery(this.highest, true);
           return;
         default:
-          this.epoch = gap.epoch;
           this.startRecovery(gap.lastSequence ?? 0, false);
       }
     }
