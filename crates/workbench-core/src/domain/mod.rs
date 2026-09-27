@@ -9,5 +9,6 @@ pub mod project;
 pub mod project_error;
 pub mod provider_session;
 pub mod saved_prompt;
+pub mod window_title;
 pub mod worktree_change;
 pub mod worktree_file;

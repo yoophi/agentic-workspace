@@ -1,10 +1,7 @@
 use std::net::Ipv4Addr;
 
 use crate::{
-    application::{
-        mcp_title_control_service::McpTitleControlService,
-        orchestration_scheduler::OrchestrationScheduler,
-    },
+    application::orchestration_scheduler::OrchestrationScheduler,
     domain::{
         mcp_title_control::{TitleChangeFailureCode, TitleChangeResult},
         run::{AgentMcpHttpHeader, AgentMcpServerConfig},
@@ -34,9 +31,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::post,
 };
-use serde::Serialize;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Manager};
 use tokio::net::TcpListener;
 
 pub mod agent_exchange_tool;
@@ -48,8 +44,6 @@ pub mod title_tool;
 pub const AW_MCP_URL_ENV: &str = "AW_MCP_URL";
 pub const AW_MCP_TOKEN_ENV: &str = "AW_MCP_TOKEN";
 pub const AW_MCP_RUN_ID_ENV: &str = "AW_MCP_RUN_ID";
-pub const MCP_WINDOW_TITLE_EVENT: &str = "workspace://mcp-window-title";
-pub const MCP_WINDOW_TITLE_FALLBACK_EVENT: &str = "mcp-window-title-fallback";
 pub const AW_MCP_SERVER_NAME: &str = "agentic_workbench";
 
 #[derive(Clone)]
@@ -64,12 +58,6 @@ struct McpRouterState {
     app: AppHandle,
     registry: AppState,
     mcp_state: McpServerState,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WindowTitleEvent {
-    pub title: String,
 }
 
 #[derive(Clone, Debug)]
@@ -363,37 +351,55 @@ async fn handle_tool_call(
             "The requested run does not match the authenticated capability.",
         ));
     }
-    let service = McpTitleControlService::new(state.registry.clone());
-    let command = match service.build_command(request).await {
-        Ok(command) => command,
-        Err(result) => return tool_result(result),
-    };
-    let Some(window) = state.app.get_webview_window(&command.window_label) else {
-        return tool_result(TitleChangeResult::failure(
-            TitleChangeFailureCode::WindowUnavailable,
-            "Owner Worktree Session window is unavailable.",
-        ));
-    };
-
-    let payload = WindowTitleEvent {
-        title: command.title.clone(),
-    };
-    if let Err(error) = window.set_title(&command.title) {
-        return tool_result(TitleChangeResult::failure(
-            TitleChangeFailureCode::WindowUnavailable,
-            format!("Owner Worktree Session window title could not be changed: {error}"),
-        ));
+    // 040 US3(ADR 0006·0007): 제목 요청은 agent principal로 `bench.requestTitle`을 부른다. 서버는 작업대 알림
+    // 스트림에 발행하고, 데스크톱 bridge가 그 작업대의 창에 적용한다(네이티브 방송 없음).
+    let runtime = state
+        .app
+        .state::<std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>>()
+        .inner()
+        .clone();
+    let mut call = workbench_protocol::CallRequest::query(
+        workbench_protocol::OperationId::BenchRequestTitle,
+        serde_json::json!({ "runId": request.run_id, "title": request.title }),
+    );
+    call.idempotency_key = Some(workbench_protocol::IdempotencyKey::random());
+    use workbench_protocol::Workbench as _;
+    match runtime
+        .call(
+            workbench_protocol::AuthenticatedPrincipal::agent(&principal.run_id),
+            call,
+        )
+        .await
+    {
+        Ok(reply) => {
+            let applied = reply
+                .output()
+                .and_then(|output| output.get("appliedTitle"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_owned();
+            tool_result(TitleChangeResult::success(applied))
+        }
+        Err(fault) => tool_result(TitleChangeResult::failure(
+            title_failure_code(&fault),
+            fault.message.clone(),
+        )),
     }
-    let _ = crate::infrastructure::native_window_menu::sync_window_menu(&state.app);
-    let _ = window.emit(MCP_WINDOW_TITLE_EVENT, &payload);
-    if let Ok(serialized) = serde_json::to_string(&payload) {
-        let script = format!(
-            "window.dispatchEvent(new CustomEvent('{MCP_WINDOW_TITLE_FALLBACK_EVENT}', {{ detail: {serialized} }}));"
-        );
-        let _ = window.eval(&script);
-    }
+}
 
-    tool_result(TitleChangeResult::success(command.title))
+/// fault의 `details.titleCode` → 오늘 `TitleChangeFailureCode`.
+fn title_failure_code(fault: &workbench_protocol::WorkbenchFault) -> TitleChangeFailureCode {
+    match fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("titleCode"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some("invalidTitle") => TitleChangeFailureCode::InvalidTitle,
+        Some("unknownRun") => TitleChangeFailureCode::UnknownRun,
+        Some("unauthorized") => TitleChangeFailureCode::Unauthorized,
+        _ => TitleChangeFailureCode::InternalError,
+    }
 }
 
 #[cfg(test)]

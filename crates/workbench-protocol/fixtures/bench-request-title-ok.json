@@ -1,0 +1,76 @@
+{
+  "name": "bench-request-title-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-2",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-2"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-1",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.requestTitle",
+        "requestId": "r-3",
+        "input": {
+          "runId": "r1",
+          "title": "  Fix login  "
+        },
+        "idempotencyKey": "k-3"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "ok": true,
+            "appliedTitle": "Fix login"
+          }
+        }
+      },
+      "principal": "agent:r1"
+    }
+  ]
+}

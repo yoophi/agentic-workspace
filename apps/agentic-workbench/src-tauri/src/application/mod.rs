@@ -5,7 +5,6 @@ pub use acp_agent_core::application::{
 
 pub mod appearance_preferences_service;
 pub mod coordinator_notification_dispatcher;
-pub mod mcp_title_control_service;
 pub mod orchestration_command_service;
 pub mod orchestration_event_projector;
 pub mod orchestration_scheduler;

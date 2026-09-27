@@ -158,13 +158,13 @@ description: "Task list for introducing benches and migrating run/exchange comma
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T053 [P] [US3] fixture: `bench-request-title-ok`, `bench-request-title-too-long`(오늘 문구), `bench-request-title-inactive-run`, `bench-request-title-other-run-forbidden`, `bench-request-title-desktop-forbidden`; 이벤트 fixture `bench-stream-title-requested`, `bench-stream-no-replay`(알림용)
+- [X] T053 [P] [US3] fixture: `bench-request-title-ok`, `bench-request-title-too-long`(오늘 문구), `bench-request-title-inactive-run`, `bench-request-title-other-run-forbidden`, `bench-request-title-desktop-forbidden`; 이벤트 fixture `bench-stream-title-requested`, `bench-stream-no-replay`(알림용)
 
 ### Implementation for User Story 3
 
-- [ ] T054 [US3] `crates/workbench-protocol/src/events/bench.rs`(신규) `TitleRequestedDto{title}` + body_schema; core handler `bench.requestTitle`(AW `application/mcp_title_control_service.rs`·`domain/mcp_title_control.rs`의 검증을 core로 이동, 기존 테스트 이동) → `publish_notification(bench:<id>, deliver = TitleRequested)`
-- [ ] T055 [US3] AW: `TauriDesktopBridge`의 `TitleRequested` → async task에서 `set_title` + `sync_window_menu` + `mcp-window-title-fallback` 삽입(네이티브 `emit` 제거); MCP `set_window_title` 도구 → `Workbench.call(bench.requestTitle)`, 결과를 `TitleChangeResult`로. 이동한 AW 파일 삭제
-- [ ] T056 [US3] 게이트·커밋 `feat(aw): deliver agent title requests through the bench notification stream (040 US3)`
+- [X] T054 [US3] `crates/workbench-protocol/src/events/bench.rs`(신규) `TitleRequestedDto{title}` + body_schema; core handler `bench.requestTitle`(AW `application/mcp_title_control_service.rs`·`domain/mcp_title_control.rs`의 검증을 core로 이동, 기존 테스트 이동) → `publish_notification(bench:<id>, deliver = TitleRequested)`
+- [X] T055 [US3] AW: `TauriDesktopBridge`의 `TitleRequested` → async task에서 `set_title` + `sync_window_menu` + `mcp-window-title-fallback` 삽입(네이티브 `emit` 제거); MCP `set_window_title` 도구 → `Workbench.call(bench.requestTitle)`, 결과를 `TitleChangeResult`로. 이동한 AW 파일 삭제
+- [X] T056 [US3] 게이트·커밋 `feat(aw): deliver agent title requests through the bench notification stream (040 US3)`
 
 **Checkpoint**: quickstart §3의 3 수동 확인 가능.
 

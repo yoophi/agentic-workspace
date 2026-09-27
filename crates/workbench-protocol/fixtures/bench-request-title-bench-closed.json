@@ -1,0 +1,95 @@
+{
+  "name": "bench-request-title-bench-closed",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-16",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-16"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-1",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-17",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-17"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": true,
+            "cancelledRuns": [
+              "r1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.requestTitle",
+        "requestId": "r-18",
+        "input": {
+          "runId": "r1",
+          "title": "t"
+        },
+        "idempotencyKey": "k-18"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "Agent run is not active or is not owned by a session window."
+        }
+      },
+      "principal": "agent:r1"
+    }
+  ]
+}
