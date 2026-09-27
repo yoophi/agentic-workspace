@@ -217,7 +217,16 @@ export const COMMANDS: Record<string, CommandSpec> = {
     bench: ensure((args) => obj(args.input).workingDirectory as string | undefined),
     input: (args, benchId) => ({ benchId, query: args.input }),
   },
-  send_prompt_to_run: runPrompt("run.sendPrompt"),
+  send_prompt_to_run: {
+    ...runPrompt("run.sendPrompt"),
+    // 교환 전달은 이어 가기 표지를 싣는다(044 T043: 비우는 중에도 교환마다 한 번 전달된다).
+    input: (args, benchId) => ({
+      benchId,
+      runId: args.runId,
+      prompt: args.prompt,
+      ...(args.continuation ? { continuation: args.continuation } : {}),
+    }),
+  },
   steer_prompt_to_run: runPrompt("run.steer"),
   cancel_current_prompt_and_send_to_run: runPrompt("run.cancelAndSend"),
   set_run_permission_mode: {

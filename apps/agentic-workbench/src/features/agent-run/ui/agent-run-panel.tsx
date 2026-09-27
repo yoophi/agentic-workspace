@@ -1,4 +1,7 @@
-import { exchangeDeliveryKey } from "@/features/agent-run/model/exchange-reconciler";
+import {
+  exchangeContinuation,
+  exchangeDeliveryKey,
+} from "@/features/agent-run/model/exchange-reconciler";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1061,6 +1064,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       activeRunId,
       nextPrompt.text,
       nextPrompt.idempotencyKey ? { idempotencyKey: nextPrompt.idempotencyKey } : undefined,
+      nextPrompt.exchangeRequestId ? exchangeContinuation(nextPrompt.exchangeRequestId) : undefined,
     )
       .then(() => {
         recordPromptHistory(nextPrompt.text);
@@ -1460,13 +1464,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setInputMode("prompt");
       setRalphLoopEnabled(false);
       setIsRalphSettingsDialogOpen(false);
-      enqueuePrompt(nextPrompt, "external-request", deliveryKey);
+      enqueuePrompt(nextPrompt, "external-request", deliveryKey, externalPromptRequest.exchangeRequestId);
       return;
     }
 
     if (activeRunIdRef.current && isRunning) {
       handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
-      enqueuePrompt(nextPrompt, "external-request", deliveryKey);
+      enqueuePrompt(nextPrompt, "external-request", deliveryKey, externalPromptRequest.exchangeRequestId);
       return;
     }
 
@@ -1634,6 +1638,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     promptText = prompt,
     source: QueuedPromptSource = "manual-queue",
     idempotencyKey?: string,
+    exchangeRequestId?: string,
   ) {
     const nextPrompt = promptText.trim();
     if (!nextPrompt) {
@@ -1643,7 +1648,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setQueuedPrompts((current) => {
       const next = appendQueuedPrompt(
         current,
-        createQueuedPrompt({ id: crypto.randomUUID(), text: nextPrompt, source, idempotencyKey }),
+        createQueuedPrompt({
+          id: crypto.randomUUID(),
+          text: nextPrompt,
+          source,
+          idempotencyKey,
+          exchangeRequestId,
+        }),
       );
       queuedPromptsRef.current = next;
       return next;

@@ -121,6 +121,23 @@ describe("createHttpTransport", () => {
     expect(calls[0].key).toBe("exchange-delivery:x1");
   });
 
+  it("carries an exchange continuation only when the caller gives one (044 T043)", async () => {
+    const { transport, calls } = setup(() => ok(null));
+    await transport.invoke(
+      "send_prompt_to_run",
+      { runId: "r1", prompt: "hi", continuation: { exchangeRequestId: "x1" } },
+      { idempotencyKey: "exchange-delivery:x1" },
+    );
+    await transport.invoke("send_prompt_to_run", { runId: "r1", prompt: "plain" });
+    expect(calls[0].input).toEqual({
+      benchId: "bench-1",
+      runId: "r1",
+      prompt: "hi",
+      continuation: { exchangeRequestId: "x1" },
+    });
+    expect(calls[1].input).toEqual({ benchId: "bench-1", runId: "r1", prompt: "plain" });
+  });
+
   it("rejects commands that are not server-owned instead of guessing", async () => {
     const { transport } = setup(() => ok(null));
     await expect(transport.invoke("get_appearance_preferences")).rejects.toThrow(/not a server-owned command/);
