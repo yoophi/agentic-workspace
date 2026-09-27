@@ -70,6 +70,9 @@ pub struct ScriptedRunEngine {
     /// 효과 표지(`start:<run>`, `prompt:<run>:<text>`). 효과가 난 직후·settle 지연 전에 기록된다(042 R17 시험 동기화).
     applied: Mutex<Vec<String>>,
     applied_notify: tokio::sync::Notify,
+    /// 있으면 `send_prompt`가 효과를 낸 **뒤** 허가를 하나 얻을 때까지 돌아가지 않는다(044 #207: 작업대 닫기와 호출 완료
+    /// 순서를 시간 지연 없이 뒤집는다).
+    pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 fn not_active() -> RunEngineError {
@@ -239,6 +242,10 @@ impl RunEngine for ScriptedRunEngine {
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
+        }
+        let gate = self.prompt_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("prompt gate open").forget();
         }
         Ok(())
     }

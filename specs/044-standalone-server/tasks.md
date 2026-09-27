@@ -23,8 +23,8 @@
 
 **Goal**: 닫힌 작업대의 epoch 멱등 기록이 되살아나지 않는다. **Independent Test**: 작업대 닫기와 그 작업대 변경 호출의 완료 순서를 뒤집은 시험.
 
-- [ ] T005 [US5] 결정적 재현 시험 `crates/workbench-core/tests/bench_close_idempotency.rs`: 시험 엔진의 prompt 완료를 gate로 붙잡고 `run.sendPrompt`(epoch 멱등) → `close_all_benches` → gate 해제 → 호출 `Ok` → 같은 키 재시도가 `notFound`인지 단정. **수정 전 실패(`Complete`)를 기록**
-- [ ] T006 [US5] `crates/workbench-core/src/application/epoch_idempotency.rs`에 세대 범위 `closed_benches` tombstone 추가: `drop_bench`가 세우고, `record`·실행 전 조회가 tombstone scope를 비어 있는 것으로 본다. T005 green. `acp_permission_exit` 원 시험 20회 반복 실행 결과 기록
+- [X] T005 [US5] 결정적 재현 시험 `crates/workbench-core/tests/bench_close_idempotency.rs`: 시험 엔진의 prompt 완료를 gate로 붙잡고 `run.sendPrompt`(epoch 멱등) → `close_all_benches` → gate 해제 → 호출 `Ok` → 같은 키 재시도가 `notFound`인지 단정. **수정 전 실패(`Complete`)를 기록**
+- [X] T006 [US5] `crates/workbench-core/src/application/epoch_idempotency.rs`에 세대 범위 `closed_benches` tombstone 추가: `drop_bench`가 세우고, `record`·실행 전 조회가 tombstone scope를 비어 있는 것으로 본다. T005 green. `acp_permission_exit` 원 시험 20회 반복 실행 결과 기록
 
 ---
 
