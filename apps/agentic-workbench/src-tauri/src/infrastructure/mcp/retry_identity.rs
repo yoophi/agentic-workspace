@@ -22,8 +22,8 @@ pub fn tool_idempotency_key(
     let request_id = arguments
         .and_then(|arguments| arguments.get("requestId"))
         .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|request_id| !request_id.is_empty());
+        // 도메인은 requestId를 그대로 비교한다 — 키도 원래 값으로 만들고, 공백뿐인 값만 식별자에서 뺀다.
+        .filter(|request_id| !request_id.trim().is_empty());
     if let Some(request_id) = request_id {
         return derived(&["request", run_id, operation.as_str(), request_id]);
     }
@@ -105,6 +105,15 @@ mod tests {
                 Some(&json!({ "requestId": "r2" })),
                 None
             )
+        );
+    }
+
+    #[test]
+    fn request_ids_are_compared_verbatim() {
+        let op = OperationId::OrchestrationReportResult;
+        assert_ne!(
+            tool_idempotency_key("run", op, Some(&json!({ "requestId": "r1" })), None),
+            tool_idempotency_key("run", op, Some(&json!({ "requestId": " r1" })), None),
         );
     }
 

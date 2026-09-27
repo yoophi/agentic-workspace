@@ -229,3 +229,16 @@ async fn reconnecting_with_a_new_ticket_resumes_after_the_last_cursor() {
         }
     }
 }
+
+/// 열린 구독이 있어도 서버 종료는 끝난다(upgrade된 연결이 graceful shutdown을 붙잡지 않는다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn shutdown_completes_with_open_subscriptions() {
+    let (h, epoch) = prepared().await;
+    let harness = spawn(&h, HarnessOptions::default()).await;
+    let mut ws = harness.subscribe(TOKEN_DESKTOP, cursor(&epoch, 0)).await;
+    assert!(matches!(ws.hello, EventFrame::Hello { .. }));
+    tokio::time::timeout(Duration::from_secs(5), harness.shutdown())
+        .await
+        .expect("shutdown finished while a WebSocket was open");
+    let _ = ws.next_frame(Duration::from_millis(100)).await;
+}

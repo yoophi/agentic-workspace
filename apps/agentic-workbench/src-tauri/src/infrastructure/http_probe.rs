@@ -6,7 +6,12 @@
 //!   command(`get_workbench_connection`)의 데스크톱 토큰과 브라우저가 붙이는 실제 Origin으로 handshake·호출·표·WS를
 //!   확인하고, 상태 코드·프레임 종류만 `report_http_probe`로 돌려준다(토큰·표 문자열 없음). **데스크톱 연결 증거.**
 
-use std::{io::Write, os::unix::fs::OpenOptionsExt, path::Path, sync::atomic::AtomicBool};
+use std::{
+    io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
+    path::Path,
+    sync::atomic::AtomicBool,
+};
 
 use serde_json::Value;
 
@@ -24,6 +29,8 @@ fn write_owner_only(path: &Path, value: &Value) -> std::io::Result<()> {
         .truncate(true)
         .mode(0o600)
         .open(path)?;
+    // `mode`는 새로 만들 때만 적용된다 — 이미 있던 파일도 owner-only로 맞춘다.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     file.write_all(serde_json::to_vec_pretty(value).expect("json").as_slice())
 }
 

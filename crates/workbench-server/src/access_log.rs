@@ -14,9 +14,11 @@ pub struct AccessEntry {
 }
 
 impl AccessEntry {
+    /// 한 줄. 요청 id·operation은 클라이언트가 보낸 값(인증 전 포함)이라 따옴표로 감싸고 escape한다 — 개행·공백으로
+    /// 기록 줄이나 필드를 위조하지 못한다.
     pub fn line(&self) -> String {
         format!(
-            "requestId={} operation={} principal={} status={} latencyMs={}",
+            "requestId={:?} operation={:?} principal={} status={} latencyMs={}",
             self.request_id.as_deref().unwrap_or("-"),
             self.operation,
             self.principal_kind.unwrap_or("-"),
@@ -55,5 +57,33 @@ impl CollectingAccessLog {
 impl AccessLog for CollectingAccessLog {
     fn record(&self, entry: &AccessEntry) {
         crate::auth::lock(&self.lines).push(entry.line());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn client_supplied_values_cannot_forge_lines_or_fields() {
+        let entry = AccessEntry {
+            request_id: Some("req\nrequestId=forged status=200".into()),
+            operation: "project.list principal=desktop".into(),
+            principal_kind: None,
+            status: 401,
+            latency_ms: 0,
+        };
+        let line = entry.line();
+        assert!(!line.contains('\n'), "{line}");
+        assert_eq!(
+            line.matches("status=").count(),
+            2,
+            "only inside the quoted value and the real field: {line}"
+        );
+        assert!(line.ends_with("status=401 latencyMs=0"), "{line}");
+        assert!(
+            line.contains(r#"requestId="req\nrequestId=forged status=200""#),
+            "{line}"
+        );
     }
 }
