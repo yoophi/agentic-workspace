@@ -264,3 +264,67 @@ green·최종:
 - 임대 표는 plan의 host `lifecycle/lease.rs`가 아니라 core `application/lease.rs`(`ServerControl` 안)에 둔다. 임대가 `server.status`와 T041 유휴 판정(core WorkGate와 함께 읽음)에 쓰이고, core가 host에 의존할 수 없기 때문이다.
 - 폐기 결과 `revokedTokens`는 폐기한 토큰 수와 이벤트 표 수의 합이다.
 - `server.stop`은 등록하지 않았다(T041).
+
+## T028–T033 — 데스크톱 외부 서버 모드(US2 데스크톱 쪽)
+
+로그: `scratchpad/044/`(세션 임시 디렉터리). 각 검증은 한 번 실행했고 로그 끝에 `exit=`를 남겼다. 전체 대상은 `0 filtered out`이다.
+
+| 검증 | 로그 | exit | 결과 |
+|---|---|---|---|
+| T030 red(스텁: 항상 CloseBench) | `t030-red-1.log` | 101 | 행동 red: 3 passed / 4 failed |
+| T030 green | `t030-green-1.log` | 0 | 7 passed |
+| host `owner_calls` red(모듈 없음) | `t028-calls-red-1.log` | 101 | 컴파일 red: `E0432 unresolved import lifecycle::calls` |
+| host `owner_calls` green | `t028-calls-green-1.log`, `t028-host-calls-1.log` | 0 | 1 passed |
+| `server_client` 변이(임대 해제 생략) | `t028-client-mut-1.log` | 101 | 1 failed(해제 단언), 원본 복원 |
+| `server_client` 변이(폐기 수를 spawn 안에서 셈) | `t031-mutant-1.log` | 101 | `counted before the task runs` 실패, 원본 복원(cmp 확인) |
+| 새 데스크톱 단위(`server_client`·`workbench_mode`·`window_close_intent`) | `t028-unit-1.log` | 0 | 14 passed |
+| T032 red | `t032-red-1.log` | 1 | 행동 red: bootstrap 4, App 1 실패 / 컴파일 red: `window-title`, `connection-failure` 모듈 없음 |
+| T032 green | `t032-green-1.log` | 0 | 5 files, 24 passed |
+| AW src-tauri `cargo test`(lint 수정 뒤 재실행) | `final-aw-test-2.log` | 0 | lib 100 passed, orchestration_smoke_agent 1 passed |
+| `cargo test -p workbench-host` | `final-host-test-1.log` | 0 | 45 + 2 + 1 + 1 + 6 passed |
+| `cargo clippy -p agentic-workbench -p workbench-host --all-targets -D warnings` | `final-clippy-1.log` → `final-clippy-2.log` | 101 → 0 | `cloned_ref_to_slice_refs` 3건(시험 코드) 수정 |
+| `cargo fmt --check`(AW, host) | `final-fmt-1.log` → `final-fmt-2.log` | host 1 → 0 | host 서식 적용 |
+| AW `pnpm test` | `final-aw-vitest-1.log` | 0 | 92 files, 641 passed |
+| AW `pnpm test:integration` | `final-aw-itest-1.log` | 0 | 1 file, 1 passed |
+| workbench-client `pnpm test:integration` | `final-client-itest-1.log` | 0 | 3 files, 7 passed |
+| AW `check-types` / workbench-client `check-types` | `final-types-1.log`, `final-client-types-1.log` | 0 / 0 | |
+| AW `pnpm build` / Storybook build | `final-aw-build-1.log`, `final-storybook-1.log` | 0 / 0 | |
+
+구현 요약:
+- **모드(T028)**: `infrastructure/workbench_mode.rs`. 기본은 `external`이다. `AW_WORKBENCH_MODE=embedded`만 043 경로를 쓴다. 기동할 때 `[workbench] mode: …`를 기록한다.
+  - external: 앱 안에 런타임·MCP·HTTP를 두지 않는다. `ExternalServer`(`infrastructure/server_client.rs`)만 관리한다.
+  - `ExternalServer`는 첫 `get_workbench_connection`에서 서버를 `ensure`하고(탐색 순서: `AW_WORKBENCH_SERVER_PATH` → 실행 파일 옆 → `target/debug|release`), 소유자 자격으로 `lease.acquire`를 보낸다. 임대는 10초마다 갱신한다.
+  - embedded: `EmbeddedOwnership::claim`이 같은 `owner.lock`을 잡는다. 못 잡으면 setup 오류로 부팅하지 않는다. host 조립에 `owner` 신원을 넣고, HTTP가 뜨면 안내 파일(`mode: "embedded"`)을 쓴다. `Exit`에서 자기 안내만 지운다.
+- **호출 client(T028)**: host `lifecycle::calls::call`(bearer + 선택 Origin). `CallError::Transport`와 `Fault{status,code,message}`를 나눈다.
+  - 창 토큰 호출은 WebView 출처를 Origin 헤더로 싣는다. 창 토큰은 Origin이 없으면 401이다(host 시험으로 고정).
+  - `Descriptor::for_endpoint`는 독립 서버와 embedded가 같이 쓴다.
+- **command(T029)**:
+  - `get_workbench_connection`: external에서 `desktop.issueWindowToken` 결과를 돌려준다. 출력 모양은 043과 같다(`incarnation` 포함).
+  - `ensure_window_bench`: external에서 창 토큰 + Origin으로 `bench.open`. `open:false`는 매핑만 조회한다.
+  - `declare_network_delivery`·`withdraw_network_delivery`: external에서 no-op.
+  - 호환 command: `workbench_runtime()`가 `try_state`로 `Result`를 돌려준다. 런타임이 없으면 정확히 `"Workbench server is external; this command is unavailable."`이다(panic 없음).
+  - 신규 `apply_window_title`(창 제목 + 네이티브 Window 메뉴 동기화)와 `get_workbench_mode`.
+- **닫기 의도(T030)**: `application/window_close_intent.rs`는 순수 상태다. (label, incarnation)별 의도를 두고, 종료 의도 뒤의 `CloseRequested`는 무시한다.
+  - R8 관측 순서 (a)/(b1)/(b2)/(c)(d)(e)/(f)를 시험으로 고정했다.
+  - (b2) Cmd+W 두 창 닫힘은 원인 미확정이다. 두 창 모두 `CloseRequested`가 있으면 둘 다 CloseBench로 기대한다.
+- **생명주기(T031)**: `window_lifecycle::track`이 `CloseRequested`에서 의도를 기록한다.
+  - `Destroyed`에서 external은 `retire_window_detached(label, incarnation, closeBench = 의도)` + `desktop_benches::forget_window`를 부른다. embedded는 기존 043 `on_destroyed` 그대로다.
+  - `mark_quitting()`은 `ExitRequested`·`Exit`에서 부른다(두 모드).
+  - external 종료는 `close_all_benches`를 부르지 않는다. `ExitRequested`는 종료를 미루지 않는다. `Exit`에서 `release_for_exit(EXIT_FLUSH_LIMIT = 2s)`가 진행 중 폐기를 흘려보낸 뒤 임대를 놓는다.
+  - 폐기 수는 spawn 전에 동기로 올린다. 그래서 `Destroyed` 직후의 `Exit`도 그 폐기를 기다린다(변이로 고정).
+  - 서버에 붙은 적이 없으면 폐기 때문에 서버를 띄우지 않는다.
+- **화면(T032)**:
+  - `bootstrapTransport`가 `get_workbench_mode`를 한 번 묻는다. 물을 수 없으면 external로 본다.
+  - external에서 실패하면 `{kind:"failed", reason}`이고 `[workbench-client] connection failed: <이유>`를 기록한다. transport는 바꾸지 않고, 철회도 부르지 않는다.
+  - `main.tsx`는 실패하면 `ConnectionFailure`(이유 + "다시 시도" = 창 다시 불러오기)만 그린다. Storybook `WorkbenchConnectionFailure`.
+  - `App.tsx` 제목은 `applyWindowTitle` → `apply_window_title`로 적용한다(두 모드).
+  - no-direct-invoke 허용 목록에 `get_workbench_mode`·`apply_window_title`를 더했다.
+- **T033 범위(정직하게)**: 043 화면 시험(AW `pnpm test` 641)과 통합 시험(AW 1, workbench-client 7)은 기대값을 바꾸지 않고 통과했다. bootstrap 043 시험은 `getMode: embedded`를 넣어 그대로 남겼다.
+  - 통합 시험이 붙는 대상은 별도 프로세스인 시험 host(`workbench-host --example http_test_host`, 독립 서버와 같은 host 조립)다. 데스크톱이 실제로 띄우는 `agentic-workbench-server` 바이너리는 아니다.
+  - 실제 앱 스모크(T045–T047)는 하지 않았다.
+
+설계와 다른 점·남은 것:
+- 외부 모드 창 토큰은 화면이 서버에 직접 묻지 않는다. 데스크톱이 소유자 자격으로 `desktop.issueWindowToken`을 부르고, `get_workbench_connection`의 모양을 유지한다(contracts와 같음).
+- `bootstrapTransport`가 예외로 끝나면 이제 연결 실패 화면을 그린다. 043은 예외여도 App을 그렸다. 정상 경로에서는 예외가 없다.
+- 호환 command의 external 오류 문구는 Tauri command 시험 틀이 없어 Rust 단위 시험으로 고정하지 않았다. 상수 `MESSAGE_EXTERNAL_UNAVAILABLE` 하나로 만든다.
+- `EmbeddedOwnership`의 안내 파일은 HTTP 기동에 실패하면 쓰지 않는다(잠금은 유지).
