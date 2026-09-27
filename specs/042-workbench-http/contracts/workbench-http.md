@@ -31,7 +31,7 @@
 | `GET /health/ready` | bearer | — | `200 {"ready":true,"serverEpoch":"…"}` |
 | `POST /v1/system/handshake` | bearer | `{supportedProtocolVersions:[1], client:{name,version}}` | `200 {selectedProtocolVersion, supportedProtocolVersions, serverVersion, apiMajor, contractHash, instanceId, serverEpoch, storageSchemaVersion, features}`; 교집합 없음 `409` fault `"protocol version is not supported."` |
 | `POST /v1/calls` | bearer | `CallRequest` | `200 CallReply` 또는 problem |
-| `POST /v1/event-tickets` | bearer | `{cursors:[StreamCursor]}` | `200 {ticket, expiresAt}`; cursor 0개·상한 초과는 `400`(오늘 `events` 문구) |
+| `POST /v1/event-tickets` | bearer | `{cursors:[StreamCursor]}` | `200 {ticket, expiresAt}`. 발급은 인증·형식·고정 상한(cursor 1,024개, 초과 `400` `"too many cursors for a ticket."`)만 본다. cursor 0개·hub 상한·권한은 연결 때 `fault` 프레임(§4) |
 | `GET /v1/events?ticket=…` | 표 | WebSocket upgrade | §4 |
 | `GET /openapi.json` | bearer | — | 계약 문서(커밋된 파일과 같은 내용) |
 | `OPTIONS *` | 없음 | preflight | 허용 출처에만 CORS 헤더 |

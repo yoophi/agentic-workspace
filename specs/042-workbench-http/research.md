@@ -47,7 +47,7 @@
 
 ## R4. 구독 표 발급
 
-**Decision**: `POST /v1/event-tickets` 본문 `{cursors: [StreamCursor]}` → `{ticket, expiresAt}`. 표는 256비트 무작위, **TTL 30초, 1회용**, 발급 주체 principal·cursor 목록·요청 Origin(없으면 "없음")에 묶는다. 저장은 메모리(상한 1,024, 만료분 정리). 발급 때는 인증·cursor 수 상한(오늘 hub 상한 64)·형식만 본다. 스트림 권한·gap·세대 판정은 **연결 때** 오늘과 같은 `Workbench.events`가 한다.
+**Decision**: `POST /v1/event-tickets` 본문 `{cursors: [StreamCursor]}` → `{ticket, expiresAt}`. 표는 256비트 무작위, **TTL 30초, 1회용**, 발급 주체 principal·cursor 목록·요청 Origin(없으면 "없음")에 묶는다. 저장은 메모리(상한 1,024, 만료분 정리). 발급 때는 인증·본문 형식·**메모리 안전용 고정 상한(cursor 1,024개 — hub의 어떤 설정보다 크다)**만 본다. cursor 0개·hub 상한(`EventHubLimits.max_cursors`, 런타임 설정)·스트림 권한·gap·세대 판정은 **연결 때** 오늘과 같은 `Workbench.events`가 한다(설계 리뷰 D1: hub 상한은 런타임 설정이라 server 크레이트가 알 수 없고, 발급 때 판정하면 fixture `cursors-over-limit`(상한 2)의 두 경로가 갈린다).
 
 **Rationale**: 이벤트 fixture가 요구하는 거절(`cursors-over-limit`, forbidden, notFound 등)을 두 경로에서 같게 내려면, 판정을 한 곳(`events`)에 두고 WS에서 오늘처럼 `fault` 프레임으로 알리는 편이 맞다. 발급 때 판정을 복제하면 두 판정이 어긋날 수 있다. 표가 짧고 1회용이라 발급 시점 권한과 연결 시점 권한 차이는 연결 때 다시 판정해 닫힌다.
 
@@ -68,7 +68,7 @@
 **Decision**:
 - bind는 `127.0.0.1:0`(임의 포트)만. 설정으로 다른 주소를 줄 수 없게 한다(remote는 범위 밖).
 - **Host**: `127.0.0.1:<port>` 또는 `localhost:<port>`와 정확히 같아야 한다. 아니면 `421`(misdirected) 없이 `403 forbidden` fault.
-- **Origin**: 없으면 통과(비브라우저 — 인증으로만 판단). 있으면 허용 목록과 **문자열 전체 일치**(접두사·접미사 금지, `null` 거절). 허용 목록은 조립 쪽이 준다: 개발 `http://localhost:1420`, macOS/Linux 배포 `tauri://localhost`, Windows 배포 `http://tauri.localhost`. 실제 WebView Origin은 스모크에서 캡처해 목록과 맞춘다.
+- **Origin**: 없으면 통과(비브라우저 — 인증으로만 판단). 있으면 허용 목록과 **문자열 전체 일치**(접두사·접미사 금지, `null` 거절). 허용 목록은 조립 쪽이 준다: 개발 `http://localhost:1420`, macOS/Linux 배포 `tauri://localhost`, Windows 배포 `http://tauri.localhost`. 실제 WebView Origin은 스모크에서 캡처해 목록과 맞춘다. **배포 빌드 Origin(`tauri://localhost`, WKWebView custom scheme)은 debug probe로 확인할 수 없다 — 4단계 화면 전환 전 필수 게이트로 실측한다.** `null`이 오면 추정으로 허용하지 않고 그때 결정한다(설계 리뷰 D4).
 - **CORS**: tower-http `CorsLayer`에 같은 허용 목록(`AllowOrigin::list`), 메서드 `GET, POST`, 헤더 `authorization, content-type`, 노출 헤더 `AW-Protocol-Version`, credentials 끔. preflight `OPTIONS`는 인증 없이 Host·Origin만 본다.
 - 같은 `OriginPolicy`(정확 일치)를 AW MCP 서버의 `origin_allowed`에 적용한다(FR-015). MCP의 허용 목록은 같은 WebView 출처 + 루프백 없음.
 
@@ -90,7 +90,7 @@
 
 ## R12. 앱 연결 스모크: 두 증거를 구분한다 (사용자 점검 반영)
 
-**Decision**: 앱 연결 확인은 두 가지를 따로 모으고 섞어 보고하지 않는다. 둘 다 **debug 빌드에서만**(`cfg(debug_assertions)`) 컴파일되고, 환경 변수가 있을 때만 켜진다. release 빌드에는 코드가 없다.
+**Decision**: 앱 연결 확인은 두 가지를 따로 모으고 섞어 보고하지 않는다. 둘 다 **debug 빌드에서만**(`cfg(debug_assertions)`) 컴파일되고, 환경 변수가 있을 때만 켜진다. release 빌드에는 코드가 없다(debug·release에 따라 `invoke_handler`를 두 벌로 조립 — `generate_handler!`는 항목별 `cfg`를 받지 않는다, 설계 리뷰 D3). 진단 토큰은 데스크톱과 같은 주체라 debug에서 그 파일을 읽을 수 있는 같은 OS 사용자는 데스크톱 권한을 얻는다 — 정본 위협 모델(같은 OS 사용자 malware 범위 밖)과 같다.
 
 1. **끝점 진단(외부 클라이언트)** — `AW_HTTP_DIAGNOSTIC_FILE`: 기동 직후 `{baseUrl, token, expiresAt}`를 owner-only(0600) 파일로 쓴다. 토큰은 **운영과 같은 발급기·검증 경로**(`DesktopTokenIssuer`)로 만들되 "Origin 없음"에 묶은 비브라우저용이다. 이것으로 `curl`/테스트 클라이언트가 health·handshake·calls·표·WS를 확인한다. **증명하는 것은 "끝점이 떠서 인증 규칙대로 응답한다"뿐이며, 데스크톱(WebView) 연결 성공으로 보고하지 않는다.**
 2. **WebView probe(실제 데스크톱 경로)** — `AW_HTTP_WEBVIEW_PROBE_FILE`: 메인 창이 로드되면 Rust가 `window.eval`로 개발용 probe 스크립트를 넣는다(AW는 이미 이벤트 전달에 같은 삽입 경로를 쓴다). probe는 WebView 안에서
@@ -116,7 +116,8 @@
 | | `run.start` | `run_start_reconcile.rs`(apply 뒤 중단 → unknown, 완료 재시도 → 저장 결과) | — |
 | | `project.delete`·`goal.clear` | **없음**(reconciler만 등록) | 세 중단 지점 × 재시작 판정·같은 키 재요청 테스트 |
 | 영속(ledger), reconciler 없음(unknown) | `project.update`·`savedPrompt.update`·`goal.update` | **없음** | 세 중단 지점 → unknown·자동 재실행 없음·같은 키 재요청 테스트 |
-| 세대 범위(메모리 작업대) | `bench.*`·`run.*`(start 제외)·`exchange.*` | `epoch_idempotency.rs`(기록 넘침·요약 한도·닫힌 작업대 재시도 notFound). **재시작 뒤 재시도 증거 없음** | 서버 재시작 뒤 같은 키 재시도 → 작업대 없음(`notFound`)·재적용 없음 |
+| 세대 범위, 작업대 불필요 | `bench.open` | 없음 | 재시작 뒤 같은 키 재시도 → **새 작업대**가 열리고 이전 작업대는 없다(메모리 전용이라 영속 효과 없음 — 설계 리뷰 D2). 증거 테스트는 새 id·이전 id `notFound`를 단정 |
+| 세대 범위(메모리 작업대) | `bench.close`·`bench.requestTitle`·`run.*`(start 제외)·`exchange.*` | `epoch_idempotency.rs`(기록 넘침·요약 한도·닫힌 작업대 재시도 notFound). **재시작 뒤 재시도 증거 없음** | 서버 재시작 뒤 같은 키 재시도 → 작업대 없음(`notFound`)·재적용 없음 |
 | 세대 범위 + 파일 영속 | `orchestration.*` 변경 27개 | 저장 경계·동시성 테스트, 작업대 닫힘 뒤 역할 거절. **재시작 뒤 재시도·파일 중단 증거 없음** | (a) 변경 뒤 재시작 → 같은 키 재시도 → `notFound`, 파일은 변경 한 번만 반영, (b) 저장 중단(임시 파일 쓰기 실패 주입) → 이전 파일 유지·`.bak` 복구 유지 |
 
 - 조회 32개는 상태를 바꾸지 않으므로 공개 조건이 없다.

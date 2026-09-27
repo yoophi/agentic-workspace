@@ -27,6 +27,8 @@ pnpm run test
 ```bash
 git diff --stat origin/main -- apps/agentic-workbench/src crates/acp-agent-core packages/agent-client   # 0
 grep -rn "axum\|tower" crates/workbench-core/Cargo.toml   # dev-dependencies만
+(cd apps/agentic-workbench/src-tauri && cargo build --release) && \
+  strings target/release/agentic-workbench | grep -c "AW_HTTP_DIAGNOSTIC_FILE\|AW_HTTP_WEBVIEW_PROBE_FILE\|report_http_probe"   # 0 (debug 전용 경로가 release에 없다)
 ```
 
 ## 3. 앱 연결 스모크 (자동화 — 격리 데이터, 두 증거 구분)
