@@ -472,3 +472,39 @@ describe("event client epoch change followed by a gap (Codex follow-up review 4)
     client.close();
   });
 });
+
+describe("event client recovery reconnect cursor (Codex follow-up review 5)", () => {
+  it("reconnects from the gap boundary while a recovery reset is still running", async () => {
+    const hub = new FakeEventHub(2);
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s");
+    }
+    const client = clientFor(hub);
+    const hold = deferred();
+    let resets = 0;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => undefined,
+        onReset: async () => {
+          resets += 1;
+          await hold.promise;
+        },
+      },
+      {
+        snapshot: {
+          load: async () => ({ lastSequence: hub.lastSequence("s") }),
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+      },
+    );
+    await until(() => resets === 1, "recovery reset running");
+    expect(client.debugCursor("s")).toBe(5); // 복구 스냅샷이 5까지 덮는다
+    const before = hub.ticketRequests.length;
+    expect(client.debugDropSockets()).toBe(1);
+    await until(() => hub.ticketRequests.length > before, "reconnect ticket");
+    expect(hub.ticketRequests[hub.ticketRequests.length - 1][0].afterSequence).toBe(5);
+    hold.resolve();
+    client.close();
+  });
+});

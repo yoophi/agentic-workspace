@@ -78,7 +78,11 @@ const MAX_BACKOFF_MS = 10_000;
 
 interface ListenerState {
   listener: StreamListener;
+  /** 재연결 cursor 기여분: 이 순번까지는 이벤트로 반영했거나, 적용 중인 스냅샷이 덮는다(그 앞을 다시 받을 필요 없음). */
   delivered: number;
+  /** 수신자가 실제로 반영을 마친 순번(재설정 context로 넘긴다 — run은 그 뒤 스냅샷 이벤트를 다시 반영한다). 끝난
+   *  onReset은 세대가 지났어도 반영한 것이므로 올린다. */
+  applied: number;
   lastQueued: number;
   queue: EventEnvelope[];
   busy: boolean;
@@ -189,6 +193,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       const state: ListenerState = {
         listener,
         delivered: joinAt,
+        applied: joinAt,
         lastQueued: joinAt,
         queue: [],
         busy: false,
@@ -407,6 +412,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           if (state.covered?.(event)) {
             state.queue.shift();
             state.delivered = Math.max(state.delivered, event.sequence);
+            state.applied = Math.max(state.applied, event.sequence);
             continue;
           }
           const generation = state.generation;
@@ -426,6 +432,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           }
           state.queue.shift();
           state.delivered = Math.max(state.delivered, event.sequence);
+          state.applied = Math.max(state.applied, event.sequence);
         }
       } finally {
         state.busy = false;
@@ -471,7 +478,8 @@ export function createEventClient(options: EventClientOptions): EventClient {
             // 스냅샷이 없는 스트림(알림): 실패한 이벤트는 건너뛴다 — 다음 알림이 다시 읽게 한다.
             state.queue.shift();
           } else {
-            await state.listener.onReset?.(data, { delivered: state.delivered });
+            await state.listener.onReset?.(data, { delivered: state.applied });
+            state.applied = Math.max(state.applied, coveredUpTo);
             if (this.isStale(state, generation)) {
               return;
             }
@@ -524,6 +532,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       for (const state of this.listeners) {
         state.generation += 1;
         state.delivered = 0;
+        state.applied = 0;
         state.lastQueued = 0;
         state.queue = [];
         state.covered = undefined;
@@ -587,9 +596,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
       state.generation += 1;
       const generation = state.generation;
       state.covered = undefined;
-      // 재설정에는 이 수신자가 실제로 반영한 순번을 넘긴다(run은 그 뒤 스냅샷 이벤트를 다시 반영한다). 반영 완료 cursor는
-      // 재설정이 끝난 뒤에 기준점으로 올린다. 대기열 중복 방지(lastQueued)는 곧바로 기준점·버퍼 기준이다.
-      const appliedBefore = state.delivered;
+      // 재연결 cursor는 곧바로 기준점: 복구 스냅샷이 그 앞을 덮으므로, 재설정 중 재연결해도 같은 gap 복구를 다시 일으키지
+      // 않는다. 재설정 context는 실제 반영 순번(`applied`)을 적용 차례에 읽는다. 대기열 중복 방지는 기준점·버퍼 기준이다.
+      state.delivered = after;
       state.queue = [];
       state.lastQueued = after;
       for (const event of pending) {
@@ -599,11 +608,11 @@ export function createEventClient(options: EventClientOptions): EventClient {
         }
       }
       void this.serialize(state, generation, async () => {
-        await state.listener.onReset?.(data, { delivered: appliedBefore });
+        await state.listener.onReset?.(data, { delivered: state.applied });
+        state.applied = Math.max(state.applied, after);
         if (this.isStale(state, generation)) {
           return;
         }
-        state.delivered = Math.max(state.delivered, after);
         state.covered = snapshot ? (event) => !snapshot.passes(event, data) : undefined;
         state.resetting = false;
         void this.pump(state);

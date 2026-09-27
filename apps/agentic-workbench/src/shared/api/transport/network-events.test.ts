@@ -344,6 +344,42 @@ describe("network events — run snapshot replay after retention recovery", () =
     events.close();
   });
 
+  it("emits outputs 1–5 exactly once when the socket reconnects while the replay callback is still running", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `e${hub.epoch}-${i}` });
+    }
+    const { client } = runClient(hub, stream);
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    const hold = deferred<void>();
+    let held = false;
+    await network.listen("agent-run-event", async (payload) => {
+      if (!held) {
+        held = true;
+        await hold.promise; // 복구 replay의 첫 출력 반영이 늦는다
+      }
+      received.push(payload);
+    });
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    const e = hub.epoch;
+    await vi.waitFor(() => expect(held).toBe(true));
+    expect(events.debugDropSockets()).toBe(1); // replay 반영 중 재연결
+    const sockets = hub.sockets.length;
+    await vi.waitFor(() => expect(hub.sockets.length).toBeGreaterThan(sockets));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    hold.resolve();
+    await vi.waitFor(() => expect(received.length).toBeGreaterThanOrEqual(5));
+    hub.publish(stream, { out: `e${e}-6` });
+    await vi.waitFor(() => expect(outputs(received)).toContain(`e${e}-6`));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `e${e}-${n}`));
+    events.close();
+  }, 20_000);
+
   it("replays the new epoch from its first output when an epoch change is followed by a retention gap", async () => {
     const hub = new FakeEventHub(2);
     const stream = "run:r1";
