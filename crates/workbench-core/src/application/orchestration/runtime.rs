@@ -102,6 +102,25 @@ impl From<OrchestrationError> for OrchestrationFailure {
 
 pub type OrchestrationResult<T> = Result<T, OrchestrationFailure>;
 
+/// 자식 기동의 시작 장벽 지점(044 research R14, 시험용 관측 지점). 운영에서는 probe가 없어 아무것도 하지 않는다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchPoint {
+    /// 저장소 예약 뒤·엔진 준비(registry 예약) 전.
+    BeforePrepare,
+    /// 엔진 준비(registry 예약·spawn·attach) 뒤·G 아래 전이 전.
+    AfterPrepare,
+    /// G 아래 전이 뒤·시작 장벽을 열기 전.
+    AfterRegister,
+    /// 시작 장벽을 연 뒤·바인딩 전(자식 첫 턴이 바인딩 전에 도구를 부르는 경우를 결정적으로 재현).
+    AfterOpen,
+}
+
+pub type LaunchProbe = std::sync::Arc<
+    dyn Fn(LaunchPoint) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + Sync,
+>;
+
 pub struct OrchestrationRuntime {
     repository: Repository,
     sink: DeliveryOrchestrationSink,
@@ -113,6 +132,12 @@ pub struct OrchestrationRuntime {
     /// 기동 중인 자식: 예정 run id → (작업 영역, 노드, 과제). 엔진이 run을 등록하고 노드에 묶기 전에 자식의 첫 턴이
     /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
     launching: std::sync::Mutex<std::collections::HashMap<String, (String, String, String)>>,
+    launch_probe: std::sync::Mutex<Option<LaunchProbe>>,
+    /// 기동 중인 task → (기동 토큰, 예정 run id). 같은 task의 기동을 하나로 묶고(단일 비행), 취소가 토큰으로 기동을
+    /// 막을 수 있게 한다(044 R14 표 4·5). 메모리 상태 — 토큰은 이 프로세스의 작업 관문에서만 뜻이 있다.
+    launch_tokens: std::sync::Mutex<std::collections::HashMap<String, (u64, String)>>,
+    /// 작업대 서비스에 관문이 없을 때(관문 없는 조립) 쓰는 자체 관문.
+    fallback_gate: std::sync::OnceLock<std::sync::Arc<crate::application::work_gate::WorkGate>>,
 }
 
 impl OrchestrationRuntime {
@@ -132,6 +157,85 @@ impl OrchestrationRuntime {
             benches,
             guards,
             launching: std::sync::Mutex::default(),
+            launch_probe: std::sync::Mutex::default(),
+            launch_tokens: std::sync::Mutex::default(),
+            fallback_gate: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// 자식 기동 토큰을 발급하는 작업 관문.
+    pub(crate) fn work_gate(&self) -> &std::sync::Arc<crate::application::work_gate::WorkGate> {
+        match self.benches.work_gate() {
+            Some(gate) => gate,
+            None => self
+                .fallback_gate
+                .get_or_init(crate::application::work_gate::WorkGate::new),
+        }
+    }
+
+    /// 같은 task의 기동이 진행 중이면 그 예정 run id를 돌려주고, 아니면 이 기동을 등록한다.
+    pub(crate) fn begin_task_launch(
+        &self,
+        task_id: &str,
+        token: u64,
+        planned_run_id: &str,
+    ) -> Result<(), String> {
+        let mut tokens = self
+            .launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((_, existing)) = tokens.get(task_id) {
+            return Err(existing.clone());
+        }
+        tokens.insert(task_id.to_owned(), (token, planned_run_id.to_owned()));
+        Ok(())
+    }
+
+    pub(crate) fn end_task_launch(&self, task_id: &str, token: u64) {
+        let mut tokens = self
+            .launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if tokens.get(task_id).is_some_and(|(held, _)| *held == token) {
+            tokens.remove(task_id);
+        }
+    }
+
+    /// task 취소(R14 표 5): 기동 중이면 토큰을 `Pending→Cancelled`로 바꿔 실행을 막는다(`Prevented`). 이미 실행이
+    /// 허용됐으면 그 run(`Registered`), 기동 중이 아니면 `Unknown`.
+    pub(crate) fn prevent_task_launch(
+        &self,
+        task_id: &str,
+    ) -> crate::application::work_gate::LaunchCancel {
+        let token = self
+            .launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(task_id)
+            .map(|(token, _)| *token);
+        match token {
+            Some(token) => self.work_gate().cancel_launch(token),
+            None => crate::application::work_gate::LaunchCancel::Unknown,
+        }
+    }
+
+    /// 시험: 시작 장벽 지점마다 부를 probe를 건다.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_launch_probe(&self, probe: Option<LaunchProbe>) {
+        *self
+            .launch_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    pub(crate) async fn launch_probe(&self, point: LaunchPoint) {
+        let probe = self
+            .launch_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(probe) = probe {
+            probe(point).await;
         }
     }
 
@@ -546,6 +650,17 @@ impl OrchestrationRuntime {
             return self
                 .blocking(move |service| service.cancel_task(&bench, request))
                 .await;
+        }
+        // 044 R14 표 5: 기동 토큰이 아직 `Pending`이면 실행을 막고 task만 취소한다(기동 경로가 준비한 run을 취소한다).
+        if self.prevent_task_launch(&request.task_id)
+            == crate::application::work_gate::LaunchCancel::Prevented
+        {
+            let (bench, task_id) = (bench_id.to_owned(), request.task_id.clone());
+            let session = self
+                .blocking(move |service| service.cancel_launching_task(&bench, request))
+                .await?;
+            let _ = self.scheduler.release(&task_id);
+            return Ok(session);
         }
         let task_id = request.task_id.clone();
         self.command_service()

@@ -61,6 +61,17 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError>;
 
+    /// 044 R14 시작 장벽: `start`의 **준비**(run을 registry에 예약하고 실행 task를 spawn·attach)까지만 하고 돌아온다.
+    /// 돌아올 때 run은 취소할 수 있고, `start_gate`가 열리기 전에는 실행(launcher·초기 prompt)하지 않는다. sender를 열지
+    /// 않고 drop하면 실행 없이 run을 끝낸다.
+    async fn start_gated(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<AgentRun, RunEngineError>;
+
     async fn send_prompt(
         &self,
         run_id: &str,

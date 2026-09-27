@@ -56,6 +56,38 @@ impl AcpRunEngine {
         }
     }
 
+    /// `start`·`start_gated` 공통: `start_gate`가 있으면 유스케이스의 시작 장벽으로 넘긴다(R14).
+    async fn start_with(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> Result<AgentRun, RunEngineError> {
+        let mut request = request;
+        // 초기 prompt 순서의 예약은 run id로 센다: id가 없으면 여기서 정한다(유스케이스의 `build_run`과 같은 uuid).
+        let run_id = match request.run_id.clone().filter(|id| !id.trim().is_empty()) {
+            Some(id) => id,
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                request.run_id = Some(id.clone());
+                id
+            }
+        };
+        let mut runner = AcpAgentRunner::new(
+            ConfigurableAgentCatalog::from_env(),
+            self.registry.permissions(),
+            self.session_store.clone(),
+        );
+        if let Some(guard) = self.reserve_turn(&run_id)? {
+            runner = runner.with_initial_turn_guard(Box::new(guard));
+        }
+        StartAgentRunUseCase::new(self.registry.clone())
+            .execute_gated(runner, sink, request, Some(owner.to_owned()), start_gate)
+            .await
+            .map_err(start_error)
+    }
+
     /// A-turn을 동기 예약한다. 관문이 없으면(시험 조립 등) 예약 없이 진행한다. 정지 중이면 거절한다.
     fn reserve_turn(&self, run_id: &str) -> Result<Option<Reservation>, RunEngineError> {
         match self.work_gate.get() {
@@ -120,28 +152,18 @@ impl RunEngine for AcpRunEngine {
         owner: &str,
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError> {
-        let mut request = request;
-        // 초기 prompt 순서의 예약은 run id로 센다: id가 없으면 여기서 정한다(유스케이스의 `build_run`과 같은 uuid).
-        let run_id = match request.run_id.clone().filter(|id| !id.trim().is_empty()) {
-            Some(id) => id,
-            None => {
-                let id = uuid::Uuid::new_v4().to_string();
-                request.run_id = Some(id.clone());
-                id
-            }
-        };
-        let mut runner = AcpAgentRunner::new(
-            ConfigurableAgentCatalog::from_env(),
-            self.registry.permissions(),
-            self.session_store.clone(),
-        );
-        if let Some(guard) = self.reserve_turn(&run_id)? {
-            runner = runner.with_initial_turn_guard(Box::new(guard));
-        }
-        StartAgentRunUseCase::new(self.registry.clone())
-            .execute(runner, sink, request, Some(owner.to_owned()))
+        self.start_with(request, owner, sink, None).await
+    }
+
+    async fn start_gated(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.start_with(request, owner, sink, Some(start_gate))
             .await
-            .map_err(start_error)
     }
 
     async fn send_prompt(

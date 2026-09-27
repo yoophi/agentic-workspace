@@ -410,3 +410,40 @@ green·최종:
 - 로그 직접 확인: server 7/0, host owner 2/0(lint 수정 뒤), AW `cargo test` 102/0, clippy 두 대상 0. filtered out은 모두 0이다. 남은 서버·agent 프로세스는 없다.
 - lint 수정 뒤 host 전체 로그가 없어, 메인 세션이 `cargo test -p workbench-host`를 한 번 실행했다(`t035-host-full-after-lint-1.log`): 종료 0, 57 passed, filtered out 0.
 - T034에는 제품 red가 없다(구성 요소가 이미 있었음). mutation(`lease.release`가 작업대를 닫게 함)으로 시험이 잡아냄을 확인했다(fork 기록).
+
+## T037 교환 전달 continuation (K) — fork
+
+- 시험 `crates/workbench-core/tests/exchange_delivery_drain.rs` 7개(유효 전달 1회 수락·소비 표시, 같은 교환 동시 전달 8개 → 효과 1, 같은 키 다른 prompt 동시 → 효과 1, 조건별 거절(키·run·없는 교환·다른 작업대·draft·rejected 확인·steer) → 소비 0, 비우는 중에는 유효 K만 수락, E2 실제 `AcpRunEngine`+가짜 ACP agent로 다른 prompt가 turn을 쥔 동안 온 전달이 그 뒤에 1회 전달).
+- red 1 `t037-red-1.log` 종료 101: **컴파일 red**(시험 코드의 `Workbench` trait import 누락). 제품 red 아님.
+- red 2 `t037-red-2.log` 종료 101: **행동 red** 5 failed / 2 passed(비우는 중 일반 prompt가 수락됨, 교환 소비 표시 없음, 동시 전달 단일 효과 실패, 틀린 키 수락, E2 소비 없음). 같은 키 동시 시험은 기존 epoch 멱등으로 이미 통과(red 아님).
+- 구현: `WorkGate::begin_exchange_delivery`(G 아래 `stopping` 거절·소비 표시·X-deliver 예약), `record_failed_delivery`; `run_service::deliver_exchange`(K 조건 판정, 엔진 **대기열** 경로 `queue_prompt`, 등록 실패 시 소비 유지 + 실패 기록, X는 대기열 등록이 A-turn을 잡은 뒤 해제); `BenchServices::attach_work_gate`; handler에서 continuation은 `send`만, 비우는 중 일반 prompt·steer·cancelAndSend는 `draining`(notApplied).
+- green `t037-green-1.log` 종료 0: 7 passed, 0 failed, 0 filtered out.
+- mutation `t037-mut-1.log` 종료 101: 전달을 `send_prompt`(즉시 전송)로 바꾸면 E2 시험이 교환 prompt가 agent에 도달하지 않아 실패한다(원본 복원 확인).
+- 이탈: T040(입구 판정) 중 run prompt 계열의 비우는 중 거절만 handler에 최소로 넣었다(T037 시험의 "비우는 중 유효 K만 수락"에 필요). `WorkbenchRuntime::call`의 operation 공통 판정은 T040에 남는다.
+- 커밋 715ec2d.
+
+## T038 대기 task 배정 원자성·시작 장벽 (E3·E4·F1) — fork
+
+- 시험 `crates/workbench-core/tests/child_assign_atomic.rs` 6개(+ support 1):
+  - E3: 서로 다른 키 동시 배정 100회 → 엔진 기동 1회, 모든 응답이 같은 run, 노드 run 일치.
+  - 배정·취소 경합 20회 → 취소 성공이면 그 task의 run이 살아 있지 않음, 관문 예약 0.
+  - 시작 장벽 지점별 취소(registry 예약 전 = `BeforePrepare`, spawn 뒤·attach 전 = 스크립트 엔진 `prepare_hook`, attach 뒤·전이 전 = `AfterPrepare`, 전이 뒤·장벽 전 = `AfterRegister`) → 취소 성공, launcher·prompt 표지 0, 관문 예약 0, 준비한 run 정리, 노드 예약 해제, task `cancelled`.
+  - 같은 지점별 배정 future abort → 실행 0, 예약 0, task는 다시 배정 가능(`ready`).
+  - 바인딩 뒤 취소 → 실제 run 취소. `bind_child_run`이 취소된 task 거절.
+  - 지점 멈춤은 결정적 gate(semaphore). abort 뒤 정리(guard가 뒤에서 하는 저장소 예약 해제·닫힌 장벽의 run 정리)는 제한 시간 안 조건 polling으로 관찰한다(순서 제어용 지연 없음).
+  - "spawn 뒤·attach 전"은 엔진 내부 지점이라 스크립트 엔진으로 모사했다. 운영 `AcpRunEngine`의 같은 지점은 acp-agent-core `start_gate` 단위 시험(T013)이 덮는다. `AcpRunEngine::start_gated`는 `execute_gated`로 이어진다.
+- red 1 `t038-red-1.log` 종료 101: **컴파일 red**(관측 지점 API 없음).
+- red 2·3 `t038-red-2.log`·`t038-red-3.log` 종료 101: 관측 지점만 추가(원자성 수정 없음)한 뒤의 실행. 시험의 기준선 버그(첫 과제의 기동 표지·run 수를 세던 것)가 섞여 무효로 두고 시험을 고쳤다.
+- red 4 `t038-red-4.log` 종료 101: **행동 red** 4 failed / 3 passed — 100회 배정 기동 2회 이상, `BeforeReserve` 취소 뒤 배정이 active run 보고, abort 뒤 노드 예약 남음, 취소된 task에 bind 성공. 경합 시험(20회)과 바인딩 뒤 취소 시험은 수정 전에도 통과(red 아님; 경합 시험은 회귀 방지용으로 둔다).
+- 구현:
+  - `RunEngine::start_gated`(필수 메서드): `AcpRunEngine`은 `StartAgentRunUseCase::execute_gated`, 스크립트 엔진은 준비(슬롯·실행 task spawn) 뒤 장벽이 열려야 실행(`launch:` 표지), 닫힌 채 drop이면 슬롯 삭제.
+  - `EngineAgentWorker::prepare_worker`(시작 장벽 경로), `start_worker`는 오늘과 같다.
+  - `service.reserve_child_run` 비교 후 변경(`ready`/`running` + 노드 run 없음 → 예약, 있으면 `Existing(run)`, 종료 task 거절), `bind_child_run`이 `Cancelled` 거절, `cancel_launching_task`(토큰 전이가 선형화 지점이라 revision 비교 없음).
+  - `OrchestrationRuntime`: 기동 토큰 표(task → 토큰·예정 run, 단일 비행), `prevent_task_launch`, 관문 접근(관문 없는 조립은 자체 관문), 시험용 `set_launch_probe`(`test-hooks`).
+  - `start_child`: `issue_launch`(T-start) → 단일 비행 → 저장소 RMW → 준비 → G 아래 `register_launch`(T→A 인계) → 장벽 열기 → 바인딩. 취소면 5'(장벽 닫힌 채 drop + 준비한 run 취소). 정리 guard가 abort 때 저장소 예약 해제·준비 run 취소·scheduler 자리 반납을 뒤에서 한다.
+  - 취소 두 경로(coordinator 도구, 데스크톱 `cancelTask`): 노드에 예정 run이 있으면 토큰을 먼저 본다. `Prevented`면 task만 취소하고 scheduler 자리를 반납한다. `Registered`면 오늘 경로가 실제 run을 취소한다.
+- 기존 시험 조정: `orchestration_agent.rs`의 첫 턴 hook 시험 2개는 실행이 장벽 뒤 따로 돌게 되어, `AfterOpen` 지점에서 hook 완료 허가를 기다리게 했다("엔진 등록 직후·노드 기록 전" 순서를 결정적으로 유지, 기대값 변경 없음).
+- green `t038-green-1.log` 종료 0: 7 passed, 0 failed, 0 filtered out.
+- mutation `t038-mut-1.log` 종료 101: `prevent_task_launch`가 항상 `Unknown`을 돌려주게 하면 `BeforeReserve` 지점에서 실행 표지가 생겨 실패(원본 복원 확인).
+- 회귀: `cargo test -p workbench-core --features test-hooks` (`t038-core-full-1.log`) 종료 0, 56 target, 463 passed, 0 failed, 모든 target filtered out 0.
+- 이탈·설명: 기동 토큰은 저장소에 쓰지 않고 메모리 표에 둔다(토큰은 이 프로세스의 작업 관문에서만 뜻이 있고, 저장소에는 노드 `Starting` + 예정 run이 남는다). 스크립트 엔진의 `active_owner_of`는 장벽 전 준비 run도 소유자로 본다(운영은 세션이 붙어야 active) — 기존 시험의 타이밍 의존을 늘리지 않기 위함.

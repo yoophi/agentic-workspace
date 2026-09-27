@@ -13,17 +13,20 @@ use serde_json::{json, Value};
 use crate::{
     application::orchestration::{
         command_service::DeliverTaskCommandRequest,
-        runtime::{OrchestrationFailure, OrchestrationRuntime},
+        runtime::{LaunchPoint, OrchestrationFailure, OrchestrationRuntime},
         scheduler::LeaseOutcome,
-        service::{CreateChildTaskRequest, ReportTaskRequest, TaskActionRequest},
+        service::{
+            ChildRunReservation, CreateChildTaskRequest, ReportTaskRequest, TaskActionRequest,
+        },
     },
+    application::work_gate::{LaunchCancel, LaunchCancelled, LaunchState, MESSAGE_STOPPING},
     domain::agent_orchestration::{
         AgentNodeCreator, AgentNodeKind, AgentRoleProfile, ArtifactReference,
         CoordinatorGenerationStatus, OrchestrationError, OrchestrationSession, PromptDelivery,
         TaskCommandKind, TaskCommandSource, TaskFinding, TaskReportType, TaskStatus,
     },
     ports::{
-        agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment},
+        agent_worker::{StartWorkerOutcome, WorkerAssignment},
         orchestration_repository::OrchestrationRepository,
     },
 };
@@ -641,6 +644,22 @@ async fn coordinator_task_command(
             }
         };
     }
+    // 044 R14 표 5: 노드에 예정 run이 있으면 기동 중일 수 있다. 토큰이 아직 `Pending`이면 여기서 실행을 막고 task만
+    // 취소한다(기동 경로가 준비한 run을 취소한다). 이미 실행이 허용됐으면 아래 오늘 경로가 실제 run을 취소한다.
+    if tool == CANCEL_CHILD_TASK_TOOL
+        && node.current_run_id.is_some()
+        && runtime.prevent_task_launch(&task_id) == LaunchCancel::Prevented
+    {
+        let b = bench.to_owned();
+        let session = runtime
+            .blocking(move |service| service.cancel_launching_task(&b, request))
+            .await?;
+        let next_task_id = runtime.scheduler().release(&task_id).ok().flatten();
+        return Ok(json!({
+            "workspace": session, "accepted": true, "runtimeCommand": null,
+            "nextReadyTaskId": next_task_id
+        }));
+    }
     if tool == CANCEL_CHILD_TASK_TOOL && node.current_run_id.is_none() {
         let b = bench.to_owned();
         let session = runtime
@@ -765,6 +784,12 @@ async fn launch_existing_task(
 
 impl OrchestrationRuntime {
     /// 자식 run을 기동하고(예정 run id를 먼저 기억해 자식의 첫 턴 도구 호출을 허용 — 설계 리뷰 H6) 성공하면 묶는다.
+    ///
+    /// 044 R14 표 4·5·5'·6(시작 장벽): 기동 토큰(`Pending`)과 T-start를 G 아래에서 만들고, 같은 task의 기동은 하나로 묶는다
+    /// (단일 비행). 저장소 RMW로 노드를 예약한 뒤 엔진을 **준비**만 하고(run은 registry에 있고 취소할 수 있음), G 아래에서
+    /// 토큰을 `Registered`로 옮기며 T-start를 A-turn으로 인계한 다음에만 시작 장벽을 연다. 그 전에 온 취소는 토큰을
+    /// `Cancelled`로 바꿔 실행을 막고, 이 경로는 준비한 run을 취소한다. future가 어느 지점에서 drop되어도 장벽은 닫힌 채
+    /// drop되고(실행 0), 예약은 guard가 되돌린다.
     pub async fn start_child(
         self: &Arc<Self>,
         bench: &str,
@@ -784,9 +809,28 @@ impl OrchestrationRuntime {
             .ok_or_else(|| {
                 ToolError::new("unknownNode", "Assigned child node was not found.", false)
             })?;
+        let gate = Arc::clone(self.work_gate());
+        let ticket = gate
+            .issue_launch()
+            .map_err(|_| ToolError::new("serverStopping", MESSAGE_STOPPING, true))?;
+        let token = ticket.token();
         let planned_run_id = uuid::Uuid::new_v4().to_string();
-        // 엔진을 부르기 전에 예정 run을 노드의 현재 run으로 예약한다 — 첫 턴 보고가 현재 run의 보고로 반영된다.
-        {
+        if let Err(existing) = self.begin_task_launch(&task.id, token, &planned_run_id) {
+            // 같은 task의 기동이 진행 중이다: 그 run을 돌려준다(이 토큰은 drop으로 `Failed`, T-start 해제).
+            return Ok(StartWorkerOutcome::Started { run_id: existing });
+        }
+        let mut cleanup = LaunchCleanup {
+            runtime: Arc::clone(self),
+            bench: bench.to_owned(),
+            node_id: node.id.clone(),
+            task_id: task.id.clone(),
+            planned_run_id: planned_run_id.clone(),
+            token,
+            state: CleanupState::Reserving,
+        };
+        // 엔진을 부르기 전에 예정 run을 노드의 현재 run으로 예약한다(비교 후 변경) — 첫 턴 보고가 현재 run의 보고로
+        // 반영된다. 다른 배정이 먼저 예약했으면 그 run을 돌려준다.
+        let reservation = {
             let (b, t, n, r) = (
                 bench.to_owned(),
                 task.id.clone(),
@@ -794,50 +838,194 @@ impl OrchestrationRuntime {
                 planned_run_id.clone(),
             );
             self.blocking(move |service| service.reserve_child_run(&b, &t, &n, &r))
-                .await?;
+                .await
+        };
+        match reservation {
+            Ok(ChildRunReservation::Reserved) => cleanup.state = CleanupState::Reserved,
+            Ok(ChildRunReservation::Existing(run_id)) => {
+                return Ok(StartWorkerOutcome::Started { run_id })
+            }
+            Err(error) => return Err(error.into()),
         }
         self.remember_launching(&planned_run_id, &snapshot.id, &node.id, &task.id);
+        self.launch_probe(LaunchPoint::BeforePrepare).await;
+        if gate.launch_state(token) == Some(LaunchState::Cancelled) {
+            drop(ticket);
+            cleanup.fail().await;
+            return Ok(cancelled_launch());
+        }
+        let (open_gate, start_gate) = tokio::sync::oneshot::channel();
         let outcome = self
             .worker()
-            .start_worker(WorkerAssignment {
-                workspace_id: snapshot.id.clone(),
-                bench_id: bench.to_owned(),
-                worktree_path: snapshot.worktree_path.clone(),
-                node_id: node.id.clone(),
-                task_id: task.id.clone(),
-                attempt: task.attempt,
-                planned_run_id: planned_run_id.clone(),
-                role: node.role.clone(),
-                objective: task.objective.clone(),
-                constraints: task.constraints.clone(),
-                expected_result: task.expected_result.clone(),
-                runtime_profile: self.child_runtime_profile(),
-                mcp_capability: String::new(),
+            .prepare_worker(
+                WorkerAssignment {
+                    workspace_id: snapshot.id.clone(),
+                    bench_id: bench.to_owned(),
+                    worktree_path: snapshot.worktree_path.clone(),
+                    node_id: node.id.clone(),
+                    task_id: task.id.clone(),
+                    attempt: task.attempt,
+                    planned_run_id: planned_run_id.clone(),
+                    role: node.role.clone(),
+                    objective: task.objective.clone(),
+                    constraints: task.constraints.clone(),
+                    expected_result: task.expected_result.clone(),
+                    runtime_profile: self.child_runtime_profile(),
+                    mcp_capability: String::new(),
+                },
+                start_gate,
+            )
+            .await;
+        let run_id = match outcome {
+            Ok(StartWorkerOutcome::Started { run_id }) => run_id,
+            Ok(other) => {
+                drop(ticket);
+                cleanup.fail().await;
+                return Ok(other);
+            }
+            Err(error) => {
+                drop(ticket);
+                cleanup.fail().await;
+                return Err(error.into());
+            }
+        };
+        cleanup.state = CleanupState::Prepared;
+        self.launch_probe(LaunchPoint::AfterPrepare).await;
+        // 선형화 지점(G 아래): `Pending`이면 `Registered`로 바꾸고 T-start를 A-turn으로 인계한다.
+        let turn = match gate.register_launch(ticket, &run_id) {
+            Ok(turn) => turn,
+            Err(LaunchCancelled) => {
+                // 5': 그 전에 취소됐다 — 장벽을 닫은 채 drop하고 준비한 run을 취소한다(실행 0).
+                drop(open_gate);
+                cleanup.fail().await;
+                return Ok(cancelled_launch());
+            }
+        };
+        self.launch_probe(LaunchPoint::AfterRegister).await;
+        // 엔진의 초기 순서 guard(A-turn)가 실행을 덮으므로 인계받은 예약은 장벽을 연 뒤 놓는다.
+        let _ = open_gate.send(());
+        drop(turn);
+        self.launch_probe(LaunchPoint::AfterOpen).await;
+        let bound = {
+            let (b, t, n, r) = (
+                bench.to_owned(),
+                task.id.clone(),
+                node.id.clone(),
+                run_id.clone(),
+            );
+            self.blocking(move |service| service.bind_child_run(&b, &t, &n, &r))
+                .await
+        };
+        match bound {
+            Ok(_) => {
+                cleanup.state = CleanupState::Done;
+                Ok(StartWorkerOutcome::Started { run_id })
+            }
+            Err(error) => {
+                // 6: 기동 중에 취소된 task(또는 사라진 작업 영역)에는 묶지 않고 run을 취소한다.
+                cleanup.fail().await;
+                Err(error.into())
+            }
+        }
+    }
+}
+
+fn cancelled_launch() -> StartWorkerOutcome {
+    StartWorkerOutcome::Failed {
+        code: "taskCancelled".into(),
+        message: "The task was cancelled before its worker started.".into(),
+        retryable: false,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CleanupState {
+    /// 저장소 예약 전(되돌릴 것 없음).
+    Reserving,
+    /// 저장소 예약 뒤·엔진 준비 전.
+    Reserved,
+    /// 엔진 준비 뒤(registry에 run이 있다).
+    Prepared,
+    /// 바인딩까지 끝났다.
+    Done,
+}
+
+/// 자식 기동의 정리 guard(R14 표 4 취소·abort 열). 성공·실패 어느 쪽이든 단일 비행 표와 기동 중 기록을 지운다. 끝나지
+/// 않고 drop되면(future abort) 준비한 run 취소·저장소 예약 해제·scheduler 자리 반납을 뒤에서 한다.
+struct LaunchCleanup {
+    runtime: Arc<OrchestrationRuntime>,
+    bench: String,
+    node_id: String,
+    task_id: String,
+    planned_run_id: String,
+    token: u64,
+    state: CleanupState,
+}
+
+impl LaunchCleanup {
+    /// 기동 실패·취소: 준비한 run을 취소하고 저장소 예약을 되돌린다(scheduler 자리는 호출자가 오늘 규칙대로 반납한다).
+    async fn fail(&mut self) {
+        let state = std::mem::replace(&mut self.state, CleanupState::Done);
+        rollback(
+            Arc::clone(&self.runtime),
+            self.bench.clone(),
+            self.node_id.clone(),
+            self.planned_run_id.clone(),
+            state,
+        )
+        .await;
+    }
+}
+
+async fn rollback(
+    runtime: Arc<OrchestrationRuntime>,
+    bench: String,
+    node_id: String,
+    planned_run_id: String,
+    state: CleanupState,
+) {
+    if state == CleanupState::Prepared {
+        runtime
+            .benches
+            .engine
+            .cancel(&planned_run_id, runtime.benches.run_sink(&bench))
+            .await;
+        runtime
+            .benches
+            .hub
+            .release_run_claim(&planned_run_id, &bench);
+    }
+    if matches!(state, CleanupState::Reserved | CleanupState::Prepared) {
+        let _ = runtime
+            .blocking(move |service| {
+                service.release_child_run_reservation(&bench, &node_id, &planned_run_id)
             })
             .await;
-        let result = match outcome {
-            Ok(StartWorkerOutcome::Started { run_id }) => {
-                let (b, t, n, r) = (
-                    bench.to_owned(),
-                    task.id.clone(),
-                    node.id.clone(),
-                    run_id.clone(),
-                );
-                self.blocking(move |service| service.bind_child_run(&b, &t, &n, &r))
-                    .await
-                    .map(|_| StartWorkerOutcome::Started { run_id })
-                    .map_err(ToolError::from)
-            }
-            Ok(other) => Ok(other),
-            Err(error) => Err(error.into()),
-        };
-        if !matches!(result, Ok(StartWorkerOutcome::Started { .. })) {
-            let (b, n, r) = (bench.to_owned(), node.id.clone(), planned_run_id.clone());
-            let _ = self
-                .blocking(move |service| service.release_child_run_reservation(&b, &n, &r))
-                .await;
+    }
+}
+
+impl Drop for LaunchCleanup {
+    fn drop(&mut self) {
+        self.runtime.end_task_launch(&self.task_id, self.token);
+        self.runtime.forget_launching(&self.planned_run_id);
+        if self.state == CleanupState::Done || self.state == CleanupState::Reserving {
+            return;
         }
-        self.forget_launching(&planned_run_id);
-        result
+        // future가 끝나지 않고 drop됐다(abort). 장벽 sender는 이미 닫혀 실행은 없다. 나머지는 뒤에서 되돌린다.
+        let Ok(handle) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        let (runtime, bench, node_id, task_id, planned_run_id, state) = (
+            Arc::clone(&self.runtime),
+            self.bench.clone(),
+            self.node_id.clone(),
+            self.task_id.clone(),
+            self.planned_run_id.clone(),
+            self.state,
+        );
+        handle.spawn(async move {
+            rollback(Arc::clone(&runtime), bench, node_id, planned_run_id, state).await;
+            let _ = runtime.scheduler().release(&task_id);
+        });
     }
 }

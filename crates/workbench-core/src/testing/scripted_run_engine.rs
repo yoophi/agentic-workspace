@@ -64,21 +64,30 @@ struct Slot {
 #[derive(Default)]
 pub struct ScriptedRunEngine {
     script: RunScript,
-    runs: Mutex<HashMap<String, Slot>>,
+    runs: Arc<Mutex<HashMap<String, Slot>>>,
     pub starts: AtomicUsize,
+    /// 실제 실행(launcher) 수. 시작 장벽이 열리지 않은 준비는 세지 않는다(044 R14).
+    pub launches: Arc<AtomicUsize>,
     pub prompts: AtomicUsize,
     pub turn_hook: Mutex<Option<TurnHook>>,
     /// `start`가 슬롯을 만든 뒤·돌아가기 전에 실행한다(자식 첫 턴이 바인딩 전에 도구를 부르는 경우).
     pub start_hook: Mutex<Option<TurnHook>>,
+    /// 준비 안(run을 registry에 예약하고 실행 task를 spawn한 뒤·attach 전)에서 실행한다(044 T038 시작 장벽 지점).
+    pub prepare_hook: Mutex<Option<TurnHook>>,
     /// 효과 표지(`start:<run>`, `prompt:<run>:<text>`). 효과가 난 직후·settle 지연 전에 기록된다(042 R17 시험 동기화).
-    applied: Mutex<Vec<String>>,
-    applied_notify: tokio::sync::Notify,
+    applied: Arc<Mutex<Vec<String>>>,
+    applied_notify: Arc<tokio::sync::Notify>,
     /// 있으면 `send_prompt`가 효과를 낸 **뒤** 허가를 하나 얻을 때까지 돌아가지 않는다(044 #207: 작업대 닫기와 호출 완료
     /// 순서를 시간 지연 없이 뒤집는다).
     pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
     work_gate: OnceLock<Arc<WorkGate>>,
     /// `start`가 받은 요청(044: launch decorator가 넣은 MCP 연결을 시험이 확인한다).
     pub start_requests: Mutex<Vec<AgentRunRequest>>,
+}
+
+fn mark(applied: &Mutex<Vec<String>>, notify: &tokio::sync::Notify, label: String) {
+    applied.lock().unwrap().push(label);
+    notify.notify_waiters();
 }
 
 fn not_active() -> RunEngineError {
@@ -121,8 +130,7 @@ impl ScriptedRunEngine {
     }
 
     fn mark_applied(&self, label: String) {
-        self.applied.lock().unwrap().push(label);
-        self.applied_notify.notify_waiters();
+        mark(&self.applied, &self.applied_notify, label);
     }
 
     /// `pred`에 맞는 효과 표지가 기록될 때까지 기다린다(settle 지연 구간 진입 확인).
@@ -140,6 +148,11 @@ impl ScriptedRunEngine {
         })
         .await
         .expect("effect marker within the wait")
+    }
+
+    /// 지금까지 기록된 효과 표지.
+    pub fn applied(&self) -> Vec<String> {
+        self.applied.lock().unwrap().clone()
     }
 
     pub fn run_count(&self) -> usize {
@@ -209,6 +222,8 @@ impl RunEngine for ScriptedRunEngine {
                 },
             );
         }
+        self.launches.fetch_add(1, Ordering::SeqCst);
+        self.mark_applied(format!("launch:{run_id}"));
         sink.emit(
             &run_id,
             RunEvent::Lifecycle {
@@ -240,6 +255,114 @@ impl RunEngine for ScriptedRunEngine {
         let hook = self.start_hook.lock().unwrap().clone();
         if let Some(hook) = hook {
             hook(run_id.clone()).await;
+        }
+        Ok(AgentRun {
+            id: run_id,
+            goal: request.goal,
+            agent_id: request.agent_id,
+        })
+    }
+
+    /// 044 R14 시작 장벽: 슬롯(registry 예약)을 만들고 실행 task를 spawn한 뒤 돌아온다. 실행(launcher 표지 `launch:<run>`·
+    /// Started·권한 요청·`start_hook`)은 장벽이 열린 뒤에만 한다. 장벽이 닫힌 채 drop되면 실행 없이 슬롯을 지운다. 열리기
+    /// 전에 취소된 슬롯은 실행하지 않는다(registry 취소가 실행 task를 멈추는 것과 같다).
+    async fn start_gated(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        self.start_requests.lock().unwrap().push(request.clone());
+        let run_id = request.run_id.clone().expect("normalized run id");
+        let initial_turn = self.reserve_turn(&run_id)?;
+        {
+            let mut runs = self.runs.lock().unwrap();
+            if runs.contains_key(&run_id) {
+                return Err(RunEngineError::new(
+                    RunErrorKind::Conflict,
+                    format!("duplicate run id: {run_id}"),
+                ));
+            }
+            if let Some(limit) = self.script.max_runs {
+                if runs.len() >= limit {
+                    return Err(RunEngineError::new(
+                        RunErrorKind::RateLimited,
+                        format!("concurrent run limit ({limit}) reached; cancel an existing run before starting a new one"),
+                    ));
+                }
+            }
+            runs.insert(
+                run_id.clone(),
+                Slot {
+                    owner: owner.to_owned(),
+                    permissions: HashSet::new(),
+                    initial_turn: None,
+                },
+            );
+        }
+        let (runs, launches, applied, notify) = (
+            Arc::clone(&self.runs),
+            Arc::clone(&self.launches),
+            Arc::clone(&self.applied),
+            Arc::clone(&self.applied_notify),
+        );
+        let permission = self.script.permission_id.clone();
+        let start_hook = self.start_hook.lock().unwrap().clone();
+        let task_run = run_id.clone();
+        tokio::spawn(async move {
+            let run_id = task_run;
+            // 초기 turn은 준비 때 예약해 실행이 끝날 때까지 쥔다(`AcpRunEngine`의 초기 순서 guard와 같다).
+            let turn = initial_turn;
+            if start_gate.await.is_err() {
+                runs.lock().unwrap().remove(&run_id);
+                return;
+            }
+            {
+                let mut runs = runs.lock().unwrap();
+                let Some(slot) = runs.get_mut(&run_id) else {
+                    return;
+                };
+                if let Some(permission) = &permission {
+                    slot.permissions.insert(permission.clone());
+                    slot.initial_turn = turn;
+                }
+            }
+            launches.fetch_add(1, Ordering::SeqCst);
+            mark(&applied, &notify, format!("launch:{run_id}"));
+            sink.emit(
+                &run_id,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::Started,
+                    message: "started".into(),
+                },
+            );
+            mark(&applied, &notify, format!("start:{run_id}"));
+            if let Some(permission) = &permission {
+                sink.emit(
+                    &run_id,
+                    RunEvent::Permission {
+                        permission_id: Some(permission.clone()),
+                        title: "allow?".into(),
+                        input: None,
+                        options: vec![PermissionOption {
+                            name: "Allow".into(),
+                            kind: "allow_once".into(),
+                            option_id: "allow".into(),
+                        }],
+                        selected: None,
+                        requires_response: true,
+                    },
+                );
+            }
+            if let Some(hook) = start_hook {
+                hook(run_id.clone()).await;
+            }
+        });
+        let prepare = self.prepare_hook.lock().unwrap().clone();
+        if let Some(prepare) = prepare {
+            prepare(run_id.clone()).await;
         }
         Ok(AgentRun {
             id: run_id,
