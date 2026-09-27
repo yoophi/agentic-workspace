@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
   AgentDescriptor,
@@ -14,6 +14,11 @@ import {
   renderAgentRunPanel,
   waitForAgentRunPanel,
 } from "./agent-run-panel.test-harness";
+import { compatTransport, setTransport } from "@/shared/api/transport";
+import {
+  startCompatSimulatingServer,
+  type CompatSimulatingServer,
+} from "@/shared/api/transport/testing/compat-simulating-server";
 
 const { invokeMock } = vi.hoisted(() => ({
   invokeMock: vi.fn(),
@@ -110,7 +115,27 @@ afterEach(async () => {
   await cleanupAgentRunPanelTests();
 });
 
-describe("AgentRunPanel user boundary", () => {
+// 043 T027(FR-012): 같은 시나리오·같은 기대값을 호환 경로와 네트워크 경로(실제 루프백 HTTP의 가짜 Workbench 서버 →
+// 실제 fetch → call client → HttpTransport)에서 모두 돌린다. 가짜 서버는 받은 operation을 command 인자로 되돌려 같은
+// `invokeMock`을 부르므로 호출 기록 단정도 두 경로에서 같은 뜻이다.
+describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (path) => {
+  let server: CompatSimulatingServer | undefined;
+
+  beforeAll(async () => {
+    if (path === "http") {
+      server = await startCompatSimulatingServer((command, args) => invokeMock(command, args));
+    }
+  });
+
+  afterAll(async () => {
+    setTransport(compatTransport);
+    await server?.close();
+  });
+
+  beforeEach(() => {
+    setTransport(path === "http" && server ? server.transport : compatTransport);
+  });
+
   it("reloads the worktree-scoped Codex model and effort selections", async () => {
     let finishLoadingAgents: ((agents: AgentDescriptor[]) => void) | undefined;
     loadAgents = () =>
@@ -259,7 +284,8 @@ describe("AgentRunPanel user boundary", () => {
     });
 
     await panel.enterPrompt("/");
-    await waitForAgentRunPanel(() => Boolean(panel.container.querySelector("[role='listbox']")));
+    // 후보를 다 불러온 목록을 기다린다(목록은 먼저 "Loading commands..."로 뜬다 — 네트워크 경로에서 드러난 대기 조건).
+    await waitForLoadedSuggestions(panel.container);
 
     const suggestions = panel.container.querySelector("[role='listbox']")?.textContent ?? "";
     expect(suggestions).toContain("goal");
@@ -286,7 +312,8 @@ describe("AgentRunPanel user boundary", () => {
     });
 
     await panel.enterPrompt("$");
-    await waitForAgentRunPanel(() => Boolean(panel.container.querySelector("[role='listbox']")));
+    // 후보를 다 불러온 목록을 기다린다(목록은 먼저 "Loading commands..."로 뜬다 — 네트워크 경로에서 드러난 대기 조건).
+    await waitForLoadedSuggestions(panel.container);
 
     const suggestions = panel.container.querySelector("[role='listbox']")?.textContent ?? "";
     expect(suggestions).toContain("set_window_title");
@@ -434,6 +461,10 @@ describe("AgentRunPanel user boundary", () => {
       onBeforeRunStart,
     });
 
+    // agent 목록을 불러온 뒤(모델 버튼이 있음) 입력한다 — 호환 경로에서는 렌더 직후 이미 불러온 상태였다.
+    await waitForAgentRunPanel(() =>
+      Boolean(document.querySelector("button[aria-label='main-agent-run model']")),
+    );
     await panel.enterPrompt("Inspect the current worktree");
     await panel.pressPromptKey("Enter");
     await waitForAgentRunPanel(() => onBeforeRunStart.mock.calls.length === 1);
@@ -504,6 +535,13 @@ describe("AgentRunPanel user boundary", () => {
     );
   });
 });
+
+async function waitForLoadedSuggestions(container: HTMLElement) {
+  await waitForAgentRunPanel(() => {
+    const listbox = container.querySelector("[role='listbox']");
+    return Boolean(listbox) && !(listbox?.textContent ?? "").includes("Loading commands...");
+  });
+}
 
 function invocationsFor(command: string) {
   return invokeMock.mock.calls

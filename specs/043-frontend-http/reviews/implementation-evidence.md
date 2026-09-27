@@ -129,3 +129,31 @@ transport:
   - `HttpTransport`는 command 표로 작업대를 확보하고(`ensure_window_bench(open, hint)`), 작업대가 없을 때의 결과·오류, 결과 변환(`sessionForWindow`), 오류 문자열(교환·orchestration), 항상 성공하는 command(`list_agents`, replay의 Missing)를 compat과 같게 돌려준다.
   - 적용 안 됨(`notApplied`)과 결과 불명(`unknown`)은 새 문구로 보여 준다.
 - 저장소 13개가 공용 `invoke`를 쓴다. 데스크톱 표현 command(`open_worktree_window`, worktree 감시)는 Tauri `invoke`를 그대로 쓴다.
+
+## T025–T028 · T051(선행) 부팅 경로·화면 시험 두 경로·직접 호출 가드
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| 부팅 선택(T026, T051 시험 선행 작성) | `npx vitest run src/app/bootstrap-transport.test.ts` | 0 | 7 passed. **시험과 구현을 함께 써서 red를 따로 기록하지 못했다.** 대신 변이로 확인했다: 전달 선언 실패를 무시하게 바꾸면 `stays on the compat path when the delivery declaration fails` 실패(종료 1) |
+| 가짜 서버 역변환 | `npx vitest run src/shared/api/transport/testing` | 0 | golden 72 사례에서 정변환(역변환(입력)) = 입력 |
+| 화면 시험 두 경로(T027) | `npx vitest run src/features/agent-run/ui/agent-run-panel.test.tsx` | 1 → 0 | 네트워크 경로에서 처음 3개 실패 → 대기 조건을 고친 뒤 26 passed(9 시나리오 × 2 경로 + 기존 harness 시험) |
+| 반복 | 같은 명령 10회, 회차마다 로그·종료 코드 | 10 × 0 | 10/10 `26 passed` |
+| 직접 호출 가드(T028) | `npx vitest run src/shared/api/transport/no-direct-invoke.test.ts` | 0 | 4 passed. 변이(`project-repository`를 Tauri `invoke`로 되돌림)에서 실패(종료 1), 위반 목록에 `list_projects`·`create_project`… |
+| AW 전체 | `pnpm --filter @yoophi/agentic-workbench test`, `tsc --noEmit` | 0, 0 | 86 files / 607 tests |
+
+T027 범위를 정직하게 적는다:
+- 기존 AW 화면 시험 중 서버 소유 command를 **실제로 거치는** 시험은 `agent-run-panel.test.tsx` 하나다.
+  - Tauri `invoke`를 command별 가짜 응답으로 흉내 낸다.
+  - 나머지 화면 시험은 소스 문자열 검사, 순수 모델 시험, props 기반 컴포넌트 시험이라 transport와 무관하다.
+  - Tauri를 흉내 내는 다른 두 시험(`appearance-preferences-repository`, `settings-window-repository`)은 데스크톱 표현 command다.
+- 따라서 FR-012/SC-002의 "새 경로에서 기존 시험 통과"는 이 시험의 9개 시나리오를 네트워크 경로로 돌린 것이 근거다. 이벤트 화면 시험은 T038에서 늘린다.
+- 네트워크 경로 구성:
+  - 시험 안에서 실제 루프백 HTTP 서버(node `http`, 042 서버와 같은 CORS 응답)를 띄운다.
+  - 실제 `createConnection`(handshake), `createWorkbenchClient`, `HttpTransport`, 실제 `fetch`(happy-dom, CORS 적용)를 거친다.
+  - 가짜 서버는 operation 입력을 command 인자로 되돌려 같은 가짜 응답 함수를 부른다. 그래서 `invocationsFor(...)` 단정이 두 경로에서 같은 뜻이다.
+- **첫 실행의 CORS 거절**: happy-dom `fetch`가 CORS를 적용해 가짜 서버 요청이 막혔다. 가짜 서버에 042 `CorsLayer`와 같은 응답(요청 출처 반사, `POST,GET`, `authorization,content-type`)을 넣었다. 실제 WebView 요청이 042 preflight 응답으로 통과한다는 근거는 core 시험 `preflight_answers_only_allowed_origins_without_credentials`와 042 probe다.
+- **대기 조건 수정(단정은 그대로)**: 실패 3개의 원인은 transport 동작이 아니라 시험의 대기 조건이 부정확했던 것이다.
+  - 목록 상자는 먼저 "Loading commands..."로 뜨는데, 시험은 목록이 나타나자마자 내용을 단정했다.
+  - 모델 버튼은 agent 목록을 불러온 뒤 생기는데, 시험은 그 전에 Enter를 눌렀다.
+  - 호환 경로의 가짜 `invoke`는 마이크로태스크 안에 끝나 이 차이가 가려져 있었다.
+  - 기대값은 바꾸지 않았다. 대기 조건을 "후보를 다 불러옴"과 "모델 버튼 있음"으로 정확히 했다.

@@ -70,10 +70,10 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 - [X] T022 [US1] `WC/connection.ts` — 자격 증명 수명·상태·backoff (T018)
 - [X] T023 [US1] `WC/call-client.ts` — `createWorkbenchClient`, 멱등성 키 생성, 세 결과, 같은 세대 재시도 (T017)
 - [X] T024 [US1] Transport 인터페이스·`CompatTransport`·`HttpTransport` — `AWF/shared/api/transport/`
-- [ ] T025 [US1] 저장소 모듈별 transport 경유로 이관(입출력 매퍼 포함) — `AWF/entities/*/api/*-repository.ts`, 모듈마다 T020 해당 시험 통과 후 커밋
-- [ ] T026 [US1] 부팅 경로 선택(R3, 창당 1회) — `AWF/app/bootstrap-transport.ts`, 앱 진입에서 transport 주입
-- [ ] T027 [US1] 기존 화면 시험을 두 transport로 매개변수화 — 화면 시험 harness(`AWF/test/`)에 HttpTransport(가짜 Workbench 서버, 실제 fetch 경로) 추가하고 기존 기대값 그대로 두 경로 실행(FR-012, SC-002)
-- [ ] T028 [US1] SC-001 확인 — 화면 코드의 서버 소유 `invoke` 호출 0개를 grep 기반 시험으로 고정(데스크톱 표현 목록은 허용 목록) `AWF/shared/api/transport/no-direct-invoke.test.ts`
+- [X] T025 [US1] 저장소 모듈별 transport 경유로 이관(입출력 매퍼 포함) — `AWF/entities/*/api/*-repository.ts`, 모듈마다 T020 해당 시험 통과 후 커밋
+- [X] T026 [US1] 부팅 경로 선택(R3, 창당 1회) — `AWF/app/bootstrap-transport.ts`, 앱 진입에서 transport 주입
+- [X] T027 [US1] 기존 화면 시험을 두 transport로 매개변수화 — 화면 시험 harness(`AWF/test/`)에 HttpTransport(가짜 Workbench 서버, 실제 fetch 경로) 추가하고 기존 기대값 그대로 두 경로 실행(FR-012, SC-002)
+- [X] T028 [US1] SC-001 확인 — 화면 코드의 서버 소유 `invoke` 호출 0개를 grep 기반 시험으로 고정(데스크톱 표현 목록은 허용 목록) `AWF/shared/api/transport/no-direct-invoke.test.ts`
 
 **Checkpoint**: US1 단독으로 네트워크 경로 호출 동작
 
