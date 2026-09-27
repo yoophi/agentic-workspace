@@ -78,8 +78,8 @@
 
 **Goal**: 완료 기준 (a)의 서버 쪽. **Independent Test**: 실제 앱 종료 뒤 소유자 클라이언트로 조회·출력·취소.
 
-- [ ] T034 [US1] host 통합 시험 `crates/workbench-host/tests/owner_after_desktop.rs`: 창 토큰으로 run 시작 → 창 임대 해제(앱 종료 흉내, 작업대 닫지 않음) → 소유자 클라이언트가 `bench.list`에서 run을 보고, `run.replay` + 구독으로 출력 이어 받기, `run.cancel`로 agent 프로세스 종료 확인(시험 엔진 + 가짜 ACP agent 둘 다)
-- [ ] T035 [US1] 앱 스모크 probe 확장(`apps/agentic-workbench/src-tauri/src/infrastructure/http_probe.rs`): 외부 모드 연결 확인, 시나리오 `quit`(run 시작 뒤 결과 기록하고 앱 종료 신호 대기). 스모크 스크립트 `specs/044-standalone-server/reviews/app-smoke/owner-check.py`(안내 파일로 신원 증명 → 소유자 토큰 → `bench.list`·`run.replay`·구독·`run.cancel`)
+- [X] T034 [US1] host 통합 시험 `crates/workbench-host/tests/owner_after_desktop.rs`: 창 토큰으로 run 시작 → 창 임대 해제(앱 종료 흉내, 작업대 닫지 않음) → 소유자 클라이언트가 `bench.list`에서 run을 보고, `run.replay` + 구독으로 출력 이어 받기, `run.cancel`로 agent 프로세스 종료 확인(시험 엔진 + 가짜 ACP agent 둘 다)
+- [X] T035 [US1] 앱 스모크 probe 확장(`apps/agentic-workbench/src-tauri/src/infrastructure/http_probe.rs`): 외부 모드 연결 확인, 시나리오 `quit`(run 시작 뒤 결과 기록하고 앱 종료 신호 대기). 스모크 스크립트 `specs/044-standalone-server/reviews/app-smoke/owner-check.py`(안내 파일로 신원 증명 → 소유자 토큰 → `bench.list`·`run.replay`·구독·`run.cancel`)
 - [ ] T036 [US1] 실제 앱 043 스모크(출력 + 강제 재연결, 새로고침 1회 전달)를 외부 서버 모드로 개발·배포 출처 각각 실행(SC-010)
 
 ---

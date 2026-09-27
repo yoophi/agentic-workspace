@@ -334,3 +334,73 @@ green·최종:
 - 최종 로그를 직접 확인했다. AW `cargo test` 101 passed(lint 수정 뒤 재실행), clippy·fmt는 첫 실행 실패(101·1) 뒤 수정해 0, AW vitest 641, 두 통합 suite, check-types, AW build, Storybook build는 모두 0이다. filtered out은 모두 0이다.
 - lint 수정 커밋 `e04eb49`이 host 코드(`lifecycle/server.rs`, `tests/owner_calls.rs`)를 건드렸다. 그런데 host 시험 로그는 수정 전의 `final-host-test-1.log`뿐이었다. 그래서 메인 세션이 `cargo test -p workbench-host`를 한 번 다시 실행했다(`t033-host-after-lint-1.log`): 종료 0, 55 passed, filtered out 0.
 - 범위(fork 보고대로): T033 통합 시험이 붙는 대상은 시험 host 프로세스다. 데스크톱이 실제로 띄우는 `agentic-workbench-server` 바이너리 연결은 실제 앱 스모크(T036·T045–T047)에서 확인한다. 실제 창·종료 동작은 아직 미확인이다.
+
+## T034 — 데스크톱이 떠난 뒤 소유자가 같은 run을 이어 본다 (host 통합)
+
+- 시험 `crates/workbench-host/tests/owner_after_desktop.rs` (dev-dep `tokio-tungstenite`). 시험 host가 실제 `server.json`을 쓰고, 소유자는 그 파일에서 `verify()`(신원 증명 → handshake → ready)를 통과한 뒤에만 자격을 쓴다.
+- 흐름: 이 순서로 진행한다.
+  1. 창 쪽: `lease.acquire` → 창 토큰 → 창 `bench.open`·`run.start`.
+  2. 앱 종료 흉내: `desktop.retireWindow {closeBench:false}`(`closedBenches == []`) → `lease.release`. 이후 옛 창 토큰은 401이다.
+  3. 소유자 쪽: `bench.list`에서 run 확인 → `run.replay`로 시작 출력(`lastSequence > 0`) → 그 순번부터 event ticket·WebSocket 구독 → 소유자 `run.sendPrompt` → 새 agentMessage를 받는다. live 순번은 모두 replay 마지막 순번보다 크다.
+  4. 소유자 `run.cancel` → run이 목록에서 사라진다.
+- 두 엔진으로 검증했다.
+  - 시험 엔진(ScriptedRunEngine): 끝에서 `run_count == 0`을 확인한다.
+  - 실제 `AcpRunEngine` + 가짜 ACP agent(`--echo`, 고유 `--log` 표식): agent 프로세스가 뜬 것을 확인한 뒤, 취소 후 프로세스가 끝나는지를 상한 있는 polling으로 확인한다.
+- 실행 기록(`scratchpad/044/`):
+  - `t034-first-1.log` 종료 101 — **시험 작성 오류**. `closedBenches`를 숫자로 가정했으나 실제 응답은 배열 `[]`이다. 기대값을 수정했다.
+  - `t034-green-1.log` 종료 101 — **시험 타이밍 오류**. `run.start` 직후 agent 프로세스를 바로 확인했다. 상한 있는 대기로 바꿨다.
+  - `t034-green-2.log` 종료 0, 2 passed, filtered out 0.
+  - **제품 red는 없다.** 제품 변경 없이 바로 통과했다(서버 lease/retire가 이미 작업대를 남겼다). 대신 mutation으로 시험의 판별력을 확인했다.
+  - `t034-mut-1.log` 종료 101 — `lease.release` 처리기가 `benches().close_all()`까지 하도록 임시 변조했다. 두 시험 모두 실패했다.
+    - 시험 엔진: 소유자 prompt가 404 `bench not found.`
+    - ACP: agent 프로세스 대기 timeout.
+    - 변조는 백업으로 되돌렸다(`git diff` 깨끗함).
+- lint 수정(redundant closure) 뒤 재실행: `final-host-owner-2.log` 종료 0, 2 passed, filtered out 0.
+
+## T035 — 앱 스모크 probe `quit` 시나리오와 소유자 확인 스크립트
+
+- probe(`http_probe.rs`, `#[cfg(debug_assertions)]` 모듈): `AW_APP_PROBE_SCENARIO=quit`이면 `APP_QUIT_PROBE_SCRIPT`를 한 번 넣는다.
+  - 모드(`get_workbench_mode`)와 transport를 기록한다.
+  - 앱 transport(`__awDebug.invoke('start_agent_run')`)로 에코 agent run을 시작하고, 시작 에코와 그 뒤 `promptCompleted`를 받는다.
+  - `ensure_window_bench {open:false}`로 작업대 id를 얻는다.
+  - `{scenario:"quit", runId, benchId, phase:"ready-to-quit", mode, transport, result}`를 `report_app_probe`로 쓴다.
+  - run은 취소하지 않는다. 토큰도 싣지 않는다.
+  - 단위 시험 `quit_probe_reports_ready_to_quit_and_leaves_the_run_alive`는 템플릿 치환, 보고 필드, `cancel`·`token`·`get_workbench_connection` 부재를 확인한다(`t035-probe-unit-1.log` 종료 0).
+  - **실제 앱 실행은 하지 않았다**(T036·T045–T047에서 메인 세션이 수행).
+- 스크립트 `specs/044-standalone-server/reviews/app-smoke/owner-check.py`(stdlib만 사용):
+  1. `server.json`을 읽는다.
+  2. `POST /v1/system/identify`의 HMAC 증명을 확인한다. 틀리면 토큰을 보내지 않고 `identity-failed`로 종료 2.
+  3. handshake(instance 일치, epoch).
+  4. `bench.list`에서 run을 찾는다.
+  5. `run.replay`.
+  6. event ticket을 받고 최소 RFC6455 WebSocket(마스킹, ping/pong, 조각 처리)으로 hello를 받는다.
+  7. 소유자 prompt의 에코를 live로 받는다(replay 뒤 순번).
+  8. `run.cancel` → run이 목록에서 사라지는지 확인한다.
+  - JSON 보고를 한 줄로 출력한다. `result == "ok"`일 때만 종료 0이다. loopback 외 주소는 거부하고, Origin을 보내지 않으며, 프록시를 쓰지 않는다.
+- 실제 바이너리 검증 `apps/agentic-workbench-server/tests/owner_check_script.rs`(dev-dep `serde_json`):
+  - `owner_check_script_observes_and_cancels_a_run_after_the_desktop_left`:
+    - 실제 `agentic-workbench-server serve`를 띄우고 PID를 추적한다(실패 시 SIGKILL). 안내 파일 `verify`를 통과할 때까지 기다린다.
+    - 창 토큰으로 실제 ACP 에코 run `r1`을 띄우고, 시작 에코 정착을 기다린다.
+    - retire(`closeBench:false`)와 lease release를 한다. 이때 agent는 살아 있다.
+    - `owner-check.py --data-dir <data> --run-id r1`을 실행한다. 종료 0, `result/identify/liveEcho/liveAfterReplay/cancelled`를 확인한다. 출력에 소유자 토큰이 없다.
+    - agent 프로세스가 끝난다. 서버는 SIGTERM에 종료 0.
+  - `owner_check_script_sends_no_owner_token_to_an_impostor_endpoint`:
+    - 가짜 TCP 끝점이 틀린 증명을 준다. 스크립트는 종료 2 / `identity-failed`이다.
+    - 끝점이 받은 요청에는 `authorization` 헤더도 토큰 문자열도 없다.
+  - `t035-script-1.log` 종료 0, 2 passed, filtered out 0.
+  - **바로 통과했다**(스크립트와 시험을 함께 작성). impostor 시험이 증명 실패 경로를 판별한다.
+- 운영 빌드 제외:
+  - `cargo check --release`(AW src-tauri, `t035-release-check-1.log`) 종료 0. probe 모듈과 command 등록은 `debug_assertions`에서만 존재한다.
+  - `VITE_AW_DEBUG_PROBE` 없이 `pnpm build`(`t035-prod-dist-1.log`) 종료 0. `dist`에서 `__awDebug`·`report_app_probe`·`ready-to-quit`·`dropEventSockets`는 각각 0개 파일이다.
+
+## 최종 실행 (T034·T035 fork)
+
+- `cargo test -p workbench-host` (`final-host-1.log`, status 파일 기록) 종료 0. 모든 target의 filtered out은 0이다(45·2·1·2·1·6·0 passed).
+  - 뒤이은 lint 수정은 시험 파일 한 줄만 바꿨다. 해당 target만 다시 돌렸다(`final-host-owner-2.log` 종료 0, 2 passed).
+- `cargo test -p agentic-workbench-server`: 첫 실행 `final-server-1.log` 종료 0. lint 수정 뒤 재실행 `final-server-2.log` 종료 0(0·2·5 passed, filtered out 0).
+- `cargo clippy -p workbench-host -p agentic-workbench-server --all-targets -D warnings`:
+  - 첫 실행 `final-clippy-ws-1.log` 종료 101. `while_let_loop`(owner_check_script.rs), `redundant_closure`(owner_after_desktop.rs).
+  - 수정 뒤 `final-clippy-ws-2.log` 종료 0.
+- AW src-tauri `cargo test` (`final-aw-test-1.log`) 종료 0, 101·0·1·0 passed, filtered out 0.
+- AW src-tauri `cargo clippy --all-targets -D warnings` (`final-aw-clippy-1.log`) 종료 0.
+- 끝난 뒤 `fake_acp_permission_agent`·`agentic-workbench-server serve` 잔여 프로세스는 없다.
