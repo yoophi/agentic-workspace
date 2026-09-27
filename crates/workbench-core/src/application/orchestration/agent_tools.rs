@@ -219,11 +219,26 @@ pub fn resolve_role(
 }
 
 impl OrchestrationRuntime {
-    pub fn agent_role(&self, run_id: &str) -> RoleLookup {
+    /// 서버 상태의 역할(research R7). 041 Codex 리뷰: 영속 기록만 보면 작업대를 닫고 다른 작업대가 재개했을 때
+    /// 끝난 이전 run(폐기되지 않은 토큰)이 역할을 되찾는다. 그래서 역할은 **지금 묶인 작업대가 소유한 살아 있는 run**
+    /// 이거나 그 작업대가 기동 중인 자식 run일 때만 준다.
+    pub async fn agent_role(&self, run_id: &str) -> RoleLookup {
         let launching = self.launching_child(run_id);
-        match self.repository().snapshot() {
-            Ok(sessions) => resolve_role(&sessions, run_id, launching),
+        let lookup = match self.repository().snapshot() {
+            Ok(sessions) => resolve_role(&sessions, run_id, launching.clone()),
             Err(_) => RoleLookup::None,
+        };
+        let RoleLookup::Role(role) = &lookup else {
+            return lookup;
+        };
+        if launching.is_some() {
+            return lookup;
+        }
+        let live_owner = self.benches.engine.active_owner_of(run_id).await;
+        if live_owner.as_deref() == Some(role.bench_id()) {
+            lookup
+        } else {
+            RoleLookup::None
         }
     }
 }
@@ -770,6 +785,17 @@ impl OrchestrationRuntime {
                 ToolError::new("unknownNode", "Assigned child node was not found.", false)
             })?;
         let planned_run_id = uuid::Uuid::new_v4().to_string();
+        // 엔진을 부르기 전에 예정 run을 노드의 현재 run으로 예약한다 — 첫 턴 보고가 현재 run의 보고로 반영된다.
+        {
+            let (b, t, n, r) = (
+                bench.to_owned(),
+                task.id.clone(),
+                node.id.clone(),
+                planned_run_id.clone(),
+            );
+            self.blocking(move |service| service.reserve_child_run(&b, &t, &n, &r))
+                .await?;
+        }
         self.remember_launching(&planned_run_id, &snapshot.id, &node.id, &task.id);
         let outcome = self
             .worker()
@@ -805,6 +831,12 @@ impl OrchestrationRuntime {
             Ok(other) => Ok(other),
             Err(error) => Err(error.into()),
         };
+        if !matches!(result, Ok(StartWorkerOutcome::Started { .. })) {
+            let (b, n, r) = (bench.to_owned(), node.id.clone(), planned_run_id.clone());
+            let _ = self
+                .blocking(move |service| service.release_child_run_reservation(&b, &n, &r))
+                .await;
+        }
         self.forget_launching(&planned_run_id);
         result
     }

@@ -172,7 +172,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.retryChildTask",
-        "requestId": "r-15",
+        "requestId": "r-16",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -180,7 +180,7 @@
             "taskId": "{{task}}"
           }
         },
-        "idempotencyKey": "k-15"
+        "idempotencyKey": "k-16"
       },
       "expect": {
         "reply": {
@@ -188,6 +188,29 @@
         }
       },
       "principal": "agent:coord"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-17",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "attempt": 2
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "ignoreFields": [

@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.sendChildCommand",
-        "requestId": "r-16",
+        "requestId": "r-17",
         "input": {
           "benchId": "{{bench}}",
           "input": {
@@ -162,7 +162,7 @@
             "delivery": "queue"
           }
         },
-        "idempotencyKey": "k-16"
+        "idempotencyKey": "k-17"
       },
       "expect": {
         "fault": {

@@ -22,3 +22,31 @@
 ## 알려진 한계(기록)
 
 - 계획 id로 묶었지만 끝내 시작하지 않은 run의 claim은 hub 소유 표에 남는다(발행 이력이 없어 보관 한도 정리에 걸리지 않음). 같은 작업대의 재시작 재시도를 위해 의도적으로 두었다. 크기는 묶기 횟수에 비례하고 서버 재시작 때 사라진다.
+
+---
+
+# 구현 리뷰 2 — Codex adversarial review (041)
+
+## 실제 범위와 제외
+
+- 첫 실행 `adversarial-review --wait --base c8b41a4 …`는 companion이 전체 diff를 git 출력 버퍼에 담지 못해 `spawnSync git ENOBUFS`로 실패했다(diff +26,626줄).
+- 재실행 범위: 같은 worktree의 임시 브랜치 `codex-review-041-tmp`에서 **생성물만 기준 상태로 되돌린 커밋**(61파일 = orchestration 계약 fixture 53 + 이벤트 fixture 3(추가 2·삭제 1) + describe fixture 3 + OpenAPI golden 1 + 생성 TS 1) 위에서 `--base c8b41a4` — 96파일 +9,995/−3,856(코드·테스트·문서 전부). 리뷰 뒤 원래 브랜치로 돌아와 임시 브랜치를 지웠고, 그 커밋은 PR에 없다.
+- **제외 범위의 한계**: 제외한 fixture에는 권한·역할·재연결 동작의 golden 기대값이 들어 있다. Codex는 그 기대값을 보지 않았다 — 아래 "보완 검토"로 따로 리뷰했다.
+
+## 발견(판정 needs-attention, high 4)과 처리
+
+| # | 내용 | 처리 | 회귀 테스트(변이 확인) |
+|---|---|---|---|
+| C1 | 작업대를 닫고 다른 작업대가 재개하면 끝난 이전 run(폐기 안 된 토큰)이 역할을 되찾음 | 역할에 "지금 묶인 작업대가 살아 있는 run으로 소유"(엔진 `active_owner_of`)를 요구(기동 중 자식 예외), 닫기가 취소한 run의 토큰 폐기 | `previous_runs_do_not_regain_roles_after_another_bench_resumes` — 역할 null·도구 `forbiddenActor`·revision·과제 불변·토큰 폐기 기록. 살아 있는 소유 검사를 끄면 역할이 `"coordinator"`로 나와 실패 |
+| C2 | 첫 턴 결과·입력 요청이 성공 응답만 받고 과제에 반영되지 않음(`is_current_run` false) | 엔진 호출 전에 예정 run을 노드 현재 run으로 예약(`reserve_child_run`), 첫 보고가 Ready→Running 뒤 반영, 기동 실패 시 예약 되돌림, `bind_child_run`은 첫 턴에 끝난 상태를 되돌리지 않음 | `first_turn_result_and_input_request_update_the_task_and_notify` — 결과: 과제 `completed`·노드 `idle`·result 알림, 입력 요청: `inputRequired`·노드 `active`·inputRequest 알림. 예약을 끄면 과제가 `"running"`으로 남아 실패 |
+| C3 | 이전 run의 늦은 종료 검사가 새 시도를 실패 처리 | 감시에 시도 번호·run id, `fail_task_for_runtime`이 둘 다 대조 | 서비스 단위 `late_runtime_failure_of_a_previous_attempt_does_not_touch_the_new_attempt` |
+| C4 | 닫기 중 저장 실패를 숨겨 작업 영역을 복구 불가로 남김 | 저장 실패 시 메모리 묶임 해제 + 로그. `bench.close`의 `closed: true`는 유지(근거: research R3 "닫기 저장 실패") | `a_failed_release_write_still_leaves_the_workspace_resumable` — 쓰기 금지로 저장 실패 → 다른 작업대 복구 목록에 즉시 보임 → 쓰기 복구 뒤 재시작 없이 재개. 메모리 해제를 끄면 복구 목록 `[]`로 실패 |
+
+## 보완 검토 — 제외한 fixture의 기대값(실행 성공과 별개)
+
+orchestration fixture 53개의 단계별 기대(결과·오류 코드·문구·details)를 추출해(`scratchpad/fixture-expectations.txt`) contracts와 대조했다.
+
+- **약점 발견**: 거절 fixture 다수가 오류 코드만 단정하고 오늘 문구를 단정하지 않았고(`forbiddenActor`·`scopeMismatch`·run 불일치), 정상 fixture 다수가 `ok()`만 보고 상태 변화를 단정하지 않았다.
+- **보강**: 거절은 문구와 `toolError{code, message, retryable}` 전체(`"The authenticated agent role cannot call this tool."`, `"This run is not bound to an orchestration workspace."`, `"The requested run does not match the authenticated capability."`). 정상은 상태: 취소 → 과제 `cancelled`, 재시도 → `attempt: 2`, 재배정 → `assignedNodeId`, 목표 위임 → 루트 과제가 활성 세대 목록에 보임(`rootTaskId` capture로 존재 확인), 자식 보고 → 보고 `type`·`progressPercent`·`reporterRunId`(principal run)와 이어지는 과제 상태(`completed`·`inputRequired`·`blocked` — 해당 알림이 `delivered`가 된 뒤 조건 대기로 읽음), 명령 → `kind`·`status: accepted`, 대기·수집 → 과제 `completed`·결과 보고.
+- 보강 중 기대값이 틀렸던 곳 1건: 목표 위임 뒤 과제 목록을 빈 목록으로 적었다가 실제로는 루트 과제가 생긴다는 계약(contracts `delegateGoal`)에 맞춰 고쳤다.
+- 경로 비교에서 뺀 값은 두 가지이고 fixture에 이유를 적었다: 보고 응답의 `notifications`(백그라운드 전달과 경합 — 전달은 liveness ①②와 조건 대기로 본다), 묶이지 않은 작업 영역 fixture의 `cancelledRuns` 순서.

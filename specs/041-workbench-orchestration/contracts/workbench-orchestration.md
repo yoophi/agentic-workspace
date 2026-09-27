@@ -60,7 +60,7 @@ coordinator(현재 세대): `orchestration.createChildTask`·`assignChildTask`·
 - `StreamKind::Orchestration` 구독 가능. 스트림 key는 묶임 id(작업 영역 DTO `eventStreamId`).
 - 구독 권한: 묶임의 작업대를 연 주체만. 다른 주체·agent `forbidden`, 모르는 id `notFound`, 끝난 묶임 `Gap(evicted)`. cursor 하나라도 거절되면 구독 전체 거절(040 규칙).
 - **run 스트림 구독 권한(보강)**: `run:<runId>` 구독도 `run.replay`와 같은 소유 조건(040은 scope만 검사 — exchange·bench와 같은 누수). 발행 전 run은 엔진에 소유가 등록된 run만 대기 구독을 허용하고 그 외 `notFound`. 검사 위치는 seam `events` 진입점(hub 아님). 제거된 run은 hub 규칙대로 `Gap(evicted)`.
-- 발행: 작업 영역이 바뀌는 모든 자리(서비스 변경, 명령 전달 단계, 알림 전달, 작업대 닫기로 복구 가능 전환 — 마지막은 스트림 제거 직전 발행).
+- 발행: 작업 영역이 바뀌는 모든 자리(서비스 변경, 명령 전달 단계, 알림 전달). 작업대 닫기로 복구 가능 전환될 때는 따로 발행하지 않는다 — 묶임이 풀리는 commit에서 스트림이 제거되어 구독자는 `Gap(evicted)`를 받는다. 전환 저장이 실패해도 묶임은 풀리고(research R3) `bench.close`는 `closed: true`다.
 
 ## 계약 조회
 

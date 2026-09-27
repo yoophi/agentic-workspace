@@ -164,7 +164,12 @@
       },
       "expect": {
         "reply": {
-          "kind": "complete"
+          "kind": "complete",
+          "output": {
+            "taskId": "{{task}}",
+            "kind": "message",
+            "status": "accepted"
+          }
         }
       },
       "principal": "agent:coord"

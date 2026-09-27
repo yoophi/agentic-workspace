@@ -617,3 +617,43 @@ async fn prebound_main_start_can_be_retried_after_an_engine_failure() {
         .finish("filler", &h.rt.runtime.benches().run_sink(&a));
     start_main(&h, &a, "main-r").await.unwrap();
 }
+
+/// 041 Codex 리뷰 C4: 작업대 닫기의 복구 가능 전환 저장이 실패해도(디스크 오류) 묶임은 풀린다. `bench.close`는
+/// 계약대로 `closed: true`(작업대 닫힘·run 취소는 사실)이고 실패는 로그로 남는다. 실패 직후 다른 작업대가 복구 목록에서
+/// 그 작업 영역을 보고, 디스크 오류가 사라지면 서버 재시작 없이 재개한다.
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_failed_release_write_still_leaves_the_workspace_resumable() {
+    use std::os::unix::fs::PermissionsExt;
+    let h = BenchHarness::new(RunScript::default());
+    let a = h.open().await;
+    let first = with_work(&h, &a, &h.dir, "main-a").await;
+    let id = first["id"].as_str().unwrap().to_owned();
+    let data_dir = h.rt.paths.app_data_dir().to_path_buf();
+    let original = std::fs::metadata(&data_dir).unwrap().permissions();
+    // 저장은 같은 디렉터리의 임시 파일 + rename이다 — 디렉터리 쓰기를 막아 실패시킨다.
+    std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+    let closed = h.close(&a).await;
+    let b = h.open().await;
+    let listed = h
+        .call(
+            &desktop(),
+            OperationId::OrchestrationListRecoverable,
+            json!({ "benchId": b, "worktreePath": h.dir }),
+        )
+        .await;
+    std::fs::set_permissions(&data_dir, original).unwrap();
+    assert_eq!(closed.unwrap()["closed"], true);
+    let listed = listed.unwrap();
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|session| session["id"] == id.as_str()),
+        "recoverable right after the failed write: {listed}"
+    );
+    let resumed = bootstrap(&h, &b, &h.dir, Some(&id)).await.unwrap();
+    assert_eq!(resumed["id"], id.as_str());
+    assert_eq!(get(&h, &b).await["id"], id.as_str());
+}

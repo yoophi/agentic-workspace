@@ -118,7 +118,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-18",
+        "requestId": "r-21",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -133,7 +133,7 @@
             "expectedResult": "summary"
           }
         },
-        "idempotencyKey": "k-18"
+        "idempotencyKey": "k-21"
       },
       "expect": {
         "reply": {
@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-19",
+        "requestId": "r-22",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -166,7 +166,7 @@
             "expectedResult": "e"
           }
         },
-        "idempotencyKey": "k-19"
+        "idempotencyKey": "k-22"
       },
       "expect": {
         "reply": {
@@ -183,7 +183,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-20",
+        "requestId": "r-23",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -198,7 +198,7 @@
             "expectedResult": "e"
           }
         },
-        "idempotencyKey": "k-20"
+        "idempotencyKey": "k-23"
       },
       "expect": {
         "reply": {
@@ -215,7 +215,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-21",
+        "requestId": "r-24",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -230,7 +230,7 @@
             "expectedResult": "e"
           }
         },
-        "idempotencyKey": "k-21"
+        "idempotencyKey": "k-24"
       },
       "expect": {
         "reply": {
@@ -249,7 +249,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportResult",
-        "requestId": "r-22",
+        "requestId": "r-25",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -257,7 +257,7 @@
             "summary": "done"
           }
         },
-        "idempotencyKey": "k-22"
+        "idempotencyKey": "k-25"
       },
       "expect": {
         "reply": {
@@ -273,14 +273,14 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.assignChildTask",
-        "requestId": "r-23",
+        "requestId": "r-26",
         "input": {
           "runId": "coord",
           "arguments": {
             "taskId": "{{queuedTask}}"
           }
         },
-        "idempotencyKey": "k-23"
+        "idempotencyKey": "k-26"
       },
       "expect": {
         "reply": {

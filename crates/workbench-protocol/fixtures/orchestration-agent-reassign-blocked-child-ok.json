@@ -172,13 +172,13 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.adoptManualChild",
-        "requestId": "r-16",
+        "requestId": "r-18",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "extra-agent-run-7",
           "title": "Spare"
         },
-        "idempotencyKey": "k-16"
+        "idempotencyKey": "k-18"
       },
       "expect": {
         "reply": {
@@ -190,7 +190,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reassignChildTask",
-        "requestId": "r-17",
+        "requestId": "r-19",
         "input": {
           "runId": "coord",
           "arguments": {
@@ -199,7 +199,7 @@
             "targetNodeId": "extra-agent-run-7"
           }
         },
-        "idempotencyKey": "k-17"
+        "idempotencyKey": "k-19"
       },
       "expect": {
         "reply": {
@@ -207,6 +207,29 @@
         }
       },
       "principal": "agent:coord"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-20",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "assignedNodeId": "extra-agent-run-7"
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "ignoreFields": [

@@ -164,7 +164,11 @@
       },
       "expect": {
         "reply": {
-          "kind": "complete"
+          "kind": "complete",
+          "output": {
+            "taskId": "{{task}}",
+            "kind": "interrupt"
+          }
         }
       },
       "principal": "agent:coord"

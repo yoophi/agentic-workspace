@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-24",
+        "requestId": "r-25",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-24"
+        "idempotencyKey": "k-25"
       },
       "expect": {
         "reply": {
@@ -172,13 +172,13 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.adoptManualChild",
-        "requestId": "r-27",
+        "requestId": "r-28",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "extra-agent-run-7",
           "title": "Spare"
         },
-        "idempotencyKey": "k-27"
+        "idempotencyKey": "k-28"
       },
       "expect": {
         "reply": {
@@ -190,7 +190,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-28",
+        "requestId": "r-29",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -214,7 +214,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reassignTask",
-        "requestId": "r-29",
+        "requestId": "r-30",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -224,11 +224,19 @@
             "targetNodeId": "extra-agent-run-7"
           }
         },
-        "idempotencyKey": "k-29"
+        "idempotencyKey": "k-30"
       },
       "expect": {
         "reply": {
-          "kind": "complete"
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "assignedNodeId": "extra-agent-run-7"
+              }
+            ]
+          }
         }
       }
     }

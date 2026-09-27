@@ -56,12 +56,12 @@ fn ensure_run(
 }
 
 /// 역할을 찾고 이 도구를 부를 수 있는지 본다(오늘 순서: 역할 불일치 → forbiddenActor, 작업 영역 없음 → scopeMismatch).
-fn role_for(
+async fn role_for(
     runtime: &OrchestrationRuntime,
     run_id: &str,
     tool: &str,
 ) -> Result<AgentRole, ToolError> {
-    match runtime.agent_role(run_id) {
+    match runtime.agent_role(run_id).await {
         RoleLookup::Role(role) if role.allows(tool) => Ok(role),
         RoleLookup::Role(_) | RoleLookup::None => Err(forbidden_actor()),
         RoleLookup::Unbound => Err(not_bound()),
@@ -165,6 +165,7 @@ pub fn register(
             async move {
                 ensure_run(&ctx.request_id, ctx.principal.agent_run_id(), &input.run_id)?;
                 let role = role_for(&runtime, &input.run_id, tool)
+                    .await
                     .map_err(|error| tool_fault(&ctx.request_id, error))?;
                 agent_tools::handle_tool(&runtime, &input.run_id, role, tool, &input.arguments)
                     .await
@@ -190,7 +191,7 @@ pub fn register(
             let runtime = Arc::clone(&runtime);
             async move {
                 ensure_run(&ctx.request_id, ctx.principal.agent_run_id(), &input.run_id)?;
-                let dto = match runtime.agent_role(&input.run_id) {
+                let dto = match runtime.agent_role(&input.run_id).await {
                     RoleLookup::Role(AgentRole::Coordinator { workspace_id, .. }) => AgentRoleDto {
                         role: Some(AgentRoleKindDto::Coordinator),
                         workspace_id: Some(workspace_id),

@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-24",
+        "requestId": "r-25",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,7 +159,7 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-24"
+        "idempotencyKey": "k-25"
       },
       "expect": {
         "reply": {
@@ -172,7 +172,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-25",
+        "requestId": "r-26",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -196,7 +196,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.retryTask",
-        "requestId": "r-26",
+        "requestId": "r-27",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -205,11 +205,19 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-26"
+        "idempotencyKey": "k-27"
       },
       "expect": {
         "reply": {
-          "kind": "complete"
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "attempt": 2
+              }
+            ]
+          }
         }
       }
     }

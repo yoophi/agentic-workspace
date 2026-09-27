@@ -118,7 +118,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-32",
+        "requestId": "r-38",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -136,7 +136,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.handoffCoordinator",
-        "requestId": "r-33",
+        "requestId": "r-39",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -147,7 +147,7 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-33"
+        "idempotencyKey": "k-39"
       },
       "expect": {
         "reply": {
@@ -159,7 +159,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.listChildTasks",
-        "requestId": "r-34",
+        "requestId": "r-40",
         "input": {
           "runId": "coord",
           "arguments": {}
@@ -170,9 +170,12 @@
           "code": "forbidden",
           "details": {
             "toolError": {
-              "code": "forbiddenActor"
+              "code": "forbiddenActor",
+              "message": "The authenticated agent role cannot call this tool.",
+              "retryable": false
             }
-          }
+          },
+          "message": "The authenticated agent role cannot call this tool."
         }
       },
       "principal": "agent:coord"

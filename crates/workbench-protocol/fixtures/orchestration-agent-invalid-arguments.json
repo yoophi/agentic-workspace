@@ -132,7 +132,8 @@
           "code": "invalidArgument",
           "details": {
             "toolError": {
-              "code": "invalidInput"
+              "code": "invalidInput",
+              "retryable": false
             }
           }
         }

@@ -54,6 +54,7 @@
 - **묶기**(`orchestration.bootstrap` — 새로 만들기 또는 `resumeWorkspaceId`로 재개. `orchestration.recover`는 이미 묶인 작업 영역을 재조정할 뿐 묶지 않는다 — 오늘 동작, 흐름 테스트로 확인): ① 작업대 입장권을 얻는다(닫히는 중이면 `notFound`), ② binding mutex 안에서 "작업 영역 찾기/만들기(저장소 `update`) + 이미 묶임 검사 + 묶임 표 삽입"을 한 번에 한다, ③ 입장권을 놓는다. 작업 영역 id를 아직 모르는 새로 만들기·worktree로 찾는 복구도 같은 mutex로 직렬화되어 두 작업대가 둘 다 "없음"을 보고 중복 생성·중복 묶기를 할 수 없다. 입장권 덕분에 닫기 hook이 먼저 돌아 죽은 작업대에 묶이는 일이 없다.
 - 거절 문구: 이미 다른 작업대에 묶인 작업 영역 → "The workspace cannot be bound to this window.", 작업대가 이미 다른 worktree 작업 영역에 묶임 → "The window is already bound to another worktree."(바이트 동일 유지, contracts에 명시).
 - **풀기**: 작업대 닫기 hook을 **async**로 바꾼다(`BenchCloseHook`이 future를 돌려주고 `finish_close`가 await — 닫기 정리는 이미 spawn된 task 안). hook은 소유 run 취소 뒤에 돌며 ① binding mutex 안에서 묶임 표 제거 + 오늘 `release_window` 규칙(노드 주의 필요·run 재조정)을 `update`(`spawn_blocking`)로 적용, ② 마지막 갱신 이벤트 발행, ③ 묶임 스트림 제거(040 `remove_stream`, 제거 표식) 순서다.
+- **닫기 저장 실패(Codex 구현 리뷰 C4)**: ①의 저장이 실패해도(디스크 오류) 메모리 묶임은 반드시 풀고 실패를 로그로 남긴다 — 풀지 않으면 작업대가 사라진 뒤 작업 영역이 "이미 묶임"으로 남아 서버 재시작 전까지 재개할 수 없다. `bench.close`의 응답(`closed: true`)은 바꾸지 않는다: 그 계약은 "작업대가 닫혔다(소유 run 취소·자원 제거)"이고 이 사실은 저장 실패와 무관하게 참이며, 작업 영역은 메모리 묶임 해제로 즉시 복구 가능하다. 저장하지 못한 표시 상태(주의 필요 등)는 다음 변경 때 따라잡는다. 테스트 `a_failed_release_write_still_leaves_the_workspace_resumable`(데이터 디렉터리 쓰기 금지로 저장 실패 → 다른 작업대의 복구 목록에 즉시 보임 → 쓰기 복구 뒤 서버 재시작 없이 재개; 메모리 해제를 끄면 복구 목록이 비어 실패함을 변이로 확인).
 - agent operation은 작업대 입장권을 쥐지 않는다. 닫기 뒤 늦게 도착한 agent 호출은 묶임이 없으므로 조회는 오늘 결과, 자식 기동은 입장 실패로 과제가 대기/실패로 남는다(R8).
 
 **Rationale**: 작업대가 메모리 전용이므로 묶임도 메모리여야 일관된다. 오늘 앱 재시작 뒤 모든 창 label이 무효가 되어 사실상 복구 가능이 되는 것과 사용자 결과가 같다.
@@ -106,13 +107,15 @@ agent operation 16개 + 역할 조회 1개(`orchestration.getAgentRole`, MCP `to
 - MCP `tools/list`: 오늘은 토큰의 actor kind로 목록을 고른다(`mcp/mod.rs:273-281`). 041은 요청 시점의 서버 역할로 고른다(core에 `orchestration.role`에 해당하는 내부 조회를 두고 AW MCP가 부른다 — agent principal로 부르는 조회 operation `orchestration.getAgentRole`을 추가, agent 전용). 역할이 없으면 오늘 `LegacyRun`과 같은 목록.
 - MCP 토큰 registry는 AW에 남아 **token → run id**만 한다. 역할 주장은 토큰에서 제거한다. 오늘의 폐기 시점(재시도·재배정 시 `revoke_run`, 교대 시 `revoke_generation` — `orchestration_tool.rs:600`, `tauri_commands.rs:597`, `:704`)은 토큰 수명 관리로 유지하되 권한 근거는 아니다.
 
+- **살아 있는 소유(Codex 구현 리뷰 C1 반영)**: 영속 기록(세대·노드 run)만 보면 작업대를 닫은 뒤 다른 작업대가 재개했을 때, 끝난 이전 run이 폐기되지 않은 토큰으로 역할을 되찾는다. 그래서 역할은 기록이 맞고 **지금 묶인 작업대가 그 run을 살아 있는 상태로 소유**(엔진 `active_owner_of`)할 때만 준다. 기동 중(launching 표) 자식은 예외다. 닫기는 취소한 run의 MCP 토큰도 폐기한다(`RunLaunchDecorator::revoke_run`) — 판정과 폐기가 이중으로 막는다. 테스트 `previous_runs_do_not_regain_roles_after_another_bench_resumes`(도구 거절·역할 없음·상태 불변·토큰 폐기; 살아 있는 소유 검사를 끄면 실패함을 변이로 확인).
+
 **Rationale**: 토큰 주장은 발급 시점의 사본이라 교대·재배정·복구 뒤 어긋난다. 서버 상태를 근거로 하면 폐기 누락이 권한 누수가 되지 않는다.
 
 ## R8. 자식 run 기동과 worktree 감시를 core로
 
-**Decision**: `AgentWorker` 포트의 운영 구현을 core `EngineAgentWorker`로 옮긴다. 자식 기동 = ① `update`: 과제 시도에 기동 예정 run id 기록(Launching, R7) ② 작업대 입장권(기동 끝까지) ③ `RunLaunchDecorator`(MCP env) ④ `RunEngine::start(owner = 작업대)`(spawn 후 반환) ⑤ `update`: 결과 기록(Running 또는 실패 → 과제 대기/실패). 입장 실패(닫히는 중)면 ⑤에서 과제를 오늘 실패 규칙으로 되돌린다. 보내기·중단·취소는 `RunEngine` 메서드이고 lock 없이 부른다.
+**Decision**: `AgentWorker` 포트의 운영 구현을 core `EngineAgentWorker`로 옮긴다. 자식 기동 = ① `update`: 노드의 현재 run으로 기동 예정 run id를 **예약**(`reserve_child_run`, 실행 상태 Starting — Codex 구현 리뷰 C2: 예약이 없으면 엔진 등록 직후·결과 저장 전의 첫 턴 결과·입력 요청이 `is_current_run` 검사에서 떨어져 과제에 반영되지 않았다. 예약 run의 첫 보고는 과제를 Ready→Running으로 옮긴 뒤 반영되고, 기동이 실패하면 예약을 되돌린다; 테스트 `first_turn_result_and_input_request_update_the_task_and_notify`) ② 작업대 입장권(기동 끝까지) ③ `RunLaunchDecorator`(MCP env) ④ `RunEngine::start(owner = 작업대)`(spawn 후 반환) ⑤ `update`: 결과 기록(Running 또는 실패 → 과제 대기/실패). 입장 실패(닫히는 중)면 ⑤에서 과제를 오늘 실패 규칙으로 되돌린다. 보내기·중단·취소는 `RunEngine` 메서드이고 lock 없이 부른다.
 
-worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core가 run 종료 이벤트를 받는 자리(`WorkbenchRunSink` 종료 처리)에서 하되, 종료 처리가 호출자 task 안에서 바로 불릴 수 있으므로 **lock을 기다리지 않고** 조건부 `update`(`(taskId, attempt, runId)` 일치 시만)를 `spawn_blocking`으로 띄운다(R2-3). AW `RunTerminalHook`의 orchestration·worktree 부분은 삭제하고, 포트가 비면 포트 자체를 없앤다. `WORKTREE_GUARDS` 전역은 core 런타임 소유 표가 된다(창 label 제거).
+worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core가 run 종료 이벤트를 받는 자리(`WorkbenchRunSink` 종료 처리)에서 하되, 종료 처리가 호출자 task 안에서 바로 불릴 수 있으므로 **lock을 기다리지 않고** 조건부 `update`(`(taskId, attempt, runId)` 일치 시만 — 감시가 시도 번호와 run id를 들고 있고 `fail_task_for_runtime`이 둘 다 대조한다, Codex 구현 리뷰 C3: 처음 구현은 과제·노드 id만 넘겨 이전 시도의 늦은 검사가 재시도한 새 시도를 실패로 덮을 수 있었다; 테스트 `late_runtime_failure_of_a_previous_attempt_does_not_touch_the_new_attempt`)를 `spawn_blocking`으로 띄운다(R2-3). AW `RunTerminalHook`의 orchestration·worktree 부분은 삭제하고, 포트가 비면 포트 자체를 없앤다. `WORKTREE_GUARDS` 전역은 core 런타임 소유 표가 된다(창 label 제거).
 
 ## R9. scheduler·알림 전달·복구를 core로
 

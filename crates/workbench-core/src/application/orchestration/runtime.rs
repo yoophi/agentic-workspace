@@ -108,7 +108,7 @@ pub struct OrchestrationRuntime {
     worker: EngineAgentWorker,
     scheduler: OrchestrationScheduler,
     config: OrchestrationConfig,
-    benches: Arc<BenchServices>,
+    pub(crate) benches: Arc<BenchServices>,
     guards: Arc<WorktreeGuards>,
     /// 기동 중인 자식: 예정 run id → (작업 영역, 노드, 과제). 엔진이 run을 등록하고 노드에 묶기 전에 자식의 첫 턴이
     /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
@@ -890,8 +890,17 @@ impl OrchestrationRuntime {
 
     /// 작업대 닫기(research R3): 오늘 창 닫힘의 `release_window`와 같은 규칙으로 복구 가능 전환. 묶임 표 제거는
     /// 묶임 저장소 commit이 한다.
+    /// 작업대 닫기 hook. 041 Codex 리뷰: 복구 가능 전환의 저장이 실패해도(디스크 부족 등) 메모리 묶임은 반드시
+    /// 푼다 — 그러지 않으면 작업대가 사라진 뒤 작업 영역이 "이미 묶임"으로 남아 서버 재시작 전까지 재개할 수 없다.
+    /// 저장된 표시 상태(주의 필요 등)는 다음 변경 때 따라잡는다. 실패는 로그로 남긴다.
     pub fn release(&self, bench_id: &str) {
-        let _ = self.service().release_bench(bench_id);
+        if let Err(error) = self.service().release_bench(bench_id) {
+            eprintln!(
+                "[workbench] orchestration release for bench {bench_id} failed to persist: {}; unbinding in memory",
+                error.message
+            );
+            self.repository.unbind_bench(bench_id);
+        }
     }
 
     /// run 종료 뒤 worktree 감시(research R8). lock을 기다리지 않는 조건부 갱신 한 번.
@@ -909,6 +918,8 @@ impl OrchestrationRuntime {
                 &guard.bench_id,
                 &guard.task_id,
                 &guard.node_id,
+                guard.attempt,
+                &guard.run_id,
                 violation.code,
                 &violation.message,
             );

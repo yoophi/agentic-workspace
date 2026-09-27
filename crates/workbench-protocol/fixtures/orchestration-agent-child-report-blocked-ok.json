@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.reportBlocked",
-        "requestId": "r-29",
+        "requestId": "r-34",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -159,19 +159,48 @@
             "summary": "stuck"
           }
         },
-        "idempotencyKey": "k-29"
+        "idempotencyKey": "k-34"
       },
       "expect": {
         "reply": {
           "kind": "complete",
           "output": {
             "report": {
-              "taskId": "{{task}}"
+              "taskId": "{{task}}",
+              "type": "blocked"
             }
           }
         }
       },
       "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-35",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "blocked"
+              }
+            ]
+          }
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
     }
   ],
   "ignoreFields": [

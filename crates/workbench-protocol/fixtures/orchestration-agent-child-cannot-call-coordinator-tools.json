@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.createChildTask",
-        "requestId": "r-30",
+        "requestId": "r-36",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -166,16 +166,19 @@
             "expectedResult": "e"
           }
         },
-        "idempotencyKey": "k-30"
+        "idempotencyKey": "k-36"
       },
       "expect": {
         "fault": {
           "code": "forbidden",
           "details": {
             "toolError": {
-              "code": "forbiddenActor"
+              "code": "forbiddenActor",
+              "message": "The authenticated agent role cannot call this tool.",
+              "retryable": false
             }
-          }
+          },
+          "message": "The authenticated agent role cannot call this tool."
         }
       },
       "principal": "agent:{{child}}"
@@ -184,7 +187,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.waitChildTasks",
-        "requestId": "r-31",
+        "requestId": "r-37",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -197,9 +200,12 @@
           "code": "forbidden",
           "details": {
             "toolError": {
-              "code": "forbiddenActor"
+              "code": "forbiddenActor",
+              "message": "The authenticated agent role cannot call this tool.",
+              "retryable": false
             }
-          }
+          },
+          "message": "The authenticated agent role cannot call this tool."
         }
       },
       "principal": "agent:{{child}}"

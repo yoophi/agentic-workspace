@@ -797,6 +797,61 @@ where
         Ok(snapshot)
     }
 
+    /// 자식 기동 전에 예정 run을 노드의 현재 run으로 예약한다(041 Codex 리뷰): 엔진이 run을 등록한 직후·결과 저장
+    /// 전에 온 첫 턴 보고도 현재 run의 보고로 반영된다. 기동이 실패하면 `release_child_run_reservation`으로 되돌린다.
+    pub fn reserve_child_run(
+        &self,
+        bench_id: &str,
+        task_id: &str,
+        node_id: &str,
+        run_id: &str,
+    ) -> Result<(), OrchestrationError> {
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_bench_mut(sessions, bench_id)?;
+        if !session
+            .tasks
+            .iter()
+            .any(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
+        {
+            return Err(not_found("Assigned task"));
+        }
+        let node = session
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == node_id)
+            .ok_or_else(|| not_found("Assigned child node"))?;
+        node.current_run_id = Some(run_id.into());
+        node.execution_status = ExecutionStatus::Starting;
+        session.revision += 1;
+        session.updated_at = now();
+        tx.commit()
+    }
+
+    /// 기동이 실패한 예약을 되돌린다(그 사이 다른 run이 들어왔으면 그대로 둔다).
+    pub fn release_child_run_reservation(
+        &self,
+        bench_id: &str,
+        node_id: &str,
+        run_id: &str,
+    ) -> Result<(), OrchestrationError> {
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_bench_mut(sessions, bench_id)?;
+        let Some(node) = session
+            .nodes
+            .iter_mut()
+            .find(|node| node.id == node_id && node.current_run_id.as_deref() == Some(run_id))
+        else {
+            return Ok(());
+        };
+        node.current_run_id = None;
+        node.execution_status = ExecutionStatus::Idle;
+        session.revision += 1;
+        session.updated_at = now();
+        tx.commit()
+    }
+
     pub fn bind_child_run(
         &self,
         bench_id: &str,
@@ -821,6 +876,7 @@ where
         if task.status == TaskStatus::Ready {
             task.transition(TaskStatus::Running, now.clone())?;
         }
+        let still_running = task.status == TaskStatus::Running;
         let node = session
             .nodes
             .iter_mut()
@@ -832,7 +888,10 @@ where
                 )
             })?;
         node.current_run_id = Some(run_id.into());
-        node.execution_status = ExecutionStatus::Active;
+        // 첫 턴에서 이미 결과를 보고했으면(예약 run으로 반영, 노드 Idle) 노드 상태를 되돌리지 않는다.
+        if still_running || node.execution_status == ExecutionStatus::Starting {
+            node.execution_status = ExecutionStatus::Active;
+        }
         node.last_activity_at = Some(now.clone());
         session.revision += 1;
         session.updated_at = now;
@@ -932,6 +991,10 @@ where
         let is_current_run = session.nodes[node_index].current_run_id.as_deref()
             == Some(request.reporter_run_id.as_str());
         let now = now();
+        // 예약된 run의 첫 턴 보고(기동 결과 저장 전): 과제를 먼저 실행 중으로 옮긴 뒤 보고를 반영한다.
+        if is_current_run && session.tasks[task_index].status == TaskStatus::Ready {
+            session.tasks[task_index].transition(TaskStatus::Running, now.clone())?;
+        }
         let report = TaskReport {
             id: Uuid::new_v4().to_string(),
             request_id: request.request_id,
@@ -1524,11 +1587,16 @@ where
         persist_mutation(tx, &self.event_sink, bench_id, "runtimeReconciled")
     }
 
+    /// 끝난 자식 run의 정책 위반을 과제 실패로 반영한다. 조건부 갱신: 과제가 **그 시도(attempt)이고 노드의 현재
+    /// run이 그 run**일 때만 바꾼다 — 이전 시도의 늦은 검사가 재시도·재배정된 새 시도나 이미 끝난 결과를 덮지 않는다.
+    #[allow(clippy::too_many_arguments)]
     pub fn fail_task_for_runtime(
         &self,
         bench_id: &str,
         task_id: &str,
         node_id: &str,
+        attempt: u32,
+        run_id: &str,
         code: OrchestrationErrorCode,
         message: &str,
     ) -> Result<OrchestrationSession, OrchestrationError> {
@@ -1536,11 +1604,21 @@ where
         let sessions = tx.sessions();
         let session = session_for_bench_mut(sessions, bench_id)?;
         let now = now();
+        let still_current = session
+            .nodes
+            .iter()
+            .any(|node| node.id == node_id && node.current_run_id.as_deref() == Some(run_id));
         let task = session
             .tasks
             .iter_mut()
             .find(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
             .ok_or_else(|| not_found("Assigned task"))?;
+        if !still_current || task.attempt != attempt {
+            return Err(OrchestrationError::new(
+                OrchestrationErrorCode::InvalidTransition,
+                "The finished run is no longer the task's current attempt.",
+            ));
+        }
         task.status = TaskStatus::Failed;
         task.completed_at = None;
         task.revision += 1;
@@ -1847,6 +1925,67 @@ mod tests {
             .bind_child_run("window-1", &created.task_id, &created.node_id, "run-child")
             .unwrap();
         (service, workspace, created)
+    }
+
+    /// 041 Codex 리뷰: 이전 시도의 늦은 종료 검사(정책 위반)는 새 시도를 실패로 만들지 않는다 — 시도와 현재 run이
+    /// 모두 맞을 때만 반영한다.
+    #[test]
+    fn late_runtime_failure_of_a_previous_attempt_does_not_touch_the_new_attempt() {
+        let (service, _workspace, created) = service_with_running_child();
+        // 재시도로 새 시도·새 run이 된 상황을 만든다.
+        {
+            let mut tx = service.repository.begin().unwrap();
+            let session = &mut tx.sessions()[0];
+            let task = session
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == created.task_id)
+                .unwrap();
+            task.attempt += 1;
+            let node = session
+                .nodes
+                .iter_mut()
+                .find(|node| node.id == created.node_id)
+                .unwrap();
+            node.current_run_id = Some("run-child-2".into());
+            tx.commit().unwrap();
+        }
+        let stale = service.fail_task_for_runtime(
+            "window-1",
+            &created.task_id,
+            &created.node_id,
+            1,
+            "run-child",
+            OrchestrationErrorCode::ReadOnlyViolation,
+            "changed",
+        );
+        assert!(stale.is_err());
+        let session = service.get_for_bench("window-1").unwrap().unwrap();
+        let task = session
+            .tasks
+            .iter()
+            .find(|task| task.id == created.task_id)
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert!(task.failure.is_none());
+
+        let current = service
+            .fail_task_for_runtime(
+                "window-1",
+                &created.task_id,
+                &created.node_id,
+                2,
+                "run-child-2",
+                OrchestrationErrorCode::ReadOnlyViolation,
+                "changed",
+            )
+            .unwrap();
+        let task = current
+            .tasks
+            .iter()
+            .find(|task| task.id == created.task_id)
+            .unwrap();
+        assert_eq!(task.status, TaskStatus::Failed);
     }
 
     /// FR-022: delegating without a Main run must be rejected with a reason the UI can

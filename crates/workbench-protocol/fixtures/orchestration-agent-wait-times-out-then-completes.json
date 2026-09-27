@@ -212,7 +212,13 @@
         "reply": {
           "kind": "complete",
           "output": {
-            "timedOut": false
+            "timedOut": false,
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "completed"
+              }
+            ]
           }
         }
       },

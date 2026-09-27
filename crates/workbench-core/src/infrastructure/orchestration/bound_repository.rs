@@ -54,6 +54,25 @@ impl<R> BoundOrchestrationRepository<R> {
         &self.bindings
     }
 
+    /// 저장 없이 작업대의 묶임만 푼다(닫기 저장 실패 복구용). 스트림 수명 observer도 부른다.
+    pub fn unbind_bench(&self, bench_id: &str) {
+        let changes = {
+            let mut table = self.bindings.lock();
+            match table.workspace_of_bench(bench_id).map(str::to_owned) {
+                Some(workspace_id) => table.set(&workspace_id, None),
+                None => Vec::new(),
+            }
+        };
+        let observer = self
+            .observer
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let (Some(observer), false) = (observer, changes.is_empty()) {
+            observer(&changes);
+        }
+    }
+
     pub fn set_observer(&self, observer: BindingObserver) {
         *self
             .observer

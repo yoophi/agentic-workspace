@@ -167,6 +167,29 @@
         }
       },
       "principal": "agent:coord"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-15",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "cancelled"
+              }
+            ]
+          }
+        }
+      }
     }
   ],
   "ignoreFields": [

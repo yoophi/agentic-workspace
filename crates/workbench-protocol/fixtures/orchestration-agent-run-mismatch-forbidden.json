@@ -126,7 +126,8 @@
       },
       "expect": {
         "fault": {
-          "code": "forbidden"
+          "code": "forbidden",
+          "message": "The requested run does not match the authenticated capability."
         }
       },
       "principal": "agent:other"

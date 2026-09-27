@@ -151,11 +151,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "bench.close",
-        "requestId": "r-35",
+        "requestId": "r-41",
         "input": {
           "benchId": "{{bench}}"
         },
-        "idempotencyKey": "k-35"
+        "idempotencyKey": "k-41"
       },
       "expect": {
         "reply": {
@@ -170,7 +170,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.getOwnTask",
-        "requestId": "r-36",
+        "requestId": "r-42",
         "input": {
           "runId": "{{child}}",
           "arguments": {}
@@ -181,9 +181,12 @@
           "code": "forbidden",
           "details": {
             "toolError": {
-              "code": "scopeMismatch"
+              "code": "scopeMismatch",
+              "message": "This run is not bound to an orchestration workspace.",
+              "retryable": false
             }
-          }
+          },
+          "message": "This run is not bound to an orchestration workspace."
         }
       },
       "principal": "agent:{{child}}"

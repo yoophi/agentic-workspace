@@ -151,6 +151,30 @@
         "reply": {
           "kind": "complete"
         }
+      },
+      "capture": {
+        "rootTask": "/output/rootTaskId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.listTasks",
+        "requestId": "r-8",
+        "input": {
+          "benchId": "{{bench}}",
+          "generationId": "{{generation}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": [
+            {
+              "id": "{{rootTask}}"
+            }
+          ]
+        }
       }
     }
   ],

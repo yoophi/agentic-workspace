@@ -226,6 +226,13 @@ impl BenchServices {
         // 엔진은 소유 표 순회 순서로 돌려준다 — 결과는 run id 순으로 정렬해 결정적으로 둔다(041 계약 fixture).
         let mut cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
         cancelled_runs.sort();
+        // 닫힌 작업대의 run은 끝났다 — MCP 토큰도 폐기한다(041 Codex 리뷰: 다른 작업대가 작업 영역을 재개해도 이전
+        // 토큰이 다시 쓰이지 않게. 역할 판정도 살아 있는 소유를 요구해 이중으로 막는다).
+        if let Some(decorator) = &self.launch_decorator {
+            for run_id in &cancelled_runs {
+                decorator.revoke_run(run_id);
+            }
+        }
         let hooks = self
             .close_hooks
             .lock()

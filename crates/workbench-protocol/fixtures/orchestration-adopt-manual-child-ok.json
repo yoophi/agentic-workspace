@@ -17,11 +17,11 @@
       "request": {
         "protocolVersion": 1,
         "operation": "bench.open",
-        "requestId": "r-9",
+        "requestId": "r-10",
         "input": {
           "workingDirectory": "{{repo}}"
         },
-        "idempotencyKey": "k-9"
+        "idempotencyKey": "k-10"
       },
       "expect": {
         "reply": {
@@ -39,12 +39,12 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.bootstrap",
-        "requestId": "r-10",
+        "requestId": "r-11",
         "input": {
           "benchId": "{{bench}}",
           "worktreePath": "{{repo}}"
         },
-        "idempotencyKey": "k-10"
+        "idempotencyKey": "k-11"
       },
       "expect": {
         "reply": {
@@ -64,13 +64,13 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.adoptManualChild",
-        "requestId": "r-11",
+        "requestId": "r-12",
         "input": {
           "benchId": "{{bench}}",
           "panelId": "extra-agent-run-1",
           "title": "Manual"
         },
-        "idempotencyKey": "k-11"
+        "idempotencyKey": "k-12"
       },
       "expect": {
         "reply": {

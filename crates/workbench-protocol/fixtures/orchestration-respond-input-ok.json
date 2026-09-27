@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.requestParentInput",
-        "requestId": "r-17",
+        "requestId": "r-18",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -160,7 +160,7 @@
             "question": "which?"
           }
         },
-        "idempotencyKey": "k-17"
+        "idempotencyKey": "k-18"
       },
       "expect": {
         "reply": {
@@ -173,7 +173,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-18",
+        "requestId": "r-19",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -197,7 +197,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.respondInput",
-        "requestId": "r-19",
+        "requestId": "r-20",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -207,7 +207,7 @@
             "message": "this one"
           }
         },
-        "idempotencyKey": "k-19"
+        "idempotencyKey": "k-20"
       },
       "expect": {
         "reply": {

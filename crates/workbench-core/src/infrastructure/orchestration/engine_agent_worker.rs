@@ -164,6 +164,8 @@ impl AgentWorkerPort for EngineAgentWorker {
                         workspace_id: assignment.workspace_id.clone(),
                         node_id: assignment.node_id.clone(),
                         task_id: assignment.task_id.clone(),
+                        attempt: assignment.attempt,
+                        run_id: run_id.clone(),
                         worktree_path: assignment.worktree_path.clone(),
                         baseline,
                     },

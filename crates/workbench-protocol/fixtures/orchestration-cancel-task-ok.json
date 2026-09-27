@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.get",
-        "requestId": "r-20",
+        "requestId": "r-21",
         "input": {
           "benchId": "{{bench}}"
         }
@@ -170,7 +170,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.cancelTask",
-        "requestId": "r-21",
+        "requestId": "r-22",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -179,11 +179,19 @@
             "expectedRevision": "{{#rev}}"
           }
         },
-        "idempotencyKey": "k-21"
+        "idempotencyKey": "k-22"
       },
       "expect": {
         "reply": {
-          "kind": "complete"
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "cancelled"
+              }
+            ]
+          }
         }
       }
     }

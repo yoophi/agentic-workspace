@@ -400,3 +400,133 @@ async fn child_first_turn_tools_are_allowed_while_launching() {
     assert_eq!(seen.len(), 2, "first-turn calls ran");
     assert_eq!(seen[0]["id"], task.as_str());
 }
+
+async fn session_of(h: &BenchHarness, bench: &str) -> Value {
+    h.call(
+        &desktop(),
+        OperationId::OrchestrationGet,
+        json!({ "benchId": bench }),
+    )
+    .await
+    .unwrap()
+}
+
+fn task_status(session: &Value, task: &str) -> Value {
+    session["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == task)
+        .map(|entry| entry["status"].clone())
+        .unwrap()
+}
+
+/// 041 Codex 리뷰 C1: 작업대를 닫고 다른 작업대가 작업 영역을 재개해도, 끝난 이전 coordinator·자식 run은 역할을
+/// 되찾지 못한다(도구 거절·역할 없음·상태 불변). 닫기는 그 run들의 MCP 토큰도 폐기한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn previous_runs_do_not_regain_roles_after_another_bench_resumes() {
+    let f = fixture().await;
+    let (_task, child) = create_child(&f, "c1").await;
+    let workspace = session_of(&f.h, &f.bench).await["id"].clone();
+    f.h.close(&f.bench).await.unwrap();
+    let revoked = f.h.desktop.revoked.lock().unwrap().clone();
+    assert!(
+        revoked.contains(&f.coordinator) && revoked.contains(&child),
+        "closing revokes the bench's run tokens: {revoked:?}"
+    );
+
+    let b = f.h.open().await;
+    f.h.call(
+        &desktop(),
+        OperationId::OrchestrationBootstrap,
+        json!({ "benchId": b, "worktreePath": f.h.dir, "resumeWorkspaceId": workspace }),
+    )
+    .await
+    .unwrap();
+    let before = session_of(&f.h, &b).await;
+
+    assert_eq!(role(&f.h, &f.coordinator).await["role"], Value::Null);
+    assert_eq!(role(&f.h, &child).await["role"], Value::Null);
+    let old_coordinator = tool(
+        &f.h,
+        &f.coordinator,
+        OperationId::OrchestrationCreateChildTask,
+        json!({
+            "requestId": "after-resume", "title": "x",
+            "role": { "name": "R", "responsibility": "r", "expectedOutput": "o" },
+            "objective": "o", "expectedResult": "e"
+        }),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(tool_code(&old_coordinator), "forbiddenActor");
+    let old_child = report_result(&f.h, &child, "late").await.unwrap_err();
+    assert_eq!(tool_code(&old_child), "forbiddenActor");
+    let after = session_of(&f.h, &b).await;
+    assert_eq!(after["revision"], before["revision"], "state unchanged");
+    assert_eq!(after["tasks"], before["tasks"]);
+}
+
+/// 041 Codex 리뷰 C2: 자식의 첫 턴(엔진이 run을 등록한 직후·기동 결과 저장 전)에 보낸 결과·입력 요청은 예약된
+/// 현재 run의 보고로 반영된다 — 과제 상태가 바뀌고 coordinator 알림이 생긴다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn first_turn_result_and_input_request_update_the_task_and_notify() {
+    for (tool_op, expected_status, report_type) in [
+        (
+            OperationId::OrchestrationReportResult,
+            "completed",
+            "result",
+        ),
+        (
+            OperationId::OrchestrationRequestParentInput,
+            "inputRequired",
+            "inputRequest",
+        ),
+    ] {
+        let f = fixture().await;
+        {
+            let h = Arc::clone(&f.h);
+            *f.h.engine.start_hook.lock().unwrap() = Some(Arc::new(move |run: String| {
+                let h = Arc::clone(&h);
+                Box::pin(async move {
+                    if run == "coord" {
+                        return;
+                    }
+                    tool(
+                        &h,
+                        &run,
+                        tool_op,
+                        json!({ "requestId": "first", "summary": "first turn", "question": "which?" }),
+                    )
+                    .await
+                    .unwrap();
+                })
+            }));
+        }
+        let (task, child) = create_child(&f, "c1").await;
+        let session = session_of(&f.h, &f.bench).await;
+        assert_eq!(
+            task_status(&session, &task),
+            expected_status,
+            "{report_type}"
+        );
+        let notifications = session["coordinatorNotifications"].as_array().unwrap();
+        assert!(
+            notifications
+                .iter()
+                .any(|entry| entry["taskId"] == task.as_str() && entry["reportType"] == report_type),
+            "{report_type}: {notifications:?}"
+        );
+        let node = session["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["currentRunId"] == child.as_str())
+            .expect("reserved run became the node's run");
+        if report_type == "result" {
+            assert_eq!(node["executionStatus"], "idle");
+        } else {
+            assert_eq!(node["executionStatus"], "active");
+        }
+    }
+}

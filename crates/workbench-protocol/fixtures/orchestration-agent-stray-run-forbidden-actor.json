@@ -74,9 +74,12 @@
           "code": "forbidden",
           "details": {
             "toolError": {
-              "code": "forbiddenActor"
+              "code": "forbiddenActor",
+              "message": "The authenticated agent role cannot call this tool.",
+              "retryable": false
             }
-          }
+          },
+          "message": "The authenticated agent role cannot call this tool."
         }
       },
       "principal": "agent:stray"

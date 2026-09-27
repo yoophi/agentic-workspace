@@ -16,6 +16,10 @@ pub struct WorktreeGuard {
     pub workspace_id: String,
     pub node_id: String,
     pub task_id: String,
+    /// 이 감시가 속한 과제 시도와 run(041 Codex 리뷰): 늦게 끝난 이전 시도의 검사가 새 시도를 실패로 만들지 않게
+    /// 실패 반영 때 대조한다.
+    pub attempt: u32,
+    pub run_id: String,
     pub worktree_path: String,
     pub baseline: String,
 }

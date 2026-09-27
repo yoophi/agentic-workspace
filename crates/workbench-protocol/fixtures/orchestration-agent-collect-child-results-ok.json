@@ -187,7 +187,19 @@
         "reply": {
           "kind": "complete",
           "output": {
-            "timedOut": false
+            "timedOut": false,
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "completed"
+              }
+            ],
+            "reports": [
+              {
+                "taskId": "{{task}}",
+                "type": "result"
+              }
+            ]
           }
         }
       },

@@ -151,7 +151,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.requestParentInput",
-        "requestId": "r-28",
+        "requestId": "r-32",
         "input": {
           "runId": "{{child}}",
           "arguments": {
@@ -160,19 +160,48 @@
             "question": "which?"
           }
         },
-        "idempotencyKey": "k-28"
+        "idempotencyKey": "k-32"
       },
       "expect": {
         "reply": {
           "kind": "complete",
           "output": {
             "report": {
-              "taskId": "{{task}}"
+              "taskId": "{{task}}",
+              "type": "inputRequest"
             }
           }
         }
       },
       "principal": "agent:{{child}}"
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-33",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "tasks": [
+              {
+                "id": "{{task}}",
+                "status": "inputRequired"
+              }
+            ]
+          }
+        }
+      },
+      "until": {
+        "pointer": "/output/coordinatorNotifications/0/status",
+        "equals": "delivered",
+        "timeoutMs": 10000
+      }
     }
   ],
   "ignoreFields": [

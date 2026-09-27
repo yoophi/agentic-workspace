@@ -118,7 +118,7 @@
       "request": {
         "protocolVersion": 1,
         "operation": "orchestration.delegateGoal",
-        "requestId": "r-8",
+        "requestId": "r-9",
         "input": {
           "benchId": "{{bench}}",
           "request": {
@@ -127,7 +127,7 @@
             "expectedRevision": 1
           }
         },
-        "idempotencyKey": "k-8"
+        "idempotencyKey": "k-9"
       },
       "expect": {
         "fault": {
