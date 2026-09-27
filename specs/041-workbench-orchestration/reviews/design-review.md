@@ -23,6 +23,11 @@
 | M5 | 토큰 폐기 시점 오기 | tauri-compat: 재시도·재배정·교대 폐기 유지, run 종료 폐기 없음 |
 | M6 | 제거된 run 응답 형태·발행 전 구독 검사 위치 | R17·contracts: Evicted 형태, seam 진입점에서 검사 |
 
-## 2. Codex adversarial review
+## 2. Codex adversarial review (`/codex:adversarial-review --wait`, 2026-09-27, OCR 반영 뒤 순차 실행)
 
-(다음 단계에서 기록)
+- 대상: 브랜치 diff(`01dbfca`까지). Verdict: needs-attention, High 1.
+
+| # | 지적 | 반영 |
+|---|---|---|
+| C1 (high) | 재생 허용 조건 2가 호출자가 넣은 run id를 신뢰 — `bindCoordinator`·`handoffCoordinator`가 다른 작업대의 run을 검사 없이 넣으면 그 run의 기록·live 스트림이 노출되고, 같은 run이 여러 작업 영역에 들어가 역할 판정이 모호해짐(`orchestration_service.rs:365–385`, `:1484–1506`) | research R18 신설: 데스크톱 입력 run은 대상 작업대 소유의 살아 있는 run만, agent 입력 run은 principal run만, 한 run은 작업 영역 하나에만. contracts·data-model·quickstart(음성 테스트) 갱신 |
+

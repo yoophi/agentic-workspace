@@ -159,6 +159,17 @@ worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core�
 
 **Rationale**: run 소유(엔진 `run_owners`)는 run이 끝나면 지워져 끝난 run의 재생 권한을 판단할 수 없다. journal이 남아 있는 동안은 재생이 가능해야 하므로(오늘 동작) 판단 근거도 journal과 수명을 같이한다.
 
+## R18. 작업 영역에 들어가는 run id의 출처 검증 (Codex 설계 리뷰 반영)
+
+**Decision**: 작업 영역에 run id를 넣는 모든 경로는 그 run의 출처를 서버가 검증한다.
+
+- **데스크톱 입력**: `orchestration.bindCoordinator`의 `request.runId`, `orchestration.handoffCoordinator`의 `request.successorRunId`는 **대상 작업대가 소유한 살아 있는 run**(엔진 `active_owner_of(run) == 작업대`)이어야 한다. 아니면 `forbidden` `"run is owned by another bench."`이고 작업 영역은 바뀌지 않는다. 오늘 서비스는 이 값을 검사 없이 저장한다(`orchestration_service.rs:365–385`, `:1484–1506`).
+- **agent 입력**: 보고의 `reporterRunId` 등 agent operation의 run id는 입력이 아니라 **principal의 run**에서만 가져온다(입력에 있으면 principal run과 같아야 함, 아니면 `forbidden` — 오늘 도구가 principal run을 넣는 것과 같다).
+- **서버 기동**: 자식 run id는 서버가 기동 전에 발급·기록한다(R7·R8).
+- **유일성**: 한 run은 **작업 영역 하나에만** 속한다. 삽입은 저장소 `update` 안에서 전체 작업 영역을 보고 다른 작업 영역의 노드·세대·과제 시도에 같은 run이 있으면 거절한다(`conflict`, 오늘 없는 경우라 새 문구 `"run already belongs to another orchestration workspace."`). 이로써 R7 역할 판정과 R17 재생 조건 2의 "그 run이 속한 작업 영역"이 하나로 정해진다.
+
+R17 재생 조건 2는 이 검증을 전제로 한다 — 작업 영역 안의 run id는 모두 삽입 시점에 같은 작업대(또는 복구 이전 작업대) 소유였거나 서버가 기동한 것이므로 신뢰할 수 있다. 음성 테스트: 다른 작업대의 run으로 bind·handoff → 거절·상태 불변, 그 뒤 그 run의 `run.replay`·`run:<id>` 구독도 거절.
+
 ## R16. ADR
 
 **Decision**: 되돌리기 어렵고 놀랍고 실제 trade-off가 있는 결정 두 가지를 core ADR로 남긴다 — `0006-orchestration-store-is-one-serialized-aggregate`(R1·R2: 파일 분할·SQLite 대신 aggregate lock, operation 범위 lock 없이 `update` 안 상태 조건 + 묶기 전용 binding mutex), `0007-agent-orchestration-roles-come-from-server-state`(R7: 토큰 주장 대신 서버 상태). 묶임별 스트림 id(R10)는 `0006`이 아니라 `docs/workbench-seam.md`에 규칙으로 적는다.

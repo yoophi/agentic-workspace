@@ -55,6 +55,10 @@ stateDiagram-v2
 - `notify_coordinator`·`waitChildTasks`·엔진 `send`/`cancel`·작업대 닫기 대기 중에는 어떤 lock도 쥐지 않는다.
 - run 종료 처리·작업대 닫기 hook은 lock을 기다리지 않고 조건부 `update` 한 번만 한다.
 
+### run 소속 (research R18)
+
+작업 영역의 노드·세대·과제 시도에 있는 run id는 모두 출처가 검증된 것이다 — 데스크톱 입력은 대상 작업대 소유의 살아 있는 run, agent 입력은 principal run, 자식은 서버가 발급. 한 run은 작업 영역 하나에만 속한다(삽입 시 저장소 `update` 안에서 전체 검사).
+
 ### agent 역할 (메모리 도출, research R7)
 
 | 역할 | 조건 | 허용 operation |
