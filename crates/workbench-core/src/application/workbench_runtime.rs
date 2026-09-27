@@ -320,6 +320,7 @@ impl WorkbenchRuntime {
             adapters.launch_decorator.clone(),
             Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
         ));
+        benches.attach_work_gate(Arc::clone(&work_gate));
         let bindings = Arc::new(OrchestrationBindings::default());
         let repository = BoundOrchestrationRepository::new(
             JsonOrchestrationRepository::from_paths(&paths),

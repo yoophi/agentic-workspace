@@ -1,7 +1,7 @@
 //! 작업대 서비스(040, research R1). 작업대 수명(열기·닫기)과 공통 검사, 그리고 run·교환 서비스가 함께 쓰는
 //! 의존성(엔진·hub·데스크톱 포트·세대 멱등)을 한곳에 둔다.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use workbench_protocol::{
     operations::bench::{BenchCloseOutput, BenchOpenOutput},
@@ -12,6 +12,7 @@ use crate::{
     application::{
         agent_exchange_service::AgentExchangeService,
         epoch_idempotency::{open_scope, EpochIdempotency},
+        work_gate::WorkGate,
     },
     infrastructure::{
         bench::in_memory_bench_registry::{
@@ -55,6 +56,8 @@ pub struct BenchServices {
     /// 작업대별 교환 작업 영역(040 US2).
     pub exchange_registry: InMemoryAgentWorkspaceRegistry,
     close_hooks: Mutex<Vec<BenchCloseHook>>,
+    /// 작업 관문(044 R14). 조립이 한 번 넣는다. 없으면(단위 시험 조립) 관문 판정 없이 동작한다.
+    work_gate: OnceLock<Arc<WorkGate>>,
 }
 
 /// 소유자 주체(044)는 작업대 소유 판정을 우회한다.
@@ -103,7 +106,17 @@ impl BenchServices {
             idempotency,
             exchange_registry: InMemoryAgentWorkspaceRegistry::default(),
             close_hooks: Mutex::default(),
+            work_gate: OnceLock::new(),
         }
+    }
+
+    /// 작업 관문을 넣는다(한 번만).
+    pub fn attach_work_gate(&self, gate: Arc<WorkGate>) {
+        let _ = self.work_gate.set(gate);
+    }
+
+    pub fn work_gate(&self) -> Option<&Arc<WorkGate>> {
+        self.work_gate.get()
     }
 
     /// 교환 서비스. 소유 조회는 run 엔진, 발행은 교환 스트림 + 데스크톱 전달.

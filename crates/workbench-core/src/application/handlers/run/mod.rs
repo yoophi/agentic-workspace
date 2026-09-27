@@ -208,16 +208,45 @@ pub fn register(
                 services,
                 |input: &RunPromptInput| Scope::Bench(input.bench_id.clone()),
                 move |services, ctx, input: RunPromptInput| async move {
-                    run_service::prompt(
-                        services,
-                        &ctx.request_id,
-                        &ctx.principal,
-                        &input.bench_id,
-                        &input.run_id,
-                        input.prompt,
-                        kind,
-                    )
-                    .await
+                    match (&input.continuation, kind) {
+                        (Some(continuation), PromptKind::Send) => {
+                            run_service::deliver_exchange(
+                                services,
+                                &ctx.request_id,
+                                &ctx.principal,
+                                &input.bench_id,
+                                &input.run_id,
+                                input.prompt,
+                                &continuation.exchange_request_id,
+                                ctx.idempotency_key.as_ref(),
+                            )
+                            .await
+                        }
+                        (Some(_), _) => Err(WorkbenchFault::invalid_argument(
+                            ctx.request_id.clone(),
+                            run_service::MESSAGE_CONTINUATION_SEND_ONLY,
+                            Some("/input/continuation"),
+                        )),
+                        (None, _) => {
+                            // 044 K: continuation 없는 prompt는 새 작업이다. 비우기 중이면 거절한다(T040 입구 판정의
+                            // 이어 가기 분류는 이 handler가 판정한다).
+                            if crate::application::drain::is_draining(services.work_gate()) {
+                                return Err(crate::application::drain::draining_fault(
+                                    &ctx.request_id,
+                                ));
+                            }
+                            run_service::prompt(
+                                services,
+                                &ctx.request_id,
+                                &ctx.principal,
+                                &input.bench_id,
+                                &input.run_id,
+                                input.prompt,
+                                kind,
+                            )
+                            .await
+                        }
+                    }
                     .map(|()| serde_json::Value::Null)
                 },
             ),

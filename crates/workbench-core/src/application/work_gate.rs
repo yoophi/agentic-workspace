@@ -132,6 +132,15 @@ pub struct GateActiveWork {
     pub notifications: usize,
 }
 
+/// 교환 전달(K)을 시작하지 못한 까닭(R14 표 3·3').
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeliveryRefused {
+    /// 이미 전달 prompt가 소비된 교환(교환마다 1회).
+    AlreadyConsumed,
+    /// 서버가 정지 중이다.
+    Stopping,
+}
+
 /// 정지 뒤의 예약 시도.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("server is stopping")]
@@ -147,6 +156,8 @@ struct Inner {
     busy: BTreeMap<String, usize>,
     /// 교환 전달 prompt 소비(교환마다 1회, K).
     consumed_exchanges: HashSet<String>,
+    /// 소비했지만 엔진 대기열 등록에 실패한 교환(대상 run이 없음). `server.status`의 `failedExchangeDeliveries`.
+    failed_deliveries: HashSet<String>,
     /// task 기동 토큰 표.
     launches: HashMap<u64, LaunchState>,
     next_launch: u64,
@@ -415,6 +426,39 @@ impl WorkGate {
     /// 교환 전달 prompt 소비(교환마다 1회). 처음이면 true.
     pub fn consume_exchange(&self, request_id: &str) -> bool {
         self.lock().consumed_exchanges.insert(request_id.to_owned())
+    }
+
+    /// 교환 전달 시작(R14 표 3): **같은 G 아래에서** 소비 표시와 X-deliver 예약을 함께 만든다. 이미 소비됐거나 정지 중이면
+    /// 둘 다 만들지 않는다. 호출자는 엔진 대기열 등록(그 안에서 A-turn이 동기 예약된다) 뒤에 이 예약을 drop한다 — A-turn이
+    /// 먼저 잡히므로 활동이 0이 되는 틈이 없다.
+    pub fn begin_exchange_delivery(
+        self: &Arc<Self>,
+        request_id: &str,
+        run: &str,
+    ) -> Result<Reservation, DeliveryRefused> {
+        let mut inner = self.lock();
+        if inner.state() == GateState::Stopping {
+            return Err(DeliveryRefused::Stopping);
+        }
+        if !inner.consumed_exchanges.insert(request_id.to_owned()) {
+            return Err(DeliveryRefused::AlreadyConsumed);
+        }
+        let id = inner.insert(ReservationKind::Deliver, Some(run.to_owned()));
+        Ok(Reservation {
+            gate: Arc::clone(self),
+            id,
+        })
+    }
+
+    /// 소비한 교환의 대기열 등록이 실패했다(대상 run이 없음). 소비 표시는 남긴다(R14 표 3 오류).
+    pub fn record_failed_delivery(&self, request_id: &str) {
+        self.lock().failed_deliveries.insert(request_id.to_owned());
+    }
+
+    pub fn failed_deliveries(&self) -> Vec<String> {
+        let mut ids: Vec<_> = self.lock().failed_deliveries.iter().cloned().collect();
+        ids.sort();
+        ids
     }
 
     pub fn exchange_consumed(&self, request_id: &str) -> bool {

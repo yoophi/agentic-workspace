@@ -11,11 +11,21 @@ use acp_agent_core::domain::{
     },
     run::{AgentRunRequest, PermissionMode, RalphLoopRequest},
 };
-use workbench_protocol::{AuthenticatedPrincipal, FaultCode, RequestId, WorkbenchFault};
+use workbench_protocol::{
+    AuthenticatedPrincipal, FaultCode, IdempotencyKey, Outcome, RequestId, WorkbenchFault,
+};
 
 use crate::{
-    application::{agent_run_settings_service, bench_service::BenchServices},
-    domain::agent_run_settings::{AgentCommandSource, APP_COMMAND_OVERRIDE_SETTINGS_KEY},
+    application::{
+        agent_run_settings_service,
+        bench_service::BenchServices,
+        drain::{draining_fault, is_draining},
+        work_gate::DeliveryRefused,
+    },
+    domain::{
+        agent_exchange::{AgentExchangeDelivery, AgentExchangeStatus},
+        agent_run_settings::{AgentCommandSource, APP_COMMAND_OVERRIDE_SETTINGS_KEY},
+    },
     infrastructure::storage_coordinator::StorageCoordinator,
     ports::run_engine::{RunEngineError, RunErrorKind},
 };
@@ -25,6 +35,14 @@ pub const MESSAGE_CANDIDATES_NON_OWNER: &str =
     "tool command candidates were requested from a non-owner window";
 pub const MESSAGE_PERMISSION_NON_OWNER: &str =
     "permission response was sent from a non-owner window";
+pub const MESSAGE_CONTINUATION_SEND_ONLY: &str = "continuation is only accepted by run.sendPrompt.";
+pub const MESSAGE_DELIVERY_KEY: &str =
+    "an exchange delivery prompt must use the idempotency key exchange-delivery:<requestId>.";
+pub const MESSAGE_EXCHANGE_NOT_FOUND: &str = "exchange was not found in this bench.";
+pub const MESSAGE_EXCHANGE_OTHER_RUN: &str = "the exchange targets another run.";
+pub const MESSAGE_EXCHANGE_DRAFT: &str = "a draft exchange is sent by the user, not delivered.";
+pub const MESSAGE_EXCHANGE_NOT_PENDING: &str = "the exchange is not waiting for delivery.";
+pub const MESSAGE_EXCHANGE_CONSUMED: &str = "the exchange delivery prompt was already sent.";
 /// MCP 제목 도구 이름(오늘 AW `title_tool::SET_WINDOW_TITLE_TOOL`과 같음).
 pub const SET_WINDOW_TITLE_TOOL: &str = "set_window_title";
 
@@ -190,6 +208,102 @@ pub async fn prompt(
                 .await
         }
     };
+    result.map_err(|error| engine_fault(request_id, error))
+}
+
+/// 교환 전달 prompt(044 K, research R7 K 경로 1·R14 표 3·3'). 조건을 모두 확인한 뒤 소비 표시와 X-deliver 예약을 한
+/// 잠금 아래에서 만들고, **엔진 대기열 경로**로 보낸다(현재 turn 뒤 차례로 — 바쁨으로 버려지지 않는다, E2). 대기열 등록
+/// 안에서 A-turn이 동기 예약된 뒤 X-deliver를 놓는다. 조건이 어긋나면 서빙 중에는 그 까닭의 fault, 비우기 중에는 새 작업과
+/// 같은 `draining` fault다.
+#[allow(clippy::too_many_arguments)]
+pub async fn deliver_exchange(
+    services: Arc<BenchServices>,
+    request_id: &RequestId,
+    principal: &AuthenticatedPrincipal,
+    bench_id: &str,
+    run_id: &str,
+    prompt: String,
+    exchange_request_id: &str,
+    idempotency_key: Option<&IdempotencyKey>,
+) -> Result<(), WorkbenchFault> {
+    let gate = services.work_gate().cloned();
+    let draining = is_draining(gate.as_ref());
+    let refuse = |fault: WorkbenchFault| {
+        if draining {
+            draining_fault(request_id)
+        } else {
+            fault
+        }
+    };
+    services.resolve(request_id, principal, bench_id)?;
+    ensure_owned(&services, request_id, bench_id, run_id).await?;
+    let expected_key = format!("exchange-delivery:{exchange_request_id}");
+    if idempotency_key.map(IdempotencyKey::as_str) != Some(expected_key.as_str()) {
+        return Err(refuse(WorkbenchFault::invalid_argument(
+            request_id.clone(),
+            MESSAGE_DELIVERY_KEY,
+            Some("/idempotencyKey"),
+        )));
+    }
+    let exchange = services
+        .exchange_service()
+        .list_exchanges(bench_id)
+        .await
+        .into_iter()
+        .find(|exchange| exchange.request_id == exchange_request_id)
+        .ok_or_else(|| {
+            refuse(WorkbenchFault::new(
+                FaultCode::NotFound,
+                request_id.clone(),
+                MESSAGE_EXCHANGE_NOT_FOUND,
+            ))
+        })?;
+    let precondition = |message: &str| {
+        refuse(WorkbenchFault::new(
+            FaultCode::PreconditionFailed,
+            request_id.clone(),
+            message,
+        ))
+    };
+    if exchange.target.run_id.as_deref() != Some(run_id) {
+        return Err(precondition(MESSAGE_EXCHANGE_OTHER_RUN));
+    }
+    if exchange.delivery == AgentExchangeDelivery::Draft {
+        return Err(precondition(MESSAGE_EXCHANGE_DRAFT));
+    }
+    if !matches!(
+        exchange.status,
+        AgentExchangeStatus::Accepted | AgentExchangeStatus::Delivered
+    ) {
+        return Err(precondition(MESSAGE_EXCHANGE_NOT_PENDING));
+    }
+    let reservation = match &gate {
+        Some(gate) => Some(
+            gate.begin_exchange_delivery(exchange_request_id, run_id)
+                .map_err(|refused| match refused {
+                    DeliveryRefused::AlreadyConsumed => refuse(WorkbenchFault::conflict(
+                        request_id.clone(),
+                        MESSAGE_EXCHANGE_CONSUMED,
+                        Outcome::NotApplied,
+                    )),
+                    DeliveryRefused::Stopping => WorkbenchFault::unavailable(
+                        request_id.clone(),
+                        crate::application::work_gate::MESSAGE_STOPPING,
+                    ),
+                })?,
+        ),
+        None => None,
+    };
+    let result = services
+        .engine
+        .queue_prompt(run_id, prompt, services.run_sink(bench_id))
+        .await;
+    if result.is_err() {
+        if let Some(gate) = &gate {
+            gate.record_failed_delivery(exchange_request_id);
+        }
+    }
+    drop(reservation); // 대기열 등록 안에서 A-turn이 먼저 잡혔다(인계)
     result.map_err(|error| engine_fault(request_id, error))
 }
 

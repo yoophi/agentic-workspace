@@ -3,7 +3,21 @@
 //! `draining` 상태의 호출 입구는 operation마다 네 가지로 처리한다. 분류는 **빠짐없는 match**라, 새 operation을 추가하면
 //! 분류하지 않고는 컴파일되지 않는다. 문서 표와 이 match는 `tests/drain_classification.rs`가 대조한다.
 
-use workbench_protocol::OperationId;
+use workbench_protocol::{FaultCode, OperationId, RequestId, WorkbenchFault};
+
+use crate::application::work_gate::{GateState, WorkGate};
+
+pub const MESSAGE_DRAINING: &str = "server is draining; new work is not accepted.";
+
+/// 비우기 중 새 작업 거절(`draining`, 적용 안 됨).
+pub fn draining_fault(request_id: &RequestId) -> WorkbenchFault {
+    WorkbenchFault::new(FaultCode::Draining, request_id.clone(), MESSAGE_DRAINING)
+}
+
+/// 관문이 비우기 중인가(`stopping`은 서버가 503으로 막는다).
+pub fn is_draining(gate: Option<&std::sync::Arc<WorkGate>>) -> bool {
+    gate.is_some_and(|gate| matches!(gate.state(), GateState::Draining(_)))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DrainClass {
