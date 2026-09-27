@@ -223,7 +223,9 @@ impl BenchServices {
 
     async fn finish_close(&self, ticket: CloseTicket, bench_id: &str) -> BenchCloseOutput {
         let drained = ticket.wait_admissions().await;
-        let cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
+        // 엔진은 소유 표 순회 순서로 돌려준다 — 결과는 run id 순으로 정렬해 결정적으로 둔다(041 계약 fixture).
+        let mut cancelled_runs = self.engine.cancel_runs_owned_by(bench_id).await;
+        cancelled_runs.sort();
         let hooks = self
             .close_hooks
             .lock()

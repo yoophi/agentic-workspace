@@ -1,0 +1,96 @@
+{
+  "name": "orchestration-agent-role-none",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-6",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-6"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-7",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "stray"
+          }
+        },
+        "idempotencyKey": "k-7"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "stray"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.getAgentRole",
+        "requestId": "r-8",
+        "input": {
+          "runId": "stray"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "role": null,
+            "workspaceId": null,
+            "taskId": null
+          }
+        }
+      },
+      "principal": "agent:stray"
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

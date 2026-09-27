@@ -1,0 +1,74 @@
+{
+  "name": "orchestration-main-start-without-workspace",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-31",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-31"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-32",
+        "input": {
+          "benchId": "{{bench}}",
+          "panelId": "main-agent-run",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "m1"
+          }
+        },
+        "idempotencyKey": "k-32"
+      },
+      "expect": {
+        "fault": {
+          "code": "preconditionFailed",
+          "message": "Main Coordinator workspace is unavailable."
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "name": "orchestration-get-unbound-null",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-4",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.get",
+        "requestId": "r-5",
+        "input": {
+          "benchId": "{{bench}}"
+        }
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

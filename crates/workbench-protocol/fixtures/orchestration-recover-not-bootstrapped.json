@@ -1,0 +1,68 @@
+{
+  "name": "orchestration-recover-not-bootstrapped",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-13",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-13"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.recover",
+        "requestId": "r-14",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-14"
+      },
+      "expect": {
+        "fault": {
+          "code": "preconditionFailed",
+          "message": "Orchestration workspace is not bootstrapped."
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

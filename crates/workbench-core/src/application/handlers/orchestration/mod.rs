@@ -415,7 +415,14 @@ fn register_run_replay(registry: &mut Registry, services: &Arc<BenchServices>, r
                 // 소유는 hub 기록(journal과 같은 수명)으로 본다 — 끝난 run도 journal이 남은 동안 재생할 수 있다(R17).
                 // 입력에 작업대가 있으므로 주체가 아니라 그 작업대 소유로 좁힌다(구독은 작업대 문맥이 없어 주체 기준).
                 let owned = services.hub.run_owner(&input.run_id).as_deref() == Some(view.id.as_str());
-                let allowed = evicted || owned || node_run_of_bound_workspace(&runtime, &view.id, &input.run_id);
+                // 모르는 run(소유 기록·발행 이력 모두 없음)은 내용이 없으므로 오늘의 Missing 형태를 그대로 준다. 다른
+                // 작업대가 claim한 미발행 run은 소유 기록이 있어 여기 해당하지 않는다(거절).
+                let unknown = services.hub.run_owner(&input.run_id).is_none()
+                    && !services.hub.has_run_history(&input.run_id);
+                let allowed = evicted
+                    || unknown
+                    || owned
+                    || node_run_of_bound_workspace(&runtime, &view.id, &input.run_id);
                 if !allowed {
                     return Err(WorkbenchFault::new(
                         FaultCode::Forbidden,

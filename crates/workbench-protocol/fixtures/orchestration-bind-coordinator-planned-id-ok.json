@@ -1,0 +1,131 @@
+{
+  "name": "orchestration-bind-coordinator-planned-id-ok",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-22",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-22"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bootstrap",
+        "requestId": "r-23",
+        "input": {
+          "benchId": "{{bench}}",
+          "worktreePath": "{{repo}}"
+        },
+        "idempotencyKey": "k-23"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "worktreePath": "{{repo}}",
+            "revision": 0
+          }
+        }
+      },
+      "capture": {
+        "workspace": "/output/id",
+        "stream": "/output/eventStreamId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bindCoordinator",
+        "requestId": "r-24",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "requestId": "bind-planned-main",
+            "panelId": "main-agent-run",
+            "runId": "planned-main",
+            "state": "active",
+            "expectedRevision": 0
+          }
+        },
+        "idempotencyKey": "k-24"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "{{workspace}}",
+            "revision": 1
+          }
+        }
+      },
+      "capture": {
+        "generation": "/output/activeCoordinatorGenerationId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-25",
+        "input": {
+          "benchId": "{{bench}}",
+          "panelId": "main-agent-run",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "planned-main"
+          }
+        },
+        "idempotencyKey": "k-25"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "planned-main"
+          }
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

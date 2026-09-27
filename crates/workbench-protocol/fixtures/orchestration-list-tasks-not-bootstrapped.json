@@ -1,0 +1,75 @@
+{
+  "name": "orchestration-list-tasks-not-bootstrapped",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-11",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-11"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.listTasks",
+        "requestId": "r-12",
+        "input": {
+          "benchId": "{{bench}}",
+          "generationId": "g1"
+        }
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "details": {
+            "orchestrationError": {
+              "code": "notFound",
+              "message": "Orchestration workspace is not bootstrapped.",
+              "retryable": false
+            }
+          },
+          "message": "Orchestration workspace is not bootstrapped."
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

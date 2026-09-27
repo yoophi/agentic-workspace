@@ -1,0 +1,97 @@
+{
+  "name": "orchestration-agent-stray-run-forbidden-actor",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-12",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-12"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-13",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "stray"
+          }
+        },
+        "idempotencyKey": "k-13"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "stray"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.getOwnTask",
+        "requestId": "r-14",
+        "input": {
+          "runId": "stray",
+          "arguments": {}
+        }
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden",
+          "details": {
+            "toolError": {
+              "code": "forbiddenActor"
+            }
+          }
+        }
+      },
+      "principal": "agent:stray"
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

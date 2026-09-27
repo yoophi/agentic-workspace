@@ -1,0 +1,97 @@
+{
+  "name": "orchestration-adopt-manual-child-ok",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-9",
+        "input": {
+          "workingDirectory": "{{repo}}"
+        },
+        "idempotencyKey": "k-9"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{repo}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.bootstrap",
+        "requestId": "r-10",
+        "input": {
+          "benchId": "{{bench}}",
+          "worktreePath": "{{repo}}"
+        },
+        "idempotencyKey": "k-10"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "worktreePath": "{{repo}}",
+            "revision": 0
+          }
+        }
+      },
+      "capture": {
+        "workspace": "/output/id",
+        "stream": "/output/eventStreamId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "orchestration.adoptManualChild",
+        "requestId": "r-11",
+        "input": {
+          "benchId": "{{bench}}",
+          "panelId": "extra-agent-run-1",
+          "title": "Manual"
+        },
+        "idempotencyKey": "k-11"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "revision": 1
+          }
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt",
+    "startedAt",
+    "lastActivityAt",
+    "completedAt",
+    "collectedAt",
+    "endedAt",
+    "deliveredAt",
+    "dispatchedAt",
+    "acknowledgedAt"
+  ]
+}

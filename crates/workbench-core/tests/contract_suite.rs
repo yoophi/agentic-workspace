@@ -229,6 +229,12 @@ async fn run_steps(fixture: &Fixture, over_http: bool) -> Vec<Value> {
         None
     };
     let mut observed = Vec::new();
+    // 사용자 값: fixture가 적은 요청(치환 전). 앞 응답에서 포착해 넣은 서버 id는 자리표시자로 이미 되돌아간다.
+    let inputs: Vec<Value> = fixture
+        .steps
+        .iter()
+        .map(|step| step.request.clone())
+        .collect();
     for (index, step) in fixture.steps.iter().enumerate() {
         let mut request = step.request.clone();
         seed.substitute(&mut request);
@@ -241,13 +247,45 @@ async fn run_steps(fixture: &Fixture, over_http: bool) -> Vec<Value> {
         );
         seed.substitute(&mut principal_name);
         let principal = fixtures::principal_named(&fixture.name, principal_name.as_str().unwrap());
-        let actual = match &harness {
-            Some(harness) => {
-                harness
-                    .call(Some(&Harness::token_string(&principal)), &request)
-                    .await
+        let deadline = step.until.as_ref().map(|until| {
+            std::time::Instant::now() + std::time::Duration::from_millis(until.timeout_ms)
+        });
+        let actual = loop {
+            let actual = match &harness {
+                Some(harness) => {
+                    harness
+                        .call(Some(&Harness::token_string(&principal)), &request)
+                        .await
+                }
+                None => {
+                    runtime
+                        .runtime
+                        .call(principal.clone(), request.clone())
+                        .await
+                }
+            };
+            // 041: 조건 대기 — 관찰 가능한 상태(알림 전달 완료 등)가 될 때까지 같은 조회를 반복한다.
+            let Some(until) = &step.until else {
+                break actual;
+            };
+            let reached = actual.as_ref().is_ok_and(|reply| {
+                serde_json::to_value(reply)
+                    .ok()
+                    .and_then(|json| json.pointer(&until.pointer).cloned())
+                    .as_ref()
+                    == Some(&until.equals)
+            });
+            if reached {
+                break actual;
             }
-            None => runtime.runtime.call(principal, request).await,
+            assert!(
+                std::time::Instant::now() < deadline.expect("deadline"),
+                "{} [{label} #{index}]: {} never became {} (last: {actual:?})",
+                fixture.name,
+                until.pointer,
+                until.equals
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
         };
         let mut expect = step.expect.clone();
         if let Some(reply) = &mut expect.reply {
@@ -283,5 +321,141 @@ async fn run_steps(fixture: &Fixture, over_http: bool) -> Vec<Value> {
         seed.normalize_captured(&mut value);
         observed.push(value);
     }
-    observed
+    masked(&observed, &inputs)
+}
+
+/// 041: 서버가 새로 만든 uuid(보고·명령·알림·과제 id 등)는 두 경로에서 다를 수밖에 없다. 한 실행 안에서 **처음 나온
+/// 순서대로** 번호를 붙인 자리표시자(`{{uuid#N}}`)로 일대일로 바꾼다 — 같은 id는 같은 자리표시자, 다른 id는 다른
+/// 자리표시자라서 참조가 뒤바뀌거나 잘못 연결되면 경로 비교가 잡는다. 요청 입력에 들어 있던 uuid 모양 문자열(사용자
+/// 값)은 바꾸지 않고 그대로 비교한다.
+#[derive(Default)]
+struct GeneratedIds {
+    inputs: std::collections::HashSet<String>,
+    assigned: std::collections::HashMap<String, String>,
+}
+
+impl GeneratedIds {
+    fn note_input(&mut self, value: &Value) {
+        match value {
+            Value::String(text) => {
+                self.inputs.insert(text.clone());
+            }
+            Value::Array(items) => items.iter().for_each(|item| self.note_input(item)),
+            Value::Object(map) => map.values().for_each(|item| self.note_input(item)),
+            _ => {}
+        }
+    }
+
+    fn placeholder(&mut self, id: &str) -> String {
+        let next = self.assigned.len() + 1;
+        self.assigned
+            .entry(id.to_owned())
+            .or_insert_with(|| format!("{{{{uuid#{next}}}}}"))
+            .clone()
+    }
+
+    /// 문자열 안의 하이픈 uuid(36자)를 찾아 바꾼다(요청 fingerprint처럼 JSON 문자열에 박힌 id 포함).
+    fn mask_text(&mut self, text: &str) -> String {
+        const LEN: usize = 36;
+        let mut out = String::with_capacity(text.len());
+        let mut index = 0;
+        while index < text.len() {
+            let end = index + LEN;
+            if text.is_char_boundary(index)
+                && end <= text.len()
+                && text.is_char_boundary(end)
+                && text.as_bytes()[index + 8] == b'-'
+                && uuid::Uuid::parse_str(&text[index..end]).is_ok()
+                && !self.inputs.contains(&text[index..end])
+            {
+                out.push_str(&self.placeholder(&text[index..end]));
+                index = end;
+                continue;
+            }
+            let next = (index + 1..=text.len())
+                .find(|position| text.is_char_boundary(*position))
+                .unwrap_or(text.len());
+            out.push_str(&text[index..next]);
+            index = next;
+        }
+        out
+    }
+
+    fn mask(&mut self, value: &mut Value) {
+        match value {
+            Value::String(text) if !self.inputs.contains(text.as_str()) => {
+                *text = self.mask_text(text);
+            }
+            Value::Array(items) => items.iter_mut().for_each(|item| self.mask(item)),
+            Value::Object(map) => map.values_mut().for_each(|item| self.mask(item)),
+            _ => {}
+        }
+    }
+}
+
+fn masked(observations: &[Value], inputs: &[Value]) -> Vec<Value> {
+    let mut ids = GeneratedIds::default();
+    inputs.iter().for_each(|input| ids.note_input(input));
+    observations
+        .iter()
+        .map(|value| {
+            let mut value = value.clone();
+            ids.mask(&mut value);
+            value
+        })
+        .collect()
+}
+
+#[test]
+fn generated_id_masking_keeps_identity_and_user_values() {
+    let (a, b) = (
+        "11111111-1111-4111-8111-111111111111",
+        "22222222-2222-4222-8222-222222222222",
+    );
+    let user = "33333333-3333-4333-8333-333333333333";
+    let first = [
+        serde_json::json!({ "id": a, "other": b }),
+        serde_json::json!({ "ref": a, "input": user }),
+    ];
+    // 같은 모양, 다른 실제 값: 가려진 뒤 같아야 한다.
+    let (c, d) = (
+        "44444444-4444-4444-8444-444444444444",
+        "55555555-5555-4555-8555-555555555555",
+    );
+    let same = [
+        serde_json::json!({ "id": c, "other": d }),
+        serde_json::json!({ "ref": c, "input": user }),
+    ];
+    let inputs = [serde_json::json!({ "requestId": user })];
+    assert_eq!(masked(&first, &inputs), masked(&same, &inputs));
+    // 변이: 참조가 다른 객체를 가리킨다 → 달라야 한다.
+    let wrong_ref = [
+        serde_json::json!({ "id": c, "other": d }),
+        serde_json::json!({ "ref": d, "input": user }),
+    ];
+    assert_ne!(masked(&first, &inputs), masked(&wrong_ref, &inputs));
+    // 변이: 두 id를 서로 바꾼다 → 달라야 한다.
+    let swapped = [
+        serde_json::json!({ "id": d, "other": c }),
+        serde_json::json!({ "ref": c, "input": user }),
+    ];
+    assert_ne!(masked(&first, &inputs), masked(&swapped, &inputs));
+    // 사용자 입력 uuid는 가리지 않는다: 값이 다르면 비교가 잡는다.
+    let other_user = [
+        serde_json::json!({ "id": c, "other": d }),
+        serde_json::json!({ "ref": c, "input": "66666666-6666-4666-8666-666666666666" }),
+    ];
+    assert_ne!(masked(&first, &inputs), masked(&other_user, &inputs));
+    // 문자열 안에 박힌 id도 같은 표로 바뀐다: 같은 참조면 같고, 다른 id를 가리키면 다르다.
+    let embedded = |id: &str, reference: &str| {
+        [serde_json::json!({ "id": id, "fingerprint": format!("{{\"ref\":\"{reference}\"}}") })]
+    };
+    assert_eq!(
+        masked(&embedded(a, a), &inputs),
+        masked(&embedded(c, c), &inputs)
+    );
+    assert_ne!(
+        masked(&embedded(a, a), &inputs),
+        masked(&embedded(c, d), &inputs)
+    );
 }
