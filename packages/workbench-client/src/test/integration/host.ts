@@ -12,7 +12,8 @@ export interface HostInfo {
   epoch: string;
   dataDir: string;
   workDir: string;
-  tokens: { windowA: string; windowB: string };
+  /** `owner`: 소유자 principal(044 — `server.*`·`lease.*`). */
+  tokens: { windowA: string; windowB: string; owner: string };
 }
 
 export interface Host extends HostInfo {
