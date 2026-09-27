@@ -1255,6 +1255,19 @@ pub fn open_worktree_window(
     window_manager::open_session_window(&app, &project_id, &project_name, &worktree_path, &mode)
 }
 
+/// 042: 이 창의 WebView 출처에 묶인 Workbench HTTP 연결 정보(짧은 토큰). 화면 전환은 4단계.
+#[tauri::command]
+pub fn get_workbench_connection(
+    window: tauri::WebviewWindow,
+    http: State<'_, crate::infrastructure::workbench_http::WorkbenchHttp>,
+) -> Result<crate::infrastructure::workbench_http::WorkbenchConnection, String> {
+    let url = window.url().map_err(|error| error.to_string())?;
+    let origin = crate::infrastructure::workbench_http::origin_of(&url).ok_or_else(|| {
+        crate::infrastructure::workbench_http::MESSAGE_ORIGIN_NOT_ALLOWED.to_owned()
+    })?;
+    http.connection_for(&origin)
+}
+
 #[tauri::command]
 pub fn open_settings_window(app: AppHandle) -> Result<(), String> {
     window_manager::open_settings_window(&app)

@@ -12,14 +12,14 @@ use inbound::tauri_commands::{
     collect_orchestration_reports, create_git_worktree, create_goal, create_project,
     create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
     delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings,
-    get_appearance_preferences, get_goal, get_orchestration_workspace, get_worktree_changes,
-    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
-    get_worktree_git_graph, get_worktree_workspace_layout, handoff_orchestration_coordinator,
-    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
-    list_git_remotes, list_git_worktrees, list_orchestration_tasks, list_projects,
-    list_provider_sessions, list_recoverable_orchestration_workspaces, list_saved_prompts,
-    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
-    open_settings_window, open_worktree_window, read_worktree_text_file,
+    get_appearance_preferences, get_goal, get_orchestration_workspace, get_workbench_connection,
+    get_worktree_changes, get_worktree_commit_detail, get_worktree_commit_file_diff,
+    get_worktree_file_diff, get_worktree_git_graph, get_worktree_workspace_layout,
+    handoff_orchestration_coordinator, list_agent_exchanges, list_agent_tool_command_candidates,
+    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_orchestration_tasks,
+    list_projects, list_provider_sessions, list_recoverable_orchestration_workspaces,
+    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
+    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
     reassign_orchestration_task, record_goal_progress, recover_orchestration_workspace,
     replay_orchestration_runtime_events, respond_agent_permission, respond_orchestration_input,
     retry_orchestration_task, save_agent_run_settings, save_worktree_workspace_layout,
@@ -30,7 +30,7 @@ use inbound::tauri_commands::{
 };
 use infrastructure::{
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-    mcp::McpServerState,
+    mcp::McpServerState, workbench_http,
 };
 use std::sync::Arc;
 use tauri::{
@@ -89,6 +89,7 @@ pub fn run() {
             let workbench_runtime: Arc<WorkbenchRuntime> =
                 WorkbenchRuntime::bootstrap_with(DataPaths::new(app_data_dir), adapters)
                     .map_err(|error| error.to_string())?;
+            let http_runtime = workbench_runtime.clone();
             _app.manage(workbench_runtime);
 
             let appearance_repository =
@@ -99,6 +100,32 @@ pub fn run() {
 
             let mcp_state = McpServerState::start(_app.handle().clone())?;
             desktop_bridge.bind_mcp(mcp_state.clone());
+
+            // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
+            let (http_state, start_error) =
+                match workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
+                    workbench: http_runtime.clone() as Arc<dyn workbench_protocol::Workbench>,
+                    mcp_registry: mcp_state.capability_registry(),
+                    server_info: workbench_http::AwServerInfo {
+                        version: APP_VERSION.to_owned(),
+                        epoch: http_runtime.epoch().to_owned(),
+                    },
+                    drain_warn_after: workbench_http::default_drain_warn_after(),
+                }) {
+                    Ok(state) => {
+                        eprintln!("[workbench-http] listening on {}", state.base_url());
+                        (Some(Arc::new(state)), None)
+                    }
+                    Err(error) => {
+                        eprintln!("[workbench-http] failed to start: {error:#}");
+                        (None, Some(format!("{error:#}")))
+                    }
+                };
+            _app.manage(workbench_http::WorkbenchHttp {
+                state: http_state,
+                start_error,
+                exit: workbench_http::ExitGate::default(),
+            });
             _app.manage(mcp_state);
 
             #[cfg(debug_assertions)]
@@ -215,10 +242,36 @@ pub fn run() {
             reassign_orchestration_task,
             handoff_orchestration_coordinator,
             dispatch_orchestration_prompt,
-            recover_orchestration_workspace
+            recover_orchestration_workspace,
+            get_workbench_connection
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(on_run_event);
+}
+
+/// 042 T033: 종료 요청은 받아들인 HTTP·MCP 호출이 끝날 때까지 미룬다 — 신호만 보내고 곧바로 끝내면 분리 실행한
+/// 호출의 결과 기록이 프로세스와 함께 사라진다. drain이 끝나면 같은 종료 코드로 다시 종료한다.
+fn on_run_event(app: &tauri::AppHandle, event: tauri::RunEvent) {
+    let tauri::RunEvent::ExitRequested { api, code, .. } = event else {
+        return;
+    };
+    let http = app.state::<workbench_http::WorkbenchHttp>();
+    match http.exit.on_exit_requested() {
+        workbench_http::ExitDecision::Exit => {}
+        workbench_http::ExitDecision::KeepWaiting => api.prevent_exit(),
+        workbench_http::ExitDecision::StartDrain => {
+            api.prevent_exit();
+            let app = app.clone();
+            let state = http.state.clone();
+            let mcp_calls = app.state::<McpServerState>().detached_calls();
+            tauri::async_runtime::spawn(async move {
+                workbench_http::drain_for_exit(state, mcp_calls).await;
+                app.state::<workbench_http::WorkbenchHttp>().exit.drained();
+                app.exit(code.unwrap_or(0));
+            });
+        }
+    }
 }
 
 fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Result<Menu<R>> {

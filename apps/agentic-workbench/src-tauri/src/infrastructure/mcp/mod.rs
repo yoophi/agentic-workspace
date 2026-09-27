@@ -155,6 +155,11 @@ impl McpServerState {
         }
     }
 
+    /// MCP 실행 토큰 레지스트리(042: Workbench HTTP 어댑터도 같은 토큰을 agent principal로 받는다).
+    pub fn capability_registry(&self) -> CapabilityRegistry {
+        self.capability_registry.clone()
+    }
+
     /// 받아들인 도구 호출 추적기(앱 종료 drain용).
     pub fn detached_calls(&self) -> std::sync::Arc<workbench_server::drain::DetachedCalls> {
         std::sync::Arc::clone(&self.calls)

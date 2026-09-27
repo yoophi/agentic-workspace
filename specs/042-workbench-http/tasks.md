@@ -103,14 +103,14 @@
 
 ### Tests for User Story 4
 
-- [ ] T031 [P] [US4] AW 단위: 합성 resolver — 데스크톱 토큰(출처 묶음), MCP 토큰 → `agent:<run>`, 폐기된 MCP 토큰 거절, 다른 run 거절(`apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs` 테스트)
+- [X] T031 [P] [US4] AW 단위: 합성 resolver — 데스크톱 토큰(출처 묶음), MCP 토큰 → `agent:<run>`, 폐기된 MCP 토큰 거절, 다른 run 거절(`apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs` 테스트)
 
 ### Implementation for User Story 4
 
-- [ ] T032 [US4] `apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs`: 합성 resolver(`DesktopTokenIssuer` + `CapabilityRegistry`), `ServerInfo`(APP_VERSION, 런타임 epoch, ledger `SCHEMA_VERSION`), 허용 출처(`http://localhost:1420`, `tauri://localhost`, `http://tauri.localhost`), 접근 기록 stderr
-- [ ] T033 [US4] AW `lib.rs`: 런타임 조립 뒤 `127.0.0.1:0` bind → `serve`(Tauri async), 실패는 기록하고 계속(FR-016), `RunEvent::Exit`에서 종료 신호(FR-017) — **신호만 보내고 즉시 종료하지 않는다**: `ExitRequested`에서 종료를 미루고(`prevent_exit`) 신호 → `serve` future 완료(분리 호출 drain)를 기다린 뒤 종료, drain 대기 중 경고 기록. 단위/통합 시험으로 지연 호출이 끝나기 전 종료 경로가 완료되지 않음을 확인, `WorkbenchHttpState` 관리
-- [ ] T034 [US4] AW `inbound/tauri_commands.rs`: `get_workbench_connection()` → `{baseUrl, token, expiresAt}`(호출 창 WebView URL 출처로 묶음), 핸들러 등록
-- [ ] T035 [US4] 커밋 `feat(aw): serve the Workbench over loopback HTTP from the desktop runtime (042 US4)`
+- [X] T032 [US4] `apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs`: 합성 resolver(`DesktopTokenIssuer` + `CapabilityRegistry`), `ServerInfo`(APP_VERSION, 런타임 epoch, ledger `SCHEMA_VERSION`), 허용 출처(`http://localhost:1420`, `tauri://localhost`, `http://tauri.localhost`), 접근 기록 stderr
+- [X] T033 [US4] AW `lib.rs`: 런타임 조립 뒤 `127.0.0.1:0` bind → `serve`(Tauri async), 실패는 기록하고 계속(FR-016), `RunEvent::Exit`에서 종료 신호(FR-017) — **신호만 보내고 즉시 종료하지 않는다**: `ExitRequested`에서 종료를 미루고(`prevent_exit`) 신호 → `serve` future 완료(분리 호출 drain)를 기다린 뒤 종료, drain 대기 중 경고 기록. 단위/통합 시험으로 지연 호출이 끝나기 전 종료 경로가 완료되지 않음을 확인, `WorkbenchHttpState` 관리
+- [X] T034 [US4] AW `inbound/tauri_commands.rs`: `get_workbench_connection()` → `{baseUrl, token, expiresAt}`(호출 창 WebView URL 출처로 묶음), 핸들러 등록
+- [X] T035 [US4] 커밋 `feat(aw): serve the Workbench over loopback HTTP from the desktop runtime (042 US4)`
 
 ---
 
@@ -191,3 +191,7 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T026·T029**: AW MCP `origin_allowed` → 공유 `OriginPolicy`(`infrastructure/workbench_http.rs` `WEBVIEW_ORIGINS`) 정확 일치. 새 시험을 옛 접두사 구현에 돌리면 `http://127.0.0.1.evil.example`에서 실패(`aw-mcp-old.log`). AW `cargo test --lib mcp` status=0(22). 도구 호출은 `workbench_server::drain::spawn_accepted`로 분리 실행, 종료 중 새 호출은 503(JSON-RPC -32000)
 - **T027(사용자 검토 5로 다시 함)**: 처음 기록한 "helper 취소 시험으로 대신"은 부족했다 — MCP 어댑터가 도구 호출마다 무작위 멱등성 키를 만들어(`orchestration_tool.rs` `request`, `agent_exchange_tool.rs` `call_as_agent`) agent의 재전송이 새 요청이 됐다. 수정: `mcp/retry_identity.rs` — 도구 인자 `requestId`에서 `mcp-`+SHA-256(run·operation·requestId) 키, 없으면 무작위(계약 §7에 명시). 도구 처리를 `AppHandle` 대신 runtime을 받게 바꾸고(`handle_tool_call(runtime, …)`), 가짜 엔진을 `workbench_core::testing`(`test-hooks`)으로 옮겨 AW 시험이 실제 `WorkbenchRuntime`으로 잰다. `mcp/retry_tests.rs` 6개: 같은 requestId 재전송(자식 1회, 다른 requestId는 새 자식), 동시 전송, 단절(운영 handler와 같은 `spawn_accepted`, 자식 기동 뒤 abort) 뒤 재전송 → 원 요청의 자식, 교환 3회 → 1건, 수집 requestId 재생, 제목 재전송 수렴. **수정 전 실행: 4건 실패**(재전송·동시·단절·교환 — 자식 2회 생성 등, `t027-before.log`), 수정 뒤 AW `cargo test --lib mcp` status=0(30, `t027-after.log`)
 - **T027 보완(사용자 검토 6)**: `requestId` 없는 호출은 JSON-RPC id로 같은 wire 요청 재전송을 식별(명시 `requestId` 우선 → 유효 id(숫자·문자열 구분, run·operation·인자 범위) → 무작위). `handle_post`가 id를 어댑터까지 전달, 제목 도구도 같은 규칙. 사실 확인: `collect_child_results`는 보고서를 지우지 않고 generation 보고서 전체를 돌려주며 부작용은 알림 수집 표시(1회) — 그래서 무작위 키에서도 보고서 자체를 잃지는 않지만 재전송 사이 새 보고서가 오면 처음 결과와 다르다. 시험 `collection_without_a_request_id_is_identified_by_the_rpc_id`: 같은 id 7 재전송 → 처음 1건 유지(그 사이 보고서 추가), 문자열 `"7"`·새 id 8·id 없음 → 새 수집 2건. 변이(rpc 분기를 무작위로) → 이 시험 실패(`t027-rpc-m.log`). AW `cargo test --lib mcp` status=0(35)
+- **T031·T032**: `infrastructure/workbench_http.rs` — 합성 resolver(`DesktopTokenIssuer` → `McpCapabilityResolver`: MCP 실행 토큰 → `agent:<run>`, Origin 있으면 거절, 폐기 즉시 무효), `AwServerInfo`(APP_VERSION·런타임 epoch·ledger `SCHEMA_VERSION`), 허용 출처 3개, stderr 기록, `ExposurePolicy::network_default()`. 단위: MCP 토큰 해석·폐기, 데스크톱 토큰 출처 묶음, 사용자 정의 scheme 출처 직렬화(`tauri://localhost`), 기동 실패 시 이유 응답
+- **T033**: 기동은 런타임·MCP 조립 뒤 `127.0.0.1:0`, 실패는 기록하고 계속. 종료: `RunEvent::ExitRequested` → `ExitGate`가 첫 요청을 미루고(`prevent_exit`) `drain_for_exit`(HTTP 종료 신호 → `serve` 완료 = 받아들인 HTTP 호출 drain → MCP 도구 호출 drain, 상한 없음·경고 간격 기록) 뒤 같은 코드로 `app.exit`. 시험 `exit_waits_for_accepted_http_and_mcp_calls`: 연결이 끊긴 HTTP 호출(400ms)·MCP 호출(600ms)이 끝나기 전 종료 경로 미완료(경고 간격 20ms), 끝난 뒤 새 MCP 호출 거절·서버 내려감. `exit_gate_defers_until_drained`. **미검증**: Tauri 이벤트 루프에서의 실제 prevent_exit·재종료는 앱 스모크(T040)에서 확인
+- **T034**: `get_workbench_connection(window)` → 호출 창 URL 출처로 묶인 `{baseUrl, token, expiresAt}`, 허용 밖 출처·기동 실패는 오류. 핸들러 등록(앱 manifest 없음 → 기본 허용)
+- **US4 게이트**: AW `cargo test` status=0(115 passed), `cargo clippy --all-targets -- -D warnings` status=0
