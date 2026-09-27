@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type EventCallback } from "@/shared/api/transport";
 
 import type {
   AgentExchange,
@@ -50,35 +49,10 @@ export function listAgentExchanges() {
   return invoke<AgentExchange[]>("list_agent_exchanges");
 }
 
-function listenWithFallback<T>(
-  eventName: string,
-  callback: (payload: T) => void,
-): Promise<UnlistenFn> {
-  let disposed = false;
-  const fallbackName = `${eventName}-fallback`;
-  const handleFallback = (event: Event) => {
-    if (!disposed) {
-      callback((event as CustomEvent<T>).detail);
-    }
-  };
-  window.addEventListener(fallbackName, handleFallback);
-  return listen<T>(eventName, (event) => {
-    if (!disposed) {
-      callback(event.payload);
-    }
-  }).then((unlistenTauri) => () => {
-    disposed = true;
-    unlistenTauri();
-    window.removeEventListener(fallbackName, handleFallback);
-  });
+export function listenAgentExchangeRequests(callback: EventCallback<AgentExchangeRequestedEvent>) {
+  return listen(AGENT_EXCHANGE_REQUESTED_EVENT, callback);
 }
 
-export function listenAgentExchangeRequests(
-  callback: (event: AgentExchangeRequestedEvent) => void,
-) {
-  return listenWithFallback(AGENT_EXCHANGE_REQUESTED_EVENT, callback);
-}
-
-export function listenAgentExchangeStatus(callback: (event: AgentExchange) => void) {
-  return listenWithFallback(AGENT_EXCHANGE_STATUS_EVENT, callback);
+export function listenAgentExchangeStatus(callback: EventCallback<AgentExchange>) {
+  return listen(AGENT_EXCHANGE_STATUS_EVENT, callback);
 }

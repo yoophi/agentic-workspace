@@ -26,6 +26,10 @@ _Avoid_: mutation, write, Tauri command
 인증 계층이 부여한 호출자의 정체와 권한 범위. 호출 입력으로 지정할 수 없다.
 _Avoid_: user, caller, client
 
+**창 주체 (Window Principal)**:
+데스크톱 창 하나에 묶인 principal. 창을 만들 때마다 새 **incarnation**으로 발급되므로, 같은 창 이름으로 다시 연 창도 다른 주체다. 창이 닫히면 그 주체의 자격 증명은 모두 무효가 된다.
+_Avoid_: desktop user, window label(주체 이름으로는)
+
 **Scope**:
 principal에게 허용된 도메인별 조회/변경 권한 단위.
 _Avoid_: permission(agent 실행 권한과 혼동), role
@@ -125,7 +129,7 @@ _Avoid_: run config, preferences(외관 설정과 혼동)
 _Avoid_: workspace, working directory(개념 이름으로는)
 
 **작업대 (Bench)**:
-호출자 하나가 Worktree 하나를 대상으로 연 작업 단위. run과 교환 작업 영역을 소유하고, 명시적으로 끝낼 때까지 유지된다. 한 Worktree에 여러 개를 동시에 열 수 있다. 데스크톱에서는 세션 창 하나가 작업대 하나를 연다.
+호출자 하나가 Worktree 하나를 대상으로 연 작업 단위. run과 교환 작업 영역을 소유하고, 명시적으로 끝낼 때까지 유지된다. 한 Worktree에 여러 개를 동시에 열 수 있다. 데스크톱에서는 세션 창의 창 주체가 작업대 하나를 열고, 다른 창 주체는 그 작업대를 쓸 수 없다.
 _Avoid_: window, session, workspace, owner(일반 명사로는)
 
 **Git Worktree**:

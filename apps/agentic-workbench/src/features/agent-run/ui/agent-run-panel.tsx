@@ -1,3 +1,4 @@
+import { exchangeDeliveryKey } from "@/features/agent-run/model/exchange-reconciler";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -1056,7 +1057,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setItems((currentItems) =>
       addUserMessage(currentItems, activeRunId, nextPrompt.text),
     );
-    void sendPromptToRun(activeRunId, nextPrompt.text)
+    void sendPromptToRun(
+      activeRunId,
+      nextPrompt.text,
+      nextPrompt.idempotencyKey ? { idempotencyKey: nextPrompt.idempotencyKey } : undefined,
+    )
       .then(() => {
         recordPromptHistory(nextPrompt.text);
       })
@@ -1435,6 +1440,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
       return;
     }
+    // 교환 prompt는 run 전송에 요청 id로 만든 키를 싣는다 — 원장이 없는 새 창에서 다시 라우팅돼도 같은 세대에서는
+    // agent에 한 번만 간다(043 T036).
+    const deliveryKey = externalPromptRequest.exchangeRequestId
+      ? exchangeDeliveryKey(externalPromptRequest.exchangeRequestId)
+      : undefined;
 
     if (externalPromptRequest.delivery === "draft") {
       handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
@@ -1450,13 +1460,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setInputMode("prompt");
       setRalphLoopEnabled(false);
       setIsRalphSettingsDialogOpen(false);
-      enqueuePrompt(nextPrompt, "external-request");
+      enqueuePrompt(nextPrompt, "external-request", deliveryKey);
       return;
     }
 
     if (activeRunIdRef.current && isRunning) {
       handledExternalPromptRequestIdRef.current = externalPromptRequest.id;
-      enqueuePrompt(nextPrompt, "external-request");
+      enqueuePrompt(nextPrompt, "external-request", deliveryKey);
       return;
     }
 
@@ -1475,6 +1485,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     void startRun(nextPrompt, {
       ralphLoopEnabled: false,
       queuedPromptSource: "external-request",
+      idempotencyKey: deliveryKey,
     }).then((started) => {
       if (!started) {
         setPrompt(nextPrompt);
@@ -1495,6 +1506,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       displayPrompt?: string;
       ralphLoopEnabled?: boolean;
       queuedPromptSource?: QueuedPromptSource;
+      /** run 시작 멱등성 키(043: 교환 prompt의 즉시 전달). */
+      idempotencyKey?: string;
     } = {},
   ) {
     if (!selectedAgentId) {
@@ -1592,6 +1605,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
             : {}),
         },
         panelId,
+        options.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined,
       );
       recordPromptHistory(displayPrompt);
       return true;
@@ -1619,6 +1633,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   function enqueuePrompt(
     promptText = prompt,
     source: QueuedPromptSource = "manual-queue",
+    idempotencyKey?: string,
   ) {
     const nextPrompt = promptText.trim();
     if (!nextPrompt) {
@@ -1628,7 +1643,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setQueuedPrompts((current) => {
       const next = appendQueuedPrompt(
         current,
-        createQueuedPrompt({ id: crypto.randomUUID(), text: nextPrompt, source }),
+        createQueuedPrompt({ id: crypto.randomUUID(), text: nextPrompt, source, idempotencyKey }),
       );
       queuedPromptsRef.current = next;
       return next;

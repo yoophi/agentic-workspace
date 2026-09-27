@@ -177,7 +177,7 @@ impl fmt::Display for Scope {
     }
 }
 
-/// 호출자 주체(040). 작업대는 연 주체에 묶인다(ADR core 0004). `desktop`, `test:<name>`, `agent:<runId>`.
+/// 호출자 주체(040). 작업대는 연 주체에 묶인다(ADR core 0004). `desktop`, `desktop:window:<label>:<incarnation>`, `test:<name>`, `agent:<runId>`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PrincipalSubject(String);
 
@@ -198,6 +198,7 @@ impl fmt::Display for PrincipalSubject {
 }
 
 const AGENT_SUBJECT_PREFIX: &str = "agent:";
+const DESKTOP_WINDOW_SUBJECT_PREFIX: &str = "desktop:window:";
 
 /// agent principal의 scope: 교환 조회·쓰기와 표현 요청만(ADR 0006).
 pub const AGENT_SCOPES: [Scope; 6] = [
@@ -230,6 +231,17 @@ impl AuthenticatedPrincipal {
     /// 데스크톱 앱 조립부가 Tauri compat Adapter에 고정 주입하는 전체 권한 호출자.
     pub fn desktop() -> Self {
         Self::new(PrincipalKind::Desktop, Scope::ALL)
+    }
+
+    /// 데스크톱 창 하나(043). 주체 `desktop:window:<label>:<incarnation>` — 창마다 작업대 소유가 갈린다. incarnation은
+    /// 창이 만들어질 때마다 새로 발급되므로, 같은 label로 다시 연 창은 이전 창의 작업대·토큰과 다른 주체다.
+    pub fn desktop_window(label: &str, incarnation: &str) -> Self {
+        Self {
+            subject: PrincipalSubject::new(format!(
+                "{DESKTOP_WINDOW_SUBJECT_PREFIX}{label}:{incarnation}"
+            )),
+            ..Self::desktop()
+        }
     }
 
     /// 테스트용 조회 전용 호출자: 모든 `:read` + `system:describe`.

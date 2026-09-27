@@ -1,0 +1,9 @@
+{
+  "origin": "http://localhost:1420",
+  "steps": {
+    "listProjects": "ok"
+  },
+  "transport": "compat",
+  "connection": "compat",
+  "result": "compat"
+}

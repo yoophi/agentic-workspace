@@ -10,23 +10,24 @@ use inbound::tauri_commands::{
     adopt_manual_orchestration_child, bind_main_coordinator_run, bootstrap_orchestration_workspace,
     cancel_agent_run, cancel_current_prompt_and_send_to_run, cancel_orchestration_task, clear_goal,
     collect_orchestration_reports, create_git_worktree, create_goal, create_project,
-    create_saved_prompt, delegate_orchestration_goal, delete_git_worktree, delete_project,
-    delete_saved_prompt, dispatch_orchestration_prompt, get_agent_run_settings,
-    get_appearance_preferences, get_goal, get_orchestration_workspace, get_workbench_connection,
-    get_worktree_changes, get_worktree_commit_detail, get_worktree_commit_file_diff,
-    get_worktree_file_diff, get_worktree_git_graph, get_worktree_workspace_layout,
-    handoff_orchestration_coordinator, list_agent_exchanges, list_agent_tool_command_candidates,
-    list_agents, list_git_branches, list_git_remotes, list_git_worktrees, list_orchestration_tasks,
-    list_projects, list_provider_sessions, list_recoverable_orchestration_workspaces,
-    list_saved_prompts, list_worktree_changes, list_worktree_files, list_worktree_git_history,
-    open_external_url, open_settings_window, open_worktree_window, read_worktree_text_file,
+    create_saved_prompt, declare_network_delivery, delegate_orchestration_goal,
+    delete_git_worktree, delete_project, delete_saved_prompt, dispatch_orchestration_prompt,
+    ensure_window_bench, get_agent_run_settings, get_appearance_preferences, get_goal,
+    get_orchestration_workspace, get_workbench_connection, get_worktree_changes,
+    get_worktree_commit_detail, get_worktree_commit_file_diff, get_worktree_file_diff,
+    get_worktree_git_graph, get_worktree_workspace_layout, handoff_orchestration_coordinator,
+    list_agent_exchanges, list_agent_tool_command_candidates, list_agents, list_git_branches,
+    list_git_remotes, list_git_worktrees, list_orchestration_tasks, list_projects,
+    list_provider_sessions, list_recoverable_orchestration_workspaces, list_saved_prompts,
+    list_worktree_changes, list_worktree_files, list_worktree_git_history, open_external_url,
+    open_settings_window, open_worktree_window, read_worktree_text_file,
     reassign_orchestration_task, record_goal_progress, recover_orchestration_workspace,
     replay_orchestration_runtime_events, respond_agent_permission, respond_orchestration_input,
     retry_orchestration_task, save_agent_run_settings, save_worktree_workspace_layout,
     send_agent_exchange, send_orchestration_child_command, send_prompt_to_run, set_font_size_step,
     set_orchestration_presentation, set_run_permission_mode, start_agent_run,
     start_worktree_watcher, steer_prompt_to_run, stop_worktree_watcher, sync_agent_workspace,
-    update_goal, update_project, update_saved_prompt,
+    update_goal, update_project, update_saved_prompt, withdraw_network_delivery,
 };
 use infrastructure::{
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
@@ -130,7 +131,11 @@ macro_rules! app_invoke_handler {
             dispatch_orchestration_prompt,
             recover_orchestration_workspace,
             get_workbench_connection,
-            infrastructure::http_probe::report_http_probe
+            ensure_window_bench,
+            declare_network_delivery,
+            withdraw_network_delivery,
+            infrastructure::http_probe::report_http_probe,
+            infrastructure::http_probe::report_app_probe
         ]
     };
 }
@@ -210,7 +215,10 @@ macro_rules! app_invoke_handler {
             handoff_orchestration_coordinator,
             dispatch_orchestration_prompt,
             recover_orchestration_workspace,
-            get_workbench_connection
+            get_workbench_connection,
+            ensure_window_bench,
+            declare_network_delivery,
+            withdraw_network_delivery
         ]
     };
 }
@@ -265,8 +273,17 @@ pub fn run() {
             desktop_bridge.bind_mcp(mcp_state.clone());
 
             // 042: 같은 런타임을 루프백 HTTP/WS로 연다. 기동 실패는 기록하고 앱은 계속 동작한다(FR-016).
-            let (http_state, start_error) =
-                match workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
+            // 043 T052(debug 전용): 끝점 기동 실패를 주입해 창이 호환 경로로 부팅하는지 확인한다(SC-007).
+            #[cfg(debug_assertions)]
+            let injected_failure = std::env::var("AW_WORKBENCH_HTTP_FAIL_START").is_ok();
+            #[cfg(not(debug_assertions))]
+            let injected_failure = false;
+            let started = if injected_failure {
+                Err(anyhow::anyhow!(
+                    "injected start failure (AW_WORKBENCH_HTTP_FAIL_START)"
+                ))
+            } else {
+                workbench_http::WorkbenchHttpState::start(workbench_http::HttpAssembly {
                     workbench: http_runtime.clone() as Arc<dyn workbench_protocol::Workbench>,
                     mcp_registry: mcp_state.capability_registry(),
                     server_info: workbench_http::AwServerInfo {
@@ -274,16 +291,18 @@ pub fn run() {
                         epoch: http_runtime.epoch().to_owned(),
                     },
                     drain_warn_after: workbench_http::default_drain_warn_after(),
-                }) {
-                    Ok(state) => {
-                        eprintln!("[workbench-http] listening on {}", state.base_url());
-                        (Some(Arc::new(state)), None)
-                    }
-                    Err(error) => {
-                        eprintln!("[workbench-http] failed to start: {error:#}");
-                        (None, Some(format!("{error:#}")))
-                    }
-                };
+                })
+            };
+            let (http_state, start_error) = match started {
+                Ok(state) => {
+                    eprintln!("[workbench-http] listening on {}", state.base_url());
+                    (Some(Arc::new(state)), None)
+                }
+                Err(error) => {
+                    eprintln!("[workbench-http] failed to start: {error:#}");
+                    (None, Some(format!("{error:#}")))
+                }
+            };
             let http = workbench_http::WorkbenchHttp {
                 state: http_state,
                 start_error,
@@ -293,6 +312,10 @@ pub fn run() {
             infrastructure::http_probe::write_diagnostic_file(&http);
             _app.manage(http);
             _app.manage(mcp_state);
+            // 043: 설정 파일로 만들어진 창도 창 주체를 등록한다(이벤트 루프 전이라 아직 호출이 없다).
+            for window in _app.webview_windows().values() {
+                infrastructure::window_lifecycle::adopt(_app.handle(), window);
+            }
 
             #[cfg(debug_assertions)]
             {
@@ -326,19 +349,14 @@ pub fn run() {
                 }
                 _ => {}
             }
-            // 세션 창이 닫히면 그 창이 소유한 진행 중 run을 모두 취소한다.
+            // 세션 창 표현 상태 정리. 주체·토큰 폐기와 작업대 닫기(소유 run 취소)는 창별 처리기가 그 창의 incarnation으로
+            // 한다(043 `window_lifecycle`).
             if let WindowEvent::Destroyed = event {
                 let label = window.label().to_string();
                 if label.starts_with("session-") {
                     infrastructure::window_manager::forget_session_window(&label);
-                    let runtime = window.state::<Arc<WorkbenchRuntime>>().inner().clone();
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
-                    tauri::async_runtime::spawn(async move {
-                        // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
-                        // 041: 묶인 orchestration 작업 영역은 작업대 닫기 hook이 복구 가능으로 바꾼다(core).
-                        infrastructure::desktop_benches::close(&runtime, &label).await;
-                    });
                 }
                 let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
             }

@@ -30,6 +30,8 @@ export type QueuedPrompt = {
   text: string;
   source?: QueuedPromptSource;
   dispatchAfterRunStart?: boolean;
+  /** run 전송 멱등성 키(043: 교환 prompt는 `exchange-delivery:<requestId>`). */
+  idempotencyKey?: string;
 };
 
 export type QueuedPromptSource =
@@ -527,11 +529,13 @@ export function createQueuedPrompt({
   text,
   source = "manual-queue",
   dispatchAfterRunStart = false,
+  idempotencyKey,
 }: {
   id: string;
   text: string;
   source?: QueuedPromptSource;
   dispatchAfterRunStart?: boolean;
+  idempotencyKey?: string;
 }): QueuedPrompt | null {
   const normalizedText = text.trim();
   if (!normalizedText) {
@@ -543,6 +547,7 @@ export function createQueuedPrompt({
     text: normalizedText,
     source,
     ...(dispatchAfterRunStart ? { dispatchAfterRunStart: true } : {}),
+    ...(idempotencyKey ? { idempotencyKey } : {}),
   };
 }
 

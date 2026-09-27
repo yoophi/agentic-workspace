@@ -17,5 +17,7 @@ pub mod mcp;
 pub mod native_window_menu;
 pub mod perf_log;
 pub mod tauri_desktop_bridge;
+pub mod window_lifecycle;
 pub mod window_manager;
+pub mod window_principals;
 pub mod workbench_http;

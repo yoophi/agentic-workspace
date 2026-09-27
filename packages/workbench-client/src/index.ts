@@ -1,5 +1,4 @@
-// 037–040: 생성 타입과 OperationMap만 노출한다. 어떤 앱도 아직 이 패키지를 import하지 않는다.
-// HTTP/WebSocket Adapter는 4단계(Desktop 전환)에서 추가된다.
+// 037–040: 생성 타입과 OperationMap. 043(4단계): 운영용 호출 클라이언트·연결 수명·오류 문자열.
 export type * from "./generated/workbench";
 export type {
   AgentDescriptor,
@@ -59,3 +58,22 @@ export type {
   WorktreeTextFile,
 } from "./operation-map";
 export { CALLS_PATH, PROTOCOL_VERSION } from "./operation-map";
+export { createWorkbenchClient } from "./call-client";
+export type { CallOptions, CallOutcome, ConnectionPort, WorkbenchClient } from "./call-client";
+export { createConnection, PROTOCOL_VERSIONS } from "./connection";
+export type { Connection, ConnectionInfo, ConnectionOptions, ConnectionState, Handshake } from "./connection";
+export { faultToString } from "./fault-string";
+export type { FaultFlavor } from "./fault-string";
+export { OPERATION_KINDS, isQueryOperation } from "./operation-kinds";
+export type { OperationKind } from "./operation-kinds";
+export { createEventClient } from "./event-client";
+export type {
+  EventClient,
+  EventClientOptions,
+  EventConnectionPort,
+  SnapshotSource,
+  SocketLike,
+  StreamListener,
+  ResetContext,
+  SubscribeOptions,
+} from "./event-client";

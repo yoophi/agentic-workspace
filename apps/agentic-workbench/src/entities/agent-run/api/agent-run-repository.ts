@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, listen, type InvokeOptions } from "@/shared/api/transport";
 
 import type {
   AgentDescriptor,
@@ -38,12 +38,12 @@ export async function saveAgentRunSettings(settings: AgentRunSettings) {
   return invoke<AgentRunSettings>("save_agent_run_settings", { settings });
 }
 
-export async function startAgentRun(request: AgentRunRequest, panelId?: string) {
-  return invoke<AgentRun>("start_agent_run", { request, panelId });
+export async function startAgentRun(request: AgentRunRequest, panelId?: string, options?: InvokeOptions) {
+  return invoke<AgentRun>("start_agent_run", { request, panelId }, options);
 }
 
-export async function sendPromptToRun(runId: string, prompt: string) {
-  return invoke<void>("send_prompt_to_run", { runId, prompt });
+export async function sendPromptToRun(runId: string, prompt: string, options?: InvokeOptions) {
+  return invoke<void>("send_prompt_to_run", { runId, prompt }, options);
 }
 
 export async function steerPromptToRun(runId: string, prompt: string) {
@@ -70,21 +70,25 @@ export async function respondAgentPermission(
   return invoke<void>("respond_agent_permission", { runId, permissionId, optionId });
 }
 
+/** 창의 run 이벤트(호환 경로: 창 삽입, 네트워크 경로: 창이 아는 run의 `run:<id>` 구독). */
+export const AGENT_RUN_EVENT = "agent-run-event";
+
 export function listenRunEvents(callback: (event: DeliveredRunEvent) => void) {
   let disposed = false;
-  const handleEnvelope = (envelope: DeliveredRunEvent) => {
-    if (disposed) {
-      return;
+  let unlisten: (() => void) | undefined;
+  void listen<DeliveredRunEvent>(AGENT_RUN_EVENT, (envelope) => {
+    if (!disposed) {
+      callback(envelope);
     }
-    callback(envelope);
-  };
-  const handleFallback = (event: Event) => {
-    handleEnvelope((event as CustomEvent<DeliveredRunEvent>).detail);
-  };
-  window.addEventListener("agent-run-event-fallback", handleFallback);
-
+  }).then((dispose) => {
+    if (disposed) {
+      dispose();
+    } else {
+      unlisten = dispose;
+    }
+  });
   return () => {
     disposed = true;
-    window.removeEventListener("agent-run-event-fallback", handleFallback);
+    unlisten?.();
   };
 }

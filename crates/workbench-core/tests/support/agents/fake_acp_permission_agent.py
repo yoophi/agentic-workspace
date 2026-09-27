@@ -7,12 +7,15 @@
 - 권한 요청 id는 prompt id에 대응한다 — 이미 끝난 prompt의 늦은 권한 응답은 무시한다.
 
 `--log <path>`면 자기가 한 일을 **응답을 보내기 전에** 한 줄씩 기록·flush한다: `prompt:<id>`,
+`prompt-text:<id>:<본문 JSON 문자열>`(043: 어떤 prompt가 몇 번 왔는지 대조),
 `end_turn:<id>`, `cancelled:<id>:<cancel-request|permission-error|permission-refused>`. 시험이 terminal 결과가 어느
 경로에서 왔는지 대조한다. 그 밖의 파일·네트워크는 건드리지 않는다."""
 import json
 import sys
 
 LOG = sys.argv[sys.argv.index("--log") + 1] if "--log" in sys.argv else None
+# 043 앱 스모크: `--echo`면 받은 prompt 본문을 `echo:<본문>` agent 메시지로 먼저 돌려보낸다(앱이 그 출력을 받는지 확인).
+ECHO = "--echo" in sys.argv
 pending_prompt = None
 prompt_for_permission = {}
 permission_seq = 0
@@ -86,6 +89,18 @@ for line in sys.stdin:
     elif method == "session/prompt":
         pending_prompt = message["id"]
         log(f"prompt:{pending_prompt}")
+        blocks = (message.get("params") or {}).get("prompt") or []
+        text = " ".join(block.get("text", "") for block in blocks if isinstance(block, dict))
+        log(f"prompt-text:{pending_prompt}:{json.dumps(text)}")
+        if ECHO:
+            send({
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "sessionId": "fake-session",
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": f"echo:{text}"}},
+                },
+            })
         ask_permission(pending_prompt)
     elif method == "$/cancel_request":
         if pending_prompt is not None and message.get("params", {}).get("requestId") == pending_prompt:

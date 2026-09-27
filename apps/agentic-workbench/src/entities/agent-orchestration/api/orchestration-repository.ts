@@ -1,5 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke, listen, type EventCallback } from "@/shared/api/transport";
 
 import type {
   OrchestrationTask,
@@ -226,45 +225,22 @@ export function recoverOrchestrationWorkspace() {
   return invoke<OrchestrationSession>("recover_orchestration_workspace");
 }
 
-function listenWithFallback<T>(
-  eventName: string,
-  callback: (payload: T) => void,
-): Promise<UnlistenFn> {
-  let disposed = false;
-  const fallbackName = `${eventName}-fallback`;
-  const handleFallback = (event: Event) => {
-    if (!disposed) {
-      callback((event as CustomEvent<T>).detail);
-    }
-  };
-  window.addEventListener(fallbackName, handleFallback);
-  return listen<T>(eventName, (event) => {
-    if (!disposed) {
-      callback(event.payload);
-    }
-  }).then((unlistenTauri) => () => {
-    disposed = true;
-    unlistenTauri();
-    window.removeEventListener(fallbackName, handleFallback);
-  });
-}
-
 export function listenOrchestrationWorkspaceUpdated(
-  callback: (event: OrchestrationEvent) => void,
+  callback: EventCallback<OrchestrationEvent>,
 ) {
-  return listenWithFallback(ORCHESTRATION_WORKSPACE_UPDATED_EVENT, callback);
+  return listen(ORCHESTRATION_WORKSPACE_UPDATED_EVENT, callback);
 }
 
 export function listenOrchestrationCommandUpdated(
-  callback: (event: OrchestrationEvent) => void,
+  callback: EventCallback<OrchestrationEvent>,
 ) {
-  return listenWithFallback(ORCHESTRATION_COMMAND_UPDATED_EVENT, callback);
+  return listen(ORCHESTRATION_COMMAND_UPDATED_EVENT, callback);
 }
 
 export function listenCoordinatorNotificationUpdated(
-  callback: (event: OrchestrationEvent) => void,
+  callback: EventCallback<OrchestrationEvent>,
 ) {
-  return listenWithFallback(
+  return listen(
     ORCHESTRATION_NOTIFICATION_UPDATED_EVENT,
     callback,
   );

@@ -39,6 +39,56 @@ pub fn orchestration_detail_event(reason: &str) -> Option<&'static str> {
     }
 }
 
+/// 네트워크 경로로 이벤트를 받는 창(043, research R4): `(label, incarnation)`. 이 창에는 앱 내부 삽입 전달을 하지 않는다
+/// (구독과 중복 금지, FR-007). incarnation까지 맞춰야 하므로 같은 label로 다시 만든 창(선언 전)은 전달을 받는다.
+fn network_windows() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, String>> {
+    static TABLE: OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> =
+        OnceLock::new();
+    TABLE
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// 창이 네트워크 경로로 이벤트를 받겠다고 선언한다. 창의 **현재** incarnation일 때만 받아들인다.
+pub fn declare_network_delivery(label: &str, incarnation: &str) -> Result<(), String> {
+    if crate::infrastructure::window_principals::incarnation(label).as_deref() != Some(incarnation)
+    {
+        return Err(
+            crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned(),
+        );
+    }
+    network_windows().insert(label.to_owned(), incarnation.to_owned());
+    Ok(())
+}
+
+/// 창 `Destroyed`: 그 incarnation의 선언만 지운다.
+pub fn forget_network_delivery(label: &str, incarnation: &str) {
+    let mut table = network_windows();
+    if table
+        .get(label)
+        .is_some_and(|current| current == incarnation)
+    {
+        table.remove(label);
+    }
+}
+
+/// 창의 페이지가 호환 경로로 부팅했다(043): 이전 페이지(같은 incarnation, 새로고침 전)가 남긴 선언을 거둬 삽입 전달을
+/// 되살린다. 부르는 창은 살아 있으므로 label의 선언을 incarnation과 상관없이 지운다.
+pub fn withdraw_network_delivery(label: &str) {
+    network_windows().remove(label);
+}
+
+/// 이 창에 삽입 전달을 건너뛸지(현재 incarnation이 네트워크 경로를 선언함).
+pub fn is_network_delivery(label: &str) -> bool {
+    let Some(current) = crate::infrastructure::window_principals::incarnation(label) else {
+        return false;
+    };
+    network_windows()
+        .get(label)
+        .is_some_and(|declared| *declared == current)
+}
+
 pub fn dispatch_script(event_name: &str, payload: &Value) -> String {
     format!("window.dispatchEvent(new CustomEvent('{event_name}', {{ detail: {payload} }}));")
 }
@@ -65,6 +115,9 @@ impl TauriDesktopBridge {
         let Some(label) = desktop_benches::label_for(bench_id) else {
             return;
         };
+        if is_network_delivery(&label) {
+            return;
+        }
         if let Some(window) = self.app.get_webview_window(&label) {
             let _ = window.eval(dispatch_script(event_name, payload));
         }
@@ -113,6 +166,10 @@ impl DesktopBridge for TauriDesktopBridge {
                         return;
                     }
                     let _ = crate::infrastructure::native_window_menu::sync_window_menu(&app);
+                    // 창 제목 적용(표현 상태)은 경로와 상관없이 앱이 한다. 화면 알림만 네트워크 창에서는 구독이 대신한다.
+                    if is_network_delivery(&label) {
+                        return;
+                    }
                     let _ = window.eval(dispatch_script(
                         MCP_WINDOW_TITLE_FALLBACK,
                         &serde_json::json!({ "title": title }),
@@ -145,5 +202,61 @@ impl RunLaunchDecorator for TauriDesktopBridge {
         if let Some(mcp) = self.mcp.get() {
             mcp.revoke_run_capability(run_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infrastructure::window_principals;
+
+    fn label() -> String {
+        format!("session-test-{}", uuid::Uuid::new_v4())
+    }
+
+    #[test]
+    fn only_the_current_incarnation_can_declare_and_skip_delivery() {
+        let label = label();
+        assert!(
+            !is_network_delivery(&label),
+            "unregistered windows receive injections"
+        );
+        let old = window_principals::register(&label);
+        assert!(
+            !is_network_delivery(&label),
+            "compat windows receive injections"
+        );
+        declare_network_delivery(&label, &old).unwrap();
+        assert!(is_network_delivery(&label));
+
+        // 같은 label로 다시 만든 창: 선언 전에는 삽입 전달을 받는다. 옛 incarnation으로는 선언하지 못한다.
+        let new = window_principals::register(&label);
+        assert!(
+            !is_network_delivery(&label),
+            "a reopened window starts on injections"
+        );
+        assert!(declare_network_delivery(&label, &old).is_err());
+        // 옛 창의 늦은 정리는 새 창의 선언을 지우지 못한다.
+        declare_network_delivery(&label, &new).unwrap();
+        forget_network_delivery(&label, &old);
+        assert!(is_network_delivery(&label));
+        forget_network_delivery(&label, &new);
+        assert!(!is_network_delivery(&label));
+        window_principals::retire(&label, &new);
+    }
+
+    /// 선언한 창을 새로고침했는데 부팅이 호환 경로로 떨어지면(같은 incarnation) 선언을 거둬 삽입 전달을 되살린다.
+    #[test]
+    fn a_window_that_falls_back_to_compat_withdraws_its_declaration() {
+        let label = label();
+        let inc = window_principals::register(&label);
+        declare_network_delivery(&label, &inc).unwrap();
+        assert!(is_network_delivery(&label));
+        withdraw_network_delivery(&label);
+        assert!(
+            !is_network_delivery(&label),
+            "the compat page receives injections again"
+        );
+        window_principals::retire(&label, &inc);
     }
 }

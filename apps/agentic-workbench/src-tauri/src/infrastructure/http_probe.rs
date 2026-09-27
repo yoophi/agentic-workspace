@@ -19,8 +19,15 @@ use crate::infrastructure::workbench_http::WorkbenchHttp;
 
 pub const DIAGNOSTIC_FILE_ENV: &str = "AW_HTTP_DIAGNOSTIC_FILE";
 pub const PROBE_FILE_ENV: &str = "AW_HTTP_WEBVIEW_PROBE_FILE";
+/// 043 T053: 앱 자신의 transport로 흐름을 확인하는 probe. 화면 번들이 `VITE_AW_DEBUG_PROBE=1`로 빌드됐을 때만 동작한다.
+pub const APP_PROBE_FILE_ENV: &str = "AW_APP_TRANSPORT_PROBE_FILE";
+pub const APP_PROBE_AGENT_ENV: &str = "AW_APP_PROBE_AGENT_COMMAND";
+pub const APP_PROBE_CWD_ENV: &str = "AW_APP_PROBE_CWD";
+/// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). 기본은 스트림·재연결 시나리오.
+pub const APP_PROBE_SCENARIO_ENV: &str = "AW_APP_PROBE_SCENARIO";
 
 static PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
+static APP_PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
 
 fn write_owner_only(path: &Path, value: &Value) -> std::io::Result<()> {
     let mut file = std::fs::OpenOptions::new()
@@ -51,6 +58,27 @@ pub fn write_diagnostic_file(http: &WorkbenchHttp) {
 /// 메인 창 로드 완료 때 한 번 probe를 넣는다.
 pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     use std::sync::atomic::Ordering;
+    // `refresh` 시나리오는 새로고침마다 다시 넣는다(단계는 화면의 sessionStorage가 이어 준다).
+    let refresh = std::env::var(APP_PROBE_SCENARIO_ENV).as_deref() == Ok("refresh");
+    if finished
+        && webview.label() == "main"
+        && std::env::var_os(APP_PROBE_FILE_ENV).is_some()
+        && (refresh || !APP_PROBE_INSTALLED.swap(true, Ordering::AcqRel))
+    {
+        let agent = std::env::var(APP_PROBE_AGENT_ENV).unwrap_or_default();
+        let cwd = std::env::var(APP_PROBE_CWD_ENV).unwrap_or_default();
+        let template = if refresh {
+            APP_REFRESH_PROBE_SCRIPT
+        } else {
+            APP_PROBE_SCRIPT
+        };
+        let script = template
+            .replace("__AGENT__", &serde_json::to_string(&agent).expect("json"))
+            .replace("__CWD__", &serde_json::to_string(&cwd).expect("json"));
+        if let Err(error) = webview.eval(&script) {
+            eprintln!("[workbench-http] failed to inject the app transport probe: {error}");
+        }
+    }
     if !finished || webview.label() != "main" || std::env::var_os(PROBE_FILE_ENV).is_none() {
         return;
     }
@@ -68,6 +96,204 @@ pub fn report_http_probe(report: Value) -> Result<(), String> {
     let path = std::env::var_os(PROBE_FILE_ENV).ok_or("probe is not enabled")?;
     write_owner_only(Path::new(&path), &report).map_err(|error| error.to_string())
 }
+
+/// 앱 probe 결과를 파일에 쓴다(debug 전용 command).
+#[tauri::command]
+pub fn report_app_probe(report: Value) -> Result<(), String> {
+    let path = std::env::var_os(APP_PROBE_FILE_ENV).ok_or("app probe is not enabled")?;
+    write_owner_only(Path::new(&path), &report).map_err(|error| error.to_string())
+}
+
+/// 043 T053: 화면의 `window.__awDebug`(앱 transport)로 프로젝트 조회 → run 시작·이벤트 수신 → 이벤트 소켓 강제 끊기 →
+/// 끊긴 뒤 보낸 prompt의 이벤트를 이어 받는지(순번 증가·중복 없음)를 확인하고, 결과만 보고한다(토큰 없음).
+const APP_PROBE_SCRIPT: &str = r#"
+(async () => {
+  const report = { origin: location.origin, steps: {} };
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  const finish = async () => { try { await invoke('report_app_probe', { report }); } catch (error) { console.error(error); } };
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const waitFor = async (condition, label, limit = 20000) => {
+    const started = Date.now();
+    while (!(await condition())) {
+      if (Date.now() - started > limit) { throw new Error('timeout: ' + label); }
+      await pause();
+    }
+  };
+  try {
+    await waitFor(() => Boolean(window.__awDebug), 'debug handle');
+    const debug = window.__awDebug;
+    report.transport = debug.transportKind();
+    report.connection = debug.connectionState();
+    const projects = await debug.invoke('list_projects');
+    report.steps.listProjects = Array.isArray(projects) ? 'ok' : 'unexpected';
+    if (report.transport !== 'http') { report.result = 'compat'; await finish(); return; }
+    const nonce = crypto.randomUUID().slice(0, 8);
+    const runId = 'probe-' + nonce;
+    const events = [];
+    window.__awProbeEvents = events;
+    await debug.listen('agent-run-event', (payload) => {
+      if (payload.runId !== runId) { return; }
+      const event = payload.event || {};
+      events.push({ sequence: payload.sequence, type: event.type, status: event.status, text: event.text });
+    });
+    // runner가 목표 앞에 안내문을 붙이므로 에코는 `echo:`로 시작하고 고유 문자열로 끝나는 agent 메시지로 판정한다.
+    const isEcho = (event, text) => event.type === 'agentMessage' && typeof event.text === 'string'
+      && event.text.startsWith('echo:') && event.text.endsWith(text);
+    const echoIndex = (text) => events.findIndex((event) => isEcho(event, text));
+    const completedAfter = (index) => index >= 0 && events.slice(index + 1).some((event) => event.type === 'lifecycle' && event.status === 'promptCompleted');
+    const startGoal = 'probe-start-' + nonce;
+    // 일반 패널로 시작한다(`main-agent-run`은 orchestration Main Coordinator 패널이라 작업 영역이 필요하다).
+    await debug.invoke('start_agent_run', {
+      request: { goal: startGoal, agentId: 'fake-acp', agentCommand: __AGENT__, cwd: __CWD__, runId, autoAllow: true },
+      panelId: 'probe-panel',
+    });
+    // 시작 정착: 시작 prompt의 에코(agent 출력)와 그 뒤 prompt 완료를 앱 transport로 받는다.
+    await waitFor(() => completedAfter(echoIndex(startGoal)), 'start prompt echo and completion');
+    report.steps.startEcho = 'ok';
+    const capturedBeforeDrop = events.length;
+    report.steps.droppedSockets = debug.dropEventSockets();
+    const afterPrompt = 'after-drop-' + nonce;
+    await debug.invoke('send_prompt_to_run', { runId, prompt: afterPrompt });
+    // 끊긴 뒤 보낸 고유 prompt의 에코와 그 뒤 완료를 받아야 한다(잔여 이벤트의 순번 증가로 판정하지 않는다).
+    await waitFor(() => completedAfter(echoIndex(afterPrompt)), 'after-drop prompt echo and completion');
+    report.steps.afterDropEcho = 'ok';
+    const sequences = events.map((event) => event.sequence);
+    report.steps.capturedEvents = events.length;
+    report.steps.capturedBeforeDrop = capturedBeforeDrop;
+    report.steps.startEchoCount = events.filter((event) => isEcho(event, startGoal)).length;
+    report.steps.afterDropEchoCount = events.filter((event) => isEcho(event, afterPrompt)).length;
+    report.steps.firstSequence = sequences[0];
+    report.steps.lastSequence = sequences[sequences.length - 1];
+    report.steps.noDuplicates = new Set(sequences).size === sequences.length;
+    report.steps.noGaps = sequences.every((sequence, index) => index === 0 || sequence === sequences[index - 1] + 1);
+    report.steps.eventTypes = events.map((event) => event.type + (event.status ? ':' + event.status : ''));
+    report.connectionAfter = debug.connectionState();
+    report.result = report.steps.droppedSockets > 0 && report.steps.noDuplicates && report.steps.noGaps
+      && report.steps.startEchoCount === 1 && report.steps.afterDropEchoCount === 1 ? 'ok' : 'failed';
+  } catch (error) {
+    report.result = 'error';
+    report.error = String(error);
+    report.observed = (window.__awProbeEvents || []).slice(-20);
+  }
+  await finish();
+})();
+"#;
+
+/// SC-004d(043): 교환 요청을 받아 대상 run에 `exchange-delivery:<requestId>` 키로 보낸 뒤 **확인 전에 창을 새로고침**한다.
+/// 새로 부팅한 창(원장 없음)은 구독 시작 재조정으로 같은 교환을 다시 받아 같은 키로 다시 보내고 확인한다. 서버 상태
+/// `delivered`, 앱이 받은 run 스트림의 그 메시지 에코 1회를 보고한다(agent 기록의 수는 스모크 스크립트가 센다).
+const APP_REFRESH_PROBE_SCRIPT: &str = r#"
+(async () => {
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  const STATE_KEY = 'aw-refresh-probe';
+  const state = JSON.parse(sessionStorage.getItem(STATE_KEY) || 'null');
+  const report = { origin: location.origin, scenario: 'refresh', phase: state ? 2 : 1, steps: {} };
+  const finish = async () => { try { await invoke('report_app_probe', { report }); } catch (error) { console.error(error); } };
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const waitFor = async (condition, label, limit = 20000) => {
+    const started = Date.now();
+    while (!(await condition())) {
+      if (Date.now() - started > limit) { throw new Error('timeout: ' + label); }
+      await pause();
+    }
+  };
+  try {
+    await waitFor(() => Boolean(window.__awDebug), 'debug handle');
+    const debug = window.__awDebug;
+    report.transport = debug.transportKind();
+    if (report.transport !== 'http') { throw new Error('not on the network path'); }
+    const events = [];
+    const isEcho = (event, runId, text) => event.runId === runId && event.type === 'agentMessage'
+      && typeof event.text === 'string' && event.text.startsWith('echo:') && event.text.endsWith(text);
+    const completedAfterEcho = (runId, text) => {
+      const index = events.findIndex((event) => isEcho(event, runId, text));
+      return index >= 0 && events.slice(index + 1).some((event) => event.runId === runId && event.type === 'lifecycle' && event.status === 'promptCompleted');
+    };
+    await debug.listen('agent-run-event', (payload) => {
+      const event = payload.event || {};
+      events.push({ runId: payload.runId, sequence: payload.sequence, type: event.type, status: event.status, text: event.text });
+    });
+    // 운영 코드의 교환 원장과 키(`createExchangeReconciler`, `exchangeDeliveryKey`). 라우팅은 화면 패널 대신 probe가
+    // 대상 run에 교환 키로 보낸다(패널이 키를 싣는 부분은 T036 화면 시험이 근거).
+    const routeTo = (runId) => (request) => {
+      void debug.invoke('send_prompt_to_run', { runId, prompt: request.message }, { idempotencyKey: debug.exchangeDeliveryKey(request.requestId) });
+      return { routed: true };
+    };
+    if (!state) {
+      const nonce = crypto.randomUUID().slice(0, 8);
+      const runA = 'refresh-a-' + nonce;
+      const runB = 'refresh-b-' + nonce;
+      for (const [runId, panelId] of [[runA, 'pa'], [runB, 'pb']]) {
+        const goal = 'refresh-start-' + runId;
+        await debug.invoke('start_agent_run', {
+          request: { goal, agentId: 'fake-acp', agentCommand: __AGENT__, cwd: __CWD__, runId, autoAllow: true },
+          panelId,
+        });
+        await waitFor(() => completedAfterEcho(runId, goal), 'start settled ' + runId);
+      }
+      await debug.invoke('sync_agent_workspace', { request: {
+        worktreePath: __CWD__, revision: 1, focusedPanelId: 'pa',
+        panels: [
+          { panelId: 'pa', title: 'A', runId: runA, status: 'running' },
+          { panelId: 'pb', title: 'B', runId: runB, status: 'running' },
+        ],
+      } });
+      const requestId = 'refresh-x-' + nonce;
+      const message = 'refresh-message-' + nonce;
+      sessionStorage.setItem(STATE_KEY, JSON.stringify({ requestId, message, runB, nonce }));
+      // 1단계 원장: 라우팅(교환 키로 전송)을 마치고, 확인을 보내는 순간 창을 새로고침한다(확인 전 새로고침).
+      const reconciler = debug.createExchangeReconciler({
+        route: routeTo(runB),
+        acknowledge: async () => {
+          await waitFor(() => completedAfterEcho(runB, message), 'first delivery reached the agent');
+          report.steps.firstDelivery = 'ok';
+          await finish();
+          location.reload();
+          await new Promise(() => undefined);
+        },
+      });
+      await debug.listen('agent-exchange-requested', (request) => reconciler.handleRequested(request));
+      await debug.invoke('send_agent_exchange', { request: {
+        requestId, sourcePanelId: 'pa', targetPanelId: 'pb', message, delivery: 'queue',
+      } });
+      return;
+    }
+    // 2단계: 새로고침 뒤 원장이 빈 창. 구독 시작 재조정이 확인 전 교환을 요청으로 다시 넘긴다.
+    const { requestId, message, runB, nonce } = state;
+    let routed = 0;
+    let acknowledged = 0;
+    const reconciler = debug.createExchangeReconciler({
+      route: (request) => { routed += 1; return routeTo(runB)(request); },
+      acknowledge: async (ack) => {
+        await debug.invoke('acknowledge_agent_exchange', { request: ack });
+        acknowledged += 1;
+      },
+    });
+    await debug.listen('agent-exchange-requested', (request) => reconciler.handleRequested(request));
+    await debug.listen('agent-exchange-status', (exchange) => reconciler.observeStatus(exchange));
+    await waitFor(async () => {
+      const list = await debug.invoke('list_agent_exchanges');
+      return list.some((item) => item.requestId === requestId && item.status === 'delivered');
+    }, 'exchange delivered after refresh');
+    // 결정적 장벽: 같은 run에 다른 고유 prompt를 보내 끝나기를 기다린다. 세션의 prompt는 차례로 처리되므로 재전송된
+    // 교환이 agent에 갔다면 이 prompt 전에 도착했다.
+    const barrier = 'refresh-barrier-' + nonce;
+    await debug.invoke('send_prompt_to_run', { runId: runB, prompt: barrier });
+    await waitFor(() => completedAfterEcho(runB, barrier), 'barrier prompt completed');
+    report.steps.routedAfterRefresh = routed;
+    report.steps.acknowledgedAfterRefresh = acknowledged;
+    report.steps.echoCountInAppStream = events.filter((event) => isEcho(event, runB, message)).length;
+    report.steps.barrier = barrier;
+    report.steps.message = message;
+    report.result = routed === 1 && acknowledged === 1 && report.steps.echoCountInAppStream === 1 ? 'ok' : 'failed';
+    sessionStorage.removeItem(STATE_KEY);
+  } catch (error) {
+    report.result = 'error';
+    report.error = String(error);
+  }
+  await finish();
+})();
+"#;
 
 const PROBE_SCRIPT: &str = r#"
 (async () => {

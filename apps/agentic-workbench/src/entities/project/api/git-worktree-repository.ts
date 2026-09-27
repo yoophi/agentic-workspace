@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as invokeDesktop } from "@tauri-apps/api/core";
+
+import { invoke } from "@/shared/api/transport";
 
 import type {
   GitWorktree,
@@ -54,7 +56,7 @@ export async function openWorktreeWindow(
   worktreePath: string,
   mode: OpenWorktreeWindowMode,
 ) {
-  return invoke<void>("open_worktree_window", {
+  return invokeDesktop<void>("open_worktree_window", {
     projectId,
     projectName,
     worktreePath,

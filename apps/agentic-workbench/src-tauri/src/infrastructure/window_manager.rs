@@ -128,12 +128,14 @@ pub fn open_settings_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, settings_url())
-        .title(SETTINGS_WINDOW_TITLE)
-        .inner_size(920.0, 760.0)
-        .min_inner_size(760.0, 560.0)
-        .build()
-        .map_err(|error| error.to_string())?;
+    crate::infrastructure::window_lifecycle::build_tracked(app, SETTINGS_WINDOW_LABEL, || {
+        WebviewWindowBuilder::new(app, SETTINGS_WINDOW_LABEL, settings_url())
+            .title(SETTINGS_WINDOW_TITLE)
+            .inner_size(920.0, 760.0)
+            .min_inner_size(760.0, 560.0)
+            .build()
+            .map_err(|error| error.to_string())
+    })?;
 
     let _ = crate::infrastructure::native_window_menu::sync_window_menu(app);
 
@@ -186,7 +188,9 @@ fn build_window(
         builder = builder.tabbing_identifier(TABBING_IDENTIFIER);
     }
 
-    let window = builder.build().map_err(|error| error.to_string())?;
+    let window = crate::infrastructure::window_lifecycle::build_tracked(app, label, || {
+        builder.build().map_err(|error| error.to_string())
+    })?;
 
     #[cfg(debug_assertions)]
     if devtools::should_open_devtools() {
