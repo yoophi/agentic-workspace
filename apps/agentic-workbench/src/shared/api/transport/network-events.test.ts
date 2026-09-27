@@ -380,6 +380,100 @@ describe("network events — run snapshot replay after retention recovery", () =
     events.close();
   }, 20_000);
 
+  it("does not let a reset that finishes late in the old epoch hide the new epoch's replay", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `e${hub.epoch}-${i}` });
+    }
+    const { client } = runClient(hub, stream);
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    const hold = deferred<void>();
+    let held = false;
+    await network.listen("agent-run-event", async (payload) => {
+      if (!held) {
+        held = true;
+        await hold.promise; // 옛 세대 복구 재설정이 늦게 끝난다
+      }
+      received.push(payload);
+    });
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    await vi.waitFor(() => expect(held).toBe(true));
+    hub.ticketsDown = true;
+    hub.restart("epoch-2");
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `eepoch-2-${i}` });
+    }
+    hub.ticketsDown = false;
+    const tickets = hub.ticketRequests.length;
+    await vi.waitFor(() => expect(hub.ticketRequests.slice(tickets).some((request) => request[0].epoch === "epoch-2")).toBe(true), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    hold.resolve();
+    hub.publish(stream, { out: "eepoch-2-6" });
+    await vi.waitFor(() => expect(outputs(received)).toContain("eepoch-2-6"), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received).filter((out) => out.startsWith("eepoch-2-"))).toEqual([1, 2, 3, 4, 5, 6].map((n) => `eepoch-2-${n}`));
+    events.close();
+  }, 20_000);
+
+  it("records how far the snapshot replay reached so an overlapping recovery does not repeat outputs past the gap boundary", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `e${hub.epoch}-${i}` });
+    }
+    const base = runClient(hub, stream);
+    const gate = deferred<void>();
+    let replays = 0;
+    const client: WorkbenchClient = {
+      call: vi.fn(async (operation: string, input: unknown) => {
+        if (operation === "run.replay") {
+          replays += 1;
+          if (replays === 1) {
+            await gate.promise; // 적재 중에 6·7이 생긴다 → 스냅샷은 7까지(기준점은 5)
+          }
+        }
+        return base.client.call(operation as never, input as never);
+      }) as never,
+    };
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    const hold = deferred<void>();
+    let held = false;
+    await network.listen("agent-run-event", async (payload) => {
+      if (!held) {
+        held = true;
+        await hold.promise;
+      }
+      received.push(payload);
+    });
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    const e = hub.epoch;
+    await vi.waitFor(() => expect(replays).toBe(1));
+    hub.publish(stream, { out: `e${e}-6` });
+    hub.publish(stream, { out: `e${e}-7` });
+    gate.resolve();
+    await vi.waitFor(() => expect(held).toBe(true));
+    // 재설정 보류 중 끊기고, 다시 붙기 전에 보관 한도를 넘긴다 → 기준점 5에서 다시 보관 gap → 겹친 복구.
+    hub.ticketsDown = true;
+    expect(events.debugDropSockets()).toBe(1);
+    for (let i = 8; i <= 12; i += 1) {
+      hub.publish(stream, { out: `e${e}-${i}` });
+    }
+    hub.ticketsDown = false;
+    await vi.waitFor(() => expect(replays).toBe(2), { timeout: 5_000 });
+    hold.resolve();
+    await vi.waitFor(() => expect(outputs(received)).toContain(`e${e}-12`), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received)).toEqual(Array.from({ length: 12 }, (_, i) => `e${e}-${i + 1}`));
+    events.close();
+  }, 20_000);
+
   it("replays the new epoch from its first output when an epoch change is followed by a retention gap", async () => {
     const hub = new FakeEventHub(2);
     const stream = "run:r1";

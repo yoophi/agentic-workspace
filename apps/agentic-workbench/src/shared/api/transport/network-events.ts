@@ -87,6 +87,8 @@ export function createNetworkEvents({ events, client }: NetworkEventsOptions) {
     return {
       load: () => call("run.replay", { benchId, runId, afterSequence: 0 }),
       passes: (event, data) => event.sequence > ((data as { lastSequence?: number }).lastSequence ?? 0),
+      // replay 재설정은 `lastSequence`까지 반영한다: 겹친 복구가 그 앞을 다시 내보내지 않게 한다.
+      position: (data) => (data as { lastSequence?: number }).lastSequence,
     };
   }
 

@@ -40,6 +40,9 @@ export interface SnapshotSource {
   load(): Promise<unknown>;
   /** 스냅샷 뒤에 넘길 이벤트인지(run: 순번, orchestration: revision, 교환: 모두 — requestId upsert). */
   passes(event: EventEnvelope, snapshot: unknown): boolean;
+  /** 스냅샷이 반영한 마지막 순번(run: `lastSequence`). 재설정이 끝나면 수신자의 실제 반영 순번을 여기까지 올린다 —
+   *  없으면 gap 기준점·재동기 시점의 최고 순번까지만 반영한 것으로 본다. */
+  position?(snapshot: unknown): number | undefined;
 }
 
 export interface SubscribeOptions {
@@ -468,6 +471,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       try {
         const snapshot = this.snapshot;
         const coveredUpTo = this.highest;
+        const epoch = this.epoch;
         // 적재는 사슬 밖: 옛 재동기의 적재가 끝나지 않아도 이 재동기는 제 스냅샷을 불러 적용한다.
         const data = snapshot ? await snapshot.load() : undefined;
         if (this.isStale(state, generation)) {
@@ -479,7 +483,10 @@ export function createEventClient(options: EventClientOptions): EventClient {
             state.queue.shift();
           } else {
             await state.listener.onReset?.(data, { delivered: state.applied });
-            state.applied = Math.max(state.applied, coveredUpTo);
+            if (this.epoch === epoch) {
+              // 끝난 재설정은 세대가 지났어도 반영한 것이다(같은 서버 세대일 때만 — 옛 세대 순번은 새 세대에서 뜻이 없다).
+              state.applied = Math.max(state.applied, coveredUpTo, snapshot.position?.(data) ?? 0);
+            }
             if (this.isStale(state, generation)) {
               return;
             }
@@ -592,6 +599,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
     applyRecoverySnapshot(state: ListenerState, recovery: Recovery, data: unknown, pending: EventEnvelope[]) {
       const snapshot = this.snapshot;
       const after = Math.max(recovery.after, 0);
+      const epoch = this.epoch;
       state.resetting = true;
       state.generation += 1;
       const generation = state.generation;
@@ -609,7 +617,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
       void this.serialize(state, generation, async () => {
         await state.listener.onReset?.(data, { delivered: state.applied });
-        state.applied = Math.max(state.applied, after);
+        if (this.epoch === epoch) {
+          state.applied = Math.max(state.applied, after, snapshot?.position?.(data) ?? 0);
+        }
         if (this.isStale(state, generation)) {
           return;
         }
