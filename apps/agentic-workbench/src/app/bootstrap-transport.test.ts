@@ -90,4 +90,22 @@ describe("bootstrapTransport", () => {
     expect(getTransport().kind).toBe("http");
     result.connection?.close();
   });
+
+  it("resynchronizes the window once when the server epoch changes after a reconnect", async () => {
+    setTransport(compatTransport);
+    let epoch = "epoch-1";
+    const resyncs: string[] = [];
+    const d = deps({
+      fetch: vi.fn(async () => handshake(epoch)) as unknown as typeof fetch,
+      onEpochChanged: (next) => resyncs.push(next),
+    });
+    const result = await bootstrapTransport(d);
+    epoch = "epoch-2";
+    result.connection?.reportLost();
+    await result.connection?.whenConnected();
+    expect(resyncs).toEqual(["epoch-2"]);
+    expect(d.logs.some((line) => line.includes("server epoch changed to epoch-2"))).toBe(true);
+    result.connection?.close();
+  });
 });
+

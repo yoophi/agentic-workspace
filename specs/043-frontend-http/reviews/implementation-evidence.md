@@ -199,3 +199,21 @@ T027 범위를 정직하게 적는다:
   - 시험은 재연결 뒤 이 신호가 실제 `QueryClient`에서 파일 목록·변경·Git 이력·그래프 query를 무효화하는 것까지 단정한다.
 - **소스 문자열 시험 4개 재지정**(App 제목, speckit 무효화, 교환·orchestration 저장소의 fallback): 검사하던 문자열이 옮겨 간 파일(호환 transport, 무효화 모델)을 보도록 대상만 바꿨고, 원래 검사 내용은 모두 유지했다.
 - **화면 이벤트 시험(T038 일부)**: `agent-run-panel` [http]의 run 이벤트는 가짜 서버 harness의 이벤트 계층으로 들어온다. 이 계층은 042 cursor 규칙을 흉내 내는 **메모리 hub 소켓**이고, 호출만 실제 HTTP다. 실제 WebSocket과 실제 042 서버의 조합은 T041 통합 suite가 맡는다.
+
+## T035 연결 · T036 교환 전달 키 · T043 agent 1회 전달 · 세대 변경 재동기(T046 일부)
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| 화면: 교환 prompt의 run 시작 키 | `npx vitest run src/features/agent-run/ui/agent-run-panel.test.tsx` | 1 → 0 | 첫 실패는 서버 기록이 앞선 시험의 `run.start` 3건까지 쌓여서였다. 이 시험 이후 기록만 보게 고친 뒤 28 passed. [http]에서 서버가 받은 `run.start`의 키가 `["exchange-delivery:x-42"]` |
+| 변이: `startRun`에 키를 넘기지 않음 | 같은 파일 `-t "exchange delivery key"` | 1 | [http] 실패 |
+| **범위 A — core → RunEngine 호출 1회** | `cargo test -p workbench-core --features test-hooks --test exchange_delivery_once` | 0 | `ScriptedRunEngine.prompts` 카운터: 같은 키 두 번 → 1, 다른 키 → 2. 이 시험은 **core가 엔진을 한 번 부른다는 근거**이고, 실제 agent 전달 증거가 아니다 |
+| **범위 B — 실제 AcpRunEngine + 가짜 ACP agent 프로세스** | `cargo test -p workbench-core --features test-hooks --test exchange_delivery_acp` | 0 | 실제 runner가 띄운 `fake_acp_permission_agent.py`의 기록에서 x-1 본문을 받은 횟수 1, 전체 prompt 3(목표, x-1, x-2) |
+| 범위 B 대조 변이(첫 판) | 중복 전송을 새 키로 | **0(변이를 못 잡음)** | 장벽이 잘못됐다. `end_turn` 3개 조건이 (목표, x-1, 중복)으로 먼저 채워져 x-2 전에 셌다 |
+| 범위 B 장벽 수정 | 가짜 agent가 `prompt-text:<id>:<본문>`을 추가로 기록(기존 줄 형식 유지), 장벽 = "x-2 본문 prompt의 `end_turn`" | 0 | 2 passed |
+| 범위 B 대조 변이(수정 뒤) | 중복 전송을 새 키로 | 101 | agent 기록에 `prompt-text:3`과 `prompt-text:4`가 모두 x-1이다(중복 전달 드러남). 실패 지점은 x-1 횟수 단정이 아니라 "x-2가 끝나지 않음(10초 상한)"이다. **변이 상태에서 x-2가 agent에 가지 않은 원인은 미확인**이다. 정상 경로에서는 중복 전송이 저장 결과 재생이라 x-2를 보낼 때 agent가 쉬고 있다 |
+| 가짜 agent 변경 회귀 | `cargo test … --test acp_permission_exit` | 0 | 4 passed |
+| 세대 변경 재동기 | `npx vitest run src/app/bootstrap-transport.test.ts` | 0 | 8 passed. 재연결 handshake의 세대가 바뀌면 `onEpochChanged`를 **한 번** 부르고 진단 기록을 남긴다. 기본 동작은 창 다시 불러오기(새 작업대·새 구독·화면 상태 초기화) |
+
+- **T035**: `worktree-agent-run-area`의 교환 요청 수신자가 원장(`handleRequested`)을 거치고, 상태 수신자는 서버의 종결 상태를 원장에 알린다(`observeStatus`). 확인에 실패했을 때 화면 문구는 오늘과 같고, 이제 다음 재조정 때 확인만 다시 시도한다.
+- **T036**: 교환에서 라우팅된 prompt(`exchangeRequestId`)는 실제로 보내는 두 지점에 키 `exchange-delivery:<requestId>`를 싣는다. 대기열 전송(`sendPromptToRun`)과 즉시 전달(`startAgentRun`)이다. 교환이 아닌 prompt에는 키가 없다(기존처럼 호출마다 새 키).
+- **SC-004d 범위**: 서버 쪽은 범위 B로 실제 agent 프로세스 경계까지 확인했다. 화면에서 원장 없이 다시 라우팅되는 새로고침 시나리오를 실제 앱에서 끝까지 보는 것은 T054 앱 스모크에서 다룬다(아직 안 함).

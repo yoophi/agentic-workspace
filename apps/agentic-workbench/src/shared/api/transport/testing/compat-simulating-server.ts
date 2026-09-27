@@ -143,6 +143,8 @@ export interface CompatSimulatingServer {
   connection: Connection;
   /** 이벤트 쪽 가짜 hub(042 cursor 규칙, 메모리 소켓). 시험은 여기에 발행해 네트워크 경로로 이벤트를 넣는다. */
   hub: FakeEventHub;
+  /** 받은 호출(operation·멱등성 키) 기록. */
+  calls: Array<{ operation: string; idempotencyKey?: string }>;
   close(): Promise<void>;
 }
 
@@ -150,6 +152,7 @@ export async function startCompatSimulatingServer(
   invoke: (command: string, args?: Args) => unknown,
   options: { windowLabel?: string; benchId?: string } = {},
 ): Promise<CompatSimulatingServer> {
+  const calls: Array<{ operation: string; idempotencyKey?: string }> = [];
   const server = createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
       response.writeHead(200, {
@@ -172,7 +175,8 @@ export async function startCompatSimulatingServer(
       send(request, response, 404, { message: "not found" });
       return;
     }
-    const call = JSON.parse(body) as { operation: string; input: Input };
+    const call = JSON.parse(body) as { operation: string; input: Input; idempotencyKey?: string };
+    calls.push({ operation: call.operation, idempotencyKey: call.idempotencyKey });
     const command = commandOfOperation.get(call.operation as never);
     if (!command) {
       send(request, response, 400, problemOf("", `unknown operation ${call.operation}`), "application/problem+json");
@@ -217,6 +221,7 @@ export async function startCompatSimulatingServer(
     transport,
     connection,
     hub,
+    calls,
     close: async () => {
       eventClient.close();
       connection.close();

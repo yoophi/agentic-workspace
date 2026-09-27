@@ -1,3 +1,4 @@
+import { createExchangeReconciler } from "@/features/agent-run/model/exchange-reconciler";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AlertTriangleIcon, FolderGit2Icon } from "lucide-react";
 
@@ -329,29 +330,37 @@ export function WorktreeAgentRunArea({
     let disposed = false;
     const unlisteners: Array<() => void> = [];
 
+    // 043 T035: 교환 원장이 라이브 요청과 스냅샷 재조정(네트워크 경로의 재동기)을 합쳐 라우팅·확인을 각각 한 번만 한다.
+    const reconciler = createExchangeReconciler({
+      route: (request) => {
+        const result = routePromptToPanel(stateRef.current, request.target.panelId, {
+          id: request.requestId,
+          text: request.message,
+          delivery: request.delivery,
+          exchangeRequestId: request.requestId,
+        });
+        if (result.routed) {
+          stateRef.current = result.state;
+          setState(result.state);
+          return { routed: true };
+        }
+        return { routed: false, reason: result.reason };
+      },
+      acknowledge: async (ack) => {
+        try {
+          await acknowledgeAgentExchange(ack);
+        } catch (error) {
+          setTargetMessage(`에이전트 메시지 상태 반영 실패: ${String(error)}`);
+          throw error;
+        }
+      },
+    });
+
     void listenAgentExchangeRequests(async (request) => {
       if (disposed) {
         return;
       }
-      const result = routePromptToPanel(stateRef.current, request.target.panelId, {
-        id: request.requestId,
-        text: request.message,
-        delivery: request.delivery,
-      });
-      if (result.routed) {
-        stateRef.current = result.state;
-        setState(result.state);
-      }
-      try {
-        await acknowledgeAgentExchange({
-          requestId: request.requestId,
-          targetPanelId: request.target.panelId,
-          outcome: result.routed ? "delivered" : "rejected",
-          reason: result.routed ? null : result.reason,
-        });
-      } catch (error) {
-        setTargetMessage(`에이전트 메시지 상태 반영 실패: ${String(error)}`);
-      }
+      await reconciler.handleRequested(request);
     }).then((unlisten) => {
       if (disposed) {
         unlisten();
@@ -364,6 +373,7 @@ export function WorktreeAgentRunArea({
       if (disposed) {
         return;
       }
+      reconciler.observeStatus(exchange);
       setExchanges((current) => [
         ...current.filter((item) => item.requestId !== exchange.requestId),
         exchange,

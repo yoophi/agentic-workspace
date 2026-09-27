@@ -23,6 +23,8 @@ export type AgentPromptRequest = {
   id: string;
   text: string;
   delivery?: AgentPromptDelivery;
+  /** agent 사이 교환에서 온 prompt면 그 요청 id(043: run 전송 멱등성 키 `exchange-delivery:<id>`). */
+  exchangeRequestId?: string;
 };
 
 export type AgentRunPanelSlot = {

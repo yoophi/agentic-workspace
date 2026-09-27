@@ -502,6 +502,24 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
     });
   });
 
+  it("starts a run for an exchange prompt with the exchange delivery key (043 T036)", async () => {
+    const recordedBefore = server?.calls.length ?? 0;
+    await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-main",
+      externalPromptRequest: { id: "x-42", text: "Handle the peer request", exchangeRequestId: "x-42" },
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);
+    expect(invocationsFor("start_agent_run")[0]).toMatchObject({
+      request: { goal: "Handle the peer request", cwd: "/tmp/agent-run-panel-main" },
+    });
+    if (path === "http") {
+      // 네트워크 경로: 서버가 받은 run.start에 교환 요청 id로 만든 멱등성 키가 실린다.
+      const starts = (server?.calls.slice(recordedBefore) ?? []).filter((call) => call.operation === "run.start");
+      expect(starts.map((call) => call.idempotencyKey)).toEqual(["exchange-delivery:x-42"]);
+    }
+  });
+
   it("drives the same prompt and run-event contract in an additional panel", async () => {
     const panel = await renderAgentRunPanel({
       panelId: "child-agent-run",

@@ -1,4 +1,4 @@
-import { invoke, listen } from "@/shared/api/transport";
+import { invoke, listen, type InvokeOptions } from "@/shared/api/transport";
 
 import type {
   AgentDescriptor,
@@ -38,12 +38,12 @@ export async function saveAgentRunSettings(settings: AgentRunSettings) {
   return invoke<AgentRunSettings>("save_agent_run_settings", { settings });
 }
 
-export async function startAgentRun(request: AgentRunRequest, panelId?: string) {
-  return invoke<AgentRun>("start_agent_run", { request, panelId });
+export async function startAgentRun(request: AgentRunRequest, panelId?: string, options?: InvokeOptions) {
+  return invoke<AgentRun>("start_agent_run", { request, panelId }, options);
 }
 
-export async function sendPromptToRun(runId: string, prompt: string) {
-  return invoke<void>("send_prompt_to_run", { runId, prompt });
+export async function sendPromptToRun(runId: string, prompt: string, options?: InvokeOptions) {
+  return invoke<void>("send_prompt_to_run", { runId, prompt }, options);
 }
 
 export async function steerPromptToRun(runId: string, prompt: string) {
