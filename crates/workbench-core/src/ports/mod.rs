@@ -15,4 +15,5 @@ pub mod project_repository;
 pub mod provider_session_repository;
 pub mod run_engine;
 pub mod saved_prompt_repository;
+pub mod server_host;
 pub mod worktree_file_provider;

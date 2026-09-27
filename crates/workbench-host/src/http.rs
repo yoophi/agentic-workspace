@@ -23,6 +23,8 @@ use workbench_server::{
     tickets::EventTicketStore,
 };
 
+use workbench_core::ports::server_host::{ServerHost, WindowToken, WindowTokenError};
+
 use crate::{
     lifecycle::identity::{OwnerIdentity, OwnerResolver},
     mcp::capability_registry::CapabilityRegistry,
@@ -90,6 +92,54 @@ pub struct WorkbenchConnection {
     /// 043: 토큰이 묶인 창 incarnation(창 토큰일 때). 전달 선언·재연결이 같은 창인지 확인하는 데 쓴다.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub incarnation: Option<String>,
+}
+
+/// core `ServerHost` 구현(044 T026). 창 토큰은 WebView 허용 출처에만, 폐기 tombstone 확인과 함께 발급기 잠금 아래에서
+/// 발급한다. 폐기는 토큰과 이벤트 표 양쪽에 tombstone을 세운다(Codex 설계 리뷰 C4).
+struct HttpServerHost {
+    issuer: Arc<DesktopTokenIssuer>,
+    tickets: Arc<EventTicketStore>,
+    instance_id: Option<String>,
+    http_calls: Arc<DetachedCalls>,
+    mcp_calls: Arc<DetachedCalls>,
+}
+
+impl ServerHost for HttpServerHost {
+    fn instance_id(&self) -> Option<String> {
+        self.instance_id.clone()
+    }
+
+    fn issue_window_token(
+        &self,
+        principal: AuthenticatedPrincipal,
+        origin: &str,
+    ) -> Result<WindowToken, WindowTokenError> {
+        if !WEBVIEW_ORIGINS.contains(&origin) {
+            return Err(WindowTokenError::OriginNotAllowed);
+        }
+        let issued = self
+            .issuer
+            .issue_window(
+                principal,
+                TokenOrigin::WebView(origin.to_owned()),
+                DESKTOP_TOKEN_TTL,
+            )
+            .map_err(|_| WindowTokenError::Retired)?;
+        Ok(WindowToken {
+            token: issued.token,
+            expires_at: issued.expires_at.to_rfc3339(),
+        })
+    }
+
+    fn retire_window(&self, subject: &workbench_protocol::PrincipalSubject) -> u64 {
+        let tokens = self.issuer.retire_subject(subject);
+        let tickets = self.tickets.retire_subject(subject);
+        (tokens + tickets) as u64
+    }
+
+    fn accepted_calls(&self) -> u64 {
+        (self.http_calls.active() + self.mcp_calls.active()) as u64
+    }
 }
 
 /// 기동한 어댑터. 종료 신호와 `serve` 완료 신호를 쥔다.
@@ -228,6 +278,21 @@ impl WorkbenchHttpState {
             TokenOrigin::WebView(origin.to_owned()),
             DESKTOP_TOKEN_TTL,
         )))
+    }
+
+    /// 044 `desktop.*`·`server.status`가 쓰는 core 서버 host port. 이 어댑터의 발급기·이벤트 표를 그대로 쓴다.
+    pub fn server_host(
+        &self,
+        instance_id: Option<String>,
+        mcp_calls: Arc<DetachedCalls>,
+    ) -> Arc<dyn ServerHost> {
+        Arc::new(HttpServerHost {
+            issuer: Arc::clone(&self.issuer),
+            tickets: Arc::clone(&self.tickets),
+            instance_id,
+            http_calls: Arc::clone(&self.http_calls),
+            mcp_calls,
+        })
     }
 
     /// 창 `Destroyed`(043): 그 창 주체의 토큰과 아직 쓰지 않은 이벤트 표를 모두 지운다.

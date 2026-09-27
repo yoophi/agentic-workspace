@@ -57,6 +57,11 @@ pub struct BenchServices {
     close_hooks: Mutex<Vec<BenchCloseHook>>,
 }
 
+/// 소유자 주체(044)는 작업대 소유 판정을 우회한다.
+pub fn is_owner(principal: &AuthenticatedPrincipal) -> bool {
+    principal.kind == workbench_protocol::PrincipalKind::Owner
+}
+
 pub fn bench_fault(request_id: &RequestId, error: BenchError) -> WorkbenchFault {
     match error {
         BenchError::NotFound => WorkbenchFault::new(
@@ -169,9 +174,13 @@ impl BenchServices {
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
     ) -> Result<BenchView, WorkbenchFault> {
-        self.registry
-            .resolve(bench_id, &principal.subject)
-            .map_err(|error| bench_fault(request_id, error))
+        // 044: 소유자 주체는 작업대 소유 판정을 우회한다(contracts/server-lifecycle.md §4 우회 지점 1).
+        let resolved = if is_owner(principal) {
+            self.registry.resolve_any(bench_id)
+        } else {
+            self.registry.resolve(bench_id, &principal.subject)
+        };
+        resolved.map_err(|error| bench_fault(request_id, error))
     }
 
     pub fn admit(
@@ -180,8 +189,11 @@ impl BenchServices {
         principal: Option<&AuthenticatedPrincipal>,
         bench_id: &str,
     ) -> Result<BenchAdmission, WorkbenchFault> {
+        let subject = principal
+            .filter(|principal| !is_owner(principal))
+            .map(|principal| &principal.subject);
         self.registry
-            .admit(bench_id, principal.map(|principal| &principal.subject))
+            .admit(bench_id, subject)
             .map_err(|error| bench_fault(request_id, error))
     }
 
@@ -194,8 +206,36 @@ impl BenchServices {
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
     ) -> Result<BenchCloseOutput, WorkbenchFault> {
-        self.close_as(request_id, &principal.subject, bench_id)
-            .await
+        // 044: 소유자는 연 주체로서 닫는다(없는 작업대는 오늘처럼 `closed: false`).
+        let subject = if is_owner(principal) {
+            self.registry
+                .owner(bench_id)
+                .unwrap_or_else(|| principal.subject.clone())
+        } else {
+            principal.subject.clone()
+        };
+        self.close_as(request_id, &subject, bench_id).await
+    }
+
+    /// 044 창 폐기(`desktop.retireWindow{closeBench}`): `subject`가 연 작업대를 모두 닫고, 닫은 작업대 id를 돌려준다.
+    pub async fn close_opened_by(
+        self: &Arc<Self>,
+        request_id: &RequestId,
+        subject: &workbench_protocol::PrincipalSubject,
+    ) -> Vec<String> {
+        let mut closed = Vec::new();
+        for (bench_id, owner) in self.registry.open_benches() {
+            if &owner != subject {
+                continue;
+            }
+            if let Ok(output) = self.close_as(request_id, subject, &bench_id).await {
+                if output.closed {
+                    closed.push(bench_id);
+                }
+            }
+        }
+        closed.sort();
+        closed
     }
 
     /// 열린 작업대 수.

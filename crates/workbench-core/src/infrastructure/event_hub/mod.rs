@@ -441,6 +441,19 @@ impl EventHub {
         }
     }
 
+    /// 이 작업대가 claim한 run id(044 `bench.list`). 끝났지만 journal이 남은 run도 들어 있다 — 호출자가 엔진 소유로 거른다.
+    pub fn runs_of_bench(&self, bench_id: &str) -> Vec<String> {
+        let prefix = StreamKind::Run.stream_id("");
+        let mut runs: Vec<String> = lock(&self.retention)
+            .run_owners
+            .iter()
+            .filter(|(_, owner)| owner.as_str() == bench_id)
+            .filter_map(|(stream_id, _)| stream_id.strip_prefix(prefix.as_str()).map(str::to_owned))
+            .collect();
+        runs.sort();
+        runs
+    }
+
     pub fn run_owner(&self, run_id: &str) -> Option<String> {
         lock(&self.retention)
             .run_owners

@@ -76,6 +76,7 @@ pub fn assemble(options: HostOptions) -> Result<HostAssembly> {
         owner,
     } = options;
     let (runtime, mcp) = assemble_core(data_dir, adapters, &spawner)?;
+    let instance_id = owner.as_ref().map(|owner| owner.instance_id().to_owned());
     let started = match http {
         HttpStart::Fail(reason) => Err(anyhow::anyhow!(reason)),
         HttpStart::Start => WorkbenchHttpState::start(
@@ -96,6 +97,10 @@ pub fn assemble(options: HostOptions) -> Result<HostAssembly> {
         Ok(state) => (Some(Arc::new(state)), None),
         Err(error) => (None, Some(format!("{error:#}"))),
     };
+    // 044 T026: `desktop.*`·`server.status`가 이 어댑터의 발급기·이벤트 표·호출 수를 쓴다.
+    if let Some(state) = &http {
+        runtime.attach_server_host(state.server_host(instance_id, mcp.detached_calls()));
+    }
     Ok(HostAssembly {
         runtime,
         mcp,

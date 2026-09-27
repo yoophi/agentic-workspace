@@ -250,6 +250,7 @@ pub struct WorkbenchRuntime {
     benches: Arc<BenchServices>,
     orchestration: Arc<OrchestrationRuntime>,
     work_gate: Arc<crate::application::work_gate::WorkGate>,
+    server_control: Arc<crate::application::server_control::ServerControl>,
 }
 
 /// run 종료 hook 여러 개를 차례로 부른다.
@@ -363,6 +364,11 @@ impl WorkbenchRuntime {
             }));
         }
 
+        let server_control = Arc::new(crate::application::server_control::ServerControl::new(
+            Arc::clone(&work_gate),
+            epoch.clone(),
+            Arc::clone(&benches),
+        ));
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
             Arc::clone(&ledger),
@@ -370,8 +376,8 @@ impl WorkbenchRuntime {
             Arc::clone(&hooks),
             &adapters,
             &epoch,
-            &benches,
             &orchestration,
+            &server_control,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -392,12 +398,23 @@ impl WorkbenchRuntime {
             benches,
             orchestration,
             work_gate,
+            server_control,
         }))
     }
 
     /// 작업 관문(044, research R14).
     pub fn work_gate(&self) -> &Arc<crate::application::work_gate::WorkGate> {
         &self.work_gate
+    }
+
+    /// 서버 제어 상태(044): 임대 표와 조립이 넣는 서버 host port.
+    pub fn server_control(&self) -> &Arc<crate::application::server_control::ServerControl> {
+        &self.server_control
+    }
+
+    /// 조립(`workbench-host`)이 창 토큰 발급기·이벤트 표·인스턴스 식별자를 넣는다. 한 번만.
+    pub fn attach_server_host(&self, host: Arc<dyn crate::ports::server_host::ServerHost>) -> bool {
+        self.server_control.attach_host(host)
     }
 
     /// 서버 상태(작업 관문).
@@ -458,6 +475,8 @@ impl WorkbenchRuntime {
                 _ => continue,
             }
             match self.benches.registry.owner(bench_id) {
+                // 044: 소유자 주체는 작업대 소유 판정을 우회한다(우회 지점 2: 스트림 구독 판정).
+                Some(_) if crate::application::bench_service::is_owner(principal) => {}
                 Some(owner) if owner == principal.subject => {}
                 Some(_) => {
                     return Err(WorkbenchFault::new(
@@ -480,10 +499,9 @@ impl WorkbenchRuntime {
     }
 
     fn owns_bench(&self, principal: &AuthenticatedPrincipal, bench_id: &str) -> bool {
-        self.benches
-            .registry
-            .owner(bench_id)
-            .is_some_and(|owner| owner == principal.subject)
+        self.benches.registry.owner(bench_id).is_some_and(|owner| {
+            owner == principal.subject || crate::application::bench_service::is_owner(principal)
+        })
     }
 
     /// `orchestration:<bindingId>`(041): 그 묶임의 작업대를 연 주체만. 풀린 묶임(제거 표식)은 `Gap(evicted)`로 보낸다.

@@ -12,6 +12,7 @@ pub mod orchestration;
 pub mod project;
 pub mod run;
 pub mod saved_prompt;
+pub mod server;
 pub mod system;
 pub mod worktree;
 
@@ -254,9 +255,10 @@ pub fn build_registry(
     hooks: Arc<TestHooks>,
     adapters: &RuntimeAdapters,
     epoch: &str,
-    benches: &Arc<crate::application::bench_service::BenchServices>,
     orchestration: &Arc<crate::application::orchestration::runtime::OrchestrationRuntime>,
+    server_control: &Arc<crate::application::server_control::ServerControl>,
 ) -> (Registry, ReconcilerRegistry) {
+    let benches = server_control.benches();
     let runner = Arc::new(IntentFirst::new(
         Arc::clone(&ledger),
         Arc::clone(&coordinator),
@@ -281,6 +283,7 @@ pub fn build_registry(
     run::register(&mut registry, &runner, &coordinator, benches, orchestration);
     exchange::register(&mut registry, benches);
     orchestration::register(&mut registry, benches, orchestration);
+    server::register(&mut registry, server_control);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler::new(epoch)),
