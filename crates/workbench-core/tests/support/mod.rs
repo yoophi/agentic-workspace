@@ -249,6 +249,22 @@ impl BenchHarness {
         }
     }
 
+    /// 같은 데이터 디렉터리로 runtime을 다시 만든다(042 재시작 뒤 재시도). 가짜 엔진·데스크톱은 유지된다.
+    pub fn restart(self) -> Self {
+        let BenchHarness {
+            rt,
+            engine,
+            desktop,
+            dir,
+        } = self;
+        Self {
+            rt: rt.restart(),
+            engine,
+            desktop,
+            dir,
+        }
+    }
+
     pub async fn call(
         &self,
         principal: &AuthenticatedPrincipal,
