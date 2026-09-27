@@ -294,3 +294,18 @@ G1–N2에서 교대 회귀가 반복된 원인은 한 cursor에 여러 의미�
 | 9 | `34ad088` | needs-attention | N1, N2 |
 | 10 | `90ffeea` | needs-attention | P1 |
 | 11 | `af4a0b2` | **approve** | 없음 |
+
+## 최종 게이트 (커밋 `00bf50d`, 각 1회·원 명령 종료 코드)
+
+| 게이트 | 종료 코드 | 결과 |
+|---|---|---|
+| `cargo fmt --all -- --check` | 0 | — |
+| `cargo clippy --workspace --all-targets -- -D warnings` | 0 | — |
+| `cargo test --workspace --all-targets` | 0 | 765 passed, 0 failed |
+| `pnpm run check-types` | 0 | 13/13 |
+| `pnpm run test` | 0 | 12/12. AW 634 tests, workbench-client 73 tests |
+| `pnpm run build` | 0 | 5/5 |
+| workbench-client `test:integration` | 0 | 7 tests |
+| AW `test:integration` | 0 | 1 test |
+
+실제 앱 스모크(개발·배포 출처 출력 + 강제 재연결, 개발 새로고침 1회 전달)를 같은 커밋에서 다시 실행했다. 모두 ok다(`app-smoke.md` "최종 이벤트 클라이언트 코드에서 다시 실행").

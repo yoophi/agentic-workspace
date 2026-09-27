@@ -155,7 +155,7 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 - [X] T054 실제 앱 스모크 — 개발 출처(`tauri dev`)와 배포 출처(`tauri://localhost` debug 빌드) 각각 probe 실행, 로그·종료 코드 `specs/043-frontend-http/reviews/app-smoke.md`(SC-005). Windows 출처는 미검증 목록
 - [X] T055 [P] 문서 — seam 문서 화면 전환 절, 연결 상태 Storybook, `CONTEXT.md` 용어(창 주체·incarnation) 갱신, 필요 시 ADR(창별 주체)
 - [X] T056 최종 게이트 1회 실행·기록(T001 목록 + `test:integration` + 화면 두 transport) `specs/043-frontend-http/reviews/implementation-review.md`, SC 증거 표
-- [ ] T057 OCR 구현 리뷰 → Codex `--wait` 구현 리뷰 → 반영·재검증 기록(`implementation-review.md`) 후 PR
+- [X] T057 OCR 구현 리뷰 → Codex `--wait` 구현 리뷰 → 반영·재검증 기록(`implementation-review.md`) 후 PR
 
 ---
 

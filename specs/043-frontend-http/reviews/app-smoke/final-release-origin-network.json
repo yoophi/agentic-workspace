@@ -1,0 +1,36 @@
+{
+  "origin": "tauri://localhost",
+  "steps": {
+    "listProjects": "ok",
+    "startEcho": "ok",
+    "droppedSockets": 1,
+    "afterDropEcho": "ok",
+    "capturedEvents": 13,
+    "capturedBeforeDrop": 9,
+    "startEchoCount": 1,
+    "afterDropEchoCount": 1,
+    "firstSequence": 1,
+    "lastSequence": 13,
+    "noDuplicates": true,
+    "noGaps": true,
+    "eventTypes": [
+      "lifecycle:started",
+      "lifecycle:initialized",
+      "diagnostic",
+      "lifecycle:sessionCreated",
+      "diagnostic",
+      "lifecycle:promptSent",
+      "agentMessage",
+      "permission",
+      "lifecycle:promptCompleted",
+      "lifecycle:promptSent",
+      "agentMessage",
+      "permission",
+      "lifecycle:promptCompleted"
+    ]
+  },
+  "transport": "http",
+  "connection": "connected",
+  "connectionAfter": "connected",
+  "result": "ok"
+}
