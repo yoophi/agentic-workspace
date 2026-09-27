@@ -378,26 +378,22 @@ fn retiring_with_close_bench_closes_the_benches_that_window_opened() {
     server.stop();
 }
 
-/// T026: 조립된 host의 `server.status`는 소유자 신원의 인스턴스 식별자를 싣고, 아직 파생하지 않는 수는 `null`로 둔다.
-/// 창 주체는 소유자 전용 조회를 부를 수 없다.
+/// T026(T041에서 갱신): 조립된 host의 `server.status`는 소유자 신원의 인스턴스 식별자를 싣고 모든 필드를 파생한다
+/// (`notYetDerived` 빈 배열). 창 주체는 소유자 전용 조회를 부를 수 없다.
 #[test]
-fn server_status_carries_the_instance_id_and_marks_underived_fields() {
+fn server_status_carries_the_instance_id_and_derives_every_field() {
     let server = Server::start();
     let status = server.owner_call("server.status", json!({}));
     assert_eq!(status.0, 200, "{status:?}");
     let output = &status.1["output"];
     assert_eq!(output["instanceId"], server.instance_id.as_str());
     assert_eq!(output["state"], "serving");
+    assert_eq!(output["activeWork"]["pendingExchanges"], 0, "{output}");
+    assert_eq!(output["unresolvedOperations"], 0, "{output}");
+    assert_eq!(output["notYetDerived"], json!([]), "{output}");
+    // 전송 계층이 받은 호출(이 조회 자신)이 보고에 보인다.
     assert!(
-        output["activeWork"]["pendingExchanges"].is_null(),
-        "{output}"
-    );
-    assert!(output["unresolvedOperations"].is_null(), "{output}");
-    assert!(
-        output["notYetDerived"]
-            .as_array()
-            .unwrap()
-            .contains(&json!("activeWork.pendingExchanges")),
+        output["activeWork"]["acceptedCalls"].as_u64().unwrap() >= 1,
         "{output}"
     );
 
