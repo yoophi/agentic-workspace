@@ -43,3 +43,7 @@
 6. 증거: 이벤트 suite 격리 20/20 통과. 새 회귀 시험 `http_tickets.rs` `hello_means_the_subscription_is_ready`(hello 직후 worktree 쓰기 → 알림 수신): 수정 10/10 통과, 변이(hello를 등록 전으로) 0/10 통과(10/10 실패).
 
 **게이트(수정 뒤, 각 한 번)**: `cargo fmt --all -- --check` 0 · `cargo clippy --workspace --all-targets -- -D warnings` 0 · `cargo test --workspace --all-targets --no-fail-fast` 0(742 passed, 0 failed, 7 ignored).
+
+## 3. OCR delegate-review 재실행 (`--from 2381d4f --to HEAD`, Codex 반영분 11개 파일)
+
+새 High/Medium 없음. 확인한 것: 종료 신호 뒤 `calls.close()`·`subscriptions.close()`가 graceful 신호보다 먼저, 구독 추적은 표 소모보다 먼저(종료 중이면 표를 쓰지 않고 `503`), `read_body`의 `Bytes::from_request`는 `DefaultBodyLimit`를 그대로 따른다(`http_security.rs` 413 통과), 유예 뒤 abort된 연결의 handler가 기다리던 분리 호출은 추적기로 끝까지 drain(`accepted_calls_outlive_the_connection_grace`), accept 오류는 50ms 뒤 재시도. 준비 확인 probe 실험은 원인과 무관해 최종 diff에 없다.
