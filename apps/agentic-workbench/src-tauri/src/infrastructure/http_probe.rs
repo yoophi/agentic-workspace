@@ -23,7 +23,8 @@ pub const PROBE_FILE_ENV: &str = "AW_HTTP_WEBVIEW_PROBE_FILE";
 pub const APP_PROBE_FILE_ENV: &str = "AW_APP_TRANSPORT_PROBE_FILE";
 pub const APP_PROBE_AGENT_ENV: &str = "AW_APP_PROBE_AGENT_COMMAND";
 pub const APP_PROBE_CWD_ENV: &str = "AW_APP_PROBE_CWD";
-/// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). 기본은 스트림·재연결 시나리오.
+/// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). `quit`: 044 T035 앱 종료 전 준비 시나리오
+/// (run을 띄우고 살려 둔 채 `ready-to-quit`을 보고한다, 한 번만 넣는다). 기본은 스트림·재연결 시나리오.
 pub const APP_PROBE_SCENARIO_ENV: &str = "AW_APP_PROBE_SCENARIO";
 
 static PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
@@ -59,7 +60,8 @@ pub fn write_diagnostic_file(http: &WorkbenchHttp) {
 pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     use std::sync::atomic::Ordering;
     // `refresh` 시나리오는 새로고침마다 다시 넣는다(단계는 화면의 sessionStorage가 이어 준다).
-    let refresh = std::env::var(APP_PROBE_SCENARIO_ENV).as_deref() == Ok("refresh");
+    let scenario = std::env::var(APP_PROBE_SCENARIO_ENV).unwrap_or_default();
+    let refresh = scenario == "refresh";
     if finished
         && webview.label() == "main"
         && std::env::var_os(APP_PROBE_FILE_ENV).is_some()
@@ -67,10 +69,10 @@ pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     {
         let agent = std::env::var(APP_PROBE_AGENT_ENV).unwrap_or_default();
         let cwd = std::env::var(APP_PROBE_CWD_ENV).unwrap_or_default();
-        let template = if refresh {
-            APP_REFRESH_PROBE_SCRIPT
-        } else {
-            APP_PROBE_SCRIPT
+        let template = match scenario.as_str() {
+            "refresh" => APP_REFRESH_PROBE_SCRIPT,
+            "quit" => APP_QUIT_PROBE_SCRIPT,
+            _ => APP_PROBE_SCRIPT,
         };
         let script = template
             .replace("__AGENT__", &serde_json::to_string(&agent).expect("json"))
@@ -170,6 +172,64 @@ const APP_PROBE_SCRIPT: &str = r#"
     report.connectionAfter = debug.connectionState();
     report.result = report.steps.droppedSockets > 0 && report.steps.noDuplicates && report.steps.noGaps
       && report.steps.startEchoCount === 1 && report.steps.afterDropEchoCount === 1 ? 'ok' : 'failed';
+  } catch (error) {
+    report.result = 'error';
+    report.error = String(error);
+    report.observed = (window.__awProbeEvents || []).slice(-20);
+  }
+  await finish();
+})();
+"#;
+
+/// 044 T035: 앱 종료 뒤 소유자 확인(`reviews/app-smoke/owner-check.py`) 앞 단계. 앱 transport(`__awDebug`)로 에코 agent
+/// run을 시작하고 시작 에코와 prompt 완료를 받은 뒤, 모드(`external`·`embedded`)·transport·작업대 id·runId와
+/// `phase: "ready-to-quit"`을 보고한다. run은 취소하지 않고 살려 둔다(앱 종료 뒤 소유자가 같은 run을 이어 본다). 토큰은 싣지 않는다.
+const APP_QUIT_PROBE_SCRIPT: &str = r#"
+(async () => {
+  const report = { origin: location.origin, scenario: 'quit', steps: {} };
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  const finish = async () => { try { await invoke('report_app_probe', { report }); } catch (error) { console.error(error); } };
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const waitFor = async (condition, label, limit = 20000) => {
+    const started = Date.now();
+    while (!(await condition())) {
+      if (Date.now() - started > limit) { throw new Error('timeout: ' + label); }
+      await pause();
+    }
+  };
+  try {
+    await waitFor(() => Boolean(window.__awDebug), 'debug handle');
+    const debug = window.__awDebug;
+    report.mode = await invoke('get_workbench_mode');
+    report.transport = debug.transportKind();
+    report.connection = debug.connectionState();
+    const nonce = crypto.randomUUID().slice(0, 8);
+    const runId = 'quit-' + nonce;
+    report.runId = runId;
+    const events = [];
+    window.__awProbeEvents = events;
+    await debug.listen('agent-run-event', (payload) => {
+      if (payload.runId !== runId) { return; }
+      const event = payload.event || {};
+      events.push({ sequence: payload.sequence, type: event.type, status: event.status, text: event.text });
+    });
+    // runner가 목표 앞에 안내문을 붙이므로 에코는 `echo:`로 시작하고 고유 문자열로 끝나는 agent 메시지로 판정한다.
+    const startGoal = 'quit-start-' + nonce;
+    const echoIndex = () => events.findIndex((event) => event.type === 'agentMessage' && typeof event.text === 'string'
+      && event.text.startsWith('echo:') && event.text.endsWith(startGoal));
+    const completedAfter = (index) => index >= 0 && events.slice(index + 1).some((event) => event.type === 'lifecycle' && event.status === 'promptCompleted');
+    await debug.invoke('start_agent_run', {
+      request: { goal: startGoal, agentId: 'fake-acp', agentCommand: __AGENT__, cwd: __CWD__, runId, autoAllow: true },
+      panelId: 'probe-panel',
+    });
+    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');
+    report.steps.startEcho = 'ok';
+    report.steps.capturedEvents = events.length;
+    report.steps.lastSequence = events.length ? events[events.length - 1].sequence : null;
+    // 이 창의 작업대 id(없으면 열지 않는다) — 외부 서버 모드면 서버 작업대, 소유자가 bench.list에서 같은 id를 본다.
+    report.benchId = await invoke('ensure_window_bench', { open: false, hint: null });
+    report.phase = 'ready-to-quit';
+    report.result = report.benchId ? 'ok' : 'failed';
   } catch (error) {
     report.result = 'error';
     report.error = String(error);
@@ -339,3 +399,27 @@ const PROBE_SCRIPT: &str = r#"
   await invoke('report_http_probe', { report });
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quit_probe_reports_ready_to_quit_and_leaves_the_run_alive() {
+        let script = APP_QUIT_PROBE_SCRIPT
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(!script.contains("__AGENT__") && !script.contains("__CWD__"));
+        assert!(script.contains("scenario: 'quit'"));
+        assert!(script.contains("report.phase = 'ready-to-quit'"));
+        assert!(script.contains("invoke('get_workbench_mode')"));
+        assert!(script.contains("invoke('ensure_window_bench', { open: false, hint: null })"));
+        // 앱 종료 뒤 소유자가 같은 run을 이어 보므로 probe는 run을 끝내지 않고 토큰을 싣지 않는다.
+        for forbidden in ["cancel", "token", "get_workbench_connection"] {
+            assert!(
+                !script.contains(forbidden),
+                "quit probe must not use {forbidden}"
+            );
+        }
+    }
+}
