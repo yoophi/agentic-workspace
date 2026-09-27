@@ -5,8 +5,8 @@ pub use acp_agent_core::infrastructure::{
 
 pub mod acp_agent_launch_factory;
 pub mod acp_agent_worker_adapter;
-#[cfg(debug_assertions)]
 pub mod desktop_benches;
+#[cfg(debug_assertions)]
 pub mod devtools;
 pub mod json_appearance_preferences_repository;
 pub mod json_orchestration_repository;

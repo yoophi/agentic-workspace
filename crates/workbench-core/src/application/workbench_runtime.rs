@@ -7,9 +7,10 @@ use acp_agent_core::domain::events::{LifecycleStatus, RunEvent};
 use async_trait::async_trait;
 use chrono::Utc;
 use workbench_protocol::{
-    events::StreamKind, operations::spec_for, AuthenticatedPrincipal, CallReply, CallRequest,
-    EventEnvelope, EventStream, OperationKind, Subscription, Workbench, WorkbenchFault,
-    PROTOCOL_VERSION,
+    events::{parse_stream_id, StreamKind},
+    operations::spec_for,
+    AuthenticatedPrincipal, CallReply, CallRequest, EventEnvelope, EventStream, FaultCode,
+    OperationKind, RequestId, Subscription, Workbench, WorkbenchFault, PROTOCOL_VERSION,
 };
 
 pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for command operations.";
@@ -17,7 +18,7 @@ pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for comm
 use crate::{
     application::{
         authorization,
-        bench_service::BenchServices,
+        bench_service::{BenchServices, MESSAGE_BENCH_FORBIDDEN, MESSAGE_BENCH_NOT_FOUND},
         epoch_idempotency::{EpochIdempotency, EpochIdempotencyLimits},
         reconcilers::ReconcilerRegistry,
         registry::{CallContext, Registry},
@@ -266,6 +267,44 @@ impl WorkbenchRuntime {
             .admit(&workbench_protocol::RequestId::random(), None, bench_id)
     }
 
+    /// 작업대에 속한 스트림(`exchange:<id>`·`bench:<id>`)은 작업대를 연 주체만 구독한다(040). hub의 scope 검사는
+    /// 스트림 종류만 보므로, 등록 전에 cursor 전부를 여기서 검사한다. agent principal은 구독하지 않는다 — MCP 도구는
+    /// 요청·응답만 쓰고 주체가 작업대를 연 주체와 다르다. 닫힌 작업대(제거 표식)는 hub가 `Gap(evicted)`로 답하게
+    /// 두고, 한 번도 없던 id는 나중에 열릴 스트림에 미리 붙지 않도록 거절한다.
+    fn authorize_bench_streams(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        request: &Subscription,
+    ) -> Result<(), WorkbenchFault> {
+        for cursor in &request.cursors {
+            let Some((kind, bench_id)) = parse_stream_id(&cursor.stream_id) else {
+                continue;
+            };
+            if !matches!(kind, StreamKind::Exchange | StreamKind::Bench) {
+                continue;
+            }
+            match self.benches.registry.owner(bench_id) {
+                Some(owner) if owner == principal.subject => {}
+                Some(_) => {
+                    return Err(WorkbenchFault::new(
+                        FaultCode::Forbidden,
+                        RequestId::random(),
+                        MESSAGE_BENCH_FORBIDDEN,
+                    ))
+                }
+                None if self.events.is_evicted(&cursor.stream_id) => {}
+                None => {
+                    return Err(WorkbenchFault::new(
+                        FaultCode::NotFound,
+                        RequestId::random(),
+                        MESSAGE_BENCH_NOT_FOUND,
+                    ))
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// 이벤트 hub(039). 발행은 `publish_run`을, 구독은 `Workbench::events`를 쓴다.
     pub fn events_hub(&self) -> &Arc<EventHub> {
         &self.events
@@ -358,6 +397,7 @@ impl Workbench for WorkbenchRuntime {
         principal: AuthenticatedPrincipal,
         request: Subscription,
     ) -> Result<EventStream, WorkbenchFault> {
+        self.authorize_bench_streams(&principal, &request)?;
         self.events.subscribe(&principal, request)
     }
 }

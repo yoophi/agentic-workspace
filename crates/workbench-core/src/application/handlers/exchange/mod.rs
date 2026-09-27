@@ -182,9 +182,11 @@ pub fn register(registry: &mut Registry, services: &Arc<BenchServices>) {
             |input: &ExchangeSendFromRunInput| Scope::RunOwner(input.run_id.clone()),
             |services, ctx, input: ExchangeSendFromRunInput| async move {
                 ensure_agent_run(&ctx.request_id, &ctx.principal, &input.run_id)?;
-                // 출발 run의 작업대에 쓰므로 그 작업대 입장권을 잡는다(주체 검사 없음 — agent는 작업대를 열지 않는다).
+                // 출발 run의 작업대에 쓰므로 그 작업대 입장권을 전송이 끝날 때까지 잡는다(주체 검사 없음 — agent는
+                // 작업대를 열지 않는다). 닫히는 중이면 입장 실패를 그대로 돌려준다: 닫기의 입장 경계 밖에서 쓰면 정리가
+                // 끝난 작업대에 교환이 남을 수 있다. 소유 작업대가 없으면 서비스가 오늘 오류(작업 영역 미등록)를 낸다.
                 let admission = match services.engine.active_owner_of(&input.run_id).await {
-                    Some(bench) => services.admit(&ctx.request_id, None, &bench).ok(),
+                    Some(bench) => Some(services.admit(&ctx.request_id, None, &bench)?),
                     None => None,
                 };
                 let exchange = services

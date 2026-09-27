@@ -272,4 +272,5 @@ T030 epoch_idempotency.rs
     - SC-007: run·교환·MCP 기존 테스트 기대값 수정 없음. 단 AW에서 core로 **옮긴** 테스트(normalize·후보·교환 서비스·제목 검증)는 위치만 바뀌었고, AW 전용 서비스를 지우면서 그 단위 테스트도 삭제했다(US1 기록). 행동이 바뀐 곳은 문서화: 교환 `windowUnavailable`→`failed` 전이 소멸(US2), 제목 요청의 오류 우선순위(US3), 재시작 뒤 `run.start` 재시도는 `notFound`(US1).
     - SC-008: 화면 코드 diff 0(T063). 화면 동작·문구 동일성의 최종 확인은 T064 수동 항목.
   - spec·contract 대비 어긋난 점: agent scope에 `system:describe` 추가(US4), 제목 오류 우선순위(US3), T044 JSON 이벤트 fixture → Rust 테스트(US2), not-directory·limit fixture → registry 단위 테스트(Foundation).
+  - (구현 Codex 리뷰 반영, 2026-09-27) ① AW `infrastructure/mod.rs`에서 `#[cfg(debug_assertions)]`가 `devtools` 대신 `desktop_benches`에 붙어 release 빌드가 깨지던 것 수정(`cargo check --release` 통과). ② 작업대 스트림 구독이 scope만 검사하던 구멍: `WorkbenchRuntime::events`가 등록 전에 `exchange:`·`bench:` cursor를 작업대를 연 주체와 대조(registry `owner`는 닫는 중 포함, 모르는 id는 hub 제거 표식이 없으면 `notFound`). ③ `exchange.sendFromRun`이 입장 실패를 삼켜 닫는 중인 작업대에 쓰던 것: 입장 실패를 그대로 돌려주고, registry `store_exchange`는 작업 영역이 없는 작업대에 큐를 만들지 않는다. 테스트 `bench_stream_access.rs` 3개(수정을 되돌리면 실패 확인), registry 단위 테스트 1개. 계약 `workbench-benches.md` 이벤트 절에 구독 권한·전송/닫기 규칙 추가.
 

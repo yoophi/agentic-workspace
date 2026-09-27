@@ -73,6 +73,14 @@ impl AgentWorkspaceRegistry for InMemoryAgentWorkspaceRegistry {
         exchange: AgentExchange,
     ) -> Result<StoreExchangeOutcome, AgentExchangeError> {
         let mut inner = self.data();
+        // 작업 영역이 없는(닫혀 지워진) 작업대에 큐를 새로 만들지 않는다. 서비스가 스냅샷을 읽은 뒤 닫기가 끼어들어도
+        // 닫힌 작업대에 교환이 남지 않는다(040).
+        if !inner.snapshots.contains_key(&exchange.bench_id) {
+            return Err(AgentExchangeError::new(
+                "unknownWorkspace",
+                "Agent workspace is not registered.",
+            ));
+        }
         let queue = inner
             .exchanges
             .entry(exchange.bench_id.clone())
@@ -208,6 +216,7 @@ mod tests {
     #[tokio::test]
     async fn deduplicates_matching_payload_and_rejects_conflicts() {
         let registry = InMemoryAgentWorkspaceRegistry::default();
+        registry.sync_snapshot(snapshot(1)).await.unwrap();
         assert!(matches!(
             registry.store_exchange(exchange("hello")).await.unwrap(),
             StoreExchangeOutcome::Stored(_)
@@ -224,5 +233,21 @@ mod tests {
                 .code,
             "duplicateConflict"
         );
+    }
+
+    #[tokio::test]
+    async fn does_not_recreate_a_removed_bench_queue() {
+        let registry = InMemoryAgentWorkspaceRegistry::default();
+        registry.sync_snapshot(snapshot(1)).await.unwrap();
+        registry.remove_bench_now("session-a");
+        assert_eq!(
+            registry
+                .store_exchange(exchange("hello"))
+                .await
+                .unwrap_err()
+                .code,
+            "unknownWorkspace"
+        );
+        assert!(registry.data().exchanges.is_empty());
     }
 }

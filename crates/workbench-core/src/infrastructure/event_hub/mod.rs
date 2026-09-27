@@ -329,6 +329,11 @@ impl EventHub {
         }
     }
 
+    /// 제거 표식이 남은 스트림인가(닫힌 작업대). 구독 권한 검사가 닫힌 작업대와 모르는 id를 구별할 때 쓴다.
+    pub fn is_evicted(&self, stream_id: &str) -> bool {
+        lock(&self.retention).evicted.contains(stream_id)
+    }
+
     /// 스트림을 지우고 제거 표식을 남긴다(작업대 닫힘, 040). 구독자에게는 `Gap(evicted)`를 보낸다. 스트림이
     /// 아직 없어도 표식은 남겨, 닫힌 작업대를 cursor 0으로 구독하면 `Gap(evicted)`가 된다.
     pub fn remove_stream(&self, kind: StreamKind, key: &str) {

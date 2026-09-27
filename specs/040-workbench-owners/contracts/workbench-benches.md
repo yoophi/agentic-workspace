@@ -76,6 +76,8 @@ fault 코드 매핑: 빈 입력·형식 → `invalidArgument`, 비활성 run·�
 - `StreamKind::Exchange` 구독 가능, `StreamKind::Bench` 신설. `orchestration:*`은 계속 `"stream kind is not available yet."`.
 - 작업대가 닫히면 `exchange:<id>`·`bench:<id>` 구독자는 `Gap(evicted)`, 이후 cursor 0 구독도 `Gap(evicted)`(제거 표식 4,096).
 - 알림용 발행도 데스크톱 전달(`deliver`)을 부른다(구독자가 없어도).
+- **구독 권한**(구현 리뷰 반영): `exchange:<id>`·`bench:<id>`는 scope에 더해 작업대를 연 주체만 구독한다. 다른 주체 `forbidden` `"bench belongs to another principal."`, agent principal도 `forbidden`(MCP 도구는 요청·응답만 쓴다), 한 번도 없던 id `notFound` `"bench not found."`(나중에 열릴 스트림에 미리 붙지 않게), 닫힌 작업대(제거 표식)는 위 규칙대로 `Gap(evicted)`. cursor 하나라도 거절되면 구독 전체를 거절한다.
+- **agent 교환 전송과 닫기**: `exchange.sendFromRun`은 출발 run의 작업대에 입장해야 한다. 닫는 중이면 `notFound` `"bench not found."`(run이 아직 살아 있어도). 작업 영역이 지워진 작업대에는 교환을 저장하지 않는다(`unknownWorkspace`).
 
 ## 계약 조회
 

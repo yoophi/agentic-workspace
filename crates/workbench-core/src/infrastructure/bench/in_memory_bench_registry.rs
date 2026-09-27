@@ -153,6 +153,13 @@ impl InMemoryBenchRegistry {
         Self::check(benches.get(id), subject).map(|record| record.view.clone())
     }
 
+    /// 작업대를 연 주체(닫히는 중 포함). 스트림 구독 권한 검사용 — 닫히는 동안에도 다른 주체는 구독할 수 없다.
+    pub fn owner(&self, id: &str) -> Option<PrincipalSubject> {
+        lock(&self.benches)
+            .get(id)
+            .map(|record| record.view.opened_by.clone())
+    }
+
     /// 주체 검사 없이 열린 작업대를 찾는다(agent principal이 run의 소유 작업대를 찾을 때).
     pub fn resolve_any(&self, id: &str) -> Result<BenchView, BenchError> {
         let benches = lock(&self.benches);
