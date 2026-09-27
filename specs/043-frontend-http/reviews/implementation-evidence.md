@@ -261,3 +261,33 @@ T027 범위를 정직하게 적는다:
 - **확인 재시도**: 라우팅 성공 → 확인 1회 실패 → 새 이벤트도 보관 gap도 없이 소켓만 재연결 → 재연결 재조정(`exchange.list` +2) → 라우팅 추가 0회, 확인만 재시도해 성공. 서버가 확인을 반영한 뒤(`delivered`)의 재연결에서는 추가 확인 0회다.
 - **구독 시작 재조정**: 스트림에 요청 이벤트가 없고 스냅샷에만 `accepted` 교환이 있어도, 구독 시작 재조정으로 라우팅 1회·확인 1회가 일어난다.
 - **병합 시험 기대값 조정(성질은 그대로)**: 재연결 hello의 재조정과 뒤이은 gap 복구가 같은 스냅샷을 두 번 적용할 수 있다(x1 `delivered`가 두 번 넘어옴). 실제 WebSocket에서는 hello와 gap이 별개의 메시지로 오기 때문에, hello에서 뒤따를 gap을 알고 재조정을 건너뛸 방법이 없다. 단정은 요구 성질인 "스냅샷 이후 역행 없음(x1 상태 집합 = {delivered})"과 "종결된 교환의 요청 재라우팅 없음"으로 정확히 했다. 상태 수신자는 requestId로 덮어쓰므로 화면 결과는 같다.
+
+## T041 · T042 실제 042 서버 통합 suite (`packages/workbench-client/src/test/integration`, `pnpm --filter @yoophi/workbench-client test:integration`)
+
+구성:
+- vitest global setup이 `cargo build -p workbench-core --example http_test_host --features test-hooks`로 시험 host를 빌드한다.
+- 각 시험은 host 프로세스를 따로 띄운다. host는 운영 router·실제 런타임·hub(journal 보관 한도 4)로 되어 있다.
+- TS 클라이언트는 실제 `fetch`와 Node 22 내장 `WebSocket`으로 붙는다. 이벤트 클라이언트의 기본 소켓이다.
+- 기본 `test`에서는 제외한다(`vitest.config.ts` exclude).
+
+| 항목 | 종료 코드 | 결과 |
+|---|---|---|
+| 첫 실행 | 1 | 2 passed, 2 failed. 실패 둘 다 시험 준비 오류다. 교환은 `syncWorkspace`의 `worktreePath`가 작업대 경로와 달랐는데 제가 넣은 `catch`가 실패를 삼켰다. orchestration은 `setPresentation`이 직접 자식 노드에만 적용되는데 메인 노드에 걸었다 |
+| 수정 뒤 | 0 | 4 passed(retention 파일) |
+| 변이: 복구 재구독 cursor 0(H1 원래 설계) | 1 | run·교환·orchestration 3개 모두 실패(10초 상한) — **실제 042 hub에서** after 0 재구독이 복구되지 않음을 확인 |
+| 반복 | 5 × 0 | — |
+| 응답 유실 파일 | 0 | 2 passed. 처음에 처리되지 않은 rejection 1건(서버를 죽일 때 진행 중이던 요청의 Promise). 처리 표시를 붙인 뒤 전체 6 passed, 0 unhandled |
+| 변이: 응답 유실 뒤 세대 확인 제거 | 1 | 새 세대 시험 실패 — 세대가 바뀐 서버로 변경이 다시 간다 |
+
+단정 범위:
+- **조회/변경 표**: `OPERATION_KINDS`가 실제 서버 `system.describe`의 operation 종류와 같다(85개).
+- **run 보관 초과**: 끊긴 동안 prompt 6건(한도 4). 스냅샷(`run.replay`)이 덮은 순번은 다시 받지 않고, 다음 live는 스냅샷 `lastSequence + 1`이다.
+- **교환 보관 초과**: 스냅샷(`exchange.list`)이 끊긴 동안의 교환 7건(x-0..x-6)을 모두 `accepted`(재조정 대상)로 담는다. 이후 live는 새 교환(x-100)만이다.
+- **orchestration 보관 초과**: 수동 자식의 표시 상태를 번갈아 바꾼다. 스냅샷 revision ≥ bootstrap + 7이고, 이후 live의 revision은 모두 스냅샷보다 크다. 마지막 live revision이 서버의 마지막 revision과 같다.
+- **같은 세대 응답 유실**:
+  - `HOST_PROMPT_SETTLE_MS=1500`. 효과 표식(run replay에 그 prompt의 AgentMessage) 뒤에 요청을 끊는다.
+  - 클라이언트가 같은 키로 한 번 재시도해 `ok`를 받는다(run.sendPrompt 요청 2건, 키 동일). 효과는 1건이다.
+- **새 세대 응답 유실**:
+  - 효과 표식 뒤 host를 `SIGKILL`하고, 같은 데이터 디렉터리로 새 host를 다른 포트에 띄운다.
+  - 클라이언트 결과는 `unknown/epochChanged`이고, 연결은 새 끝점·새 세대로 옮겨 가 있다.
+  - 새 서버로 간 run.sendPrompt는 0건이다.

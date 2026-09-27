@@ -4,6 +4,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["src/**/*.test.ts"],
+    // 통합 suite는 실제 서버 프로세스가 필요하다 — `test:integration`으로 따로 돈다.
+    exclude: ["src/test/integration/**", "node_modules/**"],
     passWithNoTests: true,
     typecheck: {
       enabled: true,
