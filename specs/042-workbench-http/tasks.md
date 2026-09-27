@@ -116,8 +116,8 @@
 
 ## Phase 7: User Story 5 — 상태 확인과 계약 문서 (P5)
 
-- [ ] T036 [P] [US5] `crates/workbench-core/tests/http_health_openapi.rs`: live 무인증·정보 없음, ready·openapi 무인증 401, 인증 뒤 openapi == 커밋된 `crates/workbench-protocol/openapi/workbench.openapi.json`
-- [ ] T037 [US5] `routes/health.rs`·`routes/openapi.rs` 구현·등록, 커밋 `feat(workbench-server): readiness and OpenAPI endpoints (042 US5)`
+- [X] T036 [P] [US5] `crates/workbench-core/tests/http_health_openapi.rs`: live 무인증·정보 없음, ready·openapi 무인증 401, 인증 뒤 openapi == 커밋된 `crates/workbench-protocol/openapi/workbench.openapi.json`
+- [X] T037 [US5] `routes/health.rs`·`routes/openapi.rs` 구현·등록, 커밋 `feat(workbench-server): readiness and OpenAPI endpoints (042 US5)`
 
 ---
 
@@ -196,3 +196,4 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T034**: `get_workbench_connection(window)` → 호출 창 URL 출처로 묶인 `{baseUrl, token, expiresAt}`, 허용 밖 출처·기동 실패는 오류. 핸들러 등록(앱 manifest 없음 → 기본 허용)
 - **US4 게이트**: AW `cargo test` status=0(115 passed), `cargo clippy --all-targets -- -D warnings` status=0
 - **T033 보완(사용자 검토 7)**: 종료 시작 때 HTTP(`http_calls`, 상태가 쥔 추적기)·MCP 양쪽 수락을 **먼저** 닫고 받아들인 호출만 기다린다(이전에는 MCP close가 HTTP drain 뒤). 시험: HTTP 호출 700ms·MCP 호출 300ms, 종료 150ms 뒤 MCP 새 호출 거절·종료 미완료, 400ms에 이전 MCP 호출 완료·HTTP 아직 drain 중. 변이(MCP close를 뒤로) → "MCP accepted a new call while the HTTP drain was still running" 실패(`t033b-m.log`)
+- **T036·T037**: `http_health_openapi.rs` status=0 — live 무인증·`{status:live}`만, ready·openapi 무인증 401, 인증 뒤 ready(serverEpoch)·openapi == 커밋된 `workbench.openapi.json`(JSON 동치). 경로는 T007에서 구현

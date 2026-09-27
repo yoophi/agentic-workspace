@@ -15,6 +15,10 @@ use std::{
 /// `send_and_wait` 턴 안에서 실행할 일(041 liveness ①): 가짜 agent가 턴 중에 도구를 부르는 것을 흉내 낸다.
 pub type TurnHook = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
+use crate::{
+    infrastructure::run::workbench_run_sink::WorkbenchRunSink,
+    ports::run_engine::{RunEngine, RunEngineError, RunErrorKind},
+};
 use acp_agent_core::{
     domain::{
         events::{LifecycleStatus, PermissionOption, RunEvent},
@@ -24,10 +28,6 @@ use acp_agent_core::{
 };
 use async_trait::async_trait;
 use serde::Deserialize;
-use crate::{
-    infrastructure::run::workbench_run_sink::WorkbenchRunSink,
-    ports::run_engine::{RunEngine, RunEngineError, RunErrorKind},
-};
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
