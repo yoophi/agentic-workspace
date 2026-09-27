@@ -3,6 +3,7 @@ pub mod agent_exchange_service;
 pub mod agent_run_settings_service;
 pub mod authorization;
 pub mod bench_service;
+pub mod drain;
 pub mod dto;
 pub mod epoch_idempotency;
 pub mod event_dto;

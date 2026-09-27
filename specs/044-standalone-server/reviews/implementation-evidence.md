@@ -50,3 +50,15 @@
 | fixture 갱신 뒤 contract_suite | 0 | 5 passed(agent fixture 오갱신 1회 실패 뒤) |
 | workspace cargo test(최종 전) | 101 | 767 passed, 1 failed(server `queries_only` 32≠34) |
 | `cargo test -p workbench-server` | 0 | 18 passed |
+
+## T008·T009 비우기 분류 대조
+
+- 시험 `crates/workbench-core/tests/drain_classification.rs`: 계약 문서의 두 표(기존 85 + 새 8)를 파싱한다. 모든 operation이 정확히 한 행인지, 종류 열이 `spec_for`와 같은지, 분류 열이 `drain_class`와 같은지, query가 Q인지 본다.
+- 구현 `crates/workbench-core/src/application/drain.rs`: `DrainClass{Query, Control, Continuation, NewWork}`, 93개 operation 전부를 빠짐없는 match(와일드카드 없음)로 분류한다. Q 34 · C 24 · K 2 · N 33.
+- **설계 문서와 다른 점**: tasks는 `drain_class(OperationId, &input)`라고 적었다. 정적 분류만 표와 대조하므로 `drain_class(OperationId)`로 두었다. K의 입력 조건 판정은 입구가 operation별로 한다(T037·T038·T040).
+
+| 항목 | 종료 코드 | 결과 |
+|---|---|---|
+| red | 101 | 컴파일 red(`application::drain` 없음) |
+| green | 0 | 1 passed |
+| 변이(`run.cancel`을 N으로) | 101 | `run.cancel: class column vs drain_class` — 시험이 공허하지 않음(변이 복원 확인) |
