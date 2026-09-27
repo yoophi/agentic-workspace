@@ -28,6 +28,7 @@ uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 workbench-core = { path = ".", features = ["test-hooks"] }
+workbench-server = { path = "../workbench-server" }
 axum = { version = "0.7", features = ["ws"] }
 futures-util = "0.3"
 tokio-tungstenite = "0.24"

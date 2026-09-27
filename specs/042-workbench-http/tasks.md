@@ -47,7 +47,7 @@
 
 ### Tests for User Story 1 (먼저 작성, 실패 확인)
 
-- [ ] T009 [P] [US1] **연결 단절 재시도(R17 공개 게이트)** `crates/workbench-core/tests/http_disconnect_retry.rs`: 효과 진행 중 클라이언트 연결을 끊고(요청 전송 뒤 응답 전에 소켓 drop) 서버·작업대를 유지한 채 같은 키로 재시도 → 저장된 결과, 효과 1회. 세 경로: `run.sendPrompt`(가짜 엔진 prompt 지연 → prompt 수), orchestration 파일 영속 변경(`delegateGoal` 또는 `setPresentation` — 저장 지연 주입 → revision 1회), `run.start`(가짜 엔진 기동 지연 → run 수). 필요한 지연 주입을 `crates/workbench-core/tests/support/scripted_run_engine.rs`(`prompt_delay_ms`)와 test-hooks(저장 지연)에 추가
+- [X] T009 [P] [US1] **연결 단절 재시도(R17 공개 게이트)** `crates/workbench-core/tests/http_disconnect_retry.rs`: 효과 진행 중 클라이언트 연결을 끊고(요청 전송 뒤 응답 전에 소켓 drop) 서버·작업대를 유지한 채 같은 키로 재시도 → 저장된 결과, 효과 1회. 세 경로: `run.sendPrompt`(가짜 엔진 prompt 지연 → prompt 수), orchestration 파일 영속 변경(`delegateGoal` 또는 `setPresentation` — 저장 지연 주입 → revision 1회), `run.start`(가짜 엔진 기동 지연 → run 수). **종료 수명(사용자 검토 추가)**: 연결 단절 → 서버 종료 신호 → `serve`가 지연 효과 완료 뒤에만 반환, 효과 1회·멱등 기록 존재(재기동한 같은 런타임에 같은 키 → 저장된 결과), 종료 신호 뒤 새 호출 `503 unavailable`·효과 없음. 지연은 테스트용 drain 경고 간격보다 길게 둬 조기 반환하지 않음을 확인. 필요한 지연 주입을 `crates/workbench-core/tests/support/scripted_run_engine.rs`(`prompt_delay_ms`)와 test-hooks(저장 지연)에 추가
 - [ ] T010 [P] [US1] **중단 증거(R13) 영속 5개** `crates/workbench-core/tests/us1_crash_points.rs`(또는 새 `crash_points_updates.rs`): `project.update`·`project.delete`·`savedPrompt.update`·`goal.update`·`goal.clear` × 세 중단 지점(`AfterPending`·`AfterJsonSave`·`BeforeApplied`) → 재시작 판정(reconciler 있으면 applied/unknown 규칙, 없으면 unknown), 자동 재실행 없음, 같은 키 재요청 계약 응답
 - [ ] T011 [P] [US1] **재시작 뒤 재시도(R13)** `crates/workbench-core/tests/restart_retry.rs`: 세대 범위(`bench.close`·`run.sendPrompt`·`exchange.send`)·orchestration 변경(`bootstrap`·`bindCoordinator`·`delegateGoal`)을 적용 → `TestRuntime::restart` → 같은 키 재시도 → `notFound`(작업대 없음), orchestration 파일은 변경 한 번만 반영. `bench.open`은 새 작업대 id·이전 id `notFound`(설계 리뷰 D2). 각 재시도를 HTTP로도 한 번 보내 같은 결과
 - [ ] T012 [P] [US1] `crates/workbench-core/tests/http_mixed_paths.rs`: in-process와 HTTP로 같은 대상(프로젝트 목록·orchestration 작업 영역)에 동시 변경 100회 이상 → 손실 0(SC-004)
@@ -55,10 +55,10 @@
 
 ### Implementation for User Story 1
 
-- [ ] T014 [US1] `crates/workbench-server/src/routes/calls.rs`: `POST /v1/calls` — 인증 → `ExposurePolicy` → **`Workbench.call`을 `tokio::spawn`한 분리 task에서 실행하고 `JoinHandle`만 기다린다**(R17), problem 응답, 접근 기록. 종료 신호 뒤 새 호출 거절(`503 unavailable`)
+- [ ] T014 [US1] `crates/workbench-server/src/routes/calls.rs`: `POST /v1/calls` — 인증 → `ExposurePolicy` → **`Workbench.call`을 `tokio::spawn`한 분리 task에서 실행하고 `JoinHandle`만 기다린다**(R17), problem 응답, 접근 기록. 종료 신호 뒤 새 호출 거절(`503 unavailable`), 받아들인 분리 호출 추적(`drain::DetachedCalls`)과 `serve`의 drain — **상한 없음**, 경고 간격(`drain_warn_after`, 기본 30초)마다 남은 수 기록 후 계속 대기(R17). 변이: drain을 첫 경고에서 반환하게 하면 단위 시험·T009 종료 수명 시험이 실패
 - [ ] T015 [US1] `crates/workbench-server/src/routes/handshake.rs` + `/v1/system/handshake` 등록
-- [ ] T016 [US1] `crates/workbench-core/tests/support/http_harness.rs`를 운영 router 래퍼로 교체: 고정 토큰 resolver(`test-desktop`·`test-readonly`·`test-noscope`·`test-desktop2`·`test-agent:<run>`), 허용 Origin 없음, 수집 기록, `ExposurePolicy::all()`(테스트는 전체), 기존 API(`spawn`·`call`·`token_for`) 유지. core `Cargo.toml` dev-dependency에 workbench-server
-- [ ] T017 [US1] 계약 suite가 운영 router로 통과(`contract_suite.rs` 변경 없음이 목표), 결과 Notes
+- [X] T016 [US1] `crates/workbench-core/tests/support/http_harness.rs`를 운영 router 래퍼로 교체: 고정 토큰 resolver(`test-desktop`·`test-readonly`·`test-noscope`·`test-desktop2`·`test-agent:<run>`), 허용 Origin 없음, 수집 기록, `ExposurePolicy::all()`(테스트는 전체), 기존 API(`spawn`·`call`·`token_for`) 유지. core `Cargo.toml` dev-dependency에 workbench-server
+- [X] T017 [US1] 계약 suite가 운영 router로 통과(`contract_suite.rs` 변경 없음이 목표), 결과 Notes
 - [ ] T018 [US1] T009–T011 통과 확인 뒤 `ExposurePolicy::all()`을 운영 기본값으로(변경 53개 공개), **분리 실행 제거 변이**(T014의 spawn을 직접 await로)로 T009가 실패함을 확인해 Notes에 기록
 - [ ] T019 [US1] 커밋 `feat(workbench-server): network calls with detached execution and crash/disconnect evidence (042 US1)`
 
@@ -108,7 +108,7 @@
 ### Implementation for User Story 4
 
 - [ ] T032 [US4] `apps/agentic-workbench/src-tauri/src/infrastructure/workbench_http.rs`: 합성 resolver(`DesktopTokenIssuer` + `CapabilityRegistry`), `ServerInfo`(APP_VERSION, 런타임 epoch, ledger `SCHEMA_VERSION`), 허용 출처(`http://localhost:1420`, `tauri://localhost`, `http://tauri.localhost`), 접근 기록 stderr
-- [ ] T033 [US4] AW `lib.rs`: 런타임 조립 뒤 `127.0.0.1:0` bind → `serve`(Tauri async), 실패는 기록하고 계속(FR-016), `RunEvent::Exit`에서 종료 신호(FR-017), `WorkbenchHttpState` 관리
+- [ ] T033 [US4] AW `lib.rs`: 런타임 조립 뒤 `127.0.0.1:0` bind → `serve`(Tauri async), 실패는 기록하고 계속(FR-016), `RunEvent::Exit`에서 종료 신호(FR-017) — **신호만 보내고 즉시 종료하지 않는다**: `ExitRequested`에서 종료를 미루고(`prevent_exit`) 신호 → `serve` future 완료(분리 호출 drain)를 기다린 뒤 종료, drain 대기 중 경고 기록. 단위/통합 시험으로 지연 호출이 끝나기 전 종료 경로가 완료되지 않음을 확인, `WorkbenchHttpState` 관리
 - [ ] T034 [US4] AW `inbound/tauri_commands.rs`: `get_workbench_connection()` → `{baseUrl, token, expiresAt}`(호출 창 WebView URL 출처로 묶음), 핸들러 등록
 - [ ] T035 [US4] 커밋 `feat(aw): serve the Workbench over loopback HTTP from the desktop runtime (042 US4)`
 
@@ -172,3 +172,6 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T002**: `crates/workbench-server` 신설, Cargo.lock 변화는 이 패키지 추가뿐
 - **T003–T008**: `cargo test -p workbench-server` status=0(단위 13), `cargo clippy -p workbench-server --all-targets -- -D warnings` status=0
 - **시험 우선 편차**: `routes/calls.rs`·`handshake.rs`·`events.rs` 골격을 router 골격(T007)과 함께 먼저 작성했다. 그래서 US1·US2 시험의 "실패 확인"은 구현 전 실행 대신 변이로 입증한다 — T018 분리 실행 제거 변이(T009 실패), 경로 제거·표 원자성 제거 변이(해당 시험 실패). 결과는 각 작업 기록에 적는다
+- **T016·T017**: harness를 운영 router 래퍼로 교체(WS도 표 발급 → 연결, T023 흐름을 함께 적용). `contract_suite.rs`·`event_fixtures.rs` 변경 없음. `cargo test -p workbench-core --all-targets --no-fail-fast` status=0(368 passed, 0 failed, 7 ignored)
+- **T009 + 종료 수명(사용자 검토)**: `http_disconnect_retry.rs` 6개 status=0. 엔진 지연은 **효과 뒤**(`prompt_settle_ms`)에 둬 단절이 효과 뒤·멱등 기록 전에 오게 했다(C1 구간). `run.start`의 진행 중 재시도는 in-process와 같이 retryable conflict → 같은 키 재시도로 저장된 결과(contracts §3 문구를 실제 의미로 정정). 변이: M1 분리 실행 제거 → prompt·orchestration 단절 재시도·종료 drain 3건 실패(`run.start`는 ledger intent-first 보호로 통과 — 분리 실행이 아니라 ledger가 막는 경로), M2 drain 첫 경고 반환 → 종료 drain 시험·단위 시험 실패, M3 종료 뒤 수락 확인 제거 → 503 시험 실패. 로그 `scratchpad/042/m1.log`·`m2.log`·`m2u.log`·`m3.log`
+- **drain 설계(사용자 검토 2)**: drain에 상한 없음. `drain_warn_after`(기본 30초)는 경고 간격일 뿐이고 `serve`는 받아들인 호출이 모두 끝난 뒤에만 반환한다. AW 종료 수명 연결은 T033

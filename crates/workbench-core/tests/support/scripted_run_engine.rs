@@ -38,6 +38,13 @@ pub struct RunScript {
     /// `start`가 소유를 기록하기 전 지연(입장 구간을 늘려 닫기 경합을 재현).
     #[serde(default)]
     pub start_delay_ms: u64,
+    /// prompt를 받아들이기 전 지연(042 연결 단절·종료 drain 시험: 호출이 진행 중인 구간을 늘린다).
+    #[serde(default)]
+    pub prompt_delay_ms: u64,
+    /// prompt 효과(수 증가·이벤트) **뒤** 돌아가기 전 지연. 효과 뒤·멱등 기록 전에 연결이 끊기는 구간(research R17,
+    /// 설계 리뷰 C1)을 재현한다.
+    #[serde(default)]
+    pub prompt_settle_ms: u64,
     /// 동시 실행 상한.
     #[serde(default)]
     pub max_runs: Option<usize>,
@@ -189,11 +196,17 @@ impl RunEngine for ScriptedRunEngine {
                 "prompt is empty",
             ));
         }
+        if self.script.prompt_delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
+        }
         if !self.active(run_id) {
             return Err(not_active());
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        if self.script.prompt_settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
+        }
         Ok(())
     }
 
@@ -209,8 +222,14 @@ impl RunEngine for ScriptedRunEngine {
                 format!("unknown or finished run: {run_id}"),
             ));
         }
+        if self.script.prompt_delay_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
+        }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        if self.script.prompt_settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
+        }
         Ok(())
     }
 

@@ -1,24 +1,23 @@
-//! 테스트 전용 loopback HTTP 경로: `POST /v1/calls`와 `GET /v1/events`(WebSocket, 039). 운영 코드에 포함되지 않는다.
-//! 계약: `specs/037-workbench-seam/contracts/workbench-call.md` §4, `specs/039-workbench-events/contracts/workbench-events.md` §6.
+//! 운영 router(`workbench-server`, 042)를 임의 루프백 포트에 띄우는 테스트 래퍼. 테스트 전용인 것은 자격 증명
+//! (고정 토큰 resolver)·서버 정보·기록 수집뿐이고, 경로·인증 판정·표·problem 형식은 운영 코드 그대로다.
+//! 계약: `specs/042-workbench-http/contracts/workbench-http.md`.
 
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use axum::{
-    body::Body,
-    extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
-    },
-    http::{header, HeaderMap, StatusCode},
-    response::{IntoResponse, Response},
-    routing::{get, post},
-    Json, Router,
-};
-use futures_util::{SinkExt, StreamExt};
-use tokio::sync::oneshot;
+use axum::http::header;
+use futures_util::StreamExt;
+use tokio::{sync::oneshot, task::JoinHandle};
 use workbench_protocol::{
-    events::EventFrame, AuthenticatedPrincipal, CallReply, CallRequest, EventItem, OperationId,
-    PrincipalKind, Subscription, Workbench, WorkbenchFault, PROTOCOL_VERSION,
+    events::EventFrame, AuthenticatedPrincipal, CallReply, CallRequest, PrincipalKind,
+    StreamCursor, Workbench, WorkbenchFault,
+};
+use workbench_server::{
+    access_log::CollectingAccessLog,
+    auth::StaticResolver,
+    handshake::ServerInfo,
+    origin::OriginPolicy,
+    tickets::{EventTicketStore, TICKET_CAPACITY, TICKET_TTL},
+    ExposurePolicy, ServerConfig, DEFAULT_BODY_LIMIT,
 };
 
 pub const TOKEN_DESKTOP: &str = "test-desktop";
@@ -34,143 +33,53 @@ pub fn noscope_principal() -> AuthenticatedPrincipal {
     AuthenticatedPrincipal::new(PrincipalKind::Desktop, [])
 }
 
-fn principal_from_headers(headers: &HeaderMap) -> Option<AuthenticatedPrincipal> {
-    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let token = value.strip_prefix("Bearer ")?;
-    match token {
-        TOKEN_DESKTOP => Some(AuthenticatedPrincipal::desktop()),
-        TOKEN_READONLY => Some(AuthenticatedPrincipal::test_readonly()),
-        TOKEN_NOSCOPE => Some(noscope_principal()),
-        TOKEN_DESKTOP2 => Some(AuthenticatedPrincipal::test_as("desktop2")),
-        other => other
-            .strip_prefix(TOKEN_AGENT_PREFIX)
-            .map(AuthenticatedPrincipal::agent),
+fn test_resolver() -> StaticResolver {
+    StaticResolver::new([
+        (TOKEN_DESKTOP.to_owned(), AuthenticatedPrincipal::desktop()),
+        (
+            TOKEN_READONLY.to_owned(),
+            AuthenticatedPrincipal::test_readonly(),
+        ),
+        (TOKEN_NOSCOPE.to_owned(), noscope_principal()),
+        (
+            TOKEN_DESKTOP2.to_owned(),
+            AuthenticatedPrincipal::test_as("desktop2"),
+        ),
+    ])
+    .with_agent_prefix(TOKEN_AGENT_PREFIX)
+}
+
+struct TestServerInfo;
+
+impl ServerInfo for TestServerInfo {
+    fn server_version(&self) -> String {
+        "test".to_owned()
+    }
+    fn server_epoch(&self) -> String {
+        "test-epoch".to_owned()
+    }
+    fn storage_schema_version(&self) -> i64 {
+        2
     }
 }
 
-fn problem_response(fault: &WorkbenchFault) -> Response {
-    let status = fault.code.http_status();
-    let mut body = serde_json::to_value(fault).expect("fault json");
-    body["type"] = serde_json::Value::String(format!("urn:aw:fault:{}", fault.code.as_str()));
-    body["title"] = serde_json::Value::String(fault.code.as_str().to_owned());
-    body["status"] = serde_json::Value::from(status);
-    Response::builder()
-        .status(StatusCode::from_u16(status).expect("valid status"))
-        .header(header::CONTENT_TYPE, "application/problem+json")
-        .body(Body::from(serde_json::to_vec(&body).expect("body")))
-        .expect("response")
+/// 운영 조립과 다른 테스트 설정.
+pub struct HarnessOptions {
+    pub origins: Vec<String>,
+    pub exposure: ExposurePolicy,
+    pub ticket_ttl: Duration,
+    pub drain_warn_after: Duration,
 }
 
-async fn call_handler(
-    State(workbench): State<Arc<dyn Workbench>>,
-    headers: HeaderMap,
-    Json(request): Json<CallRequest>,
-) -> Response {
-    let Some(principal) = principal_from_headers(&headers) else {
-        return problem_response(&WorkbenchFault::unauthenticated(request.request_id));
-    };
-    match workbench.call(principal, request).await {
-        Ok(reply) => (StatusCode::OK, Json(reply)).into_response(),
-        Err(fault) => problem_response(&fault),
-    }
-}
-
-async fn events_handler(
-    State(workbench): State<Arc<dyn Workbench>>,
-    headers: HeaderMap,
-    upgrade: WebSocketUpgrade,
-) -> Response {
-    let Some(principal) = principal_from_headers(&headers) else {
-        return problem_response(&WorkbenchFault::unauthenticated(
-            workbench_protocol::RequestId::random(),
-        ));
-    };
-    upgrade.on_upgrade(move |socket| serve_events(workbench, principal, socket))
-}
-
-async fn send_frame(socket: &mut WebSocket, frame: &EventFrame) -> bool {
-    let text = serde_json::to_string(frame).expect("frame json");
-    socket.send(Message::Text(text)).await.is_ok()
-}
-
-/// hello → subscribe 한 번 → event/gap 프레임. 연결 종료 = 구독 해제(스트림 drop).
-async fn serve_events(
-    workbench: Arc<dyn Workbench>,
-    principal: AuthenticatedPrincipal,
-    mut socket: WebSocket,
-) {
-    // 세대는 Workbench trait만으로 얻는다(system.describe).
-    let describe = workbench
-        .call(
-            principal.clone(),
-            CallRequest::query(OperationId::SystemDescribe, serde_json::json!({})),
-        )
-        .await;
-    let epoch = describe
-        .ok()
-        .and_then(|reply| {
-            reply
-                .output()
-                .and_then(|out| out["epoch"].as_str().map(str::to_owned))
-        })
-        .unwrap_or_default();
-    if !send_frame(
-        &mut socket,
-        &EventFrame::Hello {
-            protocol_version: PROTOCOL_VERSION,
-            epoch,
-        },
-    )
-    .await
-    {
-        return;
-    }
-    let cursors = match socket.recv().await {
-        Some(Ok(Message::Text(text))) => match serde_json::from_str::<EventFrame>(&text) {
-            Ok(EventFrame::Subscribe { cursors }) => cursors,
-            _ => {
-                let _ = socket.send(Message::Close(None)).await;
-                return;
-            }
-        },
-        _ => return,
-    };
-    let mut stream = match workbench.events(principal, Subscription { cursors }) {
-        Ok(stream) => stream,
-        Err(fault) => {
-            let _ = send_frame(&mut socket, &EventFrame::Fault { fault }).await;
-            let _ = socket.send(Message::Close(None)).await;
-            return;
-        }
-    };
-    loop {
-        tokio::select! {
-            item = stream.next() => {
-                let Some(item) = item else { break };
-                let frame = match item {
-                    EventItem::Event { event } => EventFrame::Event { event },
-                    EventItem::Gap { gap } => EventFrame::Gap { gap },
-                };
-                if !send_frame(&mut socket, &frame).await {
-                    break;
-                }
-            }
-            incoming = socket.recv() => {
-                match incoming {
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break,
-                    Some(Ok(_)) => {}
-                }
-            }
+impl Default for HarnessOptions {
+    fn default() -> Self {
+        Self {
+            origins: Vec::new(),
+            exposure: ExposurePolicy::All,
+            ticket_ttl: TICKET_TTL,
+            drain_warn_after: Duration::from_secs(30),
         }
     }
-    let _ = socket.send(Message::Close(None)).await;
-}
-
-pub fn router(workbench: Arc<dyn Workbench>) -> Router {
-    Router::new()
-        .route("/v1/calls", post(call_handler))
-        .route("/v1/events", get(events_handler))
-        .with_state(workbench)
 }
 
 /// 테스트 WebSocket 구독 클라이언트.
@@ -183,7 +92,7 @@ pub struct WsSubscription {
 
 impl WsSubscription {
     /// 다음 프레임. 연결이 닫혔거나 시간 안에 오지 않으면 `None`.
-    pub async fn next_frame(&mut self, wait: std::time::Duration) -> Option<EventFrame> {
+    pub async fn next_frame(&mut self, wait: Duration) -> Option<EventFrame> {
         loop {
             let message = tokio::time::timeout(wait, self.socket.next())
                 .await
@@ -203,34 +112,78 @@ impl WsSubscription {
 pub struct Harness {
     pub addr: SocketAddr,
     shutdown: Option<oneshot::Sender<()>>,
+    served: Option<JoinHandle<std::io::Result<()>>>,
     client: reqwest::Client,
+    pub access_log: Arc<CollectingAccessLog>,
+    /// 받아들인 분리 호출 추적기(종료 수명 시험용).
+    pub calls: Arc<workbench_server::drain::DetachedCalls>,
 }
 
 impl Harness {
     pub async fn spawn(workbench: Arc<dyn Workbench>) -> Self {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        Self::spawn_with(workbench, HarnessOptions::default()).await
+    }
+
+    pub async fn spawn_with(workbench: Arc<dyn Workbench>, options: HarnessOptions) -> Self {
+        let listener = workbench_server::bind_loopback()
             .await
             .expect("bind loopback");
         let addr = listener.local_addr().expect("addr");
+        let access_log = Arc::new(CollectingAccessLog::default());
+        let config = ServerConfig {
+            resolver: Arc::new(test_resolver()),
+            server_info: Arc::new(TestServerInfo),
+            origins: OriginPolicy::new(options.origins),
+            access_log: access_log.clone(),
+            exposure: options.exposure,
+            tickets: Arc::new(EventTicketStore::new(options.ticket_ttl, TICKET_CAPACITY)),
+            body_limit: DEFAULT_BODY_LIMIT,
+            drain_warn_after: options.drain_warn_after,
+        };
+        let server = workbench_server::build_router(workbench, config, addr.port());
+        let calls = Arc::clone(&server.calls);
         let (tx, rx) = oneshot::channel::<()>();
-        let app = router(workbench);
-        tokio::spawn(async move {
-            axum::serve(listener, app)
-                .with_graceful_shutdown(async {
-                    let _ = rx.await;
-                })
-                .await
-                .expect("serve");
-        });
+        let served = tokio::spawn(workbench_server::serve(listener, server, async {
+            let _ = rx.await;
+        }));
         Self {
             addr,
             shutdown: Some(tx),
+            served: Some(served),
             client: reqwest::Client::new(),
+            access_log,
+            calls,
         }
     }
 
+    pub fn base(&self) -> String {
+        format!("http://{}", self.addr)
+    }
+
     pub fn url(&self) -> String {
-        format!("http://{}/v1/calls", self.addr)
+        format!("{}/v1/calls", self.base())
+    }
+
+    pub fn client(&self) -> &reqwest::Client {
+        &self.client
+    }
+
+    /// 종료 신호를 보내고 `serve` 반환(받아들인 분리 호출 drain 포함)까지 기다린다.
+    pub async fn shutdown(mut self) {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        if let Some(served) = self.served.take() {
+            served.await.expect("serve task").expect("serve");
+        }
+    }
+
+    /// 종료 신호만 보낸다. `serve` 완료를 기다리는 handle을 돌려준다.
+    pub fn begin_shutdown(&mut self) -> JoinHandle<std::io::Result<()>> {
+        if let Some(tx) = self.shutdown.take() {
+            let _ = tx.send(());
+        }
+        self.served.take().expect("serve task")
     }
 
     /// 실제 loopback 왕복. 200이면 `CallReply`, 아니면 problem body를 `WorkbenchFault`로 읽는다.
@@ -244,34 +197,7 @@ impl Harness {
             builder = builder.bearer_auth(token);
         }
         let response = builder.send().await.expect("http send");
-        let status = response.status();
-        let content_type = response
-            .headers()
-            .get(header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .to_owned();
-        let body: serde_json::Value = response.json().await.expect("json body");
-        if status.is_success() {
-            assert!(
-                content_type.starts_with("application/json"),
-                "{content_type}"
-            );
-            Ok(serde_json::from_value(body).expect("CallReply"))
-        } else {
-            assert!(
-                content_type.starts_with("application/problem+json"),
-                "{content_type}"
-            );
-            let fault: WorkbenchFault =
-                serde_json::from_value(body.clone()).expect("WorkbenchFault");
-            assert_eq!(
-                u16::from(status),
-                fault.code.http_status(),
-                "status/code mismatch: {body}"
-            );
-            Err(fault)
-        }
+        read_reply(response).await
     }
 
     /// 040: 주체까지 구별하는 토큰(`desktop2`, `agent:<runId>` 포함).
@@ -295,35 +221,127 @@ impl Harness {
         }
     }
 
-    /// `GET /v1/events` WebSocket 구독. hello를 받고 subscribe 프레임을 보낸 뒤 돌려준다.
-    pub async fn subscribe(
+    /// `POST /v1/event-tickets`. 성공이면 표, 아니면 problem.
+    pub async fn issue_ticket(
         &self,
         token: &str,
-        cursors: Vec<workbench_protocol::StreamCursor>,
-    ) -> WsSubscription {
-        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
-        let mut request = format!("ws://{}/v1/events", self.addr)
+        origin: Option<&str>,
+        cursors: &[StreamCursor],
+    ) -> Result<String, WorkbenchFault> {
+        let mut builder = self
+            .client
+            .post(format!("{}/v1/event-tickets", self.base()))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "cursors": cursors }));
+        if let Some(origin) = origin {
+            builder = builder.header(header::ORIGIN, origin);
+        }
+        let response = builder.send().await.expect("http send");
+        let status = response.status();
+        let body: serde_json::Value = response.json().await.expect("json body");
+        if status.is_success() {
+            Ok(body["ticket"].as_str().expect("ticket").to_owned())
+        } else {
+            Err(serde_json::from_value(body).expect("WorkbenchFault"))
+        }
+    }
+
+    /// 표로 `GET /v1/events` 연결. upgrade 거절이면 HTTP 상태를 돌려준다.
+    pub async fn connect_ticket(
+        &self,
+        ticket: &str,
+        origin: Option<&str>,
+    ) -> Result<WsSubscription, u16> {
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Error};
+        let mut request = format!("ws://{}/v1/events?ticket={ticket}", self.addr)
             .into_client_request()
             .expect("ws request");
-        request.headers_mut().insert(
-            header::AUTHORIZATION,
-            format!("Bearer {token}").parse().expect("header"),
-        );
-        let (mut socket, _) = tokio_tungstenite::connect_async(request)
-            .await
-            .expect("ws connect");
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert(header::ORIGIN, origin.parse().expect("origin header"));
+        }
+        let mut socket = match tokio_tungstenite::connect_async(request).await {
+            Ok((socket, _)) => socket,
+            Err(Error::Http(response)) => return Err(response.status().as_u16()),
+            Err(other) => panic!("ws connect: {other}"),
+        };
         let hello = match socket.next().await.expect("hello").expect("hello frame") {
             tokio_tungstenite::tungstenite::Message::Text(text) => {
                 serde_json::from_str(&text).expect("hello json")
             }
             other => panic!("unexpected first frame {other:?}"),
         };
-        let subscribe = serde_json::to_string(&EventFrame::Subscribe { cursors }).expect("json");
-        socket
-            .send(tokio_tungstenite::tungstenite::Message::Text(subscribe))
+        Ok(WsSubscription { socket, hello })
+    }
+
+    /// 표 발급 → 연결 → hello. 구독 판정 결과(fault 또는 event)는 이어지는 프레임으로 온다.
+    pub async fn subscribe(&self, token: &str, cursors: Vec<StreamCursor>) -> WsSubscription {
+        let ticket = self
+            .issue_ticket(token, None, &cursors)
             .await
-            .expect("send subscribe");
-        WsSubscription { socket, hello }
+            .unwrap_or_else(|fault| panic!("ticket issuance failed: {fault:?}"));
+        self.connect_ticket(&ticket, None)
+            .await
+            .unwrap_or_else(|status| panic!("ws upgrade rejected: {status}"))
+    }
+}
+
+impl Harness {
+    /// 요청을 보내고 응답을 읽기 전에 연결을 끊는다(클라이언트 단절 흉내). 서버가 본문을 다 받을 시간을 둔다.
+    pub async fn send_and_disconnect(&self, token: &str, request: &CallRequest) {
+        use tokio::io::AsyncWriteExt;
+        let body = serde_json::to_vec(request).expect("json");
+        let head = format!(
+            "POST /v1/calls HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+            self.addr,
+            body.len()
+        );
+        let mut stream = tokio::net::TcpStream::connect(self.addr)
+            .await
+            .expect("connect");
+        stream.write_all(head.as_bytes()).await.expect("head");
+        stream.write_all(&body).await.expect("body");
+        stream.flush().await.expect("flush");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        drop(stream);
+    }
+}
+
+/// problem 형식 검사까지 포함한 응답 해석.
+pub async fn read_reply(response: reqwest::Response) -> Result<CallReply, WorkbenchFault> {
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+    assert!(
+        response
+            .headers()
+            .contains_key(workbench_server::PROTOCOL_HEADER),
+        "missing protocol header"
+    );
+    let body: serde_json::Value = response.json().await.expect("json body");
+    if status.is_success() {
+        assert!(
+            content_type.starts_with("application/json"),
+            "{content_type}"
+        );
+        Ok(serde_json::from_value(body).expect("CallReply"))
+    } else {
+        assert!(
+            content_type.starts_with("application/problem+json"),
+            "{content_type}"
+        );
+        let fault: WorkbenchFault = serde_json::from_value(body.clone()).expect("WorkbenchFault");
+        assert_eq!(
+            u16::from(status),
+            fault.code.http_status(),
+            "status/code mismatch: {body}"
+        );
+        Err(fault)
     }
 }
 

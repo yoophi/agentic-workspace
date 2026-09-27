@@ -36,7 +36,7 @@
 | `GET /openapi.json` | bearer | — | 계약 문서(커밋된 파일과 같은 내용) |
 | `OPTIONS *` | 없음 | preflight | 허용 출처에만 CORS 헤더 |
 
-- **실행 수명**: 서버가 받아들인 호출은 연결과 무관하게 끝까지 실행되고 멱등 결과가 기록된다(research R17). 연결이 끊긴 클라이언트는 같은 멱등성 키로 재시도해 저장된 결과를 받는다(진행 중이면 끝날 때까지 기다린다). AW MCP 서버의 도구 호출도 같다.
+- **실행 수명**: 서버가 받아들인 호출은 연결과 무관하게 끝까지 실행되고 멱등 결과가 기록된다(research R17). 연결이 끊긴 클라이언트는 같은 멱등성 키로 재시도해 저장된 결과를 받는다. 진행 중 재시도는 in-process와 같은 operation별 의미를 따른다 — 세대 범위 command(`run.sendPrompt`·orchestration 변경 등)는 끝날 때까지 기다리고, `run.start` 같은 ledger 경로는 retryable `conflict`(`outcome: unknown`)를 돌려주므로 같은 키로 다시 시도한다. 종료 신호 뒤 새 호출은 `503 unavailable`이고, 받아들인 호출은 drain(상한 없음, 경고 간격마다 기록)으로 끝난 뒤 서버가 내려간다. AW MCP 서버의 도구 호출도 같다.
 - problem 형식(오늘 harness와 같음): `Content-Type: application/problem+json`, 본문 = `WorkbenchFault` 직렬화 + `type: "urn:aw:fault:<code>"`, `title: <code>`, `status: <http>`. HTTP 상태는 `FaultCode::http_status()`.
 - 본문 상한 1 MiB, 초과 `413`.
 

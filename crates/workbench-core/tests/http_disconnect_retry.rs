@@ -1,0 +1,229 @@
+//! 042 research R17 공개 게이트: 받아들인 호출은 연결과 무관하게 서버 소유 task에서 끝까지 실행된다.
+//! (1) 효과 진행 중 연결을 끊고 같은 서버·작업대에 같은 키로 재시도 → 저장된 결과, 효과 1회(세 경로).
+//! (2) 종료 수명(사용자 검토 추가): 연결 단절 → 종료 신호 → `serve`는 지연 효과 완료 뒤에만 반환(경고 간격보다
+//!     긴 지연), 멱등 기록 존재. (3) 종료 신호 뒤 새 호출은 `503 unavailable`, 효과 없음.
+
+#![allow(clippy::result_large_err)]
+
+mod support;
+
+use std::{
+    sync::{atomic::Ordering, Arc},
+    time::Duration,
+};
+
+use serde_json::{json, Value};
+use support::{
+    command_request,
+    http_harness::{Harness, HarnessOptions, TOKEN_DESKTOP},
+    scripted_run_engine::RunScript,
+    uuid_key, BenchHarness,
+};
+use workbench_protocol::{AuthenticatedPrincipal, FaultCode, OperationId, Workbench};
+
+const DELAY_MS: u64 = 600;
+
+/// 효과는 곧바로 일어나고 호출은 그 뒤 `DELAY_MS` 동안 끝나지 않는다: 연결 단절이 효과 뒤·멱등 기록 전에 온다.
+fn delayed() -> RunScript {
+    RunScript {
+        prompt_settle_ms: DELAY_MS,
+        ..RunScript::default()
+    }
+}
+
+async fn orchestration_revision(h: &BenchHarness, bench: &str) -> u64 {
+    h.call(
+        &AuthenticatedPrincipal::desktop(),
+        OperationId::OrchestrationGet,
+        json!({ "benchId": bench }),
+    )
+    .await
+    .unwrap()["revision"]
+        .as_u64()
+        .unwrap()
+}
+
+async fn bound_orchestration(h: &BenchHarness) -> (String, u64) {
+    let bench = h.open().await;
+    let session = h
+        .call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::OrchestrationBootstrap,
+            json!({ "benchId": bench, "worktreePath": h.dir }),
+        )
+        .await
+        .unwrap();
+    h.start(&bench, "main-run").await.unwrap();
+    let bound = h
+        .call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::OrchestrationBindCoordinator,
+            json!({ "benchId": bench, "request": {
+                "requestId": uuid::Uuid::new_v4().to_string(), "panelId": "main-agent-run",
+                "runId": "main-run", "state": "active",
+                "expectedRevision": session["revision"] } }),
+        )
+        .await
+        .unwrap();
+    (bench, bound["revision"].as_u64().unwrap())
+}
+
+fn output(reply: workbench_protocol::CallReply) -> Value {
+    reply.output().cloned().unwrap_or(Value::Null)
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disconnected_prompt_retry_applies_once() {
+    let h = BenchHarness::new(delayed());
+    let bench = h.open().await;
+    h.start(&bench, "r1").await.unwrap();
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let before = h.engine.prompts.load(Ordering::SeqCst);
+    let request = command_request(
+        OperationId::RunSendPrompt,
+        &uuid_key(),
+        json!({ "benchId": bench, "runId": "r1", "prompt": "hello" }),
+    );
+    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    // 효과가 아직 진행 중일 때 같은 키로 재시도 → 끝날 때까지 기다려 저장된 결과.
+    let retried = harness.call(Some(TOKEN_DESKTOP), &request).await;
+    assert!(retried.is_ok(), "{retried:?}");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disconnected_orchestration_write_retry_applies_once() {
+    let h = BenchHarness::new(delayed());
+    let (bench, revision) = bound_orchestration(&h).await;
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let before = h.engine.prompts.load(Ordering::SeqCst);
+    let request = command_request(
+        OperationId::OrchestrationDelegateGoal,
+        &uuid_key(),
+        json!({ "benchId": bench, "request": {
+            "requestId": "goal-1", "goal": "Summarize", "expectedRevision": revision } }),
+    );
+    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    let retried = harness.call(Some(TOKEN_DESKTOP), &request).await;
+    let retried = output(retried.expect("retry returns the stored result"));
+    assert!(retried["rootTaskId"].is_string(), "{retried}");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
+    assert_eq!(
+        orchestration_revision(&h, &bench).await,
+        revision + 1,
+        "the workspace file changed exactly once"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn disconnected_run_start_retry_starts_once() {
+    let h = BenchHarness::new(RunScript {
+        start_delay_ms: DELAY_MS,
+        ..RunScript::default()
+    });
+    let bench = h.open().await;
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let request = command_request(
+        OperationId::RunStart,
+        &uuid_key(),
+        json!({ "benchId": bench, "request": { "goal": "g", "agentId": "codex", "runId": "r1" } }),
+    );
+    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    // run.start의 진행 중 재시도는 오늘 in-process와 같이 retryable conflict(`outcome: unknown`)다 — 클라이언트는
+    // 같은 키로 다시 시도해 저장된 결과를 받는다.
+    let mut in_progress = 0;
+    let retried = loop {
+        match harness.call(Some(TOKEN_DESKTOP), &request).await {
+            Err(fault) if fault.code == FaultCode::Conflict && fault.retryable => {
+                in_progress += 1;
+                assert!(in_progress < 100, "never settled");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            other => break other,
+        }
+    };
+    assert!(retried.is_ok(), "{retried:?}");
+    assert!(
+        in_progress > 0,
+        "the first retry overlapped the running start"
+    );
+    assert_eq!(h.engine.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(h.engine.run_count(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn shutdown_drains_a_disconnected_call_before_returning() {
+    let h = BenchHarness::new(delayed());
+    let bench = h.open().await;
+    h.start(&bench, "r1").await.unwrap();
+    let mut harness = Harness::spawn_with(
+        h.rt.runtime.clone() as Arc<dyn Workbench>,
+        HarnessOptions {
+            // 경고 간격(50ms)보다 지연(600ms)이 길다: drain은 경고만 내고 조기 반환하면 안 된다.
+            drain_warn_after: Duration::from_millis(50),
+            ..HarnessOptions::default()
+        },
+    )
+    .await;
+    let before = h.engine.prompts.load(Ordering::SeqCst);
+    let key = uuid_key();
+    let request = command_request(
+        OperationId::RunSendPrompt,
+        &key,
+        json!({ "benchId": bench, "runId": "r1", "prompt": "hello" }),
+    );
+    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    assert_eq!(harness.calls.active(), 1, "the call was accepted");
+    let served = harness.begin_shutdown();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !served.is_finished(),
+        "serve returned while an accepted call was running"
+    );
+    served.await.expect("serve task").expect("serve");
+    // serve 반환 시점에 호출과 멱등 기록이 끝나 있다.
+    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
+    assert_eq!(harness.calls.active(), 0);
+    let replay =
+        h.rt.runtime
+            .call(AuthenticatedPrincipal::desktop(), request)
+            .await;
+    assert!(
+        replay.is_ok(),
+        "same key returns the stored result: {replay:?}"
+    );
+    assert_eq!(
+        h.engine.prompts.load(Ordering::SeqCst),
+        before + 1,
+        "replay did not apply again"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn calls_after_the_shutdown_signal_are_rejected_without_effect() {
+    let h = BenchHarness::new(RunScript::default());
+    let bench = h.open().await;
+    h.start(&bench, "r1").await.unwrap();
+    let harness = Harness::spawn(h.rt.runtime.clone() as Arc<dyn Workbench>).await;
+    let before = h.engine.prompts.load(Ordering::SeqCst);
+    harness.calls.close();
+    let rejected = harness
+        .call(
+            Some(TOKEN_DESKTOP),
+            &command_request(
+                OperationId::RunSendPrompt,
+                &uuid_key(),
+                json!({ "benchId": bench, "runId": "r1", "prompt": "late" }),
+            ),
+        )
+        .await
+        .expect_err("closing server rejects new calls");
+    assert_eq!(rejected.code, FaultCode::Unavailable);
+    assert_eq!(
+        rejected.message,
+        workbench_server::drain::MESSAGE_SHUTTING_DOWN
+    );
+    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before);
+}

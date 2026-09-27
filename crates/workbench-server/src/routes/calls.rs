@@ -7,7 +7,7 @@ use axum::{body::Bytes, extract::State, http::HeaderMap, response::Response};
 use workbench_protocol::{CallRequest, FaultCode, OperationId, RequestId, WorkbenchFault};
 
 use super::{authenticate, json_response, problem, record, unauthenticated};
-use crate::{AppState, MESSAGE_NOT_EXPOSED};
+use crate::{drain::MESSAGE_SHUTTING_DOWN, AppState, MESSAGE_NOT_EXPOSED};
 
 pub const MESSAGE_BAD_BODY: &str = "invalid request body.";
 
@@ -60,9 +60,29 @@ pub async fn call(State(state): State<Arc<AppState>>, headers: HeaderMap, body: 
             return response;
         }
     }
+    // 받아들임 = 추적 시작. 종료 중이면 `503`(아무 효과 없음).
+    let Some(guard) = state.calls.accept() else {
+        let response = problem(&WorkbenchFault::unavailable(
+            request_id.clone(),
+            MESSAGE_SHUTTING_DOWN,
+        ));
+        record(
+            &state,
+            started,
+            Some(&request_id),
+            &operation,
+            Some(&principal),
+            &response,
+        );
+        return response;
+    };
     let workbench = Arc::clone(&state.workbench);
     let task_principal = principal.clone();
-    let executed = tokio::spawn(async move { workbench.call(task_principal, request).await }).await;
+    let executed = tokio::spawn(async move {
+        let _guard = guard; // 완료·panic 때 drop → drain이 안다
+        workbench.call(task_principal, request).await
+    })
+    .await;
     let response = match executed {
         Ok(Ok(reply)) => json_response(&reply),
         Ok(Err(fault)) => problem(&fault),
