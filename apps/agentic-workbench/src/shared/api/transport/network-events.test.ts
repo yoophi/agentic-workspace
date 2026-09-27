@@ -523,6 +523,41 @@ describe("network events — run snapshot replay after retention recovery", () =
     events.close();
   }, 20_000);
 
+  it("retries a failed final replay after an evicted stream so the last outputs are not lost", async () => {
+    const hub = new FakeEventHub();
+    const stream = "run:r1";
+    const { client } = runClient(hub, stream);
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    let failOnce = true;
+    await network.listen("agent-run-event", (payload) => {
+      const out = (payload as { event: { out: string } }).event.out;
+      if (out.endsWith("-2") && failOnce) {
+        failOnce = false;
+        throw new Error("render failed once"); // 최종 replay의 출력 2에서 한 번 실패
+      }
+      received.push(payload);
+    });
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    const e = hub.epoch;
+    hub.publish(stream, { out: `e${e}-1` });
+    await vi.waitFor(() => expect(received).toHaveLength(1));
+    hub.ticketsDown = true;
+    expect(events.debugDropSockets()).toBe(1);
+    for (let i = 2; i <= 5; i += 1) {
+      hub.publish(stream, { out: `e${e}-${i}` });
+    }
+    hub.evict(stream); // 다시 붙으면 evicted → 종결 복구(최종 스냅샷)
+    hub.ticketsDown = false;
+    await vi.waitFor(() => expect(outputs(received)).toContain(`e${e}-5`), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(failOnce).toBe(false);
+    expect(outputs(received)).toEqual([1, 2, 3, 4, 5].map((n) => `e${e}-${n}`));
+    events.close();
+  }, 20_000);
+
   it("replays the new epoch from its first output when an epoch change is followed by a retention gap", async () => {
     const hub = new FakeEventHub(2);
     const stream = "run:r1";

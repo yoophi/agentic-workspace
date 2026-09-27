@@ -200,3 +200,14 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 - 옛 동작과 같은 변이 2(한정 + default 분기가 세대만 갱신)는 종료 1로, 위와 같은 실패였다.
 
 회귀(각 1회, 종료 0): workbench-client 70 tests·통합 7, AW 632 tests·통합 1.
+
+## T057 Codex 후속 집중 리뷰 8 (`--wait --base 4f4f939`, 대상 `ed29063`)
+
+판정: needs-attention. L1 시험과 후속 7절의 두 변이 결과가 문서대로 재현된다고 확인했다(메모리 실행). High 1건:
+
+| # | 문제(Codex 재현, 실제 소비자) | 조치 |
+|---|---|---|
+| M1 | 종결(evicted) 복구는 `onReset` 전에 스트림을 종결로 둔다. 최종 replay 콜백이 한 번 실패하면 `resetListener`가 종결이라 바로 돌아가 재시도도 오류 통지도 없다. 마지막 출력을 영구히 잃는다(`[1]`, 기준 `4f4f939`는 `[1..5]`) | 스트림 종결과 수신자의 스냅샷 재적용을 분리했다. `resetListener`는 종결 스트림에서도 재시도한다. 수신자가 떠나거나 클라이언트가 닫히면 멈춘다 |
+
+실제 `createNetworkEvents` run 소비자 시험 "retries a failed final replay after an evicted stream…": red 1(`expected [ 'eepoch-1-1' ] to include 'eepoch-1-5'`, 수정 전 코드) → green 0.
+회귀(각 1회, 종료 0): workbench-client 70 tests·통합 7, AW 633 tests·통합 1.

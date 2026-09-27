@@ -462,7 +462,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
     /** 수신자 하나의 재동기: 스냅샷을 불러 `onReset` → 스냅샷이 덮은 순번 뒤만 이어서. 더 새 재동기가 시작되면 이 작업은
      *  스냅샷을 적용하지 않고 끝난다(늦게 온 옛 스냅샷이 새 상태를 덮지 않는다). */
     async resetListener(state: ListenerState, attempt = 0): Promise<void> {
-      if (state.removed || closed || this.terminal) {
+      // 스트림 종결(evicted·fault)과 상관없이 수신자는 스냅샷을 다시 적용할 수 있다 — 종결 복구의 최종 스냅샷 적용이 한 번
+      // 실패해도 재시도한다. 수신자가 떠나거나 클라이언트가 닫히면 멈춘다.
+      if (state.removed || closed) {
         return;
       }
       state.resetting = true;
@@ -498,7 +500,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
           void this.pump(state);
         });
       } catch (error) {
-        if (this.isStale(state, generation) || closed || this.terminal) {
+        if (this.isStale(state, generation) || closed) {
           return;
         }
         if (attempt + 1 >= maxRecoveryAttempts) {
