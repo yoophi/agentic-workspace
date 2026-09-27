@@ -40,7 +40,6 @@ use crate::{
         agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
         desktop_bridge::RunTerminalHook,
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
-        orchestration_repository::OrchestrationRepository,
     },
 };
 
