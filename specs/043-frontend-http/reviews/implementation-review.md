@@ -83,3 +83,21 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 | C2 복구 중 합류 수신자가 자기 스냅샷 뒤 live를 받음(보관 한도 2) | 1: `timed out waiting for B gets its own snapshot` | 0 |
 
 회귀(각 1회): workbench-client 63 tests(첫 실행은 시험 파일의 `Array.at` 타입 오류로 종료 1 → `[length - 1]`로 고침 → 0), 통합 7(0). AW 626 tests(첫 실행은 위 O5 가드 실패로 종료 1 → 고친 뒤 0), 통합 1(0).
+
+## T057 Codex 후속 집중 리뷰 1 (`--wait --base 5f920d2`, 대상 `4f4f939`의 이벤트 클라이언트 변경)
+
+사용자 요청으로 C1·C2 수정만 따로 검토했다. 주 리뷰 증거는 위의 전체 변경 리뷰다. 판정: needs-attention. High 2건:
+
+| # | 문제(Codex 메모리 내 재현) | 조치 |
+|---|---|---|
+| F1 | C1의 직렬화가 스냅샷 **적재**까지 사슬에 넣었다. 끝나지 않는 옛 적재(HTTP 호출에 timeout 없음) 뒤에 새 재동기가 무기한 묶이고, `resetting`이 true로 남아 전달이 멈춘다. gap 복구의 재설정도 이 사슬을 기다린다 | 적재를 사슬 밖으로 뺐다. 사슬에는 적용(`onReset`·상태 변경)만 잇는다. 적재 뒤·적용 차례에 세대를 확인해 늦은 결과는 버린다 |
+| F2 | C2 합류자 처리가 종결(evicted) 복구에서 `terminal`을 먼저 세운 뒤 `resetListener`를 불렀다. 이 함수는 terminal이면 바로 돌아가므로 합류자는 스냅샷을 받지 못하고 `resetting`이 풀리지 않는다 | 합류자에게 복구 스냅샷을 **같은 데이터로** 적용한다(`applyRecoverySnapshot`). 적용을 기다리는 동안 또 합류하면 다음 묶음으로 반복한 뒤 버퍼를 나눈다. 따로 적재하지 않으므로 종결 여부와 상관없다 |
+
+시험(먼저 작성·실패 확인, `event-client.races.test.ts` "resync liveness"):
+| 시험 | red | green |
+|---|---|---|
+| F1 옛 적재가 끝나지 않아도 새 재동기가 적용되고 전달이 이어짐 | 1: `timed out waiting for the newer resync applies despite the pending load` | 0 |
+| F2 종결 복구 중 합류자가 최종 스냅샷을 받음 | 1: `timed out waiting for B gets the final snapshot` | 0 |
+
+회귀(각 1회, 종료 0): workbench-client 65 tests·통합 7, AW 626 tests·통합 1.
+남은 한계: `onReset` 콜백 자체가 끝나지 않으면 그 수신자의 뒤 적용은 기다린다(`onEvent`가 끝나지 않으면 그 수신자 전달이 멈추는 것과 같은 수신자 계약).

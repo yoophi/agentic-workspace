@@ -250,3 +250,77 @@ describe("event client resync ordering (Codex implementation review)", () => {
     client.close();
   });
 });
+
+describe("event client resync liveness (Codex follow-up review)", () => {
+  it("lets a newer resync proceed while a superseded snapshot load never settles", async () => {
+    const hub = new FakeEventHub();
+    const client = clientFor(hub);
+    let loads = 0;
+    const applied: number[] = [];
+    const delivered: number[] = [];
+    let failOnce = true;
+    client.subscribe(
+      "s",
+      {
+        onEvent: (event) => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error("refetch failed");
+          }
+          delivered.push(event.sequence);
+        },
+        onReset: (data) => void applied.push((data as { version: number }).version),
+      },
+      {
+        snapshot: {
+          load: () => {
+            loads += 1;
+            // 첫 적재(수신자 실패 재동기)는 끝나지 않는다. 두 번째(재연결 재동기)는 1까지 덮는 스냅샷.
+            return loads === 1 ? new Promise<never>(() => undefined) : Promise.resolve({ version: 2, lastSequence: 1 });
+          },
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+        resyncOnReconnect: true,
+      },
+    );
+    hub.publish("s"); // 1: 실패 → 재동기 1(영영 보류)
+    await until(() => loads === 1, "first resync loading");
+    expect(client.debugDropSockets()).toBe(1); // 재연결 → 재동기 2
+    await until(() => applied.length === 1, "the newer resync applies despite the pending load");
+    expect(applied).toEqual([2]);
+    hub.publish("s"); // 2
+    await until(() => delivered.includes(2), "delivery resumes");
+    expect(client.debugCursor("s")).toBe(2);
+    client.close();
+  });
+
+  it("resets a listener that joins while terminal (evicted) recovery is resetting others", async () => {
+    const hub = new FakeEventHub();
+    const client = clientFor(hub);
+    const snapshot = { load: async () => ({ final: true }), passes: () => false };
+    const hold = deferred();
+    let aResets = 0;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => undefined,
+        onReset: async () => {
+          aResets += 1;
+          await hold.promise;
+        },
+      },
+      { snapshot },
+    );
+    hub.publish("s");
+    await until(() => client.debugCursor("s") === 1, "first event applied");
+    hub.evict("s");
+    expect(client.debugDropSockets()).toBe(1); // 재연결 → evicted → 종결 복구
+    await until(() => aResets === 1, "terminal recovery resetting A");
+    const bResets: unknown[] = [];
+    client.subscribe("s", { onEvent: () => undefined, onReset: (data) => void bResets.push(data) }, { snapshot });
+    hold.resolve();
+    await until(() => bResets.length === 1, "B gets the final snapshot");
+    expect(bResets).toEqual([{ final: true }]);
+    client.close();
+  });
+});
