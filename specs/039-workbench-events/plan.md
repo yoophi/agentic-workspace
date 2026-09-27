@@ -6,7 +6,7 @@
 
 ## Summary
 
-`Workbench.events`를 실제로 구현한다. core에 `EventHub`를 두어 스트림별 lock 하나로 발행과 구독(등록 → high-water → replay → drain)을 직렬화하고, 세대·gap·한도를 계약으로 고정한다. AW의 run journal을 hub로 옮겨 run 이벤트가 live·replay에서 같은 번호를 갖게 하고, 데스크톱에는 번호를 실은 봉투를 창 삽입 경로 하나로 보낸다. worktree 감시는 core로 옮겨 실제 경로별 참조 수로 공유하는 알림 스트림이 되고, 데스크톱 watcher command 2개는 구독 task로 바뀐다. 이벤트 스키마는 registry에서 OpenAPI·TS `EventMap`으로 생성되고, 테스트 HTTP 하네스는 WebSocket으로 같은 구독을 검증한다. 상세 결정은 [research.md](research.md) R1–R15.
+`Workbench.events`를 실제로 구현한다. core에 `EventHub`를 두어 스트림별 lock 하나로 발행·데스크톱 전달과 구독(등록 → high-water → replay → drain)을 직렬화하고, 보관 한도로 지운 run은 제거 표식으로 시작 전 run과 구별하며, 세대·gap·한도를 계약으로 고정한다. AW의 run journal을 hub로 옮겨 run 이벤트가 live·replay에서 같은 번호를 갖게 하고, 데스크톱에는 번호를 실은 봉투를 창 삽입 경로 하나로 보낸다. worktree 감시는 core로 옮겨 실제 경로별 참조 수로 공유하는 알림 스트림이 되고, 데스크톱 watcher command 2개는 구독 task로 바뀐다. 이벤트 스키마는 registry에서 OpenAPI·TS `EventMap`으로 생성되고, 테스트 HTTP 하네스는 WebSocket으로 같은 구독을 검증한다. 상세 결정은 [research.md](research.md) R1–R15.
 
 ## Technical Context
 
@@ -81,6 +81,7 @@ crates/workbench-core/src/
 
 crates/workbench-core/tests/
 ├── event_subscription_race.rs
+├── run_delivery_order.rs          # 동시 발행자 전달 순서(research R6)
 ├── event_contract_suite.rs       # fixture × (in-memory, WS)
 ├── worktree_stream.rs
 ├── event_latency.rs              # #[ignore]

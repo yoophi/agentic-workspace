@@ -11,10 +11,11 @@
 | 대상 창 | sink 생성 시 label | 같음(ADR 0003) |
 | 창 없음 | `emit_to(label)`(listener 없음) | 전달하지 않음 |
 | journal | AW `InMemoryRuntimeEventJournal` append | core hub `publish_run` |
+| 전달 순서 | 발행자마다 따로 전달(동시 발행 시 순서 보장 없음) | 순번 부여와 같은 스트림 lock 안에서 `eval` → 창 도착 순서 = 순번 순서(여러 발행자·sink 인스턴스여도) |
 
 ## run replay command (2b 이연 대상이지만 구현만 교체)
 
-`replay_orchestration_runtime_events({runId, afterSequence})` → `RuntimeEventSnapshot {runId, events[{runId, sequence, event, terminal}], lastSequence, terminal, gapDetected}` — 형태·의미 불변, 데이터 출처만 hub.
+`replay_orchestration_runtime_events({runId, afterSequence})` → `RuntimeEventSnapshot {runId, events[{runId, sequence, event, terminal}], lastSequence, terminal, gapDetected}` — 형태·의미 불변, 데이터 출처만 hub. **새 경우 하나**: 보관 run 상한으로 제거된 run은 `{events: [], lastSequence: 0, terminal: true, gapDetected: true}`를 돌려주어 화면이 `gap`을 표시한다(오늘은 journal을 지우지 않아 이 경우가 없었다). 이전 세대(재시작 전) run을 cursor 0으로 재수화하면 오늘처럼 빈 snapshot이다.
 
 ## worktree 감시 command
 

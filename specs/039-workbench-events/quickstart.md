@@ -7,6 +7,7 @@ worktree `/Users/yoophi/project/worktrees/039-workbench-events`, 선행: `pnpm i
 ```bash
 cargo test -p workbench-protocol -p workbench-core -p agentic-workbench
 cargo test -p workbench-core --test event_subscription_race      # SC-001: 1,000회 누락·중복 0
+cargo test -p workbench-core --test run_delivery_order           # 동시 발행자에서 창 전달 순서 = 순번 순서(1,000회)
 cargo test -p workbench-core --test event_contract_suite         # SC-003·SC-004: in-memory·WS 공통 fixture
 cargo test -p workbench-core --test worktree_stream              # SC-005: 감시 1회 시작·1회 중지
 pnpm --filter agentic-workbench test -- agent-run-controller     # SC-002: 재수화 중 live 버퍼링 6건(replay 응답 전 live 11 도착 → 1–11 모두 반영 포함)
@@ -33,4 +34,4 @@ grep -rn "InMemoryRuntimeEventJournal\|fs_worktree_watcher\|AGENT_RUN_EVENT" app
 | 2 | 세션 창에서 run 실행 | 진행·권한 요청·완료 표시가 이전과 같음. 다른 세션 창에는 이벤트가 보이지 않음 |
 | 3 | worktree 창 두 개로 같은 worktree 열고 파일 수정 | 두 창 모두 목록 갱신, 한 창 닫아도 다른 창 계속 갱신 |
 | 4 | worktree 창을 모두 닫음 | 감시 종료(`AW_PERF_LOG=1`로 watcher 로그가 멈춤) |
-| 5 | 앱 재시작 뒤 이전 run 화면 복원 | "실행 정보 유실" 표시(이전과 같음) |
+| 5 | 앱 재시작 뒤 이전 run 화면 복원 | 이전 버전과 같은 표시(재시작 전 run의 유실 확정은 2b) |

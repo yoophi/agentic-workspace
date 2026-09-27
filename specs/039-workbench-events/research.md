@@ -35,6 +35,7 @@
 
 | 조건 | 결과 |
 |---|---|
+| 제거된 run(tombstone 있음), `after` 무관 | `Gap(reason=evicted)` — cursor 0이어도(R5) |
 | 스트림 없음 + `after == 0` | 빈 replay, live 대기(시작 전 run 미리 구독) |
 | 스트림 없음 + `after > 0` | `Gap(reason=unknownStream)` |
 | `epoch ≠ 현재` | `Gap(reason=epochChanged)` |
@@ -56,17 +57,39 @@
 
 **Decision**: 스트림 식별자는 `<kind>:<key>` 문자열. 039가 구독을 여는 kind는 `run`(key = run id)과 `worktree`(key = 호출자가 준 경로 → hub가 `canonicalize`한 실제 경로로 정규화). `orchestration`·`exchange`는 이름만 예약한다(구독 시 `invalidArgument` "stream kind is not available yet."). 권한: `run` → 신설 `run:read`, `worktree` → `worktree:read`. Scope가 14개가 되고 데스크톱·조회 전용 호출자 모두 두 scope를 갖는다. 허용되지 않은 kind는 1단계와 같은 `forbidden`.
 
-## R5. run journal 이동
+## R5. run journal 이동과 제거 표식(tombstone) (Codex 리뷰 2차 반영)
 
 **Decision**: AW `InMemoryRuntimeEventJournal`·`ports/runtime_event_journal.rs`를 삭제하고 hub의 상태 복원용 스트림이 journal을 겸한다. 한도: run당 512(오늘 값), 보관 run 수 상한 256(ADR core 0002, Q8). 상한 초과 시 **terminal로 표시된 run 중 terminal이 가장 먼저 된 것**부터 스트림째 제거한다. 진행 중 run은 제거하지 않으므로 상한을 일시적으로 넘을 수 있다. terminal 판정은 오늘과 같다(`Lifecycle Completed | Cancelled`).
 
-`replay_orchestration_runtime_events`(2b 이연 command)는 hub의 run replay를 읽어 **오늘과 같은 `RuntimeEventSnapshot` 형태**로 돌려준다(화면 hydrate 코드 불변). `gapDetected` 의미도 같다(unknown + after>0, 또는 보관 범위 밖).
+**제거 표식**: 스트림을 제거할 때 run id를 `evicted` 집합(FIFO, 상한 4,096개)에 남긴다. 그래야 "제거된 run"과 "아직 시작하지 않은 run"을 cursor 0에서도 구별할 수 있다.
 
-## R6. 데스크톱 run 전달
+| 조회 | 제거된 run(표식 있음) | 표식도 스트림도 없음 |
+|---|---|---|
+| `Workbench.events` | cursor와 무관하게 `Gap(reason=evicted)` | cursor 0 → live 대기, >0 → `Gap(unknownStream)` |
+| 호환 replay command | `{events: [], lastSequence: 0, terminal: true, gapDetected: true}` → 화면이 `gap` 표시 | 오늘과 같음(cursor 0 → 빈 snapshot, >0 → `gapDetected`) |
 
-**Decision**: `TauriRunEventSink::emit`은 `runtime.events_hub().publish_run(run_id, &event, terminal)`을 호출해 `EventEnvelope`를 돌려받고, **삽입 경로만으로** 대상 창에 보낸다(ADR 0003·0004). 삽입 payload는 공유 타입 `RunEventEnvelope {runId, event}`의 **상위집합**이다: `{runId, event, sequence, epoch, streamId, eventId}`. Tauri `agent-run-event` 발행과 `target_label = None` 분기(도달 불가)는 제거한다. 창이 없으면 전달하지 않는다(오늘도 그 창의 listener가 없다). worktree guard 검증 등 sink의 부수 로직은 그대로 둔다.
+표식 4,096개를 넘으면 가장 오래된 표식부터 버린다. 그보다 오래된 run은 다시 "알 수 없는 run"이 된다(보관 run 256 + 표식 4,096 = 한 세대 안에서 4,352개 run까지 구별). 표식은 run id 문자열만 담으므로 수백 KB 이내다.
 
-**Rationale**: `@yoophi/agent-client`의 `RunEventEnvelope`(hushline 공유)를 바꾸지 않고 AW에서 확장 타입을 둔다. 패널은 추가 필드를 무시한다.
+`replay_orchestration_runtime_events`(2b 이연 command)는 hub의 run replay를 읽어 **오늘과 같은 `RuntimeEventSnapshot` 형태**로 돌려준다(화면 hydrate 코드 불변). 제거된 run의 응답만 위 표처럼 새로 정해진다(오늘은 run journal을 지우지 않았으므로 이 경우가 없었다).
+
+**이전 세대의 run(한계)**: 서버 재시작 뒤 새 세대의 hub는 이전 세대 run을 모른다. cursor를 가진 구독자는 `Gap(epochChanged)`를 받지만, 화면처럼 **새 컨트롤러가 cursor 0으로** 재수화하면 오늘과 같이 빈 `ready`가 된다(2026-09-27 확인: 오늘도 재시작 뒤 `gapDetected`는 cursor > 0일 때만 켜진다). 이전 세대 run을 "실행 정보 유실"로 확정하려면 run 목록의 정본이 필요하며, run registry가 core로 오는 2b에서 다룬다. spec US2-3·FR-005·Edge Cases를 이 사실에 맞게 정정했다.
+
+## R6. 데스크톱 run 전달 — 순번 부여와 전달을 한 lock에서 (Codex 리뷰 2차 반영)
+
+**문제**: 한 run에 여러 발행자가 동시에 emit한다(ACP 본 흐름, stderr 읽기 task `runner.rs:184`의 `Diagnostic`, steer·cancel 경로). `publish_run`이 lock을 풀고 봉투를 돌려준 뒤 sink가 전달하면, 발행자 A가 11을 받고 멈춘 사이 B가 12를 창에 먼저 보낼 수 있다. 화면은 12를 적용하고 늦게 온 11을 중복으로 버린다(R7의 `sequence <= lastSequence` 규칙). `gap` 표시로는 잃은 메시지·권한 요청이 돌아오지 않는다.
+
+**Decision**: hub가 **순번 부여와 데스크톱 전달을 같은 스트림 lock 안에서** 수행한다. `publish_run(run_id, event, terminal, deliver)`는 lock 안에서 sequence 부여 → journal·구독자 전달 → `deliver(&envelope)` 호출 → unlock 순으로 실행한다. AW sink는 `deliver`에서 대상 창에 삽입 스크립트를 넣는다. 서로 다른 sink 인스턴스가 같은 run에 발행해도 hub의 스트림 lock이 하나이므로 창에 들어가는 순서 = 순번 순서다. webview 스크립트 실행은 FIFO이므로 화면 도착 순서도 같다.
+
+`deliver` 제약(문서·주석으로 고정):
+- 막히지 않아야 한다. `window.eval`은 스크립트를 webview 대기열에 넣고 바로 돌아오므로 충족한다.
+- hub를 다시 호출하면 안 된다(같은 스트림 lock 재진입 → 교착).
+- 실패해도 hub 상태에 영향이 없다(반환값 없음).
+
+이 lock 보유 시간 증가는 `eval` 호출 비용뿐이며 SC-006 측정(R13)에 포함한다. 삽입 payload는 공유 타입 `RunEventEnvelope {runId, event}`의 **상위집합** `{runId, event, sequence, epoch, streamId, eventId}`이다(`@yoophi/agent-client`의 `RunEventEnvelope`(hushline 공유)는 바꾸지 않고 AW에서 확장 타입을 둔다. 패널은 추가 필드를 무시한다). Tauri `agent-run-event` 발행과 `target_label = None` 분기(도달 불가)는 제거한다. 창이 없으면 전달하지 않는다(오늘도 그 창의 listener가 없다). worktree guard 검증 등 sink의 부수 로직은 lock 밖(`publish_run` 뒤)에서 그대로 한다.
+
+**Concurrency test**(`tests/run_delivery_order.rs`): 두 thread가 같은 run에 발행하고, `deliver`가 순번 11에서 50ms 멈추는 동안 다른 thread가 발행한다 → 기록된 전달 순서가 순번 오름차순이고 빠진 번호가 없다. 1,000회 반복(무작위 지연).
+
+**Alternatives**: 봉투를 돌려받은 뒤 AW에 run별 전달 큐를 두기 — 모든 sink 인스턴스가 같은 큐를 공유해야 하고, 큐 적재도 순번 부여와 원자적이어야 하므로 결국 같은 lock이 필요하다. 화면에서 순서가 뒤바뀐 이벤트를 재정렬 버퍼로 기다리기 — 언제까지 기다릴지 정할 수 없다.
 
 ## R7. 프론트 변경 범위 — 재수화 중 live 버퍼링 (Codex 리뷰 반영, 2026-09-27)
 
@@ -111,7 +134,8 @@
 | 한도 | 값 | 초과 시 |
 |---|---|---|
 | run당 보관 | 512 | 오래된 것부터 버림(오늘과 같음) |
-| 보관 run 수 | 256 | 가장 먼저 terminal이 된 run 제거 |
+| 보관 run 수 | 256 | 가장 먼저 terminal이 된 run 제거 + 제거 표식 |
+| 제거 표식 | 4,096 run id | 가장 오래된 표식부터 버림(그 run은 다시 "알 수 없음") |
 | 구독자 대기열 | 1,024 항목 | 그 구독을 `Gap(reason=subscriberLagged)`로 닫음 |
 | 동시 구독 수 | 256 | `events`가 `rateLimited` |
 | 구독 하나의 cursor 수 | 64 | `invalidArgument` |

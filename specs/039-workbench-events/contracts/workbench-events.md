@@ -23,12 +23,13 @@ fault가 없으면 스트림은 cursor마다 research R2 표대로 replay/gap을
 2. 구독 시작과 동시에 발행된 이벤트는 replay 또는 live 중 정확히 한 곳에서 한 번 온다.
 3. 스트림 사이의 순서는 약속하지 않는다.
 4. gap을 받은 스트림에는 그 구독에서 더 이상 이벤트가 오지 않는다(새로 구독해야 한다). `subscriberLagged`는 구독 전체를 닫는다.
+5. **알 수 없는 run과 제거된 run은 구별된다**: 제거 표식이 있으면 `Gap(evicted)`, 없고 cursor 0이면 시작 전 run으로 보고 live를 기다린다. 표식 상한(4,096)을 넘어 오래된 run은 다시 "알 수 없음"이 된다. 이전 세대 run은 cursor가 있으면 `Gap(epochChanged)`, cursor 0이면 알 수 없는 run과 같다(run 목록의 정본은 2b).
 
 ## 3. 스트림 종류
 
 | kind | key | class | replay | 비고 |
 |---|---|---|---|---|
-| `run` | run id | state | 512개 보관 | terminal run은 보관 run 수 256 초과 시 먼저 끝난 순으로 제거 |
+| `run` | run id | state | 512개 보관 | terminal run은 보관 run 수 256 초과 시 먼저 끝난 순으로 제거하고 **제거 표식**(최대 4,096)을 남긴다. 제거된 run 구독은 cursor 0이어도 `Gap(evicted)` |
 | `worktree` | 경로(실제 경로로 정규화) | notification | 없음 | 첫 구독에 감시 시작, 마지막 해지에 중지. 500ms 묶음, file/git 분류 |
 
 ## 4. 세대
@@ -57,4 +58,4 @@ fault가 없으면 스트림은 cursor마다 research R2 표대로 replay/gap을
 }
 ```
 
-필수 fixture: 처음부터·중간·끝·unknown(0)·unknown(>0)·retention 초과·epoch 불일치·ahead·forbidden(readonly가 아닌 거부 시나리오는 scope 없는 principal로)·kind 미지원·cursor 수 초과·lag(test-hooks로 대기열 4)·worktree 알림 묶음·worktree 두 구독자. 두 경로(in-memory, WS)에서 같은 결과.
+필수 fixture: 처음부터·중간·끝·unknown(0)·unknown(>0)·**제거된 run(cursor 0과 >0, 새 컨트롤러 재수화 포함)**·retention 초과·epoch 불일치·ahead·forbidden(readonly가 아닌 거부 시나리오는 scope 없는 principal로)·kind 미지원·cursor 수 초과·lag(test-hooks로 대기열 4)·worktree 알림 묶음·worktree 두 구독자. 두 경로(in-memory, WS)에서 같은 결과.
