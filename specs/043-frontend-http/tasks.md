@@ -87,10 +87,10 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ### 시험 먼저
 
-- [ ] T029 [P] [US2] 이벤트 클라이언트 기본 시험 `WC/event-client.test.ts` — 스트림당 WS 하나, 표 발급 cursor, hello 뒤 전달, 수신자 교체 대기열(상한 1,024 초과 시 재구독), 마지막 수신자 해제 유예. 실패 확인
-- [ ] T030 [P] [US2] 수신자 계약 시험 `WC/event-client.listeners.test.ts` — Promise 이행 뒤에만 그 수신자 `deliveredSequence` 전진, 순서대로 하나씩, Promise 거절·동기 예외 시 그 수신자만 `failed`→스냅샷 재동기 후 기준점 전진, 다른 수신자 계속, 재연결 cursor = 최솟값, 이미 성공한 수신자에게 재전달 없음, 수신자 교체 중 도착. 실패 확인
+- [X] T029 [P] [US2] 이벤트 클라이언트 기본 시험 `WC/event-client.test.ts` — 스트림당 WS 하나, 표 발급 cursor, hello 뒤 전달, 수신자 교체 대기열(상한 1,024 초과 시 재구독), 마지막 수신자 해제 유예. 실패 확인
+- [X] T030 [P] [US2] 수신자 계약 시험 `WC/event-client.listeners.test.ts` — Promise 이행 뒤에만 그 수신자 `deliveredSequence` 전진, 순서대로 하나씩, Promise 거절·동기 예외 시 그 수신자만 `failed`→스냅샷 재동기 후 기준점 전진, 다른 수신자 계속, 재연결 cursor = 최솟값, 이미 성공한 수신자에게 재전달 없음, 수신자 교체 중 도착. 실패 확인
 - [ ] T031 [P] [US2] 교환 재조정 시험 `AWF/features/agent-run/model/exchange-reconciler.test.ts` — 원장 `requestId → routed/acked`: 요청 이벤트 수신=라우팅+ack 1회, 스냅샷 `Accepted`(T003 확정 상태) 미라우팅=라우팅+ack, 라우팅 뒤 ack 실패=ack만 재시도, 원장 없음(새로고침) 재조정=라우팅되더라도 run 전송 키 `exchange-delivery:<requestId>`. 실패 확인
-- [ ] T032 [P] [US2] 전달 끄기 시험 — `AWT/infrastructure/tauri_desktop_bridge.rs` 단위: 선언된 incarnation 창에는 네이티브 emit 0, 다른 창은 유지(SC-003 앱 측)
+- [X] T032 [P] [US2] 전달 끄기 시험 — `AWT/infrastructure/tauri_desktop_bridge.rs` 단위: 선언된 incarnation 창에는 네이티브 emit 0, 다른 창은 유지(SC-003 앱 측)
 
 ### 구현
 

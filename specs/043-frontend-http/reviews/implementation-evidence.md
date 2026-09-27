@@ -157,3 +157,23 @@ T027 범위를 정직하게 적는다:
   - 모델 버튼은 agent 목록을 불러온 뒤 생기는데, 시험은 그 전에 Enter를 눌렀다.
   - 호환 경로의 가짜 `invoke`는 마이크로태스크 안에 끝나 이 차이가 가려져 있었다.
   - 기대값은 바꾸지 않았다. 대기 조건을 "후보를 다 불러옴"과 "모델 버튼 있음"으로 정확히 했다.
+
+## T029 · T030 · T033 이벤트 클라이언트 기본·수신자 계약 (`packages/workbench-client/src/event-client.ts`)
+
+| 단계 | 명령 | 종료 코드 | 의미 |
+|---|---|---|---|
+| red | `npx vitest run src/event-client.test.ts src/event-client.listeners.test.ts` | 1 | 모듈 없음(import 실패). 동작 증거 아님 |
+| green | 같은 명령 | 0 | 10 passed. 처음 15로 보인 것은 기본 시험 파일을 import해 기본 5개가 두 번 돈 것이다. 도우미를 `testing/event-client-harness.ts`로 옮겼다 |
+| 변이: 수신자 실패를 반영 완료로 침 | `pump`의 catch에서 재동기 대신 계속 진행 | 1 | 재동기 시험 2개 실패(거절, 동기 예외) |
+| 변이: settle 전에 cursor 전진 | `onEvent` 호출 전에 `delivered` 갱신 | 1 | 순차 처리 시험, 재연결 cursor 시험 실패 |
+| 변이: 재연결 cursor를 최댓값으로 | `cursor()`를 max로 | 1 | `reconnects from the minimum applied cursor…` 실패 |
+
+- 가짜 hub(`testing/fake-event-hub.ts`)는 042 `decide_existing`·`decide_missing`의 cursor 판정과 "hello는 등록 뒤" 순서를 흉내 낸다. 전달은 시험이 `publish`할 때 동기로 일어나고, 기다림은 마이크로태스크만 돈다(시간 대기 없음).
+- 단정 범위:
+  - Promise settle 뒤에만 그 수신자의 cursor가 전진하고, 한 번에 하나씩 처리한다.
+  - 거절·동기 예외는 그 수신자만 스냅샷으로 재동기한다. 스냅샷이 덮은 순번은 다시 받지 않고 그 뒤만 받는다. 다른 수신자는 계속 받는다.
+  - 재연결 cursor는 반영 완료의 최솟값이다(받았지만 반영 전에 끊긴 경우 포함). 이미 반영한 수신자에게는 다시 넘기지 않는다.
+  - 수신자 교체 중에 도착한 이벤트는 새 수신자가 받는다.
+  - 대기열 상한을 넘으면 소켓을 닫고, 다음 수신자가 붙을 때 cursor에서 다시 구독한다.
+  - 마지막 수신자가 떠나고 유예가 지나면 소켓을 닫는다.
+- T032(전달 끄기 단위 시험)는 Foundational에서 Rust `tauri_desktop_bridge::only_the_current_incarnation_can_declare_and_skip_delivery`로 넣었다. T037(부팅의 전달 선언)은 `bootstrap-transport`에 있다(선언 실패 → 호환 경로, T051 시험).

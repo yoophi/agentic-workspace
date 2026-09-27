@@ -66,3 +66,13 @@ export { faultToString } from "./fault-string";
 export type { FaultFlavor } from "./fault-string";
 export { OPERATION_KINDS, isQueryOperation } from "./operation-kinds";
 export type { OperationKind } from "./operation-kinds";
+export { createEventClient } from "./event-client";
+export type {
+  EventClient,
+  EventClientOptions,
+  EventConnectionPort,
+  SnapshotSource,
+  SocketLike,
+  StreamListener,
+  SubscribeOptions,
+} from "./event-client";
