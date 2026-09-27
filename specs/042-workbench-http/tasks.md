@@ -123,8 +123,8 @@
 
 ## Phase 8: Polish & Cross-Cutting
 
-- [ ] T038 AW debug 전용 진단·probe(R12, 설계 리뷰 D3): `AW_HTTP_DIAGNOSTIC_FILE`(0600, 운영 발급기로 Origin 없는 진단 토큰), `AW_HTTP_WEBVIEW_PROBE_FILE`(메인 창 로드 뒤 `window.eval` probe → `invoke('get_workbench_connection')` → fetch handshake·`project.list`·표·WS `hello`·표 재사용 거절·무토큰 401 → `report_http_probe`), `invoke_handler`를 debug/release 두 벌로 조립. 결과에 토큰·표 문자열 없음
-- [ ] T039 release 유출 확인: `cargo build --release`(AW) 뒤 `strings`로 `AW_HTTP_DIAGNOSTIC_FILE`·`AW_HTTP_WEBVIEW_PROBE_FILE`·`report_http_probe` 0건, 결과 Notes
+- [X] T038 AW debug 전용 진단·probe(R12, 설계 리뷰 D3): `AW_HTTP_DIAGNOSTIC_FILE`(0600, 운영 발급기로 Origin 없는 진단 토큰), `AW_HTTP_WEBVIEW_PROBE_FILE`(메인 창 로드 뒤 `window.eval` probe → `invoke('get_workbench_connection')` → fetch handshake·`project.list`·표·WS `hello`·표 재사용 거절·무토큰 401 → `report_http_probe`), `invoke_handler`를 debug/release 두 벌로 조립. 결과에 토큰·표 문자열 없음
+- [X] T039 release 유출 확인: `cargo build --release`(AW) 뒤 `strings`로 `AW_HTTP_DIAGNOSTIC_FILE`·`AW_HTTP_WEBVIEW_PROBE_FILE`·`report_http_probe` 0건, 결과 Notes
 - [ ] T040 앱 스모크(quickstart §3, 격리 identifier): (a) 끝점 진단, (b) WebView probe — **보고 때 (a)는 "끝점", (b)는 "데스크톱 연결"로 구분**, 재기동 뒤 반복, 캡처한 `origin`으로 허용 목록 확인. 스모크 뒤 격리 디렉터리·파일 삭제
 - [ ] T041 [P] docs: `docs/workbench-seam.md` 네트워크 어댑터 절(경로·인증·출처·표·실행 수명, Mermaid), `docs/client-server-architecture-research.md` 진행 각주, `crates/workbench-server/docs/adr/0001-…`·`0002-…`, `crates/workbench-server/CONTEXT.md` 필요 시(용어는 core CONTEXT 참조)
 - [ ] T042 전체 게이트(quickstart §1·§2) 한 번 실행·종료 코드 기록, SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad) — 미검증 범위(배포 Origin 실측, 화면 경로 전환은 4단계) 명시, 커밋 `docs(aw): record 042 HTTP adapter status`
@@ -197,3 +197,5 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **US4 게이트**: AW `cargo test` status=0(115 passed), `cargo clippy --all-targets -- -D warnings` status=0
 - **T033 보완(사용자 검토 7)**: 종료 시작 때 HTTP(`http_calls`, 상태가 쥔 추적기)·MCP 양쪽 수락을 **먼저** 닫고 받아들인 호출만 기다린다(이전에는 MCP close가 HTTP drain 뒤). 시험: HTTP 호출 700ms·MCP 호출 300ms, 종료 150ms 뒤 MCP 새 호출 거절·종료 미완료, 400ms에 이전 MCP 호출 완료·HTTP 아직 drain 중. 변이(MCP close를 뒤로) → "MCP accepted a new call while the HTTP drain was still running" 실패(`t033b-m.log`)
 - **T036·T037**: `http_health_openapi.rs` status=0 — live 무인증·`{status:live}`만, ready·openapi 무인증 401, 인증 뒤 ready(serverEpoch)·openapi == 커밋된 `workbench.openapi.json`(JSON 동치). 경로는 T007에서 구현
+- **T038**: `infrastructure/http_probe.rs`(`#[cfg(debug_assertions)]`) — 진단 파일(0600, 운영 발급기 "Origin 없음" 토큰 10분), 메인 창 `PageLoadEvent::Finished`에서 한 번 `window.eval` probe(`get_workbench_connection` → handshake·`project.list`·표·WS hello·표 재사용·무토큰; 상태 코드·프레임 종류·`location.origin`·instanceId만 보고), debug 전용 `report_http_probe`. `invoke_handler`는 `app_invoke_handler!` 매크로 두 벌(debug만 probe command). AW debug clippy status=0
+- **T039**: `cargo build --release`(AW) status=0, `strings target/release/agentic-workbench`: `AW_HTTP_DIAGNOSTIC_FILE` 0 · `AW_HTTP_WEBVIEW_PROBE_FILE` 0 · `report_http_probe` 0 · probe 스크립트 조각 0, `get_workbench_connection` 1(운영 command). 대조: 현재 코드의 debug 바이너리에서는 1 · 1 · 2로 검출(grep 유효성)

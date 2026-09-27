@@ -7,6 +7,8 @@ pub mod acp_agent_launch_factory;
 pub mod desktop_benches;
 #[cfg(debug_assertions)]
 pub mod devtools;
+#[cfg(debug_assertions)]
+pub mod http_probe;
 pub mod json_appearance_preferences_repository;
 pub mod json_session_window_state_repository;
 pub mod json_store;

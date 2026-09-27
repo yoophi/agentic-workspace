@@ -175,6 +175,15 @@ impl WorkbenchHttpState {
         ))
     }
 
+    /// debug 스모크 전용(R12): 운영 발급기의 "Origin 없음" 토큰 — 브라우저 밖 진단 클라이언트용.
+    #[cfg(debug_assertions)]
+    pub fn diagnostic_connection(&self) -> WorkbenchConnection {
+        self.connection(self.issuer.issue(
+            TokenOrigin::NoOrigin,
+            workbench_server::auth::DIAGNOSTIC_TOKEN_TTL,
+        ))
+    }
+
     fn connection(&self, issued: IssuedToken) -> WorkbenchConnection {
         WorkbenchConnection {
             base_url: self.base_url.clone(),
