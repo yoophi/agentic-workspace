@@ -80,7 +80,7 @@
 
 - [X] T034 [US1] host 통합 시험 `crates/workbench-host/tests/owner_after_desktop.rs`: 창 토큰으로 run 시작 → 창 임대 해제(앱 종료 흉내, 작업대 닫지 않음) → 소유자 클라이언트가 `bench.list`에서 run을 보고, `run.replay` + 구독으로 출력 이어 받기, `run.cancel`로 agent 프로세스 종료 확인(시험 엔진 + 가짜 ACP agent 둘 다)
 - [X] T035 [US1] 앱 스모크 probe 확장(`apps/agentic-workbench/src-tauri/src/infrastructure/http_probe.rs`): 외부 모드 연결 확인, 시나리오 `quit`(run 시작 뒤 결과 기록하고 앱 종료 신호 대기). 스모크 스크립트 `specs/044-standalone-server/reviews/app-smoke/owner-check.py`(안내 파일로 신원 증명 → 소유자 토큰 → `bench.list`·`run.replay`·구독·`run.cancel`)
-- [ ] T036 [US1] 실제 앱 043 스모크(출력 + 강제 재연결, 새로고침 1회 전달)를 외부 서버 모드로 개발·배포 출처 각각 실행(SC-010)
+- [X] T036 [US1] 실제 앱 043 스모크(출력 + 강제 재연결, 새로고침 1회 전달)를 외부 서버 모드로 개발·배포 출처 각각 실행(SC-010)
 
 ---
 
@@ -101,10 +101,10 @@
 
 ## Phase 8: 실제 앱 검증 (US1·US2 완료 조건)
 
-- [ ] T045 [US1] 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
-- [ ] T046 [US2] 창 닫기 대조: 관측한 창 닫기 경로((a)·(b))에서 그 작업대의 run이 취소되고 그 창 토큰이 거절됨(SC-006)
-- [ ] T047 [US2] 서버 실행 파일이 없을 때 앱의 연결 실패 화면과 다시 시도, 서버가 떠 있을 때 새로 띄우지 않음, 서버 없을 때 한 번만 띄움(SC-005)
-- [ ] T048 [US1] 관측 불가 경로(예: 로그아웃)와 Windows·Linux, **OS 프로세스 재시작 뒤 보류 task 재배정**(host 재조립 수준만 검증됨, `implementation-evidence.md` 대기 task 정책 변경)을 `specs/044-standalone-server/reviews/app-smoke.md`의 미검증 목록에 적는다(완료로 세지 않음)
+- [X] T045 [US1] 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
+- [X] T046 [US2] 창 닫기 대조: 관측한 창 닫기 경로((a)·(b))에서 그 작업대의 run이 취소되고 그 창 토큰이 거절됨(SC-006)
+- [X] T047 [US2] 서버 실행 파일이 없을 때 앱의 연결 실패 화면과 다시 시도, 서버가 떠 있을 때 새로 띄우지 않음, 서버 없을 때 한 번만 띄움(SC-005)
+- [X] T048 [US1] 관측 불가 경로(예: 로그아웃)와 Windows·Linux, **OS 프로세스 재시작 뒤 보류 task 재배정**(host 재조립 수준만 검증됨, `implementation-evidence.md` 대기 task 정책 변경)을 `specs/044-standalone-server/reviews/app-smoke.md`의 미검증 목록에 적는다(완료로 세지 않음)
 
 ---
 

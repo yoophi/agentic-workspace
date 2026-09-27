@@ -1,0 +1,84 @@
+# 044 앱 스모크 (T036 · T045 · T046 · T047)
+
+2026-09-28, macOS Apple Silicon. 모든 실행은 **외부 서버 모드**(`AW_WORKBENCH_MODE` 없음)다. 앱 로그 `[workbench] mode: external`, 접근 기록은 서버 로그(`<data>/workbench/server/server.log`)에만 있고 앱 로그의 in-process `[workbench-http]` 줄은 0이다.
+
+- 사용자 설치본과 데이터를 나누려고 별도 identifier를 썼다: T036 개발 `…smoke044x`·배포 `…smoke044xr`, 종료·창 닫기 번들 배포 `…smoke044qr`(`AW Quit 044.app`)·개발 `…smoke044qd`(`AW QuitDev 044.app`).
+- 결과 파일은 `app-smoke/<실행>/`(probe·owner-check 보고, 실행 메타)다. 토큰·표 문자열은 없다. 복사 전에 모든 비밀 파일의 토큰 값이 이 파일들에 없음을 확인했다. 경로는 `<scratchpad>`·`~`로 줄였다.
+- 종료는 각 실행이 띄운 **정확한 PID**만 했다(서버는 `server.json`의 pid + 명령줄의 실행 파일·데이터 디렉터리 확인 뒤). 삭제 명령은 쓰지 않았고, 실행마다 새 디렉터리 이름을 썼다. 사용자 설치본 프로세스는 건드리지 않았다.
+- 가짜 agent: `fake_acp_permission_agent.py --echo`.
+
+## 출처
+
+| 출처 | 빌드 | Origin | 서버 실행 파일 |
+|---|---|---|---|
+| 개발(T036) | `tauri dev`(`VITE_AW_DEBUG_PROBE=1`) | `http://localhost:1420` | `AW_WORKBENCH_SERVER_PATH` → `target/debug` |
+| 배포(T036) | `tauri build --debug --no-bundle` | `tauri://localhost` | **앱 실행 파일 옆**(경로 변수 없음, `server-path=neighbor`) |
+| 배포 번들(T045–T047) | `tauri build --debug --bundles app` | `tauri://localhost` | 번들 `Contents/MacOS/`에 서버 실행 파일을 복사(externalBin 대용, (f) 배포는 미완료) |
+| 개발 번들(T045·T046) | 같은 번들, `build.frontendDist = http://localhost:1420`, vite 따로 실행 | `http://localhost:1420` | 위와 같음 |
+
+종료 경로 (c)(d)(e)는 번들 id가 있어야 자동화된다(Dock 항목, `tell application id … to quit`). 그래서 T045·T046은 두 출처 모두 번들로 실행했다. 개발 출처는 WebView가 개발 서버를 읽는 번들이다.
+
+## T036 — 043 스모크, 외부 서버 모드 (SC-010)
+
+| 실행 | 출처 | 결과 | 근거 |
+|---|---|---|---|
+| `t036-dev-1` 출력 + 강제 재연결 | 개발 | ok | 시작·끊긴 뒤 에코 각 1회, 소켓 끊기 1, 순번 1–13 중복·빈 순번 없음. 서버 로그 `event-tickets` 2, agent prompt 2 |
+| `t036-dev-refresh-1` 새로고침 1회 전달 | 개발 | ok | 새로고침 뒤 라우팅 1·확인 1, 앱 스트림 에코 1. agent 기록에서 메시지 prompt 1(전체 4) |
+| `t036-rel-1` 출력 + 강제 재연결 | 배포(옆 서버) | ok | 개발과 같음(`event-tickets` 2, prompt 2) |
+| `t036-rel-refresh-1` 새로고침 1회 전달 | 배포(옆 서버) | ok | 라우팅 1·확인 1·에코 1, 메시지 prompt 1(전체 4) |
+
+범위: 043과 같다(패널 UI 라우팅은 probe가 대신함). 043에서 돌리지 않았던 배포 출처 새로고침을 이번에는 돌렸다.
+
+## T045 — 앱 종료 뒤 run 지속 (SC-001)
+
+흐름(`quit` probe): 에코 run 시작 → 시작 에코·완료 → `ready-to-quit`(run 살려 둠) → 그 경로로 종료 → **앱 PID 소멸** → 서버 PID 생존 → `server.status` → `owner-check.py`(identify 증명 → handshake → `bench.list`에서 같은 run → replay → 구독으로 소유자 prompt 에코를 live로 받음 → `run.cancel` → 목록에서 사라짐).
+
+| 경로 | 배포 | 개발 |
+|---|---|---|
+| (c) 앱 메뉴 Quit(Cmd+Q) | ok (`t045-rel-c-1`, `-c-2`) | ok (`t045-dev-c-1`) |
+| (d) Dock 메뉴 Quit | ok (`t045-rel-d-1`, `-d-2`) | ok (`t045-dev-d-1`) |
+| (e) AppleScript `quit` | ok (`t045-rel-e-1`, `-e-2`) | ok (`t045-dev-e-1`) |
+| (g) `SIGTERM` | ok (`t045-rel-g-1`, `-g-2`) | ok (`t045-dev-g-1`) |
+
+- 모든 실행에서 앱 PID가 사라진 뒤 서버는 살아 있었다. owner-check 결과는 모두 같다: replay 1–9 연속, live 10·11(에코), `liveAfterReplay`, 취소 완료.
+- 임대: 종료 직후 `server.status.leases`는 (c)(d)(e)에서 0(앱이 `lease.release`), (g)에서 1(앱 처리 없음, TTL로 거둠). 두 출처 모두 같다(`*-2`, `t045-dev-*`의 `status-after-quit.json`).
+- 기록 정정: 첫 배포 실행(`*-1`)에서 "종료 뒤 서버 로그 조각"으로 (d)(e)의 `lease.release`를 못 봤다. 두 번째 실행에서는 (c)도 비어 있어, 로그 조각 방식이 믿을 수 없다고 판단했다. 판정은 `server.status`의 임대 수로 한다(위).
+- (h) 로그아웃·재시동은 관측 불가·미검증이다(T048).
+
+## T046 — 창 닫기 대조 (SC-006)
+
+흐름(`close-token` probe = `quit` 흐름 + 이 창 토큰 넘기기): 에코 run 시작 → 그 창의 연결 토큰을 **0600 비밀 파일에만** 쓴다(보고서 없음) → 창 안에서 그 토큰으로 handshake한 상태 코드만 보고 → 창 닫기 경로 → `bench.list`에서 run이 사라질 때까지 조건 대기 → 같은 토큰 + 그 창 Origin으로 handshake(상태 코드만 출력, `token-check.py`).
+
+| 경로 | 앱 | run·작업대 | 같은 창 토큰 닫기 전 → 뒤 | 배포 | 개발 |
+|---|---|---|---|---|---|
+| (a) 빨간 버튼(main, Settings 남음) | 살아 있음, Settings만 남음 | 제거(작업대 0) | 200 → 401 `unauthenticated` | ok | ok |
+| (b1) 메뉴 `Window > Close Window`(main 앞) | 살아 있음, Settings만 남음 | 제거 | 200 → 401 | ok | ok |
+| (f) 마지막 창 빨간 버튼 | 종료 | 제거 | 200 → 401 | ok | ok |
+| (b2) Cmd+W 키 입력(System Events, Settings 앞) | **두 창 모두 닫히고 종료** | 제거 | 200 → 401 | 관측대로 재현 | 관측대로 재현 |
+
+- 실행: `t046-{rel,dev}-{a,b1,f,b2}-tok-1`. 창 안 probe의 닫기 전 handshake도 200이었다(`probe.json` `steps.tokenBeforeClose`). 비밀 파일은 0600이며 저장소에 넣지 않았다.
+- 401이 만료 때문이 아님: 창 토큰 TTL은 15분(`DESKTOP_TOKEN_TTL`)이다. 각 실행은 토큰 발급부터 끝까지 6–11초였다.
+- (a)(b1)에서 서버가 떠 있고 다른 창(Settings)이 붙어 있는 채로 401이 나온다. 거절은 그 창의 폐기(`desktop.retireWindow{closeBench:true}`) 때문이다.
+- 토큰 없는 앞선 실행(`t046-*-{a,b1,f,b2}-1`, scratchpad)도 같은 run 제거를 보였다. 이 표는 토큰 확인 실행으로 대체한다.
+- (b2) 위험: 자동화한 Cmd+W 한 번이 두 창을 닫는다(spike와 같음). 원인은 확인하지 못했다. 사람이 누른 Cmd+W도 같은지는 확인하지 않았다(미확인 위험, T048).
+
+## T047 — 연결 실패 화면과 서버 기동 (SC-005)
+
+배포 번들, `AW_WORKBENCH_SERVER_PATH`에 없는 경로를 줬다(`t047-rel-3`, 창만 캡처):
+
+1. 앱이 연결 실패 화면을 보였다: "Workbench 서버에 연결하지 못했습니다", 이유 `No such file or directory (os error 2)`, "다시 시도" 버튼(`app-smoke/t047-rel-3/failure-window.png`). 이때 서버 프로세스와 `server.json`은 없었다.
+2. 그 경로에 서버 실행 파일 링크를 만든 뒤 "다시 시도"를 눌렀다. 서버가 한 번 떠(프로세스 1개) 작업 대시보드가 보였다(`after-retry-window.png`). `server.status`: 임대 1.
+3. 서버가 떠 있을 때 새로 띄우지 않음(`t047-rel-2`): AppleScript `quit` 뒤 서버는 남았다(임대 0). 앱을 다시 띄우자 같은 서버 PID(87805)에 붙었다. 임대는 1로 돌아왔고 서버 프로세스는 여전히 1개였다.
+
+- 캡처: 창 id로 AW 창만 찍었다(`screencapture -l`). 처음 실행(`t047-rel-2`)의 화면 영역 캡처에는 다른 앱의 떠 있는 창이 함께 찍혀 저장소에 넣지 않았다.
+- 첫 시도(`t047-rel-1`)는 WebView 내용을 접근성 API로 읽으려다 실패했다(글자 0). 판정에서 제외했다. 그 실행에서도 실패 동안 서버 프로세스는 0이었다.
+- 동시 기동 1회(동시 10회 ensure)는 프로세스 시험(T021 계열) 몫이다. 이 스모크는 앱 한 번의 기동만 본다.
+- 개발 출처 T047은 돌리지 않았다(연결 실패는 WebView Origin과 무관한 기동 경로).
+
+## 아직 검증하지 않은 것 (T048)
+
+- (h) 로그아웃·재시동 종료: 관측 불가·미검증.
+- Windows·Linux: 미검증.
+- (b2) 사람이 누른 Cmd+W: 미확인 위험.
+- OS 프로세스 재시작 뒤 보류 task 재배정: host 재조립 수준만 검증했다(`implementation-evidence.md` 대기 task 정책 변경).
+- 서명·notarization된 배포 번들의 externalBin 서버: (f) 미완료. 스모크는 번들 안에 실행 파일을 복사해 대신했다.

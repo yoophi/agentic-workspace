@@ -1,0 +1,9 @@
+app-pid=64944 quit-path=d
+probe-status=done
+run-id=quit-2906d847 server-pid=64981
+server-verified=yes
+app-gone=yes
+server-alive-after-quit=yes
+status-after-quit={"result": "ok", "state": "serving", "leases": 0, "busyRuns": 0}
+owner-check-exit=0
+server-stopped=yes

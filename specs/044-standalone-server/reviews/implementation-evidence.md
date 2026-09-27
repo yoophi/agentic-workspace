@@ -656,3 +656,18 @@ green·최종:
 - scheduler `acquire` 수정: 대기열 FIFO 대신 명시 배정을 먼저 시작해도 되는가. 자리가 비어 있을 때만 해당한다.
 - 부수 관찰: MCP 도구로 받은 `draining` 거절이 `structuredContent.code = "internalError"`로 나간다(`mut-assign-n.log`). 계약상 `draining`(notApplied)의 의미가 MCP 도구 오류 코드에서 사라진다. 수정 여부를 리뷰에서 판단한다(이 변경에서는 고치지 않음).
 - 증거 범위: 재시작은 host 재조립 수준이다(OS 프로세스 아님).
+
+## T036 · T045–T048 실제 앱 스모크 (메인 세션)
+
+- 결과·판정 범위는 `reviews/app-smoke.md`, 실행별 보고는 `reviews/app-smoke/<실행>/`, 재현 스크립트는 `reviews/app-smoke/scripts/`에 있다.
+- T046 토큰 거절(사용자 검토 요청): debug probe에 `close-token` 시나리오와 `report_app_probe_secret` command를 더했다(`http_probe.rs`, `#[cfg(debug_assertions)]`).
+  - 창 토큰은 0600 비밀 파일에만 쓴다. 보고서에는 상태 코드만 들어간다.
+  - 단위 시험 `close_token_probe_hands_the_window_token_only_to_the_secret_file`: 먼저 compile red(`close-token-red-1.log`, 함수 없음), 구현 뒤 green(`close-token-green-1.log`, fmt 뒤 `aw-probe-test-2.log` 2 passed).
+  - 기존 `quit` 템플릿은 그대로다(시험이 같음을 단정).
+  - AW src-tauri `cargo test`(`aw-test-tok.log`) 종료 0, 102·0·1·0 passed. clippy(`aw-clippy-tok.log`) 종료 0. fmt는 수정 뒤 종료 0(`aw-fmt-tok-2.log`).
+- 요약:
+  - T036: 개발·배포(옆 서버) × (출력+재연결, 새로고침 1회) 모두 ok.
+  - T045: (c)(d)(e)(g) × 개발·배포 모두 앱 PID 소멸 뒤 같은 run replay·live 에코·취소 ok. 임대는 (c)(d)(e) 0, (g) 1.
+  - T046: (a)(b1)(f)(b2) × 개발·배포 모두 run 제거. 같은 창 토큰은 닫기 전 200 → 닫기 뒤 401 `unauthenticated`(TTL 15분 안, 6–11초). (b2)는 두 창이 닫힌다(위험).
+  - T047(배포): 실패 화면(이유·다시 시도) 동안 서버 0 → 다시 시도로 서버 1 → 재실행은 같은 서버 PID를 쓴다.
+- 기록 정정: 종료 뒤 서버 로그 조각으로 `lease.release`를 판정하려던 첫 방식은 믿을 수 없어(두 번째 실행에서 (c)도 비었음) `server.status` 임대 수로 바꿨다.

@@ -1,0 +1,9 @@
+servers-before=
+app-pid=3082
+window-shot id=8462 failure-window.png
+servers-while-failed= server.json=no
+window=224, 93, 1280, 860
+click: button 다시 시도 of group 2 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of window Agentic Workbench of application process agentic-workbench
+server.json-after-retry=yes servers=3173  status={"result": "ok", "state": "serving", "leases": 1, "busyRuns": 0}
+window-shot id=8462 after-retry-window.png
+cleanup: app=gone servers=

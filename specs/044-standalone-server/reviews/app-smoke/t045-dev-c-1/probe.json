@@ -1,0 +1,16 @@
+{
+  "origin": "http://localhost:1420",
+  "scenario": "quit",
+  "steps": {
+    "startEcho": "ok",
+    "capturedEvents": 9,
+    "lastSequence": 9
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-dff2db4e",
+  "benchId": "72c1b119-7fab-4051-9a18-c8a5834e5cdd",
+  "phase": "ready-to-quit",
+  "result": "ok"
+}

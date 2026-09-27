@@ -1,0 +1,21 @@
+app-pid=93326 close-path=a
+probe-status=done
+run-id=quit-828c061a server-pid=93340
+server-verified=yes
+before: {"result": "ok", "runListed": true, "benchCount": 1, "leases": 1}
+secret-mode=  File: "<scratchpad>/044/smoke/t046-rel-a-tok-1/secret.json"
+    ID: 10000120000001a Namelen: ?       Type: apfs
+Block size: 4096       Fundamental block size: 4096
+Blocks: Total: 120699413  Free: 1674820    Available: 1674820
+Inodes: Total: 77737854   Free: 66992800 probe-tokenBeforeClose=200
+token-before-close={"status": 200}
+main-window=Agentic Workbench
+windows-before-close=Settings, Agentic Workbench
+action: button 1 of window Agentic Workbench of application process agentic-workbench
+app-alive-after-close=yes
+windows-after-close=Settings
+after: {"result": "ok", "runListed": false, "benchCount": 0, "leases": 1}
+run-removed=yes
+token-after-close={"status": 401, "code": "unauthenticated"}
+retireWindow-calls=1
+cleanup: app=gone server=gone

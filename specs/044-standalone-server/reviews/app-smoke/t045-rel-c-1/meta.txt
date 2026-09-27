@@ -1,0 +1,8 @@
+app-pid=59366 quit-path=c
+probe-status=done
+run-id=quit-8a4ce17f server-pid=59386
+server-verified=yes
+app-gone=yes
+server-alive-after-quit=yes
+owner-check-exit=0
+server-stopped=yes

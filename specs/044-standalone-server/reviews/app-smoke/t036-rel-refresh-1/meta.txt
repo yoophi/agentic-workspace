@@ -1,0 +1,8 @@
+data=~/Library/Application Support/com.yoophi.agentic-workbench.smoke044xr
+server-path=neighbor
+launch=55900
+probe-status=done
+server-pid=55926
+app-pids= 55900
+server-tree= 55926 56702 56703  
+server-verified=yes

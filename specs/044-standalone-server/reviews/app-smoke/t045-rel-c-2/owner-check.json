@@ -1,0 +1,1 @@
+{"result": "ok", "steps": {"identify": "ok", "handshake": "ok", "benchList": "ok", "replayEvents": 9, "replayLastSequence": 9, "replayContiguous": true, "liveSequences": [10, 11], "liveAfterReplay": true, "liveEcho": true, "cancelled": true}, "instanceId": "fc235066-84df-47f8-bc1e-5c44c532cf7d", "benchId": "9ae890ba-503d-4bf9-b934-b8f84e898b8c", "runId": "quit-645cae4d"}
