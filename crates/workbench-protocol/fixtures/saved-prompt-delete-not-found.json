@@ -1,0 +1,33 @@
+{
+  "name": "saved-prompt-delete-not-found",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": [
+      {
+        "id": "saved-prompt-1",
+        "label": "Continue",
+        "prompt": "keep going"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.delete",
+    "requestId": "r-spd-nf",
+    "input": {
+      "id": "nope"
+    },
+    "idempotencyKey": "k-spd-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Saved prompt not found."
+    }
+  },
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 0
+  }
+}

@@ -10,7 +10,7 @@ use utoipa::{
         self,
         path::{HttpMethod, OperationBuilder, PathItem},
         request_body::RequestBodyBuilder,
-        schema::{ArrayBuilder, ObjectBuilder, OneOfBuilder, Schema, Type},
+        schema::{ObjectBuilder, OneOfBuilder, Schema, Type},
         Content, Ref, RefOr, Required, ResponseBuilder, ResponsesBuilder,
     },
     OpenApi,
@@ -44,6 +44,73 @@ use crate::{
         crate::operations::project::ProjectDto,
         crate::operations::project::ProjectListInput,
         crate::operations::project::ProjectCreateInput,
+        crate::operations::project::ProjectUpdateInput,
+        crate::operations::project::ProjectDeleteInput,
+        crate::operations::saved_prompt::SavedPromptDto,
+        crate::operations::saved_prompt::SavedPromptListInput,
+        crate::operations::saved_prompt::SavedPromptCreateInput,
+        crate::operations::saved_prompt::SavedPromptUpdateInput,
+        crate::operations::saved_prompt::SavedPromptDeleteInput,
+        crate::operations::goal::GoalStatus,
+        crate::operations::goal::GoalDto,
+        crate::operations::goal::GoalGetInput,
+        crate::operations::goal::GoalCreateInput,
+        crate::operations::goal::GoalUpdateInput,
+        crate::operations::goal::GoalClearInput,
+        crate::operations::goal::GoalRecordProgressInput,
+        crate::operations::agent_run_settings::PermissionMode,
+        crate::operations::agent_run_settings::ContextSizePreset,
+        crate::operations::agent_run_settings::AgentRunSessionMode,
+        crate::operations::agent_run_settings::AgentRunSettingsDto,
+        crate::operations::agent_run_settings::AgentCommandOverridesDto,
+        crate::operations::agent_run_settings::AgentProfileDto,
+        crate::operations::agent_run_settings::AgentRunSettingsRalphLoopDto,
+        crate::operations::agent_run_settings::AgentRunSettingsGetInput,
+        crate::operations::agent_run_settings::AgentRunSettingsSaveInput,
+        crate::operations::git::GitRemoteDto,
+        crate::operations::git::GitBranchDto,
+        crate::operations::git::GitWorktreeStatus,
+        crate::operations::git::GitWorktreeDto,
+        crate::operations::git::GitListRemotesInput,
+        crate::operations::git::GitListBranchesInput,
+        crate::operations::git::GitListWorktreesInput,
+        crate::operations::git::GitCreateWorktreeInput,
+        crate::operations::git::GitDeleteWorktreeInput,
+        crate::operations::worktree::WorktreeChangeType,
+        crate::operations::worktree::WorktreeChangeDto,
+        crate::operations::worktree::GitChangedFileGroup,
+        crate::operations::worktree::GitChangedFileDto,
+        crate::operations::worktree::GitWorktreeChangesDto,
+        crate::operations::worktree::GitWorktreeFileDiffDto,
+        crate::operations::worktree::WorktreeFileEntryDto,
+        crate::operations::worktree::WorktreeTextFileDto,
+        crate::operations::worktree::WorktreeFileListKind,
+        crate::operations::worktree::WorktreeFileListScopeDto,
+        crate::operations::worktree::GitCommitSummaryDto,
+        crate::operations::worktree::GitCommitPageDto,
+        crate::operations::worktree::GitCommitHistoryDto,
+        crate::operations::worktree::GitGraphCommitDto,
+        crate::operations::worktree::GitGraphRefKind,
+        crate::operations::worktree::GitGraphRefDto,
+        crate::operations::worktree::GitGraphLayoutHintsDto,
+        crate::operations::worktree::GitCommitGraphDto,
+        crate::operations::worktree::GitCommitFileChangeDto,
+        crate::operations::worktree::GitCommitDetailDto,
+        crate::operations::worktree::GitFileDiffDto,
+        crate::operations::worktree::WorktreeListChangesInput,
+        crate::operations::worktree::WorktreeGetChangesInput,
+        crate::operations::worktree::WorktreeGetFileDiffInput,
+        crate::operations::worktree::WorktreeListFilesInput,
+        crate::operations::worktree::WorktreeReadTextFileInput,
+        crate::operations::worktree::WorktreeListHistoryInput,
+        crate::operations::worktree::WorktreeGetGraphInput,
+        crate::operations::worktree::WorktreeGetCommitDetailInput,
+        crate::operations::worktree::WorktreeGetCommitFileDiffInput,
+        crate::operations::agent::AgentOptionDescriptorDto,
+        crate::operations::agent::AgentDescriptorDto,
+        crate::operations::agent::ProviderSessionDto,
+        crate::operations::agent::AgentListInput,
+        crate::operations::agent::AgentListProviderSessionsInput,
         crate::operations::system::SystemDescribeInput,
         crate::workbench::StreamCursor,
         crate::workbench::Subscription,
@@ -60,19 +127,77 @@ fn input_schema_name(id: OperationId) -> &'static str {
     match id {
         OperationId::ProjectList => "ProjectListInput",
         OperationId::ProjectCreate => "ProjectCreateInput",
+        OperationId::ProjectUpdate => "ProjectUpdateInput",
+        OperationId::ProjectDelete => "ProjectDeleteInput",
+        OperationId::SavedPromptList => "SavedPromptListInput",
+        OperationId::SavedPromptCreate => "SavedPromptCreateInput",
+        OperationId::SavedPromptUpdate => "SavedPromptUpdateInput",
+        OperationId::SavedPromptDelete => "SavedPromptDeleteInput",
+        OperationId::GoalGet => "GoalGetInput",
+        OperationId::GoalCreate => "GoalCreateInput",
+        OperationId::GoalUpdate => "GoalUpdateInput",
+        OperationId::GoalClear => "GoalClearInput",
+        OperationId::GoalRecordProgress => "GoalRecordProgressInput",
+        OperationId::AgentRunSettingsGet => "AgentRunSettingsGetInput",
+        OperationId::AgentRunSettingsSave => "AgentRunSettingsSaveInput",
+        OperationId::GitListRemotes => "GitListRemotesInput",
+        OperationId::GitListBranches => "GitListBranchesInput",
+        OperationId::GitListWorktrees => "GitListWorktreesInput",
+        OperationId::GitCreateWorktree => "GitCreateWorktreeInput",
+        OperationId::GitDeleteWorktree => "GitDeleteWorktreeInput",
+        OperationId::WorktreeListChanges => "WorktreeListChangesInput",
+        OperationId::WorktreeGetChanges => "WorktreeGetChangesInput",
+        OperationId::WorktreeGetFileDiff => "WorktreeGetFileDiffInput",
+        OperationId::WorktreeListFiles => "WorktreeListFilesInput",
+        OperationId::WorktreeReadTextFile => "WorktreeReadTextFileInput",
+        OperationId::WorktreeListHistory => "WorktreeListHistoryInput",
+        OperationId::WorktreeGetGraph => "WorktreeGetGraphInput",
+        OperationId::WorktreeGetCommitDetail => "WorktreeGetCommitDetailInput",
+        OperationId::WorktreeGetCommitFileDiff => "WorktreeGetCommitFileDiffInput",
+        OperationId::AgentList => "AgentListInput",
+        OperationId::AgentListProviderSessions => "AgentListProviderSessionsInput",
         OperationId::SystemDescribe => "SystemDescribeInput",
     }
 }
 
+fn dto(name: &str) -> RefOr<Schema> {
+    Ref::from_schema_name(name).into()
+}
+
 fn output_schema(id: OperationId) -> RefOr<Schema> {
+    use crate::operations::common::{array_schema, null_schema, nullable_schema};
+
     match id {
-        OperationId::ProjectList => RefOr::T(Schema::Array(
-            ArrayBuilder::new()
-                .items(Ref::from_schema_name("ProjectDto"))
-                .build(),
-        )),
-        OperationId::ProjectCreate => Ref::from_schema_name("ProjectDto").into(),
-        OperationId::SystemDescribe => Ref::from_schema_name("DescribeOutput").into(),
+        OperationId::ProjectList => array_schema(dto("ProjectDto")),
+        OperationId::ProjectCreate | OperationId::ProjectUpdate => dto("ProjectDto"),
+        OperationId::ProjectDelete | OperationId::SavedPromptDelete | OperationId::GoalClear => {
+            null_schema()
+        }
+        OperationId::SavedPromptList => array_schema(dto("SavedPromptDto")),
+        OperationId::SavedPromptCreate | OperationId::SavedPromptUpdate => dto("SavedPromptDto"),
+        OperationId::GoalGet => nullable_schema(dto("GoalDto")),
+        OperationId::GoalCreate | OperationId::GoalUpdate | OperationId::GoalRecordProgress => {
+            dto("GoalDto")
+        }
+        OperationId::AgentRunSettingsGet => nullable_schema(dto("AgentRunSettingsDto")),
+        OperationId::AgentRunSettingsSave => dto("AgentRunSettingsDto"),
+        OperationId::GitListRemotes => array_schema(dto("GitRemoteDto")),
+        OperationId::GitListBranches => array_schema(dto("GitBranchDto")),
+        OperationId::GitListWorktrees => array_schema(dto("GitWorktreeDto")),
+        OperationId::GitCreateWorktree => null_schema(),
+        OperationId::GitDeleteWorktree => null_schema(),
+        OperationId::WorktreeListChanges => array_schema(dto("WorktreeChangeDto")),
+        OperationId::WorktreeGetChanges => dto("GitWorktreeChangesDto"),
+        OperationId::WorktreeGetFileDiff => dto("GitWorktreeFileDiffDto"),
+        OperationId::WorktreeListFiles => array_schema(dto("WorktreeFileEntryDto")),
+        OperationId::WorktreeReadTextFile => dto("WorktreeTextFileDto"),
+        OperationId::WorktreeListHistory => dto("GitCommitHistoryDto"),
+        OperationId::WorktreeGetGraph => dto("GitCommitGraphDto"),
+        OperationId::WorktreeGetCommitDetail => dto("GitCommitDetailDto"),
+        OperationId::WorktreeGetCommitFileDiff => dto("GitFileDiffDto"),
+        OperationId::AgentList => array_schema(dto("AgentDescriptorDto")),
+        OperationId::AgentListProviderSessions => array_schema(dto("ProviderSessionDto")),
+        OperationId::SystemDescribe => dto("DescribeOutput"),
     }
 }
 
@@ -303,14 +428,30 @@ mod tests {
             .as_array()
             .expect("oneOf");
         assert_eq!(variants.len(), OPERATIONS.len());
-        assert_eq!(variants[0]["properties"]["output"]["type"], "array");
+        let output_of = |operation: &str| -> serde_json::Value {
+            variants
+                .iter()
+                .find(|variant| variant["properties"]["operation"]["enum"][0] == operation)
+                .unwrap_or_else(|| panic!("variant for {operation}"))["properties"]["output"]
+                .clone()
+        };
+        assert_eq!(output_of("project.list")["type"], "array");
         assert_eq!(
-            variants[1]["properties"]["output"]["$ref"],
+            output_of("project.create")["$ref"],
             "#/components/schemas/ProjectDto"
         );
         assert_eq!(
-            variants[2]["properties"]["output"]["$ref"],
+            output_of("system.describe")["$ref"],
             "#/components/schemas/DescribeOutput"
+        );
+        // 038: null 출력과 nullable 출력
+        assert_eq!(output_of("project.delete")["type"], "null");
+        let nullable = output_of("goal.get");
+        assert_eq!(nullable["oneOf"][0]["$ref"], "#/components/schemas/GoalDto");
+        assert_eq!(nullable["oneOf"][1]["type"], "null");
+        assert_eq!(
+            output_of("savedPrompt.list")["items"]["$ref"],
+            "#/components/schemas/SavedPromptDto"
         );
     }
 

@@ -1,0 +1,73 @@
+{
+  "name": "goal-record-progress-ok",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "active",
+        "tokenBudget": 100,
+        "tokensUsed": 0,
+        "timeUsedSeconds": 0,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "goal.recordProgress",
+      "requestId": "r-grp-1",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "tokensUsed": 40,
+        "timeUsedSeconds": 5
+      },
+      "idempotencyKey": "k-grp-1"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "goal.recordProgress",
+      "requestId": "r-grp-2",
+      "input": {
+        "workingDirectory": "/repo/wt",
+        "tokensUsed": 70,
+        "timeUsedSeconds": 3
+      },
+      "idempotencyKey": "k-grp-2"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "tokensUsed": 40,
+          "timeUsedSeconds": 5,
+          "status": "active"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "tokensUsed": 70,
+          "timeUsedSeconds": 8,
+          "status": "active"
+        },
+        "revision": 2
+      }
+    }
+  ],
+  "expectAfter": {
+    "goalsLen": 1,
+    "ledgerApplied": 2
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ]
+}

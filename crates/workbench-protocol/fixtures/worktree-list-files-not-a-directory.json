@@ -1,0 +1,43 @@
+{
+  "name": "worktree-list-files-not-a-directory",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.listFiles",
+    "requestId": "r-us2-38",
+    "input": {
+      "workingDirectory": "{{repo}}/README.md"
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "message": "Working directory must be a directory.",
+      "outcome": "notApplied"
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "worktree-get-file-diff-path-required",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "workingChanges": {
+        "README.md": "hello world\n",
+        "notes.txt": "n\n"
+      }
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getFileDiff",
+    "requestId": "r-us2-33",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": " "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "File path is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/path"
+      }
+    }
+  }
+}

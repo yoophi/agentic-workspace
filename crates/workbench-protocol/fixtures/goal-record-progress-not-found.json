@@ -1,0 +1,31 @@
+{
+  "name": "goal-record-progress-not-found",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.recordProgress",
+    "requestId": "r-grp-nf",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "tokensUsed": 1,
+      "timeUsedSeconds": 1
+    },
+    "idempotencyKey": "k-grp-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Goal not found."
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 0
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "name": "git-create-worktree-expected-revision-rejected",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.createWorktree",
+    "requestId": "r-us2-16",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/wt-new",
+      "branch": "feature/new"
+    },
+    "idempotencyKey": "k-gcw-rev",
+    "expectedRevision": 0
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "expectedRevision is not supported for git operations.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/expectedRevision"
+      }
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 0
+  }
+}

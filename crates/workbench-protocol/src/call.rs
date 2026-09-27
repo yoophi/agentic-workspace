@@ -22,14 +22,102 @@ pub enum OperationId {
     ProjectList,
     #[serde(rename = "project.create")]
     ProjectCreate,
+    #[serde(rename = "project.update")]
+    ProjectUpdate,
+    #[serde(rename = "project.delete")]
+    ProjectDelete,
+    #[serde(rename = "savedPrompt.list")]
+    SavedPromptList,
+    #[serde(rename = "savedPrompt.create")]
+    SavedPromptCreate,
+    #[serde(rename = "savedPrompt.update")]
+    SavedPromptUpdate,
+    #[serde(rename = "savedPrompt.delete")]
+    SavedPromptDelete,
+    #[serde(rename = "goal.get")]
+    GoalGet,
+    #[serde(rename = "goal.create")]
+    GoalCreate,
+    #[serde(rename = "goal.update")]
+    GoalUpdate,
+    #[serde(rename = "goal.clear")]
+    GoalClear,
+    #[serde(rename = "goal.recordProgress")]
+    GoalRecordProgress,
+    #[serde(rename = "agentRunSettings.get")]
+    AgentRunSettingsGet,
+    #[serde(rename = "agentRunSettings.save")]
+    AgentRunSettingsSave,
+    #[serde(rename = "git.listRemotes")]
+    GitListRemotes,
+    #[serde(rename = "git.listBranches")]
+    GitListBranches,
+    #[serde(rename = "git.listWorktrees")]
+    GitListWorktrees,
+    #[serde(rename = "git.createWorktree")]
+    GitCreateWorktree,
+    #[serde(rename = "git.deleteWorktree")]
+    GitDeleteWorktree,
+    #[serde(rename = "worktree.listChanges")]
+    WorktreeListChanges,
+    #[serde(rename = "worktree.getChanges")]
+    WorktreeGetChanges,
+    #[serde(rename = "worktree.getFileDiff")]
+    WorktreeGetFileDiff,
+    #[serde(rename = "worktree.listFiles")]
+    WorktreeListFiles,
+    #[serde(rename = "worktree.readTextFile")]
+    WorktreeReadTextFile,
+    #[serde(rename = "worktree.listHistory")]
+    WorktreeListHistory,
+    #[serde(rename = "worktree.getGraph")]
+    WorktreeGetGraph,
+    #[serde(rename = "worktree.getCommitDetail")]
+    WorktreeGetCommitDetail,
+    #[serde(rename = "worktree.getCommitFileDiff")]
+    WorktreeGetCommitFileDiff,
+    #[serde(rename = "agent.list")]
+    AgentList,
+    #[serde(rename = "agent.listProviderSessions")]
+    AgentListProviderSessions,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
-    pub const ALL: [OperationId; 3] = [
+    /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
+    pub const ALL: [OperationId; 32] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
+        OperationId::ProjectUpdate,
+        OperationId::ProjectDelete,
+        OperationId::SavedPromptList,
+        OperationId::SavedPromptCreate,
+        OperationId::SavedPromptUpdate,
+        OperationId::SavedPromptDelete,
+        OperationId::GoalGet,
+        OperationId::GoalCreate,
+        OperationId::GoalUpdate,
+        OperationId::GoalClear,
+        OperationId::GoalRecordProgress,
+        OperationId::AgentRunSettingsGet,
+        OperationId::AgentRunSettingsSave,
+        OperationId::GitListRemotes,
+        OperationId::GitListBranches,
+        OperationId::GitListWorktrees,
+        OperationId::GitCreateWorktree,
+        OperationId::GitDeleteWorktree,
+        OperationId::WorktreeListChanges,
+        OperationId::WorktreeGetChanges,
+        OperationId::WorktreeGetFileDiff,
+        OperationId::WorktreeListFiles,
+        OperationId::WorktreeReadTextFile,
+        OperationId::WorktreeListHistory,
+        OperationId::WorktreeGetGraph,
+        OperationId::WorktreeGetCommitDetail,
+        OperationId::WorktreeGetCommitFileDiff,
+        OperationId::AgentList,
+        OperationId::AgentListProviderSessions,
         OperationId::SystemDescribe,
     ];
 
@@ -37,6 +125,35 @@ impl OperationId {
         match self {
             OperationId::ProjectList => "project.list",
             OperationId::ProjectCreate => "project.create",
+            OperationId::ProjectUpdate => "project.update",
+            OperationId::ProjectDelete => "project.delete",
+            OperationId::SavedPromptList => "savedPrompt.list",
+            OperationId::SavedPromptCreate => "savedPrompt.create",
+            OperationId::SavedPromptUpdate => "savedPrompt.update",
+            OperationId::SavedPromptDelete => "savedPrompt.delete",
+            OperationId::GoalGet => "goal.get",
+            OperationId::GoalCreate => "goal.create",
+            OperationId::GoalUpdate => "goal.update",
+            OperationId::GoalClear => "goal.clear",
+            OperationId::GoalRecordProgress => "goal.recordProgress",
+            OperationId::AgentRunSettingsGet => "agentRunSettings.get",
+            OperationId::AgentRunSettingsSave => "agentRunSettings.save",
+            OperationId::GitListRemotes => "git.listRemotes",
+            OperationId::GitListBranches => "git.listBranches",
+            OperationId::GitListWorktrees => "git.listWorktrees",
+            OperationId::GitCreateWorktree => "git.createWorktree",
+            OperationId::GitDeleteWorktree => "git.deleteWorktree",
+            OperationId::WorktreeListChanges => "worktree.listChanges",
+            OperationId::WorktreeGetChanges => "worktree.getChanges",
+            OperationId::WorktreeGetFileDiff => "worktree.getFileDiff",
+            OperationId::WorktreeListFiles => "worktree.listFiles",
+            OperationId::WorktreeReadTextFile => "worktree.readTextFile",
+            OperationId::WorktreeListHistory => "worktree.listHistory",
+            OperationId::WorktreeGetGraph => "worktree.getGraph",
+            OperationId::WorktreeGetCommitDetail => "worktree.getCommitDetail",
+            OperationId::WorktreeGetCommitFileDiff => "worktree.getCommitFileDiff",
+            OperationId::AgentList => "agent.list",
+            OperationId::AgentListProviderSessions => "agent.listProviderSessions",
             OperationId::SystemDescribe => "system.describe",
         }
     }

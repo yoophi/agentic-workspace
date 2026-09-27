@@ -1,0 +1,35 @@
+{
+  "name": "project-update-name-required",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.update",
+    "requestId": "r-pu-nr",
+    "input": {
+      "id": "project-1",
+      "name": " ",
+      "workingDirectory": "/tmp/new"
+    },
+    "idempotencyKey": "k-pu-nr"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Project name is required."
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 0
+  }
+}

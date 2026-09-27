@@ -9,7 +9,8 @@ use std::{fs, sync::Arc};
 
 use serde_json::Value;
 use support::{
-    fixtures::{self, Fixture},
+    fixtures::{self, Fixture, SeedContext},
+    git_repo,
     http_harness::Harness,
     TestRuntime,
 };
@@ -47,21 +48,50 @@ fn observable(result: &Result<CallReply, WorkbenchFault>, ignore: &[String]) -> 
     }
 }
 
-fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
+fn store_len(path: &std::path::Path) -> usize {
+    if !path.exists() {
+        return 0;
+    }
+    serde_json::from_str::<Vec<Value>>(&fs::read_to_string(path).unwrap())
+        .unwrap()
+        .len()
+}
+
+fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture, seed: &SeedContext) {
     let Some(after) = &fixture.expect_after else {
         return;
     };
-    if let Some(expected_len) = after.projects_len {
-        let projects: Vec<Value> = if runtime.paths.projects_file().exists() {
-            serde_json::from_str(&fs::read_to_string(runtime.paths.projects_file()).unwrap())
-                .unwrap()
-        } else {
-            Vec::new()
-        };
+    for (name, expected, path) in [
+        (
+            "projects.json",
+            after.projects_len,
+            runtime.paths.projects_file(),
+        ),
+        (
+            "saved-prompts.json",
+            after.saved_prompts_len,
+            runtime.paths.saved_prompts_file(),
+        ),
+        ("goals.json", after.goals_len, runtime.paths.goals_file()),
+        (
+            "agent-run-settings.json",
+            after.agent_run_settings_len,
+            runtime.paths.agent_run_settings_file(),
+        ),
+    ] {
+        if let Some(expected_len) = expected {
+            assert_eq!(store_len(&path), expected_len, "{label}: {name} length");
+        }
+    }
+    if let Some(expected_worktrees) = after.git_worktrees {
+        let repo = seed
+            .repo
+            .as_ref()
+            .unwrap_or_else(|| panic!("{label}: gitWorktrees needs seed.gitRepo"));
         assert_eq!(
-            projects.len(),
-            expected_len,
-            "{label}: projects.json length"
+            git_repo::worktree_count(&repo.root),
+            expected_worktrees,
+            "{label}: git worktree count"
         );
     }
     if let Some(expected_applied) = after.ledger_applied {
@@ -76,20 +106,29 @@ fn check_after(label: &str, runtime: &TestRuntime, fixture: &Fixture) {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_fixture_matches_on_in_memory_and_http_paths() {
-    let all = fixtures::load_all();
+    // 개발 중 한 묶음만 돌릴 때: `WORKBENCH_FIXTURE_FILTER=git-create cargo test --test contract_suite`
+    let filter = std::env::var("WORKBENCH_FIXTURE_FILTER").ok();
+    let all: Vec<Fixture> = fixtures::load_all()
+        .into_iter()
+        .filter(|fixture| {
+            filter
+                .as_deref()
+                .is_none_or(|prefix| fixture.name.starts_with(prefix))
+        })
+        .collect();
     assert!(
-        all.len() >= 9,
+        filter.is_some() || all.len() >= 9,
         "expected at least the US1 fixtures, found {}",
         all.len()
     );
 
     for fixture in &all {
         let principal = fixture.principal();
-        let steps = fixture.steps();
 
         // in-memory: runtime.call을 직접 호출
-        let mem = TestRuntime::new();
-        fixtures::apply_seed(&mem.paths, &fixture.seed);
+        let mem = TestRuntime::with_adapters(fixture.seed.adapters());
+        let mem_seed = fixtures::apply_seed(&mem.paths, &fixture.seed);
+        let steps = fixture.steps_with(&mem_seed);
         let mut mem_results = Vec::new();
         for (index, (request, expect)) in steps.iter().enumerate() {
             let actual = mem.runtime.call(principal.clone(), request.clone()).await;
@@ -101,11 +140,17 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
             );
             mem_results.push(actual);
         }
-        check_after(&format!("{} [in-memory]", fixture.name), &mem, fixture);
+        check_after(
+            &format!("{} [in-memory]", fixture.name),
+            &mem,
+            fixture,
+            &mem_seed,
+        );
 
-        // HTTP: 실제 loopback 왕복
-        let http = TestRuntime::new();
-        fixtures::apply_seed(&http.paths, &fixture.seed);
+        // HTTP: 실제 loopback 왕복 (별도 seed → 별도 저장소 경로이므로 steps도 다시 치환)
+        let http = TestRuntime::with_adapters(fixture.seed.adapters());
+        let http_seed = fixtures::apply_seed(&http.paths, &fixture.seed);
+        let steps = fixture.steps_with(&http_seed);
         let workbench: Arc<dyn Workbench> = http.runtime.clone();
         let harness = Harness::spawn(workbench).await;
         let token = Harness::token_for(&principal);
@@ -117,14 +162,22 @@ async fn every_fixture_matches_on_in_memory_and_http_paths() {
                 expect,
                 &fixture.ignore_fields,
             );
+            let mut http_value = observable(&actual, &fixture.ignore_fields);
+            http_seed.normalize_paths(&mut http_value);
+            let mut mem_value = observable(&mem_results[index], &fixture.ignore_fields);
+            mem_seed.normalize_paths(&mut mem_value);
             assert_eq!(
-                observable(&actual, &fixture.ignore_fields),
-                observable(&mem_results[index], &fixture.ignore_fields),
+                http_value, mem_value,
                 "{} #{index}: http and in-memory diverge",
                 fixture.name
             );
         }
-        check_after(&format!("{} [http]", fixture.name), &http, fixture);
+        check_after(
+            &format!("{} [http]", fixture.name),
+            &http,
+            fixture,
+            &http_seed,
+        );
     }
 }
 

@@ -1,0 +1,49 @@
+{
+  "name": "git-delete-worktree-not-found",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.deleteWorktree",
+    "requestId": "r-us2-26",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/missing"
+    },
+    "idempotencyKey": "k-gdw-missing"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "message": "Git worktree not found.",
+      "outcome": "notApplied"
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 0
+  }
+}

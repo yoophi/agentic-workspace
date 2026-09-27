@@ -1,0 +1,47 @@
+{
+  "name": "worktree-get-commit-detail-hash-required",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getCommitDetail",
+    "requestId": "r-us2-54",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "commitHash": " "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Commit hash is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/commitHash"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "name": "project-delete-not-found",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.delete",
+    "requestId": "r-pd-nf",
+    "input": {
+      "id": "missing"
+    },
+    "idempotencyKey": "k-pd-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Project not found."
+    }
+  },
+  "expectAfter": {
+    "projectsLen": 1,
+    "ledgerApplied": 0
+  }
+}

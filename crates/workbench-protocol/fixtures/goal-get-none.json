@@ -1,0 +1,21 @@
+{
+  "name": "goal-get-none",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.get",
+    "requestId": "r-gg-n",
+    "input": {
+      "workingDirectory": "/repo/wt"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": null
+    }
+  }
+}

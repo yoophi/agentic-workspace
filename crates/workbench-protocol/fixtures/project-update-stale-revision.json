@@ -1,0 +1,63 @@
+{
+  "name": "project-update-stale-revision",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "project.update",
+      "requestId": "r-pu-s1",
+      "input": {
+        "id": "project-1",
+        "name": "A",
+        "workingDirectory": "/tmp/a"
+      },
+      "idempotencyKey": "k-pu-s1"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "project.update",
+      "requestId": "r-pu-s2",
+      "input": {
+        "id": "project-1",
+        "name": "B",
+        "workingDirectory": "/tmp/b"
+      },
+      "idempotencyKey": "k-pu-s2",
+      "expectedRevision": 0
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "name": "A"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "fault": {
+        "code": "preconditionFailed",
+        "outcome": "notApplied",
+        "details": {
+          "expectedRevision": 0,
+          "currentRevision": 1
+        }
+      }
+    }
+  ],
+  "expectAfter": {
+    "ledgerApplied": 1
+  }
+}

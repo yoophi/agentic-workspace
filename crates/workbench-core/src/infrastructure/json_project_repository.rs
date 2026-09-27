@@ -1,13 +1,10 @@
 //! `projects.json` 어댑터. AW `infrastructure/json_project_repository.rs`에서 이동하며
 //! `from_app(&AppHandle)`을 `new(&DataPaths)`로 바꿨다.
 
-use std::path::PathBuf;
-
 use crate::{
     domain::{project::Project, project_error::ProjectError},
     infrastructure::{
-        data_paths::DataPaths,
-        json_store::{self, StoreError},
+        data_paths::DataPaths, json_collection_store::JsonCollectionStore, json_store::StoreError,
     },
     ports::project_repository::ProjectRepository,
 };
@@ -15,18 +12,18 @@ use crate::{
 const LABEL: &str = "projects";
 
 pub struct JsonProjectRepository {
-    store_path: PathBuf,
+    store: JsonCollectionStore<Project>,
 }
 
 impl JsonProjectRepository {
     pub fn new(paths: &DataPaths) -> Self {
         Self {
-            store_path: paths.projects_file(),
+            store: JsonCollectionStore::new(paths.projects_file(), LABEL),
         }
     }
 
     pub fn store_path(&self) -> &std::path::Path {
-        &self.store_path
+        self.store.path()
     }
 }
 
@@ -39,15 +36,16 @@ fn map_store_error(error: StoreError) -> ProjectError {
 
 impl ProjectRepository for JsonProjectRepository {
     fn load_projects(&self) -> Result<Vec<Project>, ProjectError> {
-        json_store::load_json_vec(&self.store_path, LABEL).map_err(map_store_error)
+        self.store.load().map_err(map_store_error)
     }
 
     fn save_projects(&self, projects: &[Project]) -> Result<(), ProjectError> {
-        json_store::save_json_vec(&self.store_path, LABEL, projects).map_err(map_store_error)
+        self.store.save(projects).map_err(map_store_error)
     }
 
     fn recover_from_backup(&self) -> Result<(), ProjectError> {
-        json_store::recover_from_backup::<Vec<Project>>(&self.store_path, LABEL)
+        self.store
+            .recover_from_backup()
             .map(|_| ())
             .map_err(map_store_error)
     }

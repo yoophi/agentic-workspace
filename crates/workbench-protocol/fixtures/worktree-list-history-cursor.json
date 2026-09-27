@@ -1,0 +1,100 @@
+{
+  "name": "worktree-list-history-cursor",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "worktree.listHistory",
+      "requestId": "r-us2-47",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "maxCount": 2
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "worktree.listHistory",
+      "requestId": "r-us2-48",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "maxCount": 2,
+        "offset": 2,
+        "cursor": "{{commit:1}}"
+      }
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "commits": [
+            {
+              "hash": "{{commit:2}}",
+              "message": "feat",
+              "author": "Fixture Author",
+              "date": "2026-01-01T00:00:02Z"
+            },
+            {
+              "hash": "{{commit:1}}",
+              "message": "docs",
+              "author": "Fixture Author",
+              "date": "2026-01-01T00:00:01Z"
+            }
+          ],
+          "page": {
+            "offset": 0,
+            "limit": 2,
+            "totalCount": 3,
+            "hasMore": true
+          }
+        }
+      }
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "commits": [
+            {
+              "hash": "{{commit:0}}",
+              "message": "init",
+              "author": "Fixture Author",
+              "date": "2026-01-01T00:00:00Z"
+            }
+          ],
+          "page": {
+            "offset": 2,
+            "limit": 2,
+            "totalCount": null,
+            "hasMore": false
+          }
+        }
+      }
+    }
+  ]
+}

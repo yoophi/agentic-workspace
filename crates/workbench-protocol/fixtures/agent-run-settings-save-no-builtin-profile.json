@@ -1,0 +1,91 @@
+{
+  "name": "agent-run-settings-save-no-builtin-profile",
+  "principal": "desktop",
+  "seed": {
+    "agentRunSettings": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "agentRunSettings.save",
+    "requestId": "r-ass-np",
+    "input": {
+      "settings": {
+        "workingDirectory": " /repo/wt ",
+        "agentId": " codex ",
+        "permissionMode": "plan",
+        "modelId": " gpt-5 ",
+        "effortId": "",
+        "contextSize": "large",
+        "sessionMode": "reuse",
+        "ralphLoop": {
+          "enabled": true,
+          "maxIterations": 999,
+          "delayMs": 999999,
+          "stopOnPermission": true,
+          "stopOnError": true,
+          "promptTemplate": " continue "
+        },
+        "commandOverrides": {
+          "profiles": [
+            {
+              "id": "codex",
+              "name": "codex",
+              "agentType": "codex",
+              "command": null,
+              "env": {},
+              "enabled": false,
+              "builtIn": true
+            },
+            {
+              "id": "claude-code",
+              "name": "claude-code",
+              "agentType": "claude-code",
+              "command": null,
+              "env": {},
+              "enabled": false,
+              "builtIn": true
+            },
+            {
+              "id": "opencode",
+              "name": "opencode",
+              "agentType": "opencode",
+              "command": null,
+              "env": {},
+              "enabled": false,
+              "builtIn": true
+            },
+            {
+              "id": "pi-coding-agent",
+              "name": "pi-coding-agent",
+              "agentType": "pi-coding-agent",
+              "command": null,
+              "env": {},
+              "enabled": false,
+              "builtIn": true
+            },
+            {
+              "id": "kiro-cli",
+              "name": "kiro-cli",
+              "agentType": "kiro-cli",
+              "command": null,
+              "env": {},
+              "enabled": false,
+              "builtIn": true
+            }
+          ]
+        }
+      }
+    },
+    "idempotencyKey": "k-ass-np"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "At least one built-in agent profile must stay enabled."
+    }
+  },
+  "expectAfter": {
+    "agentRunSettingsLen": 0
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "git-list-remotes-working-directory-required",
+  "principal": "desktop",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.listRemotes",
+    "requestId": "r-us2-3",
+    "input": {
+      "workingDirectory": "  "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Working directory is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/workingDirectory"
+      }
+    }
+  }
+}

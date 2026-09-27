@@ -1,37 +1,35 @@
 use serde::Deserialize;
+use serde_json::json;
 use std::{
     collections::HashMap,
     process::Command,
     sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
-use workbench_core::application::{project_service, workbench_runtime::WorkbenchRuntime};
+use workbench_core::application::{
+    agent_run_settings_service, workbench_runtime::WorkbenchRuntime,
+};
+use workbench_protocol::OperationId;
 
 use crate::inbound::workbench_compat;
 use crate::{
     application::{
         agent_exchange_service::AgentExchangeService,
-        agent_run_settings_service,
         agent_tool_candidate_service::AgentToolCandidateService,
         appearance_preferences_service::AppearancePreferencesService,
         cancel_agent_run::CancelAgentRunUseCase,
         cancel_prompt_and_send::CancelPromptAndSendUseCase,
         coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
-        git_branch_service, git_remote_service, git_worktree_changes_service, git_worktree_service,
-        goal_service,
-        list_provider_sessions::ListProviderSessionsUseCase,
         orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
         orchestration_service::{
             BindMainRunRequest, CoordinatorHandoffRequest, DelegateGoalOutcome,
             DelegateGoalRequest, DispatchPromptRequest, OrchestrationService,
             SetPresentationRequest, TaskActionRequest,
         },
-        saved_prompt_service,
         send_prompt::SendPromptUseCase,
         set_permission_mode::SetPermissionModeUseCase,
         start_agent_run::StartAgentRunUseCase,
         steer_prompt::SteerPromptUseCase,
-        worktree_changes_service, worktree_file_service, worktree_git_service,
         worktree_workspace_layout_service,
     },
     domain::{
@@ -53,11 +51,11 @@ use crate::{
         git_remote::GitRemote,
         git_worktree::{GitWorktree, GitWorktreeCreateDraft},
         git_worktree_changes::{GitWorktreeChanges, GitWorktreeFileDiff},
-        goal::{GoalDraft, GoalProgressUpdate, GoalStatus, GoalUpdate, ThreadGoal},
-        project::{Project, ProjectDraft},
-        provider_session::{ProviderSession, SessionScope},
+        goal::{GoalStatus, ThreadGoal},
+        project::Project,
+        provider_session::ProviderSession,
         run::{AgentRun, AgentRunRequest, PermissionMode},
-        saved_prompt::{SavedPrompt, SavedPromptDraft},
+        saved_prompt::SavedPrompt,
         worktree_change::WorktreeChange,
         worktree_file::{WorktreeFileEntry, WorktreeFileListScope, WorktreeTextFile},
         worktree_git::{
@@ -71,27 +69,17 @@ use crate::{
         acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
         agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
-        fs_provider_session_repository::FsProviderSessionRepository,
-        fs_worktree_file_provider::FsWorktreeFileProvider,
         fs_worktree_watcher::{WorktreeWatchHandle, watch_worktree},
-        git_cli_branch_provider::GitCliBranchProvider,
-        git_cli_remote_provider::GitCliRemoteProvider,
-        git_cli_worktree_change_provider::GitCliWorktreeChangeProvider,
-        git_cli_worktree_git_provider::GitCliWorktreeGitProvider,
-        git_cli_worktree_provider::GitCliWorktreeProvider,
         in_memory_agent_workspace_registry::{
             InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
         },
         in_memory_runtime_event_journal::InMemoryRuntimeEventJournal,
         json_acp_session_store::JsonAcpSessionStore,
-        json_agent_run_settings_repository::JsonAgentRunSettingsRepository,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-        json_goal_repository::JsonGoalRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
-        json_saved_prompt_repository::JsonSavedPromptRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
         mcp::{McpServerState, capability_registry::CapabilityPrincipal, title_tool},
-        perf_log::run_blocking_command,
+        perf_log::{log_async_command, log_async_command_error, run_blocking_command},
         tauri_orchestration_event_sink::TauriOrchestrationEventSink,
         tauri_run_event_sink::TauriRunEventSink,
         window_manager,
@@ -1092,101 +1080,59 @@ pub struct ProjectInput {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedPromptInput {
-    label: String,
-    prompt: String,
-}
-
-impl From<SavedPromptInput> for SavedPromptDraft {
-    fn from(input: SavedPromptInput) -> Self {
-        Self {
-            label: input.label,
-            prompt: input.prompt,
-        }
-    }
-}
-
-impl From<ProjectInput> for ProjectDraft {
-    fn from(input: ProjectInput) -> Self {
-        Self {
-            name: input.name,
-            working_directory: input.working_directory,
-            description: input.description,
-        }
-    }
+    pub(crate) label: String,
+    pub(crate) prompt: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalInput {
-    working_directory: String,
-    objective: String,
-    token_budget: Option<usize>,
-}
-
-impl From<GoalInput> for GoalDraft {
-    fn from(input: GoalInput) -> Self {
-        Self {
-            working_directory: input.working_directory,
-            objective: input.objective,
-            token_budget: input.token_budget,
-        }
-    }
+    pub(crate) working_directory: String,
+    pub(crate) objective: String,
+    pub(crate) token_budget: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalUpdateInput {
-    objective: Option<String>,
-    status: Option<GoalStatus>,
-    token_budget: Option<Option<usize>>,
-}
-
-impl From<GoalUpdateInput> for GoalUpdate {
-    fn from(input: GoalUpdateInput) -> Self {
-        Self {
-            objective: input.objective,
-            status: input.status,
-            token_budget: input.token_budget,
-        }
-    }
+    pub(crate) objective: Option<String>,
+    pub(crate) status: Option<GoalStatus>,
+    pub(crate) token_budget: Option<Option<usize>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalProgressInput {
-    tokens_used: usize,
-    time_used_seconds: u64,
-}
-
-impl From<GoalProgressInput> for GoalProgressUpdate {
-    fn from(input: GoalProgressInput) -> Self {
-        Self {
-            tokens_used: input.tokens_used,
-            time_used_seconds: input.time_used_seconds,
-        }
-    }
+    pub(crate) tokens_used: usize,
+    pub(crate) time_used_seconds: u64,
 }
 
 fn workbench_runtime(app: &AppHandle) -> Arc<WorkbenchRuntime> {
     app.state::<Arc<WorkbenchRuntime>>().inner().clone()
 }
 
-// 037: 프로젝트 목록·생성은 `Workbench.call`을 거치는 호환 어댑터다. 시그니처·직렬화·오류 문구는
-// 이전과 같다(specs/037-workbench-seam/contracts/tauri-compat-commands.md).
+// 037·038: 아래 command들은 `Workbench.call`을 거치는 호환 어댑터다. 시그니처·직렬화·오류 문구는 이전과 같다
+// (specs/038-workbench-domains/contracts/tauri-compat-commands.md). 저장소·업무 로직은 workbench-core에 있다.
 #[tauri::command]
 pub async fn list_projects(app: AppHandle) -> Result<Vec<Project>, String> {
     let runtime = workbench_runtime(&app);
-    workbench_compat::call_list_projects(&runtime).await
+    log_async_command(
+        "list_projects",
+        workbench_compat::call_list_projects(&runtime),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn create_project(app: AppHandle, input: ProjectInput) -> Result<Project, String> {
     let runtime = workbench_runtime(&app);
-    workbench_compat::call_create_project(&runtime, input).await
+    log_async_command(
+        "create_project",
+        workbench_compat::call_create_project(&runtime, input),
+    )
+    .await
 }
 
-// update/delete는 038에서 operation이 된다. 037에서는 서버 런타임이 소유한 같은 repository·lock을
-// 거치도록 배선만 바꿔 lock 밖의 JSON 쓰기를 없앴다(research R4).
 #[tauri::command]
 pub async fn update_project(
     app: AppHandle,
@@ -1194,114 +1140,203 @@ pub async fn update_project(
     input: ProjectInput,
 ) -> Result<Project, String> {
     let runtime = workbench_runtime(&app);
-    let draft: ProjectDraft = input.into();
-    tokio::task::spawn_blocking(move || {
-        runtime
-            .coordinator()
-            .with_projects(|repository| {
-                project_service::update_project(repository, id.clone(), draft.clone())
-            })
-            .map_err(|error| error.to_string())
-    })
+    log_async_command(
+        "update_project",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::ProjectUpdate,
+            workbench_compat::project_update_input(id, input),
+        ),
+    )
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 pub async fn delete_project(app: AppHandle, id: String) -> Result<(), String> {
     let runtime = workbench_runtime(&app);
-    tokio::task::spawn_blocking(move || {
-        runtime
-            .coordinator()
-            .with_projects(|repository| project_service::delete_project(repository, id.clone()))
-            .map_err(|error| error.to_string())
-    })
+    log_async_command(
+        "delete_project",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::ProjectDelete,
+            workbench_compat::project_delete_input(id),
+        ),
+    )
     .await
-    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn list_saved_prompts(app: AppHandle) -> Result<Vec<SavedPrompt>, String> {
-    let repository = JsonSavedPromptRepository::from_app(&app)?;
-    saved_prompt_service::list_saved_prompts(&repository)
+pub async fn list_saved_prompts(app: AppHandle) -> Result<Vec<SavedPrompt>, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_saved_prompts",
+        workbench_compat::call_query(&runtime, OperationId::SavedPromptList, json!({})),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn create_saved_prompt(app: AppHandle, input: SavedPromptInput) -> Result<SavedPrompt, String> {
-    let repository = JsonSavedPromptRepository::from_app(&app)?;
-    saved_prompt_service::create_saved_prompt(&repository, input.into())
+pub async fn create_saved_prompt(
+    app: AppHandle,
+    input: SavedPromptInput,
+) -> Result<SavedPrompt, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "create_saved_prompt",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::SavedPromptCreate,
+            workbench_compat::saved_prompt_create_input(input),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn update_saved_prompt(
+pub async fn update_saved_prompt(
     app: AppHandle,
     id: String,
     input: SavedPromptInput,
 ) -> Result<SavedPrompt, String> {
-    let repository = JsonSavedPromptRepository::from_app(&app)?;
-    saved_prompt_service::update_saved_prompt(&repository, id, input.into())
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "update_saved_prompt",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::SavedPromptUpdate,
+            workbench_compat::saved_prompt_update_input(id, input),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), String> {
-    let repository = JsonSavedPromptRepository::from_app(&app)?;
-    saved_prompt_service::delete_saved_prompt(&repository, id)
+pub async fn delete_saved_prompt(app: AppHandle, id: String) -> Result<(), String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "delete_saved_prompt",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::SavedPromptDelete,
+            workbench_compat::saved_prompt_delete_input(id),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn get_goal(app: AppHandle, working_directory: String) -> Result<Option<ThreadGoal>, String> {
-    let repository = JsonGoalRepository::from_app(&app)?;
-    goal_service::get_goal(&repository, working_directory)
+pub async fn get_goal(
+    app: AppHandle,
+    working_directory: String,
+) -> Result<Option<ThreadGoal>, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_goal",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::GoalGet,
+            workbench_compat::goal_get_input(working_directory),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn create_goal(app: AppHandle, input: GoalInput) -> Result<ThreadGoal, String> {
-    let repository = JsonGoalRepository::from_app(&app)?;
-    goal_service::create_goal(&repository, input.into())
+pub async fn create_goal(app: AppHandle, input: GoalInput) -> Result<ThreadGoal, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "create_goal",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GoalCreate,
+            workbench_compat::goal_create_input(input),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn update_goal(
+pub async fn update_goal(
     app: AppHandle,
     working_directory: String,
     input: GoalUpdateInput,
 ) -> Result<ThreadGoal, String> {
-    let repository = JsonGoalRepository::from_app(&app)?;
-    goal_service::update_goal(&repository, working_directory, input.into())
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "update_goal",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GoalUpdate,
+            workbench_compat::goal_update_input(working_directory, input),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn clear_goal(app: AppHandle, working_directory: String) -> Result<(), String> {
-    let repository = JsonGoalRepository::from_app(&app)?;
-    goal_service::clear_goal(&repository, working_directory)
+pub async fn clear_goal(app: AppHandle, working_directory: String) -> Result<(), String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "clear_goal",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GoalClear,
+            workbench_compat::goal_clear_input(working_directory),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn record_goal_progress(
+pub async fn record_goal_progress(
     app: AppHandle,
     working_directory: String,
     input: GoalProgressInput,
 ) -> Result<ThreadGoal, String> {
-    let repository = JsonGoalRepository::from_app(&app)?;
-    goal_service::record_goal_progress(&repository, working_directory, input.into())
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "record_goal_progress",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GoalRecordProgress,
+            workbench_compat::goal_record_progress_input(working_directory, input),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn get_agent_run_settings(
+pub async fn get_agent_run_settings(
     app: AppHandle,
     working_directory: String,
 ) -> Result<Option<AgentRunSettings>, String> {
-    let repository = JsonAgentRunSettingsRepository::from_app(&app)?;
-    agent_run_settings_service::get_settings(&repository, working_directory)
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_agent_run_settings",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::AgentRunSettingsGet,
+            workbench_compat::agent_run_settings_get_input(working_directory),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
-pub fn save_agent_run_settings(
+pub async fn save_agent_run_settings(
     app: AppHandle,
     settings: AgentRunSettings,
 ) -> Result<AgentRunSettings, String> {
-    let repository = JsonAgentRunSettingsRepository::from_app(&app)?;
-    agent_run_settings_service::save_settings(&repository, settings)
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "save_agent_run_settings",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::AgentRunSettingsSave,
+            workbench_compat::agent_run_settings_save_input(settings),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1327,121 +1362,178 @@ pub fn save_worktree_workspace_layout(
 }
 
 #[tauri::command]
-pub async fn list_git_remotes(working_directory: String) -> Result<Vec<GitRemote>, String> {
-    run_blocking_command("list_git_remotes", move || {
-        git_remote_service::list_git_remotes(&GitCliRemoteProvider, working_directory)
-    })
+pub async fn list_git_remotes(
+    app: AppHandle,
+    working_directory: String,
+) -> Result<Vec<GitRemote>, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_git_remotes",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::GitListRemotes,
+            workbench_compat::working_directory_input(working_directory),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
-pub async fn list_git_branches(working_directory: String) -> Result<Vec<GitBranch>, String> {
-    run_blocking_command("list_git_branches", move || {
-        git_branch_service::list_git_branches(&GitCliBranchProvider, working_directory)
-    })
+pub async fn list_git_branches(
+    app: AppHandle,
+    working_directory: String,
+) -> Result<Vec<GitBranch>, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_git_branches",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::GitListBranches,
+            workbench_compat::working_directory_input(working_directory),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn list_git_worktrees(
+    app: AppHandle,
     working_directory: String,
     include_status: Option<bool>,
 ) -> Result<Vec<GitWorktree>, String> {
-    run_blocking_command("list_git_worktrees", move || {
-        git_worktree_service::list_git_worktrees(
-            &GitCliWorktreeProvider,
-            working_directory,
-            include_status.unwrap_or(true),
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_git_worktrees",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::GitListWorktrees,
+            workbench_compat::git_list_worktrees_input(working_directory, include_status),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn list_worktree_changes(
+    app: AppHandle,
     working_directory: String,
 ) -> Result<Vec<WorktreeChange>, String> {
-    run_blocking_command("list_worktree_changes", move || {
-        worktree_changes_service::list_worktree_changes(
-            &GitCliWorktreeChangeProvider,
-            working_directory,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_worktree_changes",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeListChanges,
+            workbench_compat::working_directory_input(working_directory),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn create_git_worktree(
+    app: AppHandle,
     working_directory: String,
     input: GitWorktreeCreateDraft,
 ) -> Result<(), String> {
-    run_blocking_command("create_git_worktree", move || {
-        git_worktree_service::create_git_worktree(&GitCliWorktreeProvider, working_directory, input)
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "create_git_worktree",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GitCreateWorktree,
+            workbench_compat::git_create_worktree_input(working_directory, input),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
-pub async fn delete_git_worktree(working_directory: String, path: String) -> Result<(), String> {
-    run_blocking_command("delete_git_worktree", move || {
-        git_worktree_service::delete_git_worktree(&GitCliWorktreeProvider, working_directory, path)
-    })
+pub async fn delete_git_worktree(
+    app: AppHandle,
+    working_directory: String,
+    path: String,
+) -> Result<(), String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "delete_git_worktree",
+        workbench_compat::call_command(
+            &runtime,
+            OperationId::GitDeleteWorktree,
+            workbench_compat::git_delete_worktree_input(working_directory, path),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
-pub async fn get_worktree_changes(working_directory: String) -> Result<GitWorktreeChanges, String> {
-    run_blocking_command("get_worktree_changes", move || {
-        git_worktree_changes_service::get_worktree_changes(
-            &git_core::GitCliWorktreeStatusReader,
-            working_directory,
-        )
-    })
+pub async fn get_worktree_changes(
+    app: AppHandle,
+    working_directory: String,
+) -> Result<GitWorktreeChanges, String> {
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_worktree_changes",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeGetChanges,
+            workbench_compat::working_directory_input(working_directory),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn get_worktree_file_diff(
+    app: AppHandle,
     working_directory: String,
     path: String,
 ) -> Result<GitWorktreeFileDiff, String> {
-    run_blocking_command("get_worktree_file_diff", move || {
-        git_worktree_changes_service::get_worktree_file_diff(
-            &git_core::GitCliWorktreeStatusReader,
-            working_directory,
-            path,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_worktree_file_diff",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeGetFileDiff,
+            workbench_compat::worktree_path_input(working_directory, path),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn list_worktree_files(
+    app: AppHandle,
     working_directory: String,
     scope: Option<WorktreeFileListScope>,
 ) -> Result<Vec<WorktreeFileEntry>, String> {
-    run_blocking_command("list_worktree_files", move || {
-        worktree_file_service::list_worktree_files(
-            &FsWorktreeFileProvider,
-            working_directory,
-            scope,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_worktree_files",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeListFiles,
+            workbench_compat::worktree_list_files_input(working_directory, scope),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn read_worktree_text_file(
+    app: AppHandle,
     working_directory: String,
     path: String,
 ) -> Result<WorktreeTextFile, String> {
-    run_blocking_command("read_worktree_text_file", move || {
-        worktree_file_service::read_worktree_text_file(
-            &FsWorktreeFileProvider,
-            working_directory,
-            path,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "read_worktree_text_file",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeReadTextFile,
+            workbench_compat::worktree_path_input(working_directory, path),
+        ),
+    )
     .await
 }
 
@@ -1485,93 +1577,119 @@ pub fn stop_worktree_watcher(
 
 #[tauri::command]
 pub async fn list_worktree_git_history(
+    app: AppHandle,
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
     cursor: Option<String>,
 ) -> Result<GitCommitHistory, String> {
-    run_blocking_command("list_worktree_git_history", move || {
-        worktree_git_service::list_worktree_git_history(
-            &GitCliWorktreeGitProvider,
-            working_directory,
-            max_count,
-            offset,
-            cursor,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_worktree_git_history",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeListHistory,
+            workbench_compat::worktree_page_input(working_directory, max_count, offset, cursor),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn get_worktree_git_graph(
+    app: AppHandle,
     working_directory: String,
     max_count: Option<usize>,
     offset: Option<usize>,
     cursor: Option<String>,
 ) -> Result<GitCommitGraph, String> {
-    run_blocking_command("get_worktree_git_graph", move || {
-        worktree_git_service::get_worktree_git_graph(
-            &GitCliWorktreeGitProvider,
-            working_directory,
-            max_count,
-            offset,
-            cursor,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_worktree_git_graph",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeGetGraph,
+            workbench_compat::worktree_page_input(working_directory, max_count, offset, cursor),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn get_worktree_commit_detail(
+    app: AppHandle,
     working_directory: String,
     commit_hash: String,
 ) -> Result<GitCommitDetail, String> {
-    run_blocking_command("get_worktree_commit_detail", move || {
-        worktree_git_service::get_worktree_commit_detail(
-            &GitCliWorktreeGitProvider,
-            working_directory,
-            commit_hash,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_worktree_commit_detail",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeGetCommitDetail,
+            workbench_compat::worktree_commit_input(working_directory, commit_hash),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
 pub async fn get_worktree_commit_file_diff(
+    app: AppHandle,
     working_directory: String,
     commit_hash: String,
     path: String,
 ) -> Result<WorktreeGitFileDiff, String> {
-    run_blocking_command("get_worktree_commit_file_diff", move || {
-        worktree_git_service::get_worktree_commit_file_diff(
-            &GitCliWorktreeGitProvider,
-            working_directory,
-            commit_hash,
-            path,
-        )
-    })
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "get_worktree_commit_file_diff",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::WorktreeGetCommitFileDiff,
+            workbench_compat::worktree_commit_file_input(working_directory, commit_hash, path),
+        ),
+    )
     .await
 }
 
 #[tauri::command]
-pub fn list_agents() -> Vec<AgentDescriptor> {
-    ConfigurableAgentCatalog::from_env().list_agents()
+pub async fn list_agents(app: AppHandle) -> Vec<AgentDescriptor> {
+    let runtime = workbench_runtime(&app);
+    // 오늘 command는 실패하지 않는 `Vec`를 돌려줬다(catalog 오류는 기본값). 시그니처를 유지하기 위해
+    // 호출이 실패하면 빈 목록을 돌려주고 오류는 perf 로그에 남긴다.
+    let result: Result<Vec<AgentDescriptor>, String> = log_async_command(
+        "list_agents",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::AgentList,
+            workbench_compat::agent_list_input(),
+        ),
+    )
+    .await;
+    result.unwrap_or_else(|error| {
+        log_async_command_error("list_agents", &error);
+        Vec::new()
+    })
 }
 
 /// 선택한 provider(`agent_id`)가 로컬에 남긴 네이티브 세션을 조회한다.
 /// `cwd`가 주어지면 해당 작업 디렉터리의 세션만, 없으면 전체를 돌려준다.
 #[tauri::command]
-pub fn list_provider_sessions(
+pub async fn list_provider_sessions(
+    app: AppHandle,
     agent_id: String,
     cwd: Option<String>,
 ) -> Result<Vec<ProviderSession>, String> {
-    let scope = match cwd {
-        Some(path) if !path.trim().is_empty() => SessionScope::Path(path.into()),
-        _ => SessionScope::All,
-    };
-    ListProviderSessionsUseCase::new(FsProviderSessionRepository::new())
-        .execute(&agent_id, &scope, Some(50))
-        .map_err(|error| error.to_string())
+    let runtime = workbench_runtime(&app);
+    log_async_command(
+        "list_provider_sessions",
+        workbench_compat::call_query(
+            &runtime,
+            OperationId::AgentListProviderSessions,
+            workbench_compat::agent_list_provider_sessions_input(agent_id, cwd),
+        ),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1731,16 +1849,28 @@ pub async fn start_agent_run(
         .as_deref()
         .is_none_or(|command| command.trim().is_empty())
     {
-        let settings_repository = JsonAgentRunSettingsRepository::from_app(&app)?;
-        if let Some(settings) = agent_run_settings_service::get_settings(
-            &settings_repository,
-            APP_COMMAND_OVERRIDE_SETTINGS_KEY.into(),
-        )? {
+        // 038: 설정 저장소는 workbench-core가 소유한다. 같은 aggregate lock 안에서 읽는다(run 시작은 2단계 이관 대상).
+        let runtime = workbench_runtime(&app);
+        let settings = tokio::task::spawn_blocking(move || {
+            runtime
+                .coordinator()
+                .with_agent_run_settings(|repository| {
+                    agent_run_settings_service::get_settings(
+                        repository,
+                        APP_COMMAND_OVERRIDE_SETTINGS_KEY.into(),
+                    )
+                })
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())??;
+        if let Some(settings) = settings {
             let resolution = agent_run_settings_service::resolve_agent_command(
                 &request.agent_id,
                 &settings.command_overrides,
                 catalog.command_for_agent(&request.agent_id),
-            )?;
+            )
+            .map_err(|error| error.to_string())?;
             if resolution.source != AgentCommandSource::DefaultCommand {
                 request.agent_command = Some(resolution.command);
             }

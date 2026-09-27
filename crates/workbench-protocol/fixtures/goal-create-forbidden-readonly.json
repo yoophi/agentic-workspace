@@ -1,0 +1,28 @@
+{
+  "name": "goal-create-forbidden-readonly",
+  "principal": "readonly",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.create",
+    "requestId": "r-gc-fb",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "objective": "Ship"
+    },
+    "idempotencyKey": "k-gc-fb"
+  },
+  "expect": {
+    "fault": {
+      "code": "forbidden",
+      "outcome": "notApplied",
+      "retryable": false
+    }
+  },
+  "expectAfter": {
+    "goalsLen": 0,
+    "ledgerApplied": 0
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "name": "git-create-worktree-conflict-different-payload",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "git.createWorktree",
+      "requestId": "r-us2-14",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-new",
+        "branch": "feature/new"
+      },
+      "idempotencyKey": "k-gcw-c"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "git.createWorktree",
+      "requestId": "r-us2-15",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-new",
+        "branch": "feature/other"
+      },
+      "idempotencyKey": "k-gcw-c"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      }
+    },
+    {
+      "fault": {
+        "code": "conflict",
+        "outcome": "applied",
+        "retryable": false
+      }
+    }
+  ],
+  "expectAfter": {
+    "gitWorktrees": 2,
+    "ledgerApplied": 1
+  }
+}

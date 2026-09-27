@@ -1,0 +1,26 @@
+{
+  "name": "goal-clear-not-found",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.clear",
+    "requestId": "r-gcl-nf",
+    "input": {
+      "workingDirectory": "/repo/wt"
+    },
+    "idempotencyKey": "k-gcl-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Goal not found."
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 0
+  }
+}

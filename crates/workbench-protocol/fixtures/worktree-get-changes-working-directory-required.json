@@ -1,0 +1,22 @@
+{
+  "name": "worktree-get-changes-working-directory-required",
+  "principal": "desktop",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getChanges",
+    "requestId": "r-us2-31",
+    "input": {
+      "workingDirectory": " "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Working directory is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/workingDirectory"
+      }
+    }
+  }
+}

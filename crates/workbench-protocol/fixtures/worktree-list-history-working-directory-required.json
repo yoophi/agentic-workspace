@@ -1,0 +1,22 @@
+{
+  "name": "worktree-list-history-working-directory-required",
+  "principal": "desktop",
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.listHistory",
+    "requestId": "r-us2-49",
+    "input": {
+      "workingDirectory": ""
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "Working directory is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/workingDirectory"
+      }
+    }
+  }
+}

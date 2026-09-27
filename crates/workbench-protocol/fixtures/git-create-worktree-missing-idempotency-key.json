@@ -1,0 +1,52 @@
+{
+  "name": "git-create-worktree-missing-idempotency-key",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.createWorktree",
+    "requestId": "r-us2-11",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/wt-new",
+      "branch": "feature/new"
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "idempotencyKey is required for git.createWorktree.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/idempotencyKey"
+      }
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 0
+  }
+}

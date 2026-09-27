@@ -17,10 +17,52 @@ use crate::{
     },
 };
 
-pub const SCHEMA_VERSION: i64 = 1;
+/// v2(038, research R16): 자원 예약 unique index를 `pending` 행에만 적용한다. 종료 상태(applied/failed/unknown)는
+/// 예약을 해제하되 `reserved_resource_id` 값은 재시작 판정 증거로 남긴다.
+pub const SCHEMA_VERSION: i64 = 2;
 /// 멱등성 결과 보존 기간. `pending`/`unknown`에는 적용하지 않는다.
 pub const RESULT_TTL: chrono::Duration = chrono::Duration::hours(24);
 
+/// 버전과 무관한 테이블·index. 예약 index는 버전마다 다르므로 여기 없다(v1은 `DDL_V1`, v2는 `MIGRATION_V2`).
+const DDL_BASE: &str = r#"
+CREATE TABLE IF NOT EXISTS schema_version (
+  version    INTEGER NOT NULL,
+  applied_at TEXT    NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS operation_ledger (
+  execution_id         TEXT PRIMARY KEY,
+  principal_kind       TEXT NOT NULL,
+  operation            TEXT NOT NULL,
+  contract_revision    INTEGER NOT NULL,
+  idempotency_key      TEXT NOT NULL,
+  input_fingerprint    TEXT NOT NULL,
+  aggregate            TEXT NOT NULL,
+  reserved_resource_id TEXT,
+  state                TEXT NOT NULL,
+  result_json          TEXT,
+  revision             INTEGER,
+  request_id           TEXT NOT NULL,
+  created_at           TEXT NOT NULL,
+  updated_at           TEXT NOT NULL,
+  expires_at           TEXT,
+  UNIQUE (principal_kind, operation, contract_revision, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS operation_ledger_expiry
+  ON operation_ledger (expires_at) WHERE expires_at IS NOT NULL;
+CREATE INDEX IF NOT EXISTS operation_ledger_pending
+  ON operation_ledger (state) WHERE state IN ('pending','unknown');
+
+CREATE TABLE IF NOT EXISTS aggregate_revision (
+  aggregate  TEXT PRIMARY KEY,
+  revision   INTEGER NOT NULL,
+  updated_at TEXT    NOT NULL
+);
+"#;
+
+/// 037이 만든 v1 파일의 전체 DDL. 운영 코드는 더 이상 실행하지 않고, 승격 경로(v1 → v2) 테스트가 v1 파일을
+/// 이 텍스트로 재현한다. v1 예약 index는 상태와 무관하게 배타적이었다(research R16의 결함).
+#[cfg(test)]
 const DDL_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_version (
   version    INTEGER NOT NULL,
@@ -58,6 +100,14 @@ CREATE TABLE IF NOT EXISTS aggregate_revision (
   revision   INTEGER NOT NULL,
   updated_at TEXT    NOT NULL
 );
+"#;
+
+/// v1 → v2: 상태와 무관하던 예약 unique index를 `state = 'pending'`으로 한정한다. 행 데이터는 바뀌지 않는다.
+const MIGRATION_V2: &str = r#"
+DROP INDEX IF EXISTS operation_ledger_reserved;
+CREATE UNIQUE INDEX IF NOT EXISTS operation_ledger_reserved_pending
+  ON operation_ledger (aggregate, reserved_resource_id)
+  WHERE reserved_resource_id IS NOT NULL AND state = 'pending';
 "#;
 
 pub struct SqliteOperationLedger {
@@ -260,20 +310,23 @@ const SELECT_RECORD: &str =
 impl OperationLedger for SqliteOperationLedger {
     fn migrate(&self) -> LedgerResult<()> {
         self.with_connection(|conn| {
-            conn.execute_batch(DDL_V1).map_err(storage)?;
+            conn.execute_batch(DDL_BASE).map_err(storage)?;
             let current: Option<i64> = conn
                 .query_row("SELECT MAX(version) FROM schema_version", [], |row| {
                     row.get(0)
                 })
                 .map_err(storage)?;
             match current {
-                None => {
-                    conn.execute(
+                // 새 파일(None) 또는 037의 v1 파일: v2 index로 교체하고 버전을 기록한다.
+                None | Some(1) => {
+                    let tx = conn.transaction().map_err(storage)?;
+                    tx.execute_batch(MIGRATION_V2).map_err(storage)?;
+                    tx.execute(
                         "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
                         params![SCHEMA_VERSION, now_rfc3339()],
                     )
                     .map_err(storage)?;
-                    Ok(())
+                    tx.commit().map_err(storage)
                 }
                 Some(found) if found == SCHEMA_VERSION => Ok(()),
                 Some(found) => Err(LedgerError::UnsupportedSchema {
@@ -496,11 +549,140 @@ mod tests {
         }
     }
 
+    fn schema_version(ledger: &SqliteOperationLedger) -> i64 {
+        ledger
+            .with_connection(|conn| {
+                conn.query_row("SELECT MAX(version) FROM schema_version", [], |row| {
+                    row.get(0)
+                })
+                .map_err(storage)
+            })
+            .unwrap()
+    }
+
     #[test]
     fn migrate_is_idempotent_and_records_version() {
         let (_dir, ledger) = ledger();
         ledger.migrate().unwrap();
         assert_eq!(ledger.current_revision("projects").unwrap(), 0);
+        assert_eq!(schema_version(&ledger), SCHEMA_VERSION);
+    }
+
+    /// research R16 (a): 037이 만든 v1 파일에 `applied` 예약이 남아 있어도, v2로 승격되면 같은 자원을 다시 예약할 수 있다.
+    #[test]
+    fn v1_file_upgrades_to_v2_and_releases_terminal_reservations() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        {
+            let conn = Connection::open(paths.ledger_file()).unwrap();
+            conn.execute_batch(DDL_V1).unwrap();
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (1, ?1)",
+                params![now_rfc3339()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO operation_ledger (execution_id, principal_kind, operation, contract_revision,
+                    idempotency_key, input_fingerprint, aggregate, reserved_resource_id, state,
+                    result_json, revision, request_id, created_at, updated_at, expires_at)
+                 VALUES ('exec_old', 'desktop', 'project.create', 1, 'old-key', 'fp', 'git-worktrees:/repo',
+                    '/repo-worktrees/a', 'applied', 'null', 1, 'r0', ?1, ?1, ?1)",
+                params![now_rfc3339()],
+            )
+            .unwrap();
+        }
+
+        let ledger = SqliteOperationLedger::open(&paths).unwrap();
+        ledger.migrate().unwrap();
+        assert_eq!(schema_version(&ledger), 2);
+        let indexes: Vec<String> = ledger
+            .with_connection(|conn| {
+                let mut statement = conn
+                    .prepare("SELECT name FROM sqlite_master WHERE type = 'index' ORDER BY name")
+                    .map_err(storage)?;
+                let rows = statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .map_err(storage)?;
+                rows.collect::<Result<Vec<_>, _>>().map_err(storage)
+            })
+            .unwrap();
+        assert!(
+            !indexes
+                .iter()
+                .any(|name| name == "operation_ledger_reserved"),
+            "v1 index must be dropped: {indexes:?}"
+        );
+        assert!(
+            indexes
+                .iter()
+                .any(|name| name == "operation_ledger_reserved_pending"),
+            "v2 index must exist: {indexes:?}"
+        );
+
+        // v1에서는 DuplicateReservation이던 조합이 v2에서는 통과한다.
+        let mut entry = entry("new-key", "/repo-worktrees/a");
+        entry.aggregate = "git-worktrees:/repo".into();
+        let exec = ledger.begin(entry).unwrap();
+        assert!(exec.starts_with("exec_"));
+        // 다시 migrate해도 멱등 — v1 예약 index를 다시 만들지 않는다(applied+pending이 같은 자원을 가진 지금
+        // 그 index를 다시 만들면 constraint 위반으로 기동이 실패한다).
+        ledger.migrate().unwrap();
+        assert_eq!(schema_version(&ledger), 2);
+        ledger
+            .begin(entry_for(
+                "k-after",
+                "git-worktrees:/repo",
+                "/repo-worktrees/b",
+            ))
+            .unwrap();
+    }
+
+    fn entry_for(key: &str, aggregate: &str, reserved: &str) -> NewLedgerEntry {
+        let mut entry = entry(key, reserved);
+        entry.aggregate = aggregate.into();
+        entry
+    }
+
+    /// research R16 표: `applied`(및 failed/unknown) 전이는 예약을 해제하고, `pending`만 배타다.
+    #[test]
+    fn applied_transition_releases_reservation_but_pending_still_conflicts() {
+        let (_dir, ledger) = ledger();
+        let exec = ledger.begin(entry("k1", "/wt/a")).unwrap();
+        assert_eq!(
+            ledger.begin(entry("k2", "/wt/a")).unwrap_err(),
+            LedgerError::DuplicateReservation
+        );
+        ledger.complete(&exec, &json!(null)).unwrap();
+        let exec2 = ledger.begin(entry("k2", "/wt/a")).unwrap();
+        ledger.fail(&exec2, &json!({"code": "internal"})).unwrap();
+        let exec3 = ledger.begin(entry("k3", "/wt/a")).unwrap();
+        // unknown으로 닫혀도 해제된다.
+        ledger.reconcile_pending(&mut |_| None).unwrap();
+        assert_eq!(ledger.count_by_state(LedgerState::Unknown).unwrap(), 1);
+        let _ = exec3;
+        ledger.begin(entry("k4", "/wt/a")).unwrap();
+    }
+
+    #[test]
+    fn unsupported_future_schema_is_rejected() {
+        let (_dir, ledger) = ledger();
+        ledger
+            .with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO schema_version (version, applied_at) VALUES (3, ?1)",
+                    params![now_rfc3339()],
+                )
+                .map_err(storage)
+            })
+            .unwrap();
+        assert_eq!(
+            ledger.migrate().unwrap_err(),
+            LedgerError::UnsupportedSchema {
+                found: 3,
+                supported: SCHEMA_VERSION
+            }
+        );
     }
 
     #[test]

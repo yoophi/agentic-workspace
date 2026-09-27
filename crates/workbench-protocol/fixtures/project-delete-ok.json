@@ -1,0 +1,40 @@
+{
+  "name": "project-delete-ok",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      },
+      {
+        "id": "project-2",
+        "name": "Two",
+        "workingDirectory": "/tmp/two",
+        "description": "d"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.delete",
+    "requestId": "r-pd-ok",
+    "input": {
+      "id": "project-1"
+    },
+    "idempotencyKey": "k-pd-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": null,
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "projectsLen": 1,
+    "ledgerApplied": 1
+  }
+}

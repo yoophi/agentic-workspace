@@ -1,0 +1,64 @@
+{
+  "name": "worktree-get-changes-seeded",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "workingChanges": {
+        "README.md": "hello world\n",
+        "notes.txt": "n\n"
+      }
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getChanges",
+    "requestId": "r-us2-30",
+    "input": {
+      "workingDirectory": "{{repo}}"
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "workingDirectory": "{{repo}}",
+        "files": [
+          {
+            "path": "README.md",
+            "oldPath": null,
+            "group": "unstaged"
+          },
+          {
+            "path": "notes.txt",
+            "oldPath": null,
+            "group": "untracked"
+          }
+        ],
+        "stagedCount": 0,
+        "unstagedCount": 1,
+        "untrackedCount": 1,
+        "conflictedCount": 0
+      }
+    }
+  }
+}

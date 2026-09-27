@@ -1,0 +1,59 @@
+{
+  "name": "git-delete-worktree-has-changes-precondition-failed",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "worktrees": [
+        {
+          "path": "wt-a",
+          "branch": "wt-a",
+          "files": {
+            "dirty.txt": "x\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.deleteWorktree",
+    "requestId": "r-us2-25",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/wt-a"
+    },
+    "idempotencyKey": "k-gdw-dirty"
+  },
+  "expect": {
+    "fault": {
+      "code": "preconditionFailed",
+      "message": "Worktree has changes and cannot be deleted.",
+      "outcome": "notApplied",
+      "retryable": false
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 2,
+    "ledgerApplied": 0
+  }
+}

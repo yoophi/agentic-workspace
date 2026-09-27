@@ -98,7 +98,6 @@ dependencies = [
  "tokio",
  "tower-http 0.5.2",
  "uuid",
- "walkdir",
  "workbench-core",
  "workbench-protocol",
 ]
@@ -5514,9 +5513,12 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workbench-core"
 version = "0.1.0"
 dependencies = [
+ "acp-agent-core",
+ "anyhow",
  "async-trait",
  "axum",
  "chrono",
+ "git-core",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
@@ -5526,6 +5528,7 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "uuid",
+ "walkdir",
  "workbench-core",
  "workbench-protocol",
 ]

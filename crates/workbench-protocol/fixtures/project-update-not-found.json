@@ -1,0 +1,36 @@
+{
+  "name": "project-update-not-found",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.update",
+    "requestId": "r-pu-nf",
+    "input": {
+      "id": "missing",
+      "name": "X",
+      "workingDirectory": "/tmp/x"
+    },
+    "idempotencyKey": "k-pu-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Project not found."
+    }
+  },
+  "expectAfter": {
+    "projectsLen": 1,
+    "ledgerApplied": 0
+  }
+}

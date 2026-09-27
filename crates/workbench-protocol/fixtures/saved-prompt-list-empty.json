@@ -1,0 +1,19 @@
+{
+  "name": "saved-prompt-list-empty",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.list",
+    "requestId": "r-spl-e",
+    "input": {}
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": []
+    }
+  }
+}

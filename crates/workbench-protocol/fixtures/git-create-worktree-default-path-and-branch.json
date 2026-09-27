@@ -1,0 +1,51 @@
+{
+  "name": "git-create-worktree-default-path-and-branch",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.createWorktree",
+    "requestId": "r-us2-10",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": ""
+    },
+    "idempotencyKey": "k-gcw-default"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": null
+    },
+    "absent": [
+      "revision"
+    ]
+  },
+  "expectAfter": {
+    "gitWorktrees": 2,
+    "ledgerApplied": 1
+  }
+}

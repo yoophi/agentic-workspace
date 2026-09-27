@@ -1,0 +1,60 @@
+{
+  "name": "git-list-worktrees-include-status",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ],
+      "worktrees": [
+        {
+          "path": "wt-a",
+          "branch": "wt-a"
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.listWorktrees",
+    "requestId": "r-us2-7",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "includeStatus": false
+    }
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "path": "{{repo}}",
+          "status": "unknown",
+          "canDelete": false
+        },
+        {
+          "path": "{{repoParent}}/wt-a",
+          "status": "unknown",
+          "canDelete": false
+        }
+      ]
+    }
+  }
+}

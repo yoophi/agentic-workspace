@@ -1,0 +1,30 @@
+{
+  "name": "goal-update-not-found",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.update",
+    "requestId": "r-gu-nf",
+    "input": {
+      "workingDirectory": "/repo/none",
+      "objective": "x"
+    },
+    "idempotencyKey": "k-gu-nf"
+  },
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "outcome": "notApplied",
+      "message": "Goal not found."
+    }
+  },
+  "expectAfter": {
+    "ledgerApplied": 0
+  },
+  "ignoreFields": [
+    "updatedAt"
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "name": "worktree-get-commit-file-diff-path-required",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "worktree.getCommitFileDiff",
+    "requestId": "r-us2-56",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "commitHash": "{{commit:2}}",
+      "path": ""
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "message": "File path is required.",
+      "outcome": "notApplied",
+      "details": {
+        "path": "/path"
+      }
+    }
+  }
+}

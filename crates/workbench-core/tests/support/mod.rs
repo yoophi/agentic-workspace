@@ -3,34 +3,100 @@
 #![allow(clippy::result_large_err)]
 
 pub mod fixtures;
+pub mod git_repo;
 pub mod http_harness;
 
 use std::{fs, sync::Arc};
 
+use acp_agent_core::{domain::agent::AgentDescriptor, ports::agent_catalog::AgentCatalog};
 use serde_json::{json, Value};
 use workbench_core::{
-    application::workbench_runtime::WorkbenchRuntime, infrastructure::data_paths::DataPaths,
+    application::workbench_runtime::{RuntimeAdapters, WorkbenchRuntime},
+    domain::{
+        errors::ProviderSessionError,
+        provider_session::{provider_kind_for, ProviderSession, SessionScope},
+    },
+    infrastructure::data_paths::DataPaths,
+    ports::provider_session_repository::ProviderSessionRepository,
 };
 use workbench_protocol::{
     AuthenticatedPrincipal, CallReply, CallRequest, IdempotencyKey, OperationId, RequestId,
     Workbench, WorkbenchFault, PROTOCOL_VERSION,
 };
 
+/// 038 US3: 실행 환경을 읽지 않는 agent catalog stub.
+#[derive(Clone, Default)]
+pub struct StubCatalog(pub Vec<AgentDescriptor>);
+
+impl AgentCatalog for StubCatalog {
+    fn list_agents(&self) -> Vec<AgentDescriptor> {
+        self.0.clone()
+    }
+}
+
+/// provider 세션 stub. fs 어댑터의 계약(미지원 agent → 빈 목록, agent·경로 범위 필터)만 흉내 내고, 정렬·상한은
+/// 유즈케이스가 한다.
+#[derive(Clone, Default)]
+pub struct StubProviderSessions(pub Vec<ProviderSession>);
+
+impl ProviderSessionRepository for StubProviderSessions {
+    fn list(
+        &self,
+        agent_id: &str,
+        scope: &SessionScope,
+    ) -> Result<Vec<ProviderSession>, ProviderSessionError> {
+        if provider_kind_for(agent_id).is_none() {
+            return Ok(Vec::new());
+        }
+        Ok(self
+            .0
+            .iter()
+            .filter(|session| session.agent_id == agent_id)
+            .filter(|session| match scope {
+                SessionScope::All => true,
+                SessionScope::Path(path) => session
+                    .cwd
+                    .as_deref()
+                    .is_some_and(|cwd| std::path::Path::new(cwd) == path),
+            })
+            .cloned()
+            .collect())
+    }
+}
+
+pub fn stub_adapters(
+    agents: Vec<AgentDescriptor>,
+    sessions: Vec<ProviderSession>,
+) -> RuntimeAdapters {
+    RuntimeAdapters {
+        agent_catalog: Arc::new(StubCatalog(agents)),
+        provider_sessions: Arc::new(StubProviderSessions(sessions)),
+    }
+}
+
 pub struct TestRuntime {
     pub dir: tempfile::TempDir,
     pub paths: DataPaths,
     pub runtime: Arc<WorkbenchRuntime>,
+    adapters: RuntimeAdapters,
 }
 
 impl TestRuntime {
+    /// 실행 환경(환경 변수·홈 디렉터리)을 읽지 않도록 빈 stub 어댑터로 기동한다.
     pub fn new() -> Self {
+        Self::with_adapters(stub_adapters(Vec::new(), Vec::new()))
+    }
+
+    pub fn with_adapters(adapters: RuntimeAdapters) -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
         let paths = DataPaths::new(dir.path());
-        let runtime = WorkbenchRuntime::bootstrap(paths.clone()).expect("bootstrap");
+        let runtime =
+            WorkbenchRuntime::bootstrap_with(paths.clone(), adapters.clone()).expect("bootstrap");
         Self {
             dir,
             paths,
             runtime,
+            adapters,
         }
     }
 
@@ -40,13 +106,16 @@ impl TestRuntime {
             dir,
             paths,
             runtime,
+            adapters,
         } = self;
         drop(runtime);
-        let runtime = WorkbenchRuntime::bootstrap(paths.clone()).expect("bootstrap again");
+        let runtime = WorkbenchRuntime::bootstrap_with(paths.clone(), adapters.clone())
+            .expect("bootstrap again");
         Self {
             dir,
             paths,
             runtime,
+            adapters,
         }
     }
 
@@ -83,4 +152,43 @@ pub fn create_request(key: &str, name: &str, working_directory: &str) -> CallReq
 
 pub fn list_request() -> CallRequest {
     CallRequest::query(OperationId::ProjectList, json!({}))
+}
+
+/// 038: 임의 operation의 변경 요청. 키는 호출자가 정한다(재시도·충돌 시나리오용).
+pub fn command_request(operation: OperationId, key: &str, input: Value) -> CallRequest {
+    CallRequest {
+        protocol_version: PROTOCOL_VERSION,
+        operation: operation.as_str().to_owned(),
+        request_id: RequestId::random(),
+        input,
+        idempotency_key: Some(IdempotencyKey::new(key).expect("key")),
+        expected_revision: None,
+        timeout_ms: None,
+    }
+}
+
+pub fn query_request(operation: OperationId, input: Value) -> CallRequest {
+    CallRequest::query(operation, input)
+}
+
+/// 저장 파일 하나를 JSON 배열로 읽는다. 없으면 빈 벡터.
+pub fn read_store(path: &std::path::Path) -> Vec<Value> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    serde_json::from_str(&fs::read_to_string(path).expect("read store")).expect("parse store")
+}
+
+impl TestRuntime {
+    pub fn saved_prompts(&self) -> Vec<Value> {
+        read_store(&self.paths.saved_prompts_file())
+    }
+
+    pub fn goals(&self) -> Vec<Value> {
+        read_store(&self.paths.goals_file())
+    }
+
+    pub fn agent_run_settings(&self) -> Vec<Value> {
+        read_store(&self.paths.agent_run_settings_file())
+    }
 }

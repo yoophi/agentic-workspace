@@ -1,0 +1,41 @@
+{
+  "name": "saved-prompt-list-seeded",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": [
+      {
+        "id": "saved-prompt-1",
+        "label": "Continue",
+        "prompt": "keep going"
+      },
+      {
+        "id": "saved-prompt-2",
+        "label": "Fix",
+        "prompt": "fix the tests"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.list",
+    "requestId": "r-spl-s",
+    "input": {}
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": [
+        {
+          "id": "saved-prompt-1",
+          "label": "Continue",
+          "prompt": "keep going"
+        },
+        {
+          "id": "saved-prompt-2",
+          "label": "Fix",
+          "prompt": "fix the tests"
+        }
+      ]
+    }
+  }
+}

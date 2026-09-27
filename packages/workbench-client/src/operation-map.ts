@@ -14,10 +14,31 @@ export type CallReply = Schemas["CallReply"];
 export type WorkbenchFault = Schemas["WorkbenchFault"];
 export type FaultCode = Schemas["FaultCode"];
 export type Outcome = Schemas["Outcome"];
-export type Project = Schemas["ProjectDto"];
-export type ProjectCreateInput = Schemas["ProjectCreateInput"];
 export type DescribeOutput = Schemas["DescribeOutput"];
 export type OperationDescriptor = Schemas["OperationDescriptor"];
+
+// 도메인 DTO alias (038 US1). 프론트 entities의 타입과 필드·표기가 같다.
+export type Project = Schemas["ProjectDto"];
+export type ProjectCreateInput = Schemas["ProjectCreateInput"];
+export type SavedPrompt = Schemas["SavedPromptDto"];
+export type Goal = Schemas["GoalDto"];
+export type GoalStatus = Schemas["GoalStatus"];
+export type AgentRunSettings = Schemas["AgentRunSettingsDto"];
+// 038 US2: Git·worktree 조회 결과. 프론트 `entities/project`·`entities/worktree-*`의 타입과 필드·표기가 같다.
+export type GitRemote = Schemas["GitRemoteDto"];
+export type GitBranch = Schemas["GitBranchDto"];
+export type GitWorktree = Schemas["GitWorktreeDto"];
+export type WorktreeChange = Schemas["WorktreeChangeDto"];
+export type GitWorktreeChanges = Schemas["GitWorktreeChangesDto"];
+export type WorktreeFileEntry = Schemas["WorktreeFileEntryDto"];
+export type WorktreeTextFile = Schemas["WorktreeTextFileDto"];
+export type GitCommitHistory = Schemas["GitCommitHistoryDto"];
+export type GitCommitGraph = Schemas["GitCommitGraphDto"];
+export type GitCommitDetail = Schemas["GitCommitDetailDto"];
+export type GitFileDiff = Schemas["GitFileDiffDto"];
+// 038 US3: 새 run 화면의 agent 목록과 이어 붙일 provider 세션.
+export type AgentDescriptor = Schemas["AgentDescriptorDto"];
+export type ProviderSession = Schemas["ProviderSessionDto"];
 
 export type OperationId = CallRequest["operation"];
 

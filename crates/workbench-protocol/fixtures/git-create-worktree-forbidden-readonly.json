@@ -1,0 +1,50 @@
+{
+  "name": "git-create-worktree-forbidden-readonly",
+  "principal": "readonly",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "git.createWorktree",
+    "requestId": "r-us2-18",
+    "input": {
+      "workingDirectory": "{{repo}}",
+      "path": "{{repoParent}}/wt-new",
+      "branch": "feature/new"
+    },
+    "idempotencyKey": "k-gcw-ro"
+  },
+  "expect": {
+    "fault": {
+      "code": "forbidden",
+      "outcome": "notApplied",
+      "retryable": false
+    }
+  },
+  "expectAfter": {
+    "gitWorktrees": 1,
+    "ledgerApplied": 0
+  }
+}

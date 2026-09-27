@@ -1,0 +1,42 @@
+{
+  "name": "project-update-ok",
+  "principal": "desktop",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.update",
+    "requestId": "r-pu-ok",
+    "input": {
+      "id": "project-1",
+      "name": " New ",
+      "workingDirectory": "/tmp/new ",
+      "description": null
+    },
+    "idempotencyKey": "k-pu-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "id": "project-1",
+        "name": "New",
+        "workingDirectory": "/tmp/new",
+        "description": null
+      },
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "projectsLen": 1,
+    "ledgerApplied": 1
+  }
+}

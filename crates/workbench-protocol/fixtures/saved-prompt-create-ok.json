@@ -1,0 +1,34 @@
+{
+  "name": "saved-prompt-create-ok",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.create",
+    "requestId": "r-spc-ok",
+    "input": {
+      "label": " Continue ",
+      "prompt": " keep going "
+    },
+    "idempotencyKey": "k-spc-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "label": "Continue",
+        "prompt": "keep going"
+      },
+      "revision": 1
+    }
+  },
+  "ignoreFields": [
+    "id"
+  ],
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 1
+  }
+}

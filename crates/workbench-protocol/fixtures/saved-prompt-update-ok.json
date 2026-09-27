@@ -1,0 +1,39 @@
+{
+  "name": "saved-prompt-update-ok",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": [
+      {
+        "id": "saved-prompt-1",
+        "label": "Continue",
+        "prompt": "keep going"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "savedPrompt.update",
+    "requestId": "r-spu-ok",
+    "input": {
+      "id": "saved-prompt-1",
+      "label": " Go on ",
+      "prompt": " continue "
+    },
+    "idempotencyKey": "k-spu-ok"
+  },
+  "expect": {
+    "reply": {
+      "kind": "complete",
+      "output": {
+        "id": "saved-prompt-1",
+        "label": "Go on",
+        "prompt": "continue"
+      },
+      "revision": 1
+    }
+  },
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 1
+  }
+}

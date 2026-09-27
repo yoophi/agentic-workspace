@@ -1,16 +1,242 @@
 {
   "name": "system-describe-desktop",
   "principal": "desktop",
-  "request": { "protocolVersion": 1, "operation": "system.describe", "requestId": "r-describe-desktop", "input": {} },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "system.describe",
+    "requestId": "r-system-describe-desktop",
+    "input": {}
+  },
   "expect": {
     "reply": {
       "kind": "complete",
       "output": {
         "protocolVersion": 1,
         "operations": [
-          { "id": "project.list", "kind": "query", "effect": "read", "idempotent": false, "requiredScopes": ["project:read"], "mcpExposure": false },
-          { "id": "project.create", "kind": "command", "effect": "modify", "idempotent": true, "requiredScopes": ["project:write"], "mcpExposure": false },
-          { "id": "system.describe", "kind": "query", "effect": "read", "idempotent": false, "requiredScopes": ["system:describe"], "mcpExposure": false }
+          {
+            "id": "project.list",
+            "kind": "query",
+            "requiredScopes": [
+              "project:read"
+            ]
+          },
+          {
+            "id": "project.create",
+            "kind": "command",
+            "requiredScopes": [
+              "project:write"
+            ]
+          },
+          {
+            "id": "project.update",
+            "kind": "command",
+            "requiredScopes": [
+              "project:write"
+            ]
+          },
+          {
+            "id": "project.delete",
+            "kind": "command",
+            "requiredScopes": [
+              "project:write"
+            ]
+          },
+          {
+            "id": "savedPrompt.list",
+            "kind": "query",
+            "requiredScopes": [
+              "savedPrompt:read"
+            ]
+          },
+          {
+            "id": "savedPrompt.create",
+            "kind": "command",
+            "requiredScopes": [
+              "savedPrompt:write"
+            ]
+          },
+          {
+            "id": "savedPrompt.update",
+            "kind": "command",
+            "requiredScopes": [
+              "savedPrompt:write"
+            ]
+          },
+          {
+            "id": "savedPrompt.delete",
+            "kind": "command",
+            "requiredScopes": [
+              "savedPrompt:write"
+            ]
+          },
+          {
+            "id": "goal.get",
+            "kind": "query",
+            "requiredScopes": [
+              "goal:read"
+            ]
+          },
+          {
+            "id": "goal.create",
+            "kind": "command",
+            "requiredScopes": [
+              "goal:write"
+            ]
+          },
+          {
+            "id": "goal.update",
+            "kind": "command",
+            "requiredScopes": [
+              "goal:write"
+            ]
+          },
+          {
+            "id": "goal.clear",
+            "kind": "command",
+            "requiredScopes": [
+              "goal:write"
+            ]
+          },
+          {
+            "id": "goal.recordProgress",
+            "kind": "command",
+            "requiredScopes": [
+              "goal:write"
+            ]
+          },
+          {
+            "id": "agentRunSettings.get",
+            "kind": "query",
+            "requiredScopes": [
+              "agentRunSettings:read"
+            ]
+          },
+          {
+            "id": "agentRunSettings.save",
+            "kind": "command",
+            "requiredScopes": [
+              "agentRunSettings:write"
+            ]
+          },
+          {
+            "id": "git.listRemotes",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "git.listBranches",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "git.listWorktrees",
+            "kind": "query",
+            "requiredScopes": [
+              "git:read"
+            ]
+          },
+          {
+            "id": "git.createWorktree",
+            "kind": "command",
+            "requiredScopes": [
+              "git:write"
+            ]
+          },
+          {
+            "id": "git.deleteWorktree",
+            "kind": "command",
+            "requiredScopes": [
+              "git:write"
+            ]
+          },
+          {
+            "id": "worktree.listChanges",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getChanges",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getFileDiff",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.listFiles",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.readTextFile",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.listHistory",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getGraph",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getCommitDetail",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "worktree.getCommitFileDiff",
+            "kind": "query",
+            "requiredScopes": [
+              "worktree:read"
+            ]
+          },
+          {
+            "id": "agent.list",
+            "kind": "query",
+            "requiredScopes": [
+              "agent:read"
+            ]
+          },
+          {
+            "id": "agent.listProviderSessions",
+            "kind": "query",
+            "requiredScopes": [
+              "agent:read"
+            ]
+          },
+          {
+            "id": "system.describe",
+            "kind": "query",
+            "requiredScopes": [
+              "system:describe"
+            ]
+          }
         ]
       }
     },

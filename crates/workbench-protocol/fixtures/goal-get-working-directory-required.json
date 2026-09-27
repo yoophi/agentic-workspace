@@ -1,0 +1,33 @@
+{
+  "name": "goal-get-working-directory-required",
+  "principal": "desktop",
+  "seed": {
+    "goals": [
+      {
+        "workingDirectory": "/repo/wt",
+        "objective": "Old objective",
+        "status": "paused",
+        "tokenBudget": 100,
+        "tokensUsed": 50,
+        "timeUsedSeconds": 10,
+        "createdAt": "2026-01-01T00:00:00+00:00",
+        "updatedAt": "2026-01-02T00:00:00+00:00"
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.get",
+    "requestId": "r-gg-wr",
+    "input": {
+      "workingDirectory": "  "
+    }
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Working directory is required."
+    }
+  }
+}

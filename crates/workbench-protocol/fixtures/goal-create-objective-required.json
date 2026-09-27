@@ -1,0 +1,27 @@
+{
+  "name": "goal-create-objective-required",
+  "principal": "desktop",
+  "seed": {
+    "goals": []
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "goal.create",
+    "requestId": "r-gc-or",
+    "input": {
+      "workingDirectory": "/repo/wt",
+      "objective": " "
+    },
+    "idempotencyKey": "k-gc-or"
+  },
+  "expect": {
+    "fault": {
+      "code": "invalidArgument",
+      "outcome": "notApplied",
+      "message": "Goal objective is required."
+    }
+  },
+  "expectAfter": {
+    "goalsLen": 0
+  }
+}

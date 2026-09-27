@@ -1,0 +1,76 @@
+{
+  "name": "git-create-worktree-idempotent-replay",
+  "principal": "desktop",
+  "seed": {
+    "gitRepo": {
+      "commits": [
+        {
+          "message": "init",
+          "files": {
+            "README.md": "hello\n"
+          }
+        },
+        {
+          "message": "docs",
+          "files": {
+            "docs/guide.md": "# guide\n"
+          }
+        },
+        {
+          "message": "feat",
+          "files": {
+            "src/a.rs": "fn a() {}\n"
+          }
+        }
+      ]
+    }
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "git.createWorktree",
+      "requestId": "r-us2-12",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-new",
+        "branch": "feature/new"
+      },
+      "idempotencyKey": "k-gcw-r"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "git.createWorktree",
+      "requestId": "r-us2-13",
+      "input": {
+        "workingDirectory": "{{repo}}",
+        "path": "{{repoParent}}/wt-new",
+        "branch": "feature/new"
+      },
+      "idempotencyKey": "k-gcw-r"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      },
+      "absent": [
+        "revision"
+      ]
+    },
+    {
+      "reply": {
+        "kind": "complete",
+        "output": null
+      },
+      "absent": [
+        "revision"
+      ]
+    }
+  ],
+  "expectAfter": {
+    "gitWorktrees": 2,
+    "ledgerApplied": 1
+  }
+}

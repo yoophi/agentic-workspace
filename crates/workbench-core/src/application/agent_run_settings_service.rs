@@ -1,0 +1,614 @@
+//! agent 실행 설정 업무 규칙. AW `application/agent_run_settings_service.rs`에서 이동, 오류를
+//! `AgentRunSettingsError`로. `save_settings`는 같은 worktree의 기존 설정을 **교체**한다(upsert).
+
+use std::collections::BTreeMap;
+
+use acp_agent_core::domain::run::{MAX_RALPH_DELAY_MS, MAX_RALPH_ITERATIONS};
+
+use crate::{
+    domain::{
+        agent_run_settings::{
+            AgentCommandOverrides, AgentCommandSource, AgentProfile, AgentRunSettings,
+            AgentRunSettingsRalphLoop, CommandResolutionResult, BUILT_IN_AGENT_TYPES,
+        },
+        errors::AgentRunSettingsError,
+    },
+    ports::agent_run_settings_repository::AgentRunSettingsRepository,
+};
+
+pub fn get_settings(
+    repository: &dyn AgentRunSettingsRepository,
+    working_directory: String,
+) -> Result<Option<AgentRunSettings>, AgentRunSettingsError> {
+    let working_directory = normalize_required(working_directory, "Working directory")?;
+    Ok(repository
+        .load_settings()?
+        .into_iter()
+        .find(|settings| settings.working_directory == working_directory))
+}
+
+pub fn save_settings(
+    repository: &dyn AgentRunSettingsRepository,
+    settings: AgentRunSettings,
+) -> Result<AgentRunSettings, AgentRunSettingsError> {
+    let settings = normalize_settings(settings)?;
+    let mut all_settings = repository.load_settings()?;
+
+    all_settings.retain(|existing| existing.working_directory != settings.working_directory);
+    all_settings.push(settings.clone());
+    repository.save_settings(&all_settings)?;
+
+    Ok(settings)
+}
+
+pub fn normalize_settings(
+    mut settings: AgentRunSettings,
+) -> Result<AgentRunSettings, AgentRunSettingsError> {
+    settings.working_directory =
+        normalize_required(settings.working_directory, "Working directory")?;
+    settings.agent_id = settings.agent_id.trim().to_string();
+    settings.model_id = normalize_optional_with_default(settings.model_id, "providerDefault");
+    settings.effort_id = normalize_optional_with_default(settings.effort_id, "providerDefault");
+    settings.ralph_loop = normalize_ralph_loop(settings.ralph_loop);
+    settings.command_overrides = normalize_command_overrides(settings.command_overrides);
+    ensure_active_built_in_profile(&settings.command_overrides)?;
+    Ok(settings)
+}
+
+/// 활성 기본 프로필 최소 1개 불변식(specs/008 FR-010). 오류 메시지에 env value를
+/// 포함하지 않는다.
+fn ensure_active_built_in_profile(
+    overrides: &AgentCommandOverrides,
+) -> Result<(), AgentRunSettingsError> {
+    let has_active_built_in = effective_profiles(overrides)
+        .iter()
+        .any(|profile| profile.built_in && profile.enabled);
+
+    if has_active_built_in {
+        Ok(())
+    } else {
+        Err(AgentRunSettingsError::NoBuiltInProfile)
+    }
+}
+
+/// 저장 프로필 + seed(누락 기본 프로필 자동 채움)를 합친 "유효 프로필" 목록.
+/// seed 시 legacy `agent_commands[agent_type]`을 command 초기값으로 사용한다.
+/// 저장 데이터는 변경하지 않는다(specs/008 research R2).
+pub fn effective_profiles(overrides: &AgentCommandOverrides) -> Vec<AgentProfile> {
+    let normalized = normalize_command_overrides(overrides.clone());
+    let mut profiles = normalized.profiles.clone();
+    for agent_type in BUILT_IN_AGENT_TYPES {
+        if profiles.iter().any(|profile| profile.id == *agent_type) {
+            continue;
+        }
+        profiles.push(AgentProfile {
+            id: (*agent_type).to_string(),
+            name: built_in_profile_default_name(agent_type),
+            agent_type: (*agent_type).to_string(),
+            command: normalized.agent_commands.get(*agent_type).cloned(),
+            env: BTreeMap::new(),
+            enabled: true,
+            built_in: true,
+        });
+    }
+    profiles
+}
+
+/// 실행 env 병합(specs/008 R4): globalEnv ⊕ 프로필 env, 동일 key는 프로필 우선.
+pub fn merged_profile_env(
+    overrides: &AgentCommandOverrides,
+    profile_id: &str,
+) -> BTreeMap<String, String> {
+    let normalized = normalize_command_overrides(overrides.clone());
+    let mut merged = normalized.global_env.clone();
+    if let Some(profile) = effective_profiles(&normalized)
+        .into_iter()
+        .find(|profile| profile.id == profile_id.trim())
+    {
+        merged.extend(profile.env);
+    }
+    merged
+}
+
+fn built_in_profile_default_name(agent_type: &str) -> String {
+    match agent_type {
+        "codex" => "Codex".to_string(),
+        "claude-code" => "Claude Code".to_string(),
+        "opencode" => "OpenCode".to_string(),
+        "pi-coding-agent" => "Pi Coding Agent".to_string(),
+        "kiro-cli" => "Kiro CLI".to_string(),
+        other => other.to_string(),
+    }
+}
+
+pub fn resolve_agent_command(
+    agent_id: &str,
+    overrides: &AgentCommandOverrides,
+    default_command: Option<String>,
+) -> Result<CommandResolutionResult, AgentRunSettingsError> {
+    let agent_id = normalize_required(agent_id.to_string(), "Agent id")?;
+    let overrides = normalize_command_overrides(overrides.clone());
+
+    if let Some(command) = overrides.agent_commands.get(&agent_id) {
+        return Ok(CommandResolutionResult {
+            agent_id,
+            command: command.clone(),
+            source: AgentCommandSource::AgentOverride,
+        });
+    }
+
+    if let Some(command) = overrides.global_command {
+        return Ok(CommandResolutionResult {
+            agent_id,
+            command,
+            source: AgentCommandSource::GlobalOverride,
+        });
+    }
+
+    let command = normalize_optional(default_command.unwrap_or_default())
+        .ok_or_else(|| AgentRunSettingsError::NoCommandConfigured(agent_id.clone()))?;
+    Ok(CommandResolutionResult {
+        agent_id,
+        command,
+        source: AgentCommandSource::DefaultCommand,
+    })
+}
+
+fn normalize_ralph_loop(mut ralph_loop: AgentRunSettingsRalphLoop) -> AgentRunSettingsRalphLoop {
+    ralph_loop.max_iterations = ralph_loop.max_iterations.clamp(1, MAX_RALPH_ITERATIONS);
+    ralph_loop.delay_ms = ralph_loop.delay_ms.min(MAX_RALPH_DELAY_MS);
+    ralph_loop.prompt_template = ralph_loop.prompt_template.trim().to_string();
+    ralph_loop
+}
+
+fn normalize_command_overrides(mut overrides: AgentCommandOverrides) -> AgentCommandOverrides {
+    overrides.global_command = overrides.global_command.and_then(normalize_optional);
+    overrides.agent_commands = overrides
+        .agent_commands
+        .into_iter()
+        .filter_map(|(agent_id, command)| {
+            let agent_id = agent_id.trim().to_string();
+            normalize_optional(command).and_then(|command| {
+                if agent_id.is_empty() {
+                    None
+                } else {
+                    Some((agent_id, command))
+                }
+            })
+        })
+        .collect();
+    overrides.global_env = normalize_env(overrides.global_env);
+    overrides.profiles = overrides
+        .profiles
+        .into_iter()
+        .filter_map(|profile| {
+            let profile = normalize_profile(profile);
+            (!profile.id.is_empty()).then_some(profile)
+        })
+        .collect();
+    overrides
+}
+
+/// env normalization(FR-004): key trim, 빈/공백 key 제거, 빈 value는 유지.
+fn normalize_env(env: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    env.into_iter()
+        .filter_map(|(key, value)| {
+            let key = key.trim().to_string();
+            (!key.is_empty()).then_some((key, value))
+        })
+        .collect()
+}
+
+fn normalize_profile(mut profile: AgentProfile) -> AgentProfile {
+    profile.id = profile.id.trim().to_string();
+    profile.agent_type = profile.agent_type.trim().to_string();
+    let name = profile.name.trim().to_string();
+    profile.name = if name.is_empty() {
+        built_in_profile_default_name(&profile.agent_type)
+    } else {
+        name
+    };
+    profile.command = profile.command.and_then(normalize_optional);
+    profile.env = normalize_env(profile.env);
+    profile
+}
+
+fn normalize_optional_with_default(value: String, fallback: &str) -> String {
+    normalize_optional(value).unwrap_or_else(|| fallback.to_string())
+}
+
+fn normalize_optional(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn normalize_required(value: String, label: &'static str) -> Result<String, AgentRunSettingsError> {
+    let trimmed = value.trim().to_owned();
+    if trimmed.is_empty() {
+        return Err(AgentRunSettingsError::Required(label));
+    }
+    Ok(trimmed)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::sync::Mutex;
+
+    use acp_agent_core::domain::run::{ContextSizePreset, PermissionMode};
+
+    use super::*;
+    use crate::domain::agent_run_settings::AgentRunSessionMode;
+
+    #[derive(Default)]
+    struct MemoryAgentRunSettingsRepository {
+        settings: Mutex<Vec<AgentRunSettings>>,
+    }
+
+    impl AgentRunSettingsRepository for MemoryAgentRunSettingsRepository {
+        fn load_settings(&self) -> Result<Vec<AgentRunSettings>, AgentRunSettingsError> {
+            Ok(self.settings.lock().unwrap().clone())
+        }
+
+        fn save_settings(
+            &self,
+            settings: &[AgentRunSettings],
+        ) -> Result<(), AgentRunSettingsError> {
+            *self.settings.lock().unwrap() = settings.to_vec();
+            Ok(())
+        }
+
+        fn recover_from_backup(&self) -> Result<(), AgentRunSettingsError> {
+            Ok(())
+        }
+    }
+
+    fn settings(agent_id: &str) -> AgentRunSettings {
+        AgentRunSettings {
+            working_directory: " /repo/worktree ".into(),
+            agent_id: agent_id.into(),
+            permission_mode: PermissionMode::Plan,
+            model_id: " gpt-5 ".into(),
+            effort_id: " high ".into(),
+            context_size: ContextSizePreset::Large,
+            session_mode: AgentRunSessionMode::Reuse,
+            ralph_loop: AgentRunSettingsRalphLoop {
+                enabled: true,
+                max_iterations: 999,
+                delay_ms: 999_999,
+                stop_on_permission: true,
+                stop_on_error: true,
+                prompt_template: " continue ".into(),
+            },
+            command_overrides: AgentCommandOverrides::default(),
+        }
+    }
+
+    #[test]
+    fn save_settings_replaces_worktree_entry_and_sanitizes_values() {
+        let repository = MemoryAgentRunSettingsRepository::default();
+
+        save_settings(&repository, settings("codex")).expect("settings should save");
+        let saved =
+            save_settings(&repository, settings("claude-code")).expect("settings should replace");
+
+        assert_eq!(saved.working_directory, "/repo/worktree");
+        assert_eq!(saved.agent_id, "claude-code");
+        assert_eq!(saved.model_id, "gpt-5");
+        assert_eq!(saved.effort_id, "high");
+        assert_eq!(saved.ralph_loop.max_iterations, MAX_RALPH_ITERATIONS);
+        assert_eq!(saved.ralph_loop.delay_ms, MAX_RALPH_DELAY_MS);
+        assert!(saved.ralph_loop.stop_on_permission);
+        assert_eq!(saved.ralph_loop.prompt_template, "continue");
+        assert_eq!(saved.command_overrides, AgentCommandOverrides::default());
+        assert_eq!(repository.load_settings().expect("load settings").len(), 1);
+    }
+
+    #[test]
+    fn get_settings_returns_only_matching_worktree() {
+        let repository = MemoryAgentRunSettingsRepository::default();
+        save_settings(&repository, settings("codex")).expect("settings should save");
+
+        assert!(get_settings(&repository, "/other".into())
+            .expect("lookup should succeed")
+            .is_none());
+        assert!(get_settings(&repository, "/repo/worktree".into())
+            .expect("lookup should succeed")
+            .is_some());
+    }
+
+    #[test]
+    fn save_settings_normalizes_command_overrides() {
+        let repository = MemoryAgentRunSettingsRepository::default();
+        let mut settings = settings("codex");
+        settings.command_overrides = AgentCommandOverrides {
+            global_env: BTreeMap::new(),
+            profiles: Vec::new(),
+            global_command: Some("  global-acp  ".into()),
+            agent_commands: BTreeMap::from([
+                (" codex ".into(), "  codex-acp  ".into()),
+                ("claude-code".into(), "   ".into()),
+                (" ".into(), "ignored".into()),
+            ]),
+        };
+
+        let saved = save_settings(&repository, settings).expect("settings should save");
+
+        assert_eq!(
+            saved.command_overrides.global_command.as_deref(),
+            Some("global-acp")
+        );
+        assert_eq!(
+            saved.command_overrides.agent_commands,
+            BTreeMap::from([("codex".into(), "codex-acp".into())])
+        );
+    }
+
+    #[test]
+    fn missing_command_overrides_deserializes_as_empty() {
+        let value = serde_json::json!({
+            "workingDirectory": "/repo/worktree",
+            "agentId": "codex",
+            "permissionMode": "plan",
+            "modelId": "providerDefault",
+            "contextSize": "default",
+            "sessionMode": "new",
+            "ralphLoop": {
+                "enabled": false,
+                "maxIterations": 5,
+                "delayMs": 0,
+                "stopOnPermission": false,
+                "stopOnError": true,
+                "promptTemplate": ""
+            }
+        });
+
+        let settings: AgentRunSettings =
+            serde_json::from_value(value).expect("legacy settings should deserialize");
+
+        assert_eq!(settings.command_overrides, AgentCommandOverrides::default());
+        assert_eq!(settings.effort_id, "providerDefault");
+    }
+
+    #[test]
+    fn resolve_agent_command_prefers_agent_override_then_global_then_default() {
+        let overrides = AgentCommandOverrides {
+            global_command: Some("global-acp".into()),
+            agent_commands: BTreeMap::from([("codex".into(), "codex-acp".into())]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            resolve_agent_command("codex", &overrides, Some("default-acp".into()))
+                .expect("agent override")
+                .source,
+            AgentCommandSource::AgentOverride
+        );
+        assert_eq!(
+            resolve_agent_command("claude-code", &overrides, Some("default-acp".into()))
+                .expect("global override")
+                .source,
+            AgentCommandSource::GlobalOverride
+        );
+        assert_eq!(
+            resolve_agent_command(
+                "claude-code",
+                &AgentCommandOverrides::default(),
+                Some(" default-acp ".into())
+            )
+            .expect("default command"),
+            CommandResolutionResult {
+                agent_id: "claude-code".into(),
+                command: "default-acp".into(),
+                source: AgentCommandSource::DefaultCommand,
+            }
+        );
+        assert_eq!(
+            resolve_agent_command("claude-code", &AgentCommandOverrides::default(), None),
+            Err(AgentRunSettingsError::NoCommandConfigured(
+                "claude-code".into()
+            ))
+        );
+    }
+
+    fn profile(id: &str, built_in: bool, enabled: bool) -> AgentProfile {
+        AgentProfile {
+            id: id.into(),
+            name: id.into(),
+            agent_type: id.into(),
+            command: None,
+            env: BTreeMap::new(),
+            enabled,
+            built_in,
+        }
+    }
+
+    #[test]
+    fn normalization_trims_env_keys_and_drops_blank_keys_keeping_empty_values() {
+        let overrides = normalize_command_overrides(AgentCommandOverrides {
+            global_env: BTreeMap::from([
+                ("  FOO  ".to_string(), "bar".to_string()),
+                ("".to_string(), "drop".to_string()),
+                ("   ".to_string(), "drop".to_string()),
+                ("EMPTY".to_string(), String::new()),
+            ]),
+            profiles: vec![AgentProfile {
+                env: BTreeMap::from([(" KEY ".to_string(), "v".to_string())]),
+                ..profile("codex", true, true)
+            }],
+            ..Default::default()
+        });
+
+        assert_eq!(
+            overrides.global_env,
+            BTreeMap::from([
+                ("FOO".to_string(), "bar".to_string()),
+                ("EMPTY".to_string(), String::new()),
+            ])
+        );
+        assert_eq!(
+            overrides.profiles[0].env,
+            BTreeMap::from([("KEY".to_string(), "v".to_string())])
+        );
+    }
+
+    #[test]
+    fn effective_profiles_seed_missing_built_ins_with_legacy_commands() {
+        let overrides = AgentCommandOverrides {
+            agent_commands: BTreeMap::from([(
+                "claude-code".to_string(),
+                "npx custom-claude".to_string(),
+            )]),
+            ..Default::default()
+        };
+
+        let profiles = effective_profiles(&overrides);
+
+        let built_ins: Vec<&AgentProfile> =
+            profiles.iter().filter(|profile| profile.built_in).collect();
+        assert_eq!(built_ins.len(), BUILT_IN_AGENT_TYPES.len());
+        let claude = built_ins
+            .iter()
+            .find(|profile| profile.id == "claude-code")
+            .expect("claude-code seeded");
+        assert_eq!(claude.command.as_deref(), Some("npx custom-claude"));
+        assert!(built_ins.iter().all(|profile| profile.enabled));
+    }
+
+    #[test]
+    fn effective_profiles_keep_stored_entries_and_fill_missing_built_ins() {
+        let overrides = AgentCommandOverrides {
+            profiles: vec![
+                AgentProfile {
+                    name: "Claude 수정본".into(),
+                    command: Some("npx modified".into()),
+                    ..profile("claude-code", true, false)
+                },
+                profile("custom-1", false, true),
+            ],
+            ..Default::default()
+        };
+
+        let profiles = effective_profiles(&overrides);
+
+        assert_eq!(
+            profiles
+                .iter()
+                .find(|entry| entry.id == "claude-code")
+                .map(|entry| entry.name.as_str()),
+            Some("Claude 수정본"),
+        );
+        assert!(profiles.iter().any(|entry| entry.id == "custom-1"));
+        assert_eq!(
+            profiles.iter().filter(|entry| entry.built_in).count(),
+            BUILT_IN_AGENT_TYPES.len()
+        );
+    }
+
+    #[test]
+    fn normalization_defaults_blank_profile_names_and_empty_commands() {
+        let overrides = normalize_command_overrides(AgentCommandOverrides {
+            profiles: vec![AgentProfile {
+                name: "   ".into(),
+                command: Some("   ".into()),
+                ..profile("codex", true, true)
+            }],
+            ..Default::default()
+        });
+
+        let codex = overrides
+            .profiles
+            .iter()
+            .find(|profile| profile.id == "codex")
+            .expect("codex profile");
+        assert!(!codex.name.trim().is_empty(), "name gets a default");
+        assert_eq!(codex.command, None);
+    }
+
+    #[test]
+    fn save_rejects_payload_with_no_active_built_in_profile() {
+        let repository = MemoryAgentRunSettingsRepository::default();
+        let mut settings = settings("codex");
+        settings.command_overrides = AgentCommandOverrides {
+            profiles: vec![
+                AgentProfile {
+                    env: BTreeMap::from([("SECRET_TOKEN".to_string(), "hunter2".to_string())]),
+                    ..profile("codex", true, false)
+                },
+                profile("claude-code", true, false),
+                profile("opencode", true, false),
+                profile("pi-coding-agent", true, false),
+                profile("kiro-cli", true, false),
+            ],
+            ..Default::default()
+        };
+
+        let error = save_settings(&repository, settings).expect_err("invariant violation");
+
+        assert_eq!(error, AgentRunSettingsError::NoBuiltInProfile);
+        assert!(
+            !error.to_string().contains("hunter2"),
+            "env value must not leak into errors"
+        );
+    }
+
+    #[test]
+    fn merged_profile_env_prefers_profile_values_over_global() {
+        let overrides = AgentCommandOverrides {
+            global_env: BTreeMap::from([
+                ("SHARED".to_string(), "global".to_string()),
+                ("FOO".to_string(), "global-foo".to_string()),
+            ]),
+            profiles: vec![AgentProfile {
+                env: BTreeMap::from([
+                    ("FOO".to_string(), "profile-foo".to_string()),
+                    ("ONLY".to_string(), "profile".to_string()),
+                ]),
+                ..profile("codex", true, true)
+            }],
+            ..Default::default()
+        };
+
+        let merged = merged_profile_env(&overrides, "codex");
+
+        assert_eq!(
+            merged,
+            BTreeMap::from([
+                ("SHARED".to_string(), "global".to_string()),
+                ("FOO".to_string(), "profile-foo".to_string()),
+                ("ONLY".to_string(), "profile".to_string()),
+            ])
+        );
+    }
+
+    #[test]
+    fn merged_profile_env_returns_global_env_for_unknown_profiles() {
+        let overrides = AgentCommandOverrides {
+            global_env: BTreeMap::from([("SHARED".to_string(), "global".to_string())]),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            merged_profile_env(&overrides, "missing"),
+            BTreeMap::from([("SHARED".to_string(), "global".to_string())])
+        );
+    }
+
+    #[test]
+    fn loads_legacy_command_only_overrides_without_migration() {
+        let legacy_json = r#"{
+            "globalCommand": "npx global",
+            "agentCommands": { "codex": "npx codex" }
+        }"#;
+        let overrides: AgentCommandOverrides =
+            serde_json::from_str(legacy_json).expect("legacy shape deserializes");
+
+        assert_eq!(overrides.global_command.as_deref(), Some("npx global"));
+        assert!(overrides.profiles.is_empty());
+        assert!(overrides.global_env.is_empty());
+    }
+}

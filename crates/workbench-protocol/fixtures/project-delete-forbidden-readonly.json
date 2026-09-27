@@ -1,0 +1,34 @@
+{
+  "name": "project-delete-forbidden-readonly",
+  "principal": "readonly",
+  "seed": {
+    "projects": [
+      {
+        "id": "project-1",
+        "name": "Old",
+        "workingDirectory": "/tmp/old",
+        "description": null
+      }
+    ]
+  },
+  "request": {
+    "protocolVersion": 1,
+    "operation": "project.delete",
+    "requestId": "r-pd-fb",
+    "input": {
+      "id": "project-1"
+    },
+    "idempotencyKey": "k-pd-fb"
+  },
+  "expect": {
+    "fault": {
+      "code": "forbidden",
+      "outcome": "notApplied",
+      "retryable": false
+    }
+  },
+  "expectAfter": {
+    "projectsLen": 1,
+    "ledgerApplied": 0
+  }
+}

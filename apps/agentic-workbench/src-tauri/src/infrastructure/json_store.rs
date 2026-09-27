@@ -1,6 +1,8 @@
-// 038 이관 메모: `load_json`이 읽기 경로에서 `.bak`을 `fs::copy`로 복구한다. 프로젝트 저장소는 037에서
-// `crates/workbench-core/src/infrastructure/json_store.rs`(읽기 전용 load + lock 안 recover)로 옮겼고,
-// 나머지 저장소를 옮길 때 이 파일은 삭제한다.
+// 이관 메모: `load_json`이 읽기 경로에서 `.bak`을 `fs::copy`로 복구한다. 037·038에서 서버 소유 저장소
+// (projects·saved-prompts·goals·agent-run-settings)는 `crates/workbench-core`의 `JsonCollectionStore`(읽기 전용
+// load + lock 안 recover)로 옮겼다. 038 뒤 남은 사용처: appearance·session window state·workspace layout(데스크톱
+// 표현 상태, 유지)과 orchestration(2단계 이연). 2단계에서 orchestration을 옮기고 표현 상태 저장을 정리할 때
+// 이 파일을 삭제하거나 표현 상태 전용으로 줄인다.
 use std::{
     fs::{self, File},
     io::Write,

@@ -1,2 +1,12 @@
+pub mod agent_run_settings;
+pub mod errors;
+pub mod git_branch;
+pub mod git_remote;
+pub mod git_worktree;
+pub mod goal;
 pub mod project;
 pub mod project_error;
+pub mod provider_session;
+pub mod saved_prompt;
+pub mod worktree_change;
+pub mod worktree_file;

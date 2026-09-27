@@ -1,0 +1,53 @@
+{
+  "name": "saved-prompt-create-conflict-different-payload",
+  "principal": "desktop",
+  "seed": {
+    "savedPrompts": []
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.create",
+      "requestId": "r-spc-c1",
+      "input": {
+        "label": "A",
+        "prompt": "a"
+      },
+      "idempotencyKey": "k-spc-c"
+    },
+    {
+      "protocolVersion": 1,
+      "operation": "savedPrompt.create",
+      "requestId": "r-spc-c2",
+      "input": {
+        "label": "A",
+        "prompt": "b"
+      },
+      "idempotencyKey": "k-spc-c"
+    }
+  ],
+  "expects": [
+    {
+      "reply": {
+        "kind": "complete",
+        "output": {
+          "label": "A"
+        },
+        "revision": 1
+      }
+    },
+    {
+      "fault": {
+        "code": "conflict",
+        "outcome": "applied"
+      }
+    }
+  ],
+  "ignoreFields": [
+    "id"
+  ],
+  "expectAfter": {
+    "savedPromptsLen": 1,
+    "ledgerApplied": 1
+  }
+}
