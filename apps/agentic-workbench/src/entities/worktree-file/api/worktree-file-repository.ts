@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as invokeDesktop } from "@tauri-apps/api/core";
+
+import { invoke } from "@/shared/api/transport";
 
 import type {
   WorktreeFileEntry,
@@ -50,9 +52,9 @@ export async function readWorktreeTextFile(
 }
 
 export function startWorktreeWatcher(workingDirectory: string) {
-  return invoke<void>("start_worktree_watcher", { workingDirectory });
+  return invokeDesktop<void>("start_worktree_watcher", { workingDirectory });
 }
 
 export function stopWorktreeWatcher() {
-  return invoke<void>("stop_worktree_watcher");
+  return invokeDesktop<void>("stop_worktree_watcher");
 }

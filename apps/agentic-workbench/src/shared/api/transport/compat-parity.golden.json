@@ -1,0 +1,1342 @@
+{
+  "description": "043 T020: 호환 command 인자 → Workbench operation 입력의 golden. expected는 compat Rust가 계산한다(AW `inbound/compat_parity_tests.rs`, UPDATE_GOLDEN=1로 갱신). TS 표(command-table.ts)가 같은 결과를 내야 한다.",
+  "cases": [
+    {
+      "command": "list_projects",
+      "args": {},
+      "benchId": null,
+      "expected": {
+        "operation": "project.list",
+        "input": {}
+      }
+    },
+    {
+      "command": "create_project",
+      "args": {
+        "input": {
+          "name": "P",
+          "workingDirectory": "/work/wt"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "project.create",
+        "input": {
+          "name": "P",
+          "workingDirectory": "/work/wt",
+          "description": null
+        }
+      }
+    },
+    {
+      "command": "create_project",
+      "args": {
+        "input": {
+          "name": "P",
+          "workingDirectory": "/work/wt",
+          "description": "d"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "project.create",
+        "input": {
+          "name": "P",
+          "workingDirectory": "/work/wt",
+          "description": "d"
+        }
+      }
+    },
+    {
+      "command": "update_project",
+      "args": {
+        "id": "p1",
+        "input": {
+          "name": "P",
+          "workingDirectory": "/work/wt"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "project.update",
+        "input": {
+          "id": "p1",
+          "name": "P",
+          "workingDirectory": "/work/wt",
+          "description": null
+        }
+      }
+    },
+    {
+      "command": "delete_project",
+      "args": {
+        "id": "p1"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "project.delete",
+        "input": {
+          "id": "p1"
+        }
+      }
+    },
+    {
+      "command": "list_saved_prompts",
+      "args": {},
+      "benchId": null,
+      "expected": {
+        "operation": "savedPrompt.list",
+        "input": {}
+      }
+    },
+    {
+      "command": "create_saved_prompt",
+      "args": {
+        "input": {
+          "label": "L",
+          "prompt": "text"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "savedPrompt.create",
+        "input": {
+          "label": "L",
+          "prompt": "text"
+        }
+      }
+    },
+    {
+      "command": "update_saved_prompt",
+      "args": {
+        "id": "s1",
+        "input": {
+          "label": "L",
+          "prompt": "text"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "savedPrompt.update",
+        "input": {
+          "id": "s1",
+          "label": "L",
+          "prompt": "text"
+        }
+      }
+    },
+    {
+      "command": "delete_saved_prompt",
+      "args": {
+        "id": "s1"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "savedPrompt.delete",
+        "input": {
+          "id": "s1"
+        }
+      }
+    },
+    {
+      "command": "get_goal",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.get",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "create_goal",
+      "args": {
+        "input": {
+          "workingDirectory": "/work/wt",
+          "objective": "o"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.create",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "objective": "o"
+        }
+      }
+    },
+    {
+      "command": "create_goal",
+      "args": {
+        "input": {
+          "workingDirectory": "/work/wt",
+          "objective": "o",
+          "tokenBudget": 1000
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.create",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "objective": "o",
+          "tokenBudget": 1000
+        }
+      }
+    },
+    {
+      "command": "update_goal",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {}
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.update",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "update_goal",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {
+          "objective": "o2",
+          "status": "paused",
+          "tokenBudget": 50
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.update",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "objective": "o2",
+          "status": "paused",
+          "tokenBudget": 50
+        }
+      }
+    },
+    {
+      "command": "update_goal",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {
+          "tokenBudget": null
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.update",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "clear_goal",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.clear",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "record_goal_progress",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {
+          "tokensUsed": 10,
+          "timeUsedSeconds": 3
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "goal.recordProgress",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "tokensUsed": 10,
+          "timeUsedSeconds": 3
+        }
+      }
+    },
+    {
+      "command": "get_agent_run_settings",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "agentRunSettings.get",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_git_remotes",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.listRemotes",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_git_branches",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.listBranches",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_git_worktrees",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.listWorktrees",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_git_worktrees",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "includeStatus": false
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.listWorktrees",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "includeStatus": false
+        }
+      }
+    },
+    {
+      "command": "list_worktree_changes",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.listChanges",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "create_git_worktree",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {
+          "path": "/work/new"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.createWorktree",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "path": "/work/new"
+        }
+      }
+    },
+    {
+      "command": "create_git_worktree",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "input": {
+          "path": "/work/new",
+          "branch": "b",
+          "reference": "main"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.createWorktree",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "path": "/work/new",
+          "branch": "b",
+          "reference": "main"
+        }
+      }
+    },
+    {
+      "command": "delete_git_worktree",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "path": "/work/new"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "git.deleteWorktree",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "path": "/work/new"
+        }
+      }
+    },
+    {
+      "command": "get_worktree_changes",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.getChanges",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "get_worktree_file_diff",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "path": "a.txt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.getFileDiff",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "path": "a.txt"
+        }
+      }
+    },
+    {
+      "command": "list_worktree_files",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.listFiles",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_worktree_files",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "scope": {
+          "kind": "markdown",
+          "dir": "docs",
+          "depth": 2
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.listFiles",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "scope": {
+            "kind": "markdown",
+            "dir": "docs",
+            "depth": 2
+          }
+        }
+      }
+    },
+    {
+      "command": "read_worktree_text_file",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "path": "a.txt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.readTextFile",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "path": "a.txt"
+        }
+      }
+    },
+    {
+      "command": "list_worktree_git_history",
+      "args": {
+        "workingDirectory": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.listHistory",
+        "input": {
+          "workingDirectory": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "list_worktree_git_history",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "maxCount": 50,
+        "offset": 10,
+        "cursor": "c1"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.listHistory",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "maxCount": 50,
+          "offset": 10,
+          "cursor": "c1"
+        }
+      }
+    },
+    {
+      "command": "get_worktree_git_graph",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "maxCount": 20
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.getGraph",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "maxCount": 20
+        }
+      }
+    },
+    {
+      "command": "get_worktree_commit_detail",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "commitHash": "abc"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.getCommitDetail",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "commitHash": "abc"
+        }
+      }
+    },
+    {
+      "command": "get_worktree_commit_file_diff",
+      "args": {
+        "workingDirectory": "/work/wt",
+        "commitHash": "abc",
+        "path": "a.txt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "worktree.getCommitFileDiff",
+        "input": {
+          "workingDirectory": "/work/wt",
+          "commitHash": "abc",
+          "path": "a.txt"
+        }
+      }
+    },
+    {
+      "command": "list_agents",
+      "args": {},
+      "benchId": null,
+      "expected": {
+        "operation": "agent.list",
+        "input": {}
+      }
+    },
+    {
+      "command": "list_provider_sessions",
+      "args": {
+        "agentId": "codex"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "agent.listProviderSessions",
+        "input": {
+          "agentId": "codex"
+        }
+      }
+    },
+    {
+      "command": "list_provider_sessions",
+      "args": {
+        "agentId": "codex",
+        "cwd": "/work/wt"
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "agent.listProviderSessions",
+        "input": {
+          "agentId": "codex",
+          "cwd": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "send_prompt_to_run",
+      "args": {
+        "runId": "r1",
+        "prompt": "hi"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.sendPrompt",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "prompt": "hi"
+        }
+      }
+    },
+    {
+      "command": "steer_prompt_to_run",
+      "args": {
+        "runId": "r1",
+        "prompt": "hi"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.steer",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "prompt": "hi"
+        }
+      }
+    },
+    {
+      "command": "cancel_current_prompt_and_send_to_run",
+      "args": {
+        "runId": "r1",
+        "prompt": "hi"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.cancelAndSend",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "prompt": "hi"
+        }
+      }
+    },
+    {
+      "command": "set_run_permission_mode",
+      "args": {
+        "runId": "r1",
+        "permissionMode": "plan"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.setPermissionMode",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "mode": "plan"
+        }
+      }
+    },
+    {
+      "command": "cancel_agent_run",
+      "args": {
+        "runId": "r1"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.cancel",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1"
+        }
+      }
+    },
+    {
+      "command": "respond_agent_permission",
+      "args": {
+        "runId": "r1",
+        "permissionId": "perm",
+        "optionId": "allow"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.respondPermission",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "permissionId": "perm",
+          "optionId": "allow"
+        }
+      }
+    },
+    {
+      "command": "list_agent_exchanges",
+      "args": {},
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "exchange.list",
+        "input": {
+          "benchId": "bench-1"
+        }
+      }
+    },
+    {
+      "command": "acknowledge_agent_exchange",
+      "args": {
+        "request": {
+          "requestId": "x1",
+          "targetPanelId": "p2",
+          "outcome": "delivered",
+          "reason": null
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "exchange.acknowledge",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "x1",
+            "targetPanelId": "p2",
+            "outcome": "delivered",
+            "reason": null
+          }
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "x1",
+            "targetPanelId": "p2",
+            "outcome": "delivered",
+            "reason": null
+          }
+        }
+      }
+    },
+    {
+      "command": "bootstrap_orchestration_workspace",
+      "args": {
+        "input": {
+          "worktreePath": "/work/wt"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.bootstrap",
+        "input": {
+          "benchId": "bench-1",
+          "worktreePath": "/work/wt",
+          "resumeWorkspaceId": null
+        }
+      }
+    },
+    {
+      "command": "bootstrap_orchestration_workspace",
+      "args": {
+        "input": {
+          "worktreePath": "/work/wt",
+          "resumeWorkspaceId": "ws1"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.bootstrap",
+        "input": {
+          "benchId": "bench-1",
+          "worktreePath": "/work/wt",
+          "resumeWorkspaceId": "ws1"
+        }
+      }
+    },
+    {
+      "command": "get_orchestration_workspace",
+      "args": {},
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.get",
+        "input": {
+          "benchId": "bench-1"
+        }
+      }
+    },
+    {
+      "command": "list_recoverable_orchestration_workspaces",
+      "args": {
+        "input": {
+          "worktreePath": "/work/wt"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.listRecoverable",
+        "input": {
+          "benchId": "bench-1",
+          "worktreePath": "/work/wt"
+        }
+      }
+    },
+    {
+      "command": "delegate_orchestration_goal",
+      "args": {
+        "input": {
+          "goal": "g",
+          "extra": {
+            "a": 1
+          }
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.delegateGoal",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "goal": "g",
+            "extra": {
+              "a": 1
+            }
+          }
+        }
+      }
+    },
+    {
+      "command": "adopt_manual_orchestration_child",
+      "args": {
+        "input": {
+          "panelId": "p2",
+          "title": "T"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.adoptManualChild",
+        "input": {
+          "benchId": "bench-1",
+          "panelId": "p2",
+          "title": "T"
+        }
+      }
+    },
+    {
+      "command": "list_orchestration_tasks",
+      "args": {
+        "input": {
+          "generationId": "g1"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.listTasks",
+        "input": {
+          "benchId": "bench-1",
+          "generationId": "g1"
+        }
+      }
+    },
+    {
+      "command": "collect_orchestration_reports",
+      "args": {},
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.collectReports",
+        "input": {
+          "benchId": "bench-1"
+        }
+      }
+    },
+    {
+      "command": "send_orchestration_child_command",
+      "args": {
+        "input": {
+          "taskId": "t1",
+          "command": "c"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.sendChildCommand",
+        "input": {
+          "benchId": "bench-1",
+          "input": {
+            "taskId": "t1",
+            "command": "c"
+          }
+        }
+      }
+    },
+    {
+      "command": "respond_orchestration_input",
+      "args": {
+        "input": {
+          "requestId": "q1",
+          "answer": "a"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.respondInput",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q1",
+            "answer": "a"
+          }
+        }
+      }
+    },
+    {
+      "command": "replay_orchestration_runtime_events",
+      "args": {
+        "input": {
+          "runId": "r1",
+          "afterSequence": 3
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.replay",
+        "input": {
+          "benchId": "bench-1",
+          "runId": "r1",
+          "afterSequence": 3
+        }
+      }
+    },
+    {
+      "command": "dispatch_orchestration_prompt",
+      "args": {
+        "input": {
+          "prompt": "p"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.dispatchPrompt",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "prompt": "p"
+          }
+        }
+      }
+    },
+    {
+      "command": "recover_orchestration_workspace",
+      "args": {},
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.recover",
+        "input": {
+          "benchId": "bench-1"
+        }
+      }
+    },
+    {
+      "command": "bind_main_coordinator_run",
+      "args": {
+        "input": {
+          "requestId": "q",
+          "panelId": "main-agent-run",
+          "runId": "r1",
+          "state": "active"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.bindCoordinator",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q",
+            "panelId": "main-agent-run",
+            "runId": "r1",
+            "state": "active"
+          }
+        }
+      }
+    },
+    {
+      "command": "set_orchestration_presentation",
+      "args": {
+        "input": {
+          "requestId": "q",
+          "presentation": "x"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.setPresentation",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q",
+            "presentation": "x"
+          }
+        }
+      }
+    },
+    {
+      "command": "cancel_orchestration_task",
+      "args": {
+        "input": {
+          "requestId": "q",
+          "taskId": "t"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.cancelTask",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q",
+            "taskId": "t"
+          }
+        }
+      }
+    },
+    {
+      "command": "retry_orchestration_task",
+      "args": {
+        "input": {
+          "requestId": "q",
+          "taskId": "t"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.retryTask",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q",
+            "taskId": "t"
+          }
+        }
+      }
+    },
+    {
+      "command": "reassign_orchestration_task",
+      "args": {
+        "input": {
+          "requestId": "q",
+          "taskId": "t"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.reassignTask",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q",
+            "taskId": "t"
+          }
+        }
+      }
+    },
+    {
+      "command": "handoff_orchestration_coordinator",
+      "args": {
+        "input": {
+          "requestId": "q"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "orchestration.handoffCoordinator",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "q"
+          }
+        }
+      }
+    },
+    {
+      "command": "save_agent_run_settings",
+      "args": {
+        "settings": {
+          "workingDirectory": "/work/wt",
+          "agentId": "codex"
+        }
+      },
+      "benchId": null,
+      "expected": {
+        "operation": "agentRunSettings.save",
+        "input": {
+          "settings": {
+            "workingDirectory": "/work/wt",
+            "agentId": "codex",
+            "permissionMode": "default",
+            "modelId": "providerDefault",
+            "effortId": "providerDefault",
+            "contextSize": "default",
+            "sessionMode": "new",
+            "ralphLoop": {
+              "enabled": false,
+              "maxIterations": 5,
+              "delayMs": 0,
+              "stopOnPermission": false,
+              "stopOnError": true,
+              "promptTemplate": ""
+            },
+            "commandOverrides": {
+              "globalCommand": null,
+              "agentCommands": {},
+              "globalEnv": {},
+              "profiles": []
+            }
+          }
+        },
+        "wire": {
+          "settings": {
+            "workingDirectory": "/work/wt",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "command": "start_agent_run",
+      "args": {
+        "request": {
+          "goal": "g",
+          "agentId": "codex",
+          "cwd": "/work/wt",
+          "runId": "r1"
+        },
+        "panelId": "main"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.start",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "workspaceId": null,
+            "checkoutId": null,
+            "cwd": "/work/wt",
+            "agentCommand": null,
+            "agentEnv": null,
+            "mcpServers": [],
+            "stdioBufferLimitMb": null,
+            "autoAllow": null,
+            "permissionMode": null,
+            "modelId": null,
+            "effortId": null,
+            "contextSize": null,
+            "runId": "r1",
+            "resumeSessionId": null,
+            "resumePolicy": null,
+            "ralphLoop": null
+          },
+          "panelId": "main"
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "cwd": "/work/wt",
+            "runId": "r1"
+          },
+          "panelId": "main"
+        }
+      }
+    },
+    {
+      "command": "start_agent_run",
+      "args": {
+        "request": {
+          "goal": "g",
+          "agentId": "codex"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.start",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "workspaceId": null,
+            "checkoutId": null,
+            "cwd": null,
+            "agentCommand": null,
+            "agentEnv": null,
+            "mcpServers": [],
+            "stdioBufferLimitMb": null,
+            "autoAllow": null,
+            "permissionMode": null,
+            "modelId": null,
+            "effortId": null,
+            "contextSize": null,
+            "runId": null,
+            "resumeSessionId": null,
+            "resumePolicy": null,
+            "ralphLoop": null
+          }
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "request": {
+            "goal": "g",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "command": "list_agent_tool_command_candidates",
+      "args": {
+        "input": {
+          "agentId": "codex",
+          "workingDirectory": "/work/wt",
+          "sessionMode": "new"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "run.listToolCandidates",
+        "input": {
+          "benchId": "bench-1",
+          "query": {
+            "runId": null,
+            "agentId": "codex",
+            "workingDirectory": "/work/wt",
+            "sessionMode": "new"
+          }
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "query": {
+            "agentId": "codex",
+            "workingDirectory": "/work/wt",
+            "sessionMode": "new"
+          }
+        }
+      }
+    },
+    {
+      "command": "sync_agent_workspace",
+      "args": {
+        "request": {
+          "worktreePath": "/work/wt",
+          "revision": 1,
+          "focusedPanelId": "main",
+          "panels": [
+            {
+              "panelId": "main",
+              "title": "Main",
+              "runId": "r1",
+              "status": "running"
+            }
+          ]
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "exchange.syncWorkspace",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "worktreePath": "/work/wt",
+            "revision": 1,
+            "focusedPanelId": "main",
+            "panels": [
+              {
+                "panelId": "main",
+                "title": "Main",
+                "runId": "r1",
+                "status": "running"
+              }
+            ]
+          }
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "request": {
+            "worktreePath": "/work/wt",
+            "revision": 1,
+            "focusedPanelId": "main",
+            "panels": [
+              {
+                "panelId": "main",
+                "title": "Main",
+                "runId": "r1",
+                "status": "running"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "command": "send_agent_exchange",
+      "args": {
+        "request": {
+          "requestId": "x1",
+          "sourcePanelId": "main",
+          "targetPanelId": "p2",
+          "message": "m",
+          "delivery": "queue"
+        }
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "exchange.send",
+        "input": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "x1",
+            "sourcePanelId": "main",
+            "sourceRunId": null,
+            "targetPanelId": "p2",
+            "targetRunId": null,
+            "message": "m",
+            "delivery": "queue"
+          }
+        },
+        "wire": {
+          "benchId": "bench-1",
+          "request": {
+            "requestId": "x1",
+            "sourcePanelId": "main",
+            "targetPanelId": "p2",
+            "message": "m",
+            "delivery": "queue"
+          }
+        }
+      }
+    }
+  ]
+}

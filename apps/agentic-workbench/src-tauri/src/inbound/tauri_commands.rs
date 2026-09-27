@@ -1710,3 +1710,7 @@ mod tests {
         assert!(validate_external_browser_url("https:///docs").is_err());
     }
 }
+
+#[cfg(test)]
+#[path = "compat_parity_tests.rs"]
+mod compat_parity_tests;

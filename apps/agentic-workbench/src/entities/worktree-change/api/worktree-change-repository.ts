@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "@/shared/api/transport";
 
 import type { WorktreeChange } from "@/entities/worktree-change/model";
 

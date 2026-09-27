@@ -50,6 +50,9 @@ importers:
       '@yoophi/markdown-annotation-react':
         specifier: workspace:*
         version: link:../../packages/markdown-annotation-react
+      '@yoophi/workbench-client':
+        specifier: workspace:*
+        version: link:../../packages/workbench-client
       '@yoophi/workspace-auto-refresh':
         specifier: workspace:*
         version: link:../../packages/workspace-auto-refresh

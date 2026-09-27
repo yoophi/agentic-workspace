@@ -107,3 +107,25 @@ tasks.md에는 경로가 `crates/workbench-server/tests/`로 적혀 있다. 실�
 - **조회·변경 구분**: `OPERATION_KINDS: Record<OperationId, …>`(85개, 시험 host의 `system.describe`에서 뽑음). 누락이나 초과가 있으면 타입 검사가 실패한다. 실제 서버와의 대조는 통합 suite(T041)에서 한다.
 - **`faultToString`**: compat Rust와 같다. 교환은 `details.exchangeCode`가 있을 때만 JSON이다(계약 문서의 `?? code`는 compat 코드와 달라 T055에서 문서를 고친다).
 - **`onState`**: 구독 즉시 현재 상태를 한 번 알린다(화면 표시용). 처음 쓴 시험 기대값에 이 첫 알림이 빠져 있어 계약을 명시하는 쪽으로 고쳤다.
+
+## T020 · T024 · T025 command 표 동등성·transport·저장소 이관
+
+| 단계 | 명령 | 종료 코드 | 의미 |
+|---|---|---|---|
+| golden 생성 | `cd apps/agentic-workbench/src-tauri && UPDATE_GOLDEN=1 cargo test --lib compat_parity` | 101 → 수정 뒤 0 | 처음 실패는 제 추정 command 수(60)가 틀려서다. 실제 서버 소유 command는 **61개**다. 파일은 compat 코드로 계산됐다 |
+| golden 확인 | `cargo test --lib compat_parity` | 0 | 72 사례, 61 command. DTO를 통째로 넘기는 사례 6개(`save_agent_run_settings`, `start_agent_run`×2, `list_agent_tool_command_candidates`, `sync_agent_workspace`, `send_agent_exchange`, `acknowledge_agent_exchange`)는 화면 원본(`wire`)과 compat 입력이 **서버의 operation 입력 DTO로 같다**는 것을 Rust가 확인한다 |
+| TS red | `npx vitest run src/shared/api/transport/command-table.parity.test.ts` | 1 | **실제 불일치 1건**: `update_goal`의 `tokenBudget: null`. compat은 생략하고, TS 표는 코드 주석("null 포함 그대로")을 따라 null을 보냈다 |
+| TS green | 같은 명령 | 0 | 73 passed(72 사례 + 표와 golden의 command 목록 일치) |
+| transport red→green | `npx vitest run src/shared/api/transport/` | 1 → 0 | `http-transport` 모듈 없음 → 82 passed |
+| AW 전체 | `pnpm --filter @yoophi/agentic-workbench test`, `tsc --noEmit` | 0, 0 | 83 files / 511 tests(기준선 429 + 82). 기존 화면 시험은 기본값(호환 경로)으로 통과 |
+
+관찰(기존 동작, 043이 바꾸지 않음):
+- `update_goal`의 compat 인자 타입은 `Option<Option<usize>>`지만 serde 기본 역직렬화는 JSON null을 바깥 `None`으로 읽는다. 그래서 화면이 `tokenBudget: null`을 보내도 **예산 지우기가 서버에 전달되지 않는다**. `workbench_compat::goal_update_input`의 주석과 실제 동작이 다르다.
+- 네트워크 경로는 동등성을 위해 같은 동작을 따른다. 고칠지는 별도 이슈로 판단한다.
+
+transport:
+- `shared/api/transport`:
+  - `invoke`는 창이 정한 transport로 간다. 기본은 호환 경로다.
+  - `HttpTransport`는 command 표로 작업대를 확보하고(`ensure_window_bench(open, hint)`), 작업대가 없을 때의 결과·오류, 결과 변환(`sessionForWindow`), 오류 문자열(교환·orchestration), 항상 성공하는 command(`list_agents`, replay의 Missing)를 compat과 같게 돌려준다.
+  - 적용 안 됨(`notApplied`)과 결과 불명(`unknown`)은 새 문구로 보여 준다.
+- 저장소 13개가 공용 `invoke`를 쓴다. 데스크톱 표현 command(`open_worktree_window`, worktree 감시)는 Tauri `invoke`를 그대로 쓴다.

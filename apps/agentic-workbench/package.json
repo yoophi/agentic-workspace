@@ -26,6 +26,7 @@
     "@yoophi/git-ui": "workspace:*",
     "@yoophi/markdown-annotation-core": "workspace:*",
     "@yoophi/markdown-annotation-react": "workspace:*",
+    "@yoophi/workbench-client": "workspace:*",
     "@yoophi/workspace-auto-refresh": "workspace:*",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
