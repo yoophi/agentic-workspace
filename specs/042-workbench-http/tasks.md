@@ -127,7 +127,7 @@
 - [X] T039 release 유출 확인: `cargo build --release`(AW) 뒤 `strings`로 `AW_HTTP_DIAGNOSTIC_FILE`·`AW_HTTP_WEBVIEW_PROBE_FILE`·`report_http_probe` 0건, 결과 Notes
 - [X] T040 앱 스모크(quickstart §3, 격리 identifier): (a) 끝점 진단, (b) WebView probe — **보고 때 (a)는 "끝점", (b)는 "데스크톱 연결"로 구분**, 재기동 뒤 반복, 캡처한 `origin`으로 허용 목록 확인. 스모크 뒤 격리 디렉터리·파일 삭제
 - [X] T041 [P] docs: `docs/workbench-seam.md` 네트워크 어댑터 절(경로·인증·출처·표·실행 수명, Mermaid), `docs/client-server-architecture-research.md` 진행 각주, `crates/workbench-server/docs/adr/0001-…`·`0002-…`, `crates/workbench-server/CONTEXT.md` 필요 시(용어는 core CONTEXT 참조)
-- [ ] T042 전체 게이트(quickstart §1·§2) 한 번 실행·종료 코드 기록, SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad) — 미검증 범위(배포 Origin 실측, 화면 경로 전환은 4단계) 명시, 커밋 `docs(aw): record 042 HTTP adapter status`
+- [X] T042 전체 게이트(quickstart §1·§2) 한 번 실행·종료 코드 기록, SC-001–008 증거·spec 대비 어긋난 점 Notes, PR 본문 초안(scratchpad) — 미검증 범위(배포 Origin 실측, 화면 경로 전환은 4단계) 명시, 커밋 `docs(aw): record 042 HTTP adapter status`
 
 ---
 
@@ -207,3 +207,7 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
   - **미검증**: 실제 앱에서 진행 중 호출이 있는 상태의 종료(agent 없이 오래 걸리는 호출을 만들 수 없음 — drain 대기 의미는 단위 시험 `exit_waits_for_accepted_http_and_mcp_calls`가 잰다), 배포 Origin(`tauri://localhost`) 실측(설계 리뷰 D4 — 4단계 전 release 번들 스모크로), Windows `http://tauri.localhost`
   - 정리: 격리 데이터 디렉터리·토큰 든 진단 파일 삭제(토큰 없는 probe·진단 결과만 scratchpad에 남김)
 - **T041**: `docs/workbench-seam.md` 네트워크 어댑터 절(인증·출처·표·MCP 재시도 식별·데스크톱 조립·종료, Mermaid), 연구 문서 042 진행 각주, `crates/workbench-server/docs/adr/0001`(protocol만 의존)·`0002`(연결보다 오래 사는 호출). server CONTEXT.md는 새 용어가 core CONTEXT와 겹쳐 만들지 않았다
+- **T042 전체 게이트**(각 한 번, 원 명령 종료 코드): `cargo test --workspace --all-targets --no-fail-fast` status=0(732 passed, 0 failed, 7 ignored; 기준선 661) · `cargo clippy --workspace --all-targets -- -D warnings` status=0 · `cargo fmt --all -- --check` status=0 · `pnpm run check-types` status=0 · `pnpm run test` status=0(turbo 12개 중 11개 캐시 재생 — 프런트 입력 변경 없음) · `git diff --stat main -- apps/agentic-workbench/src crates/acp-agent-core packages/agent-client` 0
+- **SC 증거**: SC-001 계약·이벤트 suite가 운영 router로 통과(fixture 변경 0) · SC-002 `http_security.rs`·`http_tickets.rs`·AW `mcp_tokens_resolve_…revoked`, 거절 뒤 상태 불변 · SC-003 `http_ws_boundary_race.rs` 1,000회 · SC-004 `http_mixed_paths.rs` 160건 · SC-005 앱 스모크 (b) WebView probe 3회 기동 · SC-006 화면 diff 0(동작 변경은 AW Rust에 한정 — MCP 출처 정확 일치, 도구 재시도 식별, 종료 drain) · SC-007 `http_security.rs`·`http_tickets.rs` 기록 검사, 스모크 로그 토큰 0건 · SC-008 `reviews/exposure-evidence.md` 53개
+- **spec 대비 어긋난 점**: (1) `run.start`의 진행 중 재시도는 기다림이 아니라 retryable conflict(in-process와 같음, contracts §3 정정) (2) `bench.close` 재시작 뒤 재시도는 `notFound`가 아니라 `closed:false`(종료 상태 멱등) (3) T027을 처음 helper 시험으로 대신했다가 사용자 검토로 MCP 재시도 식별 결함을 찾아 수정 (4) macOS Quit에서 `ExitRequested`가 오지 않는 것을 스모크에서 찾아 `Exit` 경로 drain 추가 (5) 가짜 엔진을 `workbench_core::testing`(`test-hooks`)으로 옮김
+- **미검증 범위**: 배포 Origin `tauri://localhost`·Windows `http://tauri.localhost` 실측(4단계 전 release 번들 스모크), 실제 앱에서 진행 중 호출이 있는 종료, 화면의 HTTP 경로 전환(4단계), AW MCP 끝점 자체의 네트워크 단절(어댑터 seam 시험과 공유 `spawn_accepted`로 잼)
