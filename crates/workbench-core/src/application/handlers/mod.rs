@@ -278,7 +278,7 @@ pub fn build_registry(
         &adapters.provider_sessions,
     );
     bench::register(&mut registry, benches);
-    run::register(&mut registry, &runner, &coordinator, benches);
+    run::register(&mut registry, &runner, &coordinator, benches, orchestration);
     exchange::register(&mut registry, benches);
     orchestration::register(&mut registry, benches, orchestration);
     registry.register(

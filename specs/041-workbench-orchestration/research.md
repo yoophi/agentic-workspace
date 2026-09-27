@@ -51,7 +51,7 @@
 
 **Decision**: 묶임은 core 메모리 표 `OrchestrationBindings{workspace_id → Binding{bench_id, binding_id}}`와 역방향 `bench_id → workspace_id`. 작업대 하나에 작업 영역 최대 1개. 영속 `boundWindowLabel`은 **읽을 때 무시하고 쓸 때 생략**(serde `default`·`skip_serializing`) — 이전 빌드는 필드가 없으면 `None`(복구 가능)으로 읽는다. 서버 재시작 뒤 모든 작업 영역은 복구 가능.
 
-- **묶기**(`orchestration.bootstrap` 새로 만들기·재개, `orchestration.recover`): ① 작업대 입장권을 얻는다(닫히는 중이면 `notFound`), ② binding mutex 안에서 "작업 영역 찾기/만들기(저장소 `update`) + 이미 묶임 검사 + 묶임 표 삽입"을 한 번에 한다, ③ 입장권을 놓는다. 작업 영역 id를 아직 모르는 새로 만들기·worktree로 찾는 복구도 같은 mutex로 직렬화되어 두 작업대가 둘 다 "없음"을 보고 중복 생성·중복 묶기를 할 수 없다. 입장권 덕분에 닫기 hook이 먼저 돌아 죽은 작업대에 묶이는 일이 없다.
+- **묶기**(`orchestration.bootstrap` — 새로 만들기 또는 `resumeWorkspaceId`로 재개. `orchestration.recover`는 이미 묶인 작업 영역을 재조정할 뿐 묶지 않는다 — 오늘 동작, 흐름 테스트로 확인): ① 작업대 입장권을 얻는다(닫히는 중이면 `notFound`), ② binding mutex 안에서 "작업 영역 찾기/만들기(저장소 `update`) + 이미 묶임 검사 + 묶임 표 삽입"을 한 번에 한다, ③ 입장권을 놓는다. 작업 영역 id를 아직 모르는 새로 만들기·worktree로 찾는 복구도 같은 mutex로 직렬화되어 두 작업대가 둘 다 "없음"을 보고 중복 생성·중복 묶기를 할 수 없다. 입장권 덕분에 닫기 hook이 먼저 돌아 죽은 작업대에 묶이는 일이 없다.
 - 거절 문구: 이미 다른 작업대에 묶인 작업 영역 → "The workspace cannot be bound to this window.", 작업대가 이미 다른 worktree 작업 영역에 묶임 → "The window is already bound to another worktree."(바이트 동일 유지, contracts에 명시).
 - **풀기**: 작업대 닫기 hook을 **async**로 바꾼다(`BenchCloseHook`이 future를 돌려주고 `finish_close`가 await — 닫기 정리는 이미 spawn된 task 안). hook은 소유 run 취소 뒤에 돌며 ① binding mutex 안에서 묶임 표 제거 + 오늘 `release_window` 규칙(노드 주의 필요·run 재조정)을 `update`(`spawn_blocking`)로 적용, ② 마지막 갱신 이벤트 발행, ③ 묶임 스트림 제거(040 `remove_stream`, 제거 표식) 순서다.
 - agent operation은 작업대 입장권을 쥐지 않는다. 닫기 뒤 늦게 도착한 agent 호출은 묶임이 없으므로 조회는 오늘 결과, 자식 기동은 입장 실패로 과제가 대기/실패로 남는다(R8).
@@ -130,7 +130,7 @@ worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core�
 
 ## R11. 호환 command와 `boundWindowLabel`
 
-**Decision**: AW command는 `DesktopBenches`로 창의 작업대를 찾아(`bootstrap`·`recover`는 `ensure`, 나머지는 조회만) `Workbench.call`을 부르고, 결과 작업 영역에 `boundWindowLabel`을 다시 채운다(묶인 작업대가 이 창의 작업대면 이 창 label, 아니면 null) — 화면 타입(`string | null`, 필수 필드) 유지, core에는 창 label 없음. 창에 작업대가 없으면 core를 부르지 않고 오늘 서비스가 내던 결과(`get` → null, 나머지 → 오늘 "작업 영역 없음" 오류 JSON)를 그대로 돌려준다. 오류는 `OrchestrationError` JSON 문자열(fault `details.orchestrationError`에 원본을 싣고 compat가 재구성, 040 교환과 같은 방식).
+**Decision**: AW command는 `DesktopBenches`로 창의 작업대를 찾아(`bootstrap`·`listRecoverable`은 `ensure`, 나머지는 조회만) `Workbench.call`을 부르고, 결과 작업 영역에 `boundWindowLabel`을 다시 채운다(묶인 작업대가 이 창의 작업대면 이 창 label, 아니면 null) — 화면 타입(`string | null`, 필수 필드) 유지, core에는 창 label 없음. 창에 작업대가 없으면 core를 부르지 않고 오늘 서비스가 내던 결과(`get` → null, 나머지 → 오늘 "작업 영역 없음" 오류 JSON)를 그대로 돌려준다. 오류는 `OrchestrationError` JSON 문자열(fault `details.orchestrationError`에 원본을 싣고 compat가 재구성, 040 교환과 같은 방식).
 
 ## R12. MCP 도구
 
@@ -146,7 +146,7 @@ worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core�
 
 ## R15. 테스트
 
-**Decision**: AW orchestration 테스트 60개를 core로 옮긴다(위치만 이동, 기대값 유지 — 창 label을 쓰던 테스트는 작업대 id로 입력만 바꾼다). projector(production 미사용)는 테스트와 함께 삭제한다. 새 테스트: fixture(데스크톱 18·agent 16 operation, 교차 작업대·교차 주체·이전 세대·다른 과제 거절), 묶임 스트림 fixture(순번·구독 거절·닫기 gap·재묶임 새 스트림), cross-workspace·same-workspace 동시성 테스트(R1), liveness 테스트 5종(R2: 알림 전달 중 Main 도구, 대기 중 자식 보고, 취소 안 종료 처리, 기동 중 닫기, 동시 bootstrap·recover), 작업대 닫기 → 복구 가능 → 다른 작업대로 복구, worktree 변경 시 과제 실패(가짜 엔진), scheduler 대기·진행. describe fixture 재생성(데스크톱 85, readonly, agent).
+**Decision**: AW orchestration 테스트 60개를 core로 옮긴다(위치만 이동, 기대값 유지 — 창 label을 쓰던 테스트는 작업대 id로 입력만 바꾼다). projector(production 미사용)는 테스트와 함께 삭제한다. 새 테스트: fixture(데스크톱 18·agent 16 operation, 교차 작업대·교차 주체·이전 세대·다른 과제 거절), 묶임 스트림 fixture(순번·구독 거절·닫기 gap·재묶임 새 스트림), cross-workspace·same-workspace 동시성 테스트(R1), liveness 테스트 5종(R2: 알림 전달 중 Main 도구, 대기 중 자식 보고, 취소 안 종료 처리, 기동 중 닫기, 같은 복구 가능 작업 영역 동시 재개 200회), 작업대 닫기 → 복구 가능 → 다른 작업대로 복구, worktree 변경 시 과제 실패(가짜 엔진), scheduler 대기·진행. describe fixture 재생성(데스크톱 85, readonly, agent).
 
 ## R17. run 재생·구독 권한 (설계 리뷰 반영)
 
@@ -167,7 +167,7 @@ worktree 감시(기동 시 지문, 종료 시 비교 → 과제 실패)는 core�
 - **데스크톱 입력**: `orchestration.bindCoordinator`의 `request.runId`, `orchestration.handoffCoordinator`의 `request.successorRunId`는 **대상 작업대가 소유한 살아 있는 run**(엔진 `active_owner_of(run) == 작업대`)이어야 한다. 아니면 `forbidden` `"run is owned by another bench."`이고 작업 영역은 바뀌지 않는다. 오늘 서비스는 이 값을 검사 없이 저장한다(`orchestration_service.rs:365–385`, `:1484–1506`).
 - **agent 입력**: 보고의 `reporterRunId` 등 agent operation의 run id는 입력이 아니라 **principal의 run**에서만 가져온다(입력에 있으면 principal run과 같아야 함, 아니면 `forbidden` — 오늘 도구가 principal run을 넣는 것과 같다).
 - **서버 기동**: 자식 run id는 서버가 기동 전에 발급·기록한다(R7·R8).
-- **유일성**: 한 run은 **작업 영역 하나에만** 속한다. 삽입은 저장소 `update` 안에서 전체 작업 영역을 보고 다른 작업 영역의 노드·세대·과제 시도에 같은 run이 있으면 거절한다(`conflict`, 오늘 없는 경우라 새 문구 `"run already belongs to another orchestration workspace."`). 이로써 R7 역할 판정과 R17 재생 조건 2의 "그 run이 속한 작업 영역"이 하나로 정해진다.
+- **유일성**: 한 run은 **작업 영역 하나에만** 속한다. 처음 설계는 삽입 시 `conflict` 검사였지만, 구현 중 사용자 점검(작업대 닫기·복구·재연결)으로 다시 따져 보니 **run id 재사용**이 진짜 경로였다 — 오늘 `run.start`는 살아 있는 run만 중복으로 거절하므로, 작업대 A가 닫혀 run이 끝난 뒤 작업대 B가 같은 id로 run을 띄우면 복구 가능한 작업 영역이 여전히 그 id를 기록하고 hub journal도 같은 스트림을 쓴다. 그러면 그 작업 영역을 복구한 작업대가 B의 run 기록을 재생하고(R17 허용 조건 2) 역할 판정도 모호해진다. 그래서 **`run.start`가 끝난 run의 id 재사용을 거절한다**(hub에 발행 이력·제거 표식이 있거나 어떤 작업 영역이 노드·세대로 기록 중이면 `conflict` `"duplicate run id: <id>"` — 오늘 살아 있는 중복과 같은 문구, 멱등 재시도는 저장된 결과로 끝나므로 영향 없음). 이 규칙과 "작업대 하나에 작업 영역 하나"(묶기 검사) 때문에 활성 연결의 삽입 시점 유일성 검사는 도달할 수 없어 두지 않는다 — 계약에도 문구를 남기지 않는다. 테스트: `orchestration_flow.rs::ended_run_ids_cannot_be_reused_across_close_and_recover`(닫기 뒤 coordinator id 재사용 거절, 일반 run id 재사용 거절, 복구한 작업대는 원래 run만 재생·다른 작업대 run은 거절).
 
 R17 재생 조건 2는 이 검증을 전제로 한다 — 작업 영역 안의 run id는 모두 삽입 시점에 같은 작업대(또는 복구 이전 작업대) 소유였거나 서버가 기동한 것이므로 신뢰할 수 있다. 음성 테스트: 다른 작업대의 run으로 bind·handoff → 거절·상태 불변, 그 뒤 그 run의 `run.replay`·`run:<id>` 구독도 거절.
 

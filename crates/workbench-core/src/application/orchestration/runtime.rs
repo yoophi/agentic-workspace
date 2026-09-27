@@ -38,8 +38,9 @@ use crate::{
     },
     ports::{
         agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
-        desktop_bridge::RunTerminalHook,
+        desktop_bridge::{OrchestrationLaunchRole, RunTerminalHook},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
+        orchestration_repository::OrchestrationRepository,
     },
 };
 
@@ -219,6 +220,56 @@ impl OrchestrationRuntime {
         {
             self.emit_runtime_update(&session, reason);
         }
+    }
+
+    /// 어떤 작업 영역(묶임과 무관)이라도 이 run을 노드·세대로 기록하고 있는가(research R18).
+    pub fn references_run(&self, run_id: &str) -> bool {
+        self.repository.snapshot().is_ok_and(|sessions| {
+            sessions.iter().any(|session| {
+                session
+                    .nodes
+                    .iter()
+                    .any(|node| node.current_run_id.as_deref() == Some(run_id))
+                    || session
+                        .generations
+                        .iter()
+                        .any(|generation| generation.run_id == run_id)
+            })
+        })
+    }
+
+    /// Main 패널 run을 띄우기 전 검사(오늘 AW `resolve_agent_run_launch_principal`의 문구 그대로). 작업대에 묶인
+    /// 작업 영역의 활성 세대가 이 run이어야 coordinator 역할을 준다.
+    pub fn coordinator_launch_role(
+        &self,
+        bench_id: &str,
+        run_id: &str,
+    ) -> Result<OrchestrationLaunchRole, String> {
+        let sessions = self.repository.snapshot().map_err(|error| error.message)?;
+        let session = sessions
+            .iter()
+            .find(|session| session.bound_bench_id.as_deref() == Some(bench_id))
+            .ok_or_else(|| "Main Coordinator workspace is unavailable.".to_string())?;
+        let generation_id = session
+            .active_coordinator_generation_id
+            .clone()
+            .ok_or_else(|| {
+                "Main Coordinator generation must be bound before launch.".to_string()
+            })?;
+        let generation = session
+            .generations
+            .iter()
+            .find(|generation| generation.id == generation_id)
+            .ok_or_else(|| "Active Main Coordinator generation is unavailable.".to_string())?;
+        if generation.run_id != run_id {
+            return Err(
+                "Main Coordinator generation does not match the run being launched.".to_string(),
+            );
+        }
+        Ok(OrchestrationLaunchRole::Coordinator {
+            workspace_id: session.id.clone(),
+            generation_id,
+        })
     }
 
     // ---- 데스크톱 동작 18개 ----

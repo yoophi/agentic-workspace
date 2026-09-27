@@ -413,6 +413,12 @@ impl EventHub {
     }
 
     /// 호환 replay command용 run replay(research R5 표).
+    /// 이 run id에 발행 이력(journal)이나 제거 표식이 남아 있는가(041 research R18: 끝난 run id 재사용 금지).
+    pub fn has_run_history(&self, run_id: &str) -> bool {
+        let replay = self.replay_run(run_id, 0);
+        replay.last_sequence > 0 || (replay.terminal && replay.gap_detected)
+    }
+
     pub fn replay_run(&self, run_id: &str, after: u64) -> RunReplay {
         let stream_id = StreamKind::Run.stream_id(run_id);
         match self.lookup(&stream_id, StreamKind::Run, false) {

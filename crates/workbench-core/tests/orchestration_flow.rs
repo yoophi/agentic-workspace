@@ -205,7 +205,7 @@ async fn closing_a_bench_makes_the_workspace_recoverable_by_another_bench() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_resumes_of_one_workspace_bind_exactly_once() {
     let h = Arc::new(BenchHarness::new(RunScript::default()));
-    for round in 0..30 {
+    for round in 0..200 {
         let dir = extra_dir(&h, &format!("wt-{round}"));
         let owner = h.open().await;
         let id = with_work(&h, &owner, &dir, &format!("main-{round}")).await["id"]
@@ -218,10 +218,13 @@ async fn concurrent_resumes_of_one_workspace_bind_exactly_once() {
             let (h, dir, id) = (Arc::clone(&h), dir.clone(), id.clone());
             tokio::spawn(async move { bootstrap(&h, &bench, &dir, Some(&id)).await })
         };
-        let (first, second) = (spawn(a), spawn(b));
+        let (first, second) = (spawn(a.clone()), spawn(b.clone()));
         let results = [first.await.unwrap(), second.await.unwrap()];
         let bound = results.iter().filter(|result| result.is_ok()).count();
         assert_eq!(bound, 1, "round {round}: {results:?}");
+        // 작업대 상한(256) 안에서 200회를 돌도록 회차마다 닫는다.
+        h.close(&a).await.unwrap();
+        h.close(&b).await.unwrap();
     }
 }
 
@@ -250,4 +253,53 @@ async fn delegating_a_goal_prompts_the_coordinator_run() {
         h.engine.prompts.load(std::sync::atomic::Ordering::SeqCst),
         before + 1
     );
+}
+
+/// research R18 + 설계 리뷰: 작업대를 닫고(run 종료) 다른 작업대에서 같은 run id를 다시 쓰면, 복구 가능한 작업
+/// 영역이 그 id를 기록하고 있어 재생 권한·역할이 다른 run을 가리키게 된다. 그래서 끝난 run의 id는 다시 쓸 수
+/// 없다. 복구한 작업대는 원래 run의 기록만 재생한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ended_run_ids_cannot_be_reused_across_close_and_recover() {
+    let h = BenchHarness::new(RunScript::default());
+    let a = h.open().await;
+    let first = with_work(&h, &a, &h.dir, "coord-1").await;
+    let id = first["id"].as_str().unwrap().to_owned();
+    h.close(&a).await.unwrap();
+
+    // 다른 작업대가 같은 id로 run을 띄울 수 없다(작업 영역이 기록 중).
+    let b = h.open().await;
+    let reused = h.start(&b, "coord-1").await.unwrap_err();
+    assert_eq!(
+        (reused.code, reused.message.as_str()),
+        (FaultCode::Conflict, "duplicate run id: coord-1")
+    );
+
+    // 작업 영역과 무관한 일반 run도 끝난 뒤에는 같은 id를 다시 쓸 수 없다(hub journal이 남아 있다).
+    h.start(&b, "plain-1").await.unwrap();
+    h.close(&b).await.unwrap();
+    let c = h.open().await;
+    let plain = h.start(&c, "plain-1").await.unwrap_err();
+    assert_eq!(plain.message, "duplicate run id: plain-1");
+
+    // 복구한 작업대는 원래 coordinator run의 기록을 재생한다(노드 run 허용), 다른 작업대의 일반 run은 거절.
+    let resumed = bootstrap(&h, &c, &h.dir, Some(&id)).await.unwrap();
+    assert_eq!(resumed["id"], id.as_str());
+    let replay = h
+        .call(
+            &desktop(),
+            OperationId::RunReplay,
+            json!({ "benchId": c, "runId": "coord-1", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(replay["runId"], "coord-1");
+    let foreign = h
+        .call(
+            &desktop(),
+            OperationId::RunReplay,
+            json!({ "benchId": c, "runId": "plain-1", "afterSequence": 0 }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(foreign.code, FaultCode::Forbidden);
 }
