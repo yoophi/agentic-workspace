@@ -12,8 +12,23 @@
 | `working_directory` | 실제 경로 문자열 | `bench.open` 입력을 `canonicalize`, 디렉터리여야 함 |
 | `opened_by` | `PrincipalSubject` | 연 principal의 주체. 모든 `benchId` 입력 호출에서 동등 검사 |
 | `opened_at` | RFC3339 | |
+| `state` | `Open` \| `Closing` | registry lock 안에서만 바뀐다 |
+| `admission` | read/write guard | 새 자원을 등록하는 동작이 read, 닫기가 write |
+| `idempotency` | 작업대별 멱등 기록(아래) | 닫힐 때 통째로 버림 |
 
-수명: `open` → (사용) → `close`(멱등). 닫을 때 순서: 소유 run 취소 → 교환 작업 영역 삭제 → `exchange:<id>`·`bench:<id>` 스트림 제거(구독자 `Gap(evicted)`, 제거 표식) → registry 삭제. 상한 256.
+상태 전이:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Open: bench.open
+    Open --> Closing: bench.close (registry lock 안, 원자적)
+    Closing --> [*]: 입장한 동작 종료 대기 → 소유 run 취소 → 교환 삭제 → 스트림 제거 → registry 삭제
+```
+
+- 입장(admission): `run.start`(소유 기록까지), `exchange.syncWorkspace`·`send`·`sendFromRun`, 과도기 orchestration run 기동. `Open`일 때만 가능(`Closing`이면 `notFound`).
+- 입장하지 않는 동작: 기존 run 제어·조회 — 닫기를 막지 않는다.
+- 닫기 불변식: `bench.close`가 `closed: true`로 반환한 시점에 그 작업대 소유의 살아 있는 run은 0개.
+- 상한 256(`Closing` 포함).
 
 ### PrincipalSubject
 
@@ -39,9 +54,17 @@
 | `AgentExchange{requestId, worktreePath, source, target, message, delivery, status, failureCode?, failureReason?, createdAt, updatedAt}` | **`windowLabel` 제거**. 요청 id 중복: 같은 payload → 기존 반환(이벤트 없음), 다른 payload → `duplicateConflict` |
 | 상태 전이 | `Pending→Accepted/Rejected`, `Accepted→Delivered/Rejected/Failed/Cancelled`; terminal에서 같은 상태로의 전이는 변화 없음(**이벤트 없음**), 다른 상태는 `invalidTransition` |
 
-### 세대 범위 멱등성 표
+### 세대 범위 멱등 기록 (작업대별)
 
-`(subject, operation, idempotency_key) → {payload_hash, result_json}`. 상한 4,096(FIFO). 진행 중 같은 키는 대기. 다른 payload → `conflict`.
+키 `(subject, operation, idempotency_key)`.
+
+| 계층 | 값 | 한도(작업대당) | 수명 |
+|---|---|---|---|
+| 결과 기록 | payload hash + 결과 JSON | 1,024(넘치면 오래된 것부터 요약으로 강등) | 작업대 |
+| 요약 기록 | payload hash | 65,536(도달하면 새 command `rateLimited`) | 작업대 |
+| `bench.open` 기록(주체별) | payload hash + `benchId` | 256 | 만든 작업대가 닫힐 때까지 |
+
+판정: 결과 기록 적중 → 저장된 결과. 요약 적중 → 재실행 없이 `conflict`(`outcome: applied`). 다른 payload → `conflict`. 진행 중 같은 키 → 대기. agent 전용 operation의 기록은 run의 소유 작업대에 둔다.
 
 ### run.start 변경 기록
 

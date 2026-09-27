@@ -19,13 +19,25 @@
 | 창 닫힘 | `session-*` `Destroyed`에서 `cancel_runs_owned_by(label)` → `remove_window(label)` → orchestration `release_window(label)`(041) |
 | AW 조립 | `lib.rs` `setup`에서 `WorkbenchRuntime::bootstrap` → `McpServerState::start(app, AppState, registry)`. `AppState`·교환 registry는 `run()` 시작 시 만들어 `.manage` |
 
-## R1. 작업대 registry
+## R1. 작업대 registry와 닫기 경계
 
-**Decision**: core `application/bench_service.rs` + `infrastructure/bench/in_memory_bench_registry.rs`. `Bench{id: BenchId(uuid v4), working_directory: 실제 경로(canonicalize), opened_by: PrincipalSubject, opened_at}`. `bench.open{workingDirectory}` → 경로가 없거나 디렉터리가 아니면 `invalidArgument`(오늘 교환 동기화 문구 `"Workspace path must be a directory."`/`"Failed to resolve workspace path: …"` 재사용). 동시 작업대 상한 256(`BenchLimits`, 초과 `rateLimited`). `bench.close{benchId}`: 모르는 id·이미 닫힘 → 성공(`closed: false`), 있으면 소유 run 전부 취소 → 교환 작업 영역 삭제 → 교환·작업대 스트림 제거 → registry에서 삭제(`closed: true`).
+**Decision**: core `application/bench_service.rs` + `infrastructure/bench/in_memory_bench_registry.rs`. `Bench{id: BenchId(uuid v4), working_directory: 실제 경로(canonicalize), opened_by: PrincipalSubject, opened_at, state: Open | Closing, admission: tokio::sync::RwLock<()>}`. `bench.open{workingDirectory}` → 경로가 없거나 디렉터리가 아니면 `invalidArgument`(오늘 교환 동기화 문구 `"Workspace path must be a directory."`/`"Failed to resolve workspace path: …"` 재사용). 동시 작업대 상한 256(`BenchLimits`, 초과 `rateLimited`, `Closing`도 센다).
 
-**Rationale**: 작업대는 메모리 전용(Q3). 닫기 멱등은 창 `Destroyed` 중복에 대비. 경로 정규화는 교환 동기화가 오늘 하던 일과 같다.
+**입장(admission) 경계** — 작업대 아래에 **새 자원을 등록하는** 동작만 입장권을 잡는다:
 
-**Alternatives**: 작업대를 ledger aggregate로 — Q8(세대 범위)과 모순.
+| 입장권을 잡는 동작 | 잡는 구간 |
+|---|---|
+| `run.start` | 작업대 검사 → decorator → 엔진 `start`가 run을 **예약(소유 기록)** 하고 돌아올 때까지(프로세스 기동·완료는 기다리지 않음) |
+| `exchange.syncWorkspace`·`exchange.send`·`exchange.sendFromRun` | 교환 작업 영역에 쓰는 동안 |
+| orchestration 자식·Main 위임 run 기동(AW, 041 전) | 같은 `run.start` 구간 — 런타임 `admit(bench_id) -> BenchAdmission` guard로 |
+
+입장권 = 작업대의 `admission` read guard를 **상태가 `Open`인 것을 확인한 같은 registry lock 안에서** 얻는 것. `Closing`이면 `notFound` `"bench not found."`(닫히는 작업대는 이미 없는 것으로 본다). 이미 있는 run의 제어(프롬프트·조향·취소·권한)와 조회는 입장권을 잡지 않는다 — 닫기가 run을 취소하므로 경합해도 "비활성 run" 오류로 끝나고, `cancelAndSend`처럼 오래 기다리는 동작이 닫기를 막지 않는다.
+
+**`bench.close{benchId}`**: (1) registry lock 안에서 `Open → Closing`(원자적; 모르는 id·이미 `Closing`/삭제 → 성공 `closed: false`, 이미 `Closing`이면 먼저 시작한 닫기가 끝날 때까지 기다린 뒤 반환) → (2) `admission` write guard 획득 = 입장한 동작이 모두 끝날 때까지 대기(새 입장은 (1) 때문에 불가) → (3) 소유 run 전부 취소(`cancel_runs_owned_by`; 입장한 `run.start`는 이미 소유를 기록했으므로 스냅샷에 포함) → (4) 교환 작업 영역 삭제 → (5) 교환·작업대 스트림 제거 → (6) registry에서 삭제(`closed: true`, `cancelledRuns`).
+
+**Rationale**: 작업대는 메모리 전용(Q3). "닫으면 소유 run이 모두 취소된다"(SC-006)는 닫기 스냅샷 뒤에 새 run이 등록되지 않아야 성립한다 — 상태 전이와 입장을 같은 lock으로 직렬화하고, 쓰기 guard로 이미 입장한 동작을 기다린다. 입장 구간을 "소유 기록까지"로 좁혀 닫기가 오래 막히지 않게 한다. 닫기 멱등은 창 `Destroyed` 중복에 대비.
+
+**Alternatives**: 닫기가 run 취소 후 한 번 더 스캔 — 여전히 창(window)이 남는다. 모든 operation이 입장권을 잡음 — `cancelAndSend`(교체 프롬프트 완료까지 대기)가 닫기를 수 분 막을 수 있다. 작업대를 ledger aggregate로 — Q8(세대 범위)과 모순.
 
 ## R2. principal 주체 식별자
 
@@ -95,13 +107,27 @@ acp_session_store() -> Option<Arc<JsonAcpSessionStore>>   // 같은 이유
 
 **Rationale**: 외부 효과(프로세스)가 있는 유일한 동작만 영속 기록. `unknown`은 "떴는지 알 수 없음"을 정직하게 표현한다.
 
-## R7. 세대 범위 멱등성
+## R7. 세대 범위 멱등성 — 작업대에 묶인 기록
 
-**Decision**: core `application/epoch_idempotency.rs`: 메모리 표 `(subject, operation, key) → (payload hash, 결과 JSON)`, 상한 4,096(가장 오래된 것부터 버림). 같은 키·같은 payload → 저장된 결과, 다른 payload → `conflict`(ledger와 같은 fault·문구). 진행 중인 같은 키의 두 번째 요청은 첫 요청이 끝날 때까지 기다린다(키별 `tokio::sync::Mutex`). 세대 범위 operation도 command이므로 멱등성 키 필수. descriptor에 `idempotencyScope: "durable" | "epoch"`(command만, query는 생략)를 추가한다.
+**Decision**: core `application/epoch_idempotency.rs`. 기록은 전역 표가 아니라 **작업대별**(작업대 없는 `bench.open`은 주체별)로 둔다. 키 `(subject, operation, idempotency_key)`.
 
-**Rationale**: FR-011. 3단계 HTTP 재시도에서 프롬프트 중복을 막는다.
+| 계층 | 내용 | 한도 | 사라지는 때 |
+|---|---|---|---|
+| 결과 기록 | payload hash + 결과 JSON | 작업대당 최근 1,024개 | 넘치면 가장 오래된 것부터 **요약 기록으로 강등** |
+| 요약 기록(tombstone) | payload hash만(결과 없음) | 작업대당 65,536개 | 작업대가 닫힐 때 |
+| `bench.open` 기록 | 주체별, 결과 = 만든 `benchId` | 작업대 상한(256)과 같음 | 그 작업대가 닫힐 때 |
 
-**Alternatives**: 결과를 저장하지 않고 "이미 처리됨"만 기록 — 재시도 응답이 달라진다.
+- 같은 키·같은 payload + 결과 기록 → 저장된 결과를 그대로 반환.
+- 같은 키·같은 payload + 요약 기록 → **다시 실행하지 않고** `conflict` fault(`outcome: applied`, `"idempotency result is no longer available; the request was already applied."`). 재시도가 효과를 두 번 내는 경우는 없다.
+- 같은 키·다른 payload → `conflict`(ledger와 같은 문구).
+- 진행 중인 같은 키의 두 번째 요청은 첫 요청이 끝날 때까지 기다린다(키별 `tokio::sync::Mutex`).
+- 작업대당 요약 기록이 65,536개에 이르면 그 작업대의 **새** command는 `rateLimited`(`retryable: false`, `"bench idempotency capacity exhausted; close and reopen the bench."`) — 받아들이면 중복 보장을 깨야 하므로 입장 제어로 막는다. 데스크톱 창 하나에서 command 65,536개는 오늘 사용 패턴에서 도달하지 않는다(실측 근거는 tasks Notes).
+- 작업대가 닫히면 기록 전체를 버린다: 그 뒤의 재시도는 대상 작업대가 없어 `notFound`로 끝나므로 중복 효과가 생기지 않는다. agent 전용 operation(`sendFromRun`, `requestTitle`)의 기록은 run의 소유 작업대에 둔다.
+- 세대 범위 operation도 command이므로 멱등성 키 필수. descriptor에 `idempotencyScope: "durable" | "epoch"`(command만)를 추가한다.
+
+**Rationale**: FR-011의 "같은 세대 안 재시도는 같은 결과"를 메모리 상한과 함께 지키려면, 결과는 버려도 "이미 적용됨"은 대상의 수명 동안 기억해야 한다. 기록의 수명을 작업대에 묶으면 재시도가 의미를 잃는 시점(작업대 소멸)과 기록이 사라지는 시점이 같아진다.
+
+**Alternatives**: 전역 FIFO 4,096 — 넘친 뒤 재시도가 다시 실행된다(Codex 리뷰). TTL 만료 — 만료 뒤 재시도를 구별할 수 없어 다시 실행된다. 모든 결과를 세대 끝까지 보관 — 메모리 상한이 없다.
 
 ## R8. 교환 이관
 
@@ -160,6 +186,7 @@ operation:
 - `AppState`는 AW `run()`이 만들지 않고 런타임의 `run_engine().acp_registry()`에서 얻는다(한 run 기계). 자식 worker가 쓰던 `JsonAcpSessionStore::from_app`도 런타임의 같은 저장소(`acp_session_store()`)로 바꾼다(같은 파일을 두 인스턴스가 쓰지 않게).
 - 자식 worker·Main 위임의 run 소유자는 창 label 대신 그 창의 `BenchId`(`DesktopBenches::ensure`). 창 닫힘의 `bench.close`가 자식 run도 취소한다(오늘 `cancel_runs_owned_by(label)`과 같은 결과).
 - 자식 worker의 sink는 `TauriRunEventSink` 대신 core `WorkbenchRunSink`(런타임이 `run_sink(bench_id)`로 제공) — 전달 경로가 하나가 된다.
+- 자식 worker·Main 위임 run 기동은 런타임 `admit(bench_id)` guard를 잡은 채 `StartAgentRunUseCase`를 부른다(R1 입장 경계). guard 획득 실패(작업대 닫힘)는 오늘 창이 사라졌을 때의 `"Owner Worktree Session window is unavailable."` 경로로 처리한다.
 - orchestration 코드 안의 창 label(바인딩·scope 검사·이벤트 대상)은 041까지 그대로.
 
 **Rationale**: Q1. 041이 과도기 접근자(`acp_registry`, `run_sink`)를 제거한다.
@@ -171,11 +198,13 @@ operation:
 - call fixture(`crates/workbench-protocol/fixtures/*.json`)에 `steps`를 추가한다: 앞선 호출의 출력에서 값을 꺼내 `{{bench}}`·`{{run}}`으로 치환(`capture: {"bench": "/output/benchId"}`). principal은 `desktop`·`readonly`·`agent:<runRef>`·`desktop2`(다른 주체).
 - 가짜 엔진 스크립트는 fixture의 `runScript`(이벤트 목록·권한 요청·실패 주입)로 지정한다.
 - 흐름 테스트(Rust): run 수명(열기 → 시작 → 권한 → 프롬프트 → 닫기), 교차 작업대·교차 주체 거절 6종, 교환 두 작업대 격리·확인 멱등, 작업대 닫기 시 스트림 gap, 세대 범위 멱등(재시도·충돌·동시), `run.start` reconciler(`pending` → `unknown`), 데스크톱 전달 순서(run·교환 동시 발행).
+- 닫기 경합(`bench_close_race.rs`): `run.start`·`exchange.send`·과도기 `admit`과 `bench.close`를 동시에 1,000회 — 매 회차 "닫기가 반환한 뒤 그 작업대 소유 run이 0개"이고 새 동작은 성공(닫기 전 입장) 또는 `notFound`(닫기 후) 둘 중 하나. 가짜 엔진의 `start`에 지연을 넣어 입장 구간을 늘린다. 닫기가 `cancelAndSend` 진행 중에도 막히지 않는지.
+- 멱등 보존(`epoch_idempotency.rs`): 결과 1,024개를 넘긴 뒤 첫 키 재시도 → 재실행 없음(엔진 호출 수 불변) + `conflict(applied)`; 요약 한도 도달 → 새 command `rateLimited`; 작업대 닫은 뒤 재시도 → `notFound`.
 - AW: compat 변환 단위 테스트(교환 오류 JSON 문자열 재구성, 제목 결과 변환), `DesktopBenches` single-flight·닫기 멱등.
 
 ## R14. 한도·성능
 
-**Decision**: 작업대 256, 교환 스트림 작업대당 512, 세대 멱등 표 4,096. `Workbench.call` 경유로 run 제어 지연 증가는 dispatch + 멱등 표 조회(µs 단위) — `#[ignore]` 측정 테스트로 `run.sendPrompt` p95 증가 < 5ms를 기록한다.
+**Decision**: 작업대 256, 교환 스트림 작업대당 512, 세대 멱등 결과 기록 작업대당 1,024 + 요약 기록 65,536(요약 1개 ≈ 키·hash 100바이트 → 작업대당 최대 약 6.5 MB, 전체 상한은 작업대 수로 묶임). `Workbench.call` 경유로 run 제어 지연 증가는 dispatch + 멱등 표 조회(µs 단위) — `#[ignore]` 측정 테스트로 `run.sendPrompt` p95 증가 < 5ms를 기록한다.
 
 ## R15. 문서·인벤토리
 

@@ -6,15 +6,32 @@
 
 | 조건 | fault |
 |---|---|
-| 작업대 없음(또는 닫힘, 이전 세대) | `notFound` `"bench not found."` |
+| 작업대 없음(닫히는 중·닫힘·이전 세대 포함) | `notFound` `"bench not found."` |
 | 작업대를 연 주체가 아님 | `forbidden` `"bench belongs to another principal."` |
+
+## 멱등성 (command 공통)
+
+| 경우 | 응답 |
+|---|---|
+| `durable`(`run.start`) | 1단계 ledger 규칙 |
+| `epoch`, 같은 키·같은 payload, 결과 기록 있음 | 저장된 결과 |
+| `epoch`, 같은 키·같은 payload, 결과가 요약으로 강등됨 | 재실행 없음, `conflict` `outcome: applied` `"idempotency result is no longer available; the request was already applied."` |
+| 같은 키·다른 payload | `conflict`(ledger와 같은 문구) |
+| 작업대의 요약 기록 65,536개 도달 뒤 새 키 | `rateLimited` `retryable: false` `"bench idempotency capacity exhausted; close and reopen the bench."` |
+| 작업대가 닫힌 뒤 재시도 | `notFound` `"bench not found."` (기록은 작업대와 함께 사라짐 — 중복 실행 없음) |
+
+## 닫기와 입장 경계
+
+- `bench.close`는 `Open → Closing` 전이를 원자적으로 한 뒤, 이미 입장한 동작(`run.start`의 소유 기록, 교환 쓰기, 과도기 orchestration 기동)이 끝나기를 기다리고, 소유 run을 모두 취소한다. 반환 시점에 그 작업대 소유의 살아 있는 run은 0개다.
+- `Closing` 이후 들어온 입장 동작은 `notFound`. 기존 run 제어·조회는 입장하지 않으므로 닫기를 막지 않는다(경합하면 run이 취소되어 "비활성 run" 오류).
+- 두 닫기가 겹치면 두 번째는 첫 번째가 끝날 때까지 기다린 뒤 `closed: false`.
 
 ## 작업대
 
 | operation | 종류 | scope | 멱등 | 입력 → 출력 |
 |---|---|---|---|---|
 | `bench.open` | command | `bench:write` | epoch | `{workingDirectory}` → `{benchId, workingDirectory}`(실제 경로). 없는 경로 `invalidArgument` `"Failed to resolve workspace path: …"`, 디렉터리 아님 `"Workspace path must be a directory."`, 상한 `rateLimited` |
-| `bench.close` | command | `bench:write` | epoch | `{benchId}` → `{closed: bool, cancelledRuns: [runId]}`. 모르는 id도 성공(`closed: false`). 다른 주체의 작업대는 `forbidden` |
+| `bench.close` | command | `bench:write` | epoch | `{benchId}` → `{closed: bool, cancelledRuns: [runId]}`. 모르는 id·닫히는 중·닫힘도 성공(`closed: false`, 닫히는 중이면 끝날 때까지 대기). 다른 주체의 작업대는 `forbidden`. 멱등 기록 없이도 자연 멱등 |
 | `bench.requestTitle` | command | `presentation:write` | epoch | `{runId, title}` → `{ok: true, appliedTitle}`. agent 전용(주체 run == runId, 아니면 `forbidden` `"The requested run does not match the authenticated capability."`). 제목 검증 문구는 오늘과 같음(80자). run의 활성 작업대 없음 → `notFound` `"Agent run is not active or is not owned by a session window."` |
 
 ## run
