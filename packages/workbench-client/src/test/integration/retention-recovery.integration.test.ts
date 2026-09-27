@@ -74,7 +74,22 @@ describe("real 042 hub: retention recovery through the TS client", () => {
     const { call } = await setup();
     const describe = await call<{ operations: Array<{ id: OperationId; kind: string }> }>("system.describe", {});
     const server = Object.fromEntries(describe.operations.map((operation) => [operation.id, operation.kind]));
-    expect(OPERATION_KINDS).toEqual(server);
+    // 044: describe는 호출자에게 보이는 operation만 싣는다. 창 주체에게는 소유자 전용 operation이 보이지 않으므로,
+    // 보이는 것은 표와 같고 보이지 않는 것은 정확히 소유자 전용 집합이어야 한다.
+    const ownerOnly = [
+      "server.status",
+      "server.stop",
+      "lease.acquire",
+      "lease.renew",
+      "lease.release",
+      "desktop.issueWindowToken",
+      "desktop.retireWindow",
+    ];
+    const visible = Object.fromEntries(
+      Object.entries(OPERATION_KINDS).filter(([id]) => !ownerOnly.includes(id)),
+    );
+    expect(visible).toEqual(server);
+    expect(Object.keys(OPERATION_KINDS).filter((id) => !(id in server)).sort()).toEqual([...ownerOnly].sort());
   });
 
   it("recovers the run stream past retention and receives later events without loss or duplication", async () => {

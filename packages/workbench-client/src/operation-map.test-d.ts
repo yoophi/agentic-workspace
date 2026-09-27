@@ -29,7 +29,7 @@ import type {
   WorktreeTextFile,
 } from "./operation-map";
 
-test("operation ids are exactly the registered operations (037 + 038 + 040)", () => {
+test("operation ids are exactly the registered operations (037 + 038 + 040 + 044)", () => {
   expectTypeOf<OperationId>().toEqualTypeOf<
     | "project.list"
     | "project.create"
@@ -116,6 +116,14 @@ test("operation ids are exactly the registered operations (037 + 038 + 040)", ()
     | "orchestration.getAgentRole"
     | "run.replay"
     | "system.describe"
+    | "server.status"
+    | "server.stop"
+    | "lease.acquire"
+    | "lease.renew"
+    | "lease.release"
+    | "desktop.issueWindowToken"
+    | "desktop.retireWindow"
+    | "bench.list"
   >();
 });
 

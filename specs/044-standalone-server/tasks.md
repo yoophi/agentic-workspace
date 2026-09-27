@@ -30,7 +30,7 @@
 
 ## Phase 3: 기반 (모든 이야기의 전제)
 
-- [ ] T007 protocol 새 operation 8개(`server.status`·`server.stop`·`lease.acquire`·`renew`·`release`·`desktop.issueWindowToken`·`desktop.retireWindow`·`bench.list`)와 `run.sendPrompt` 입력 `continuation?`을 `crates/workbench-protocol/src/call.rs`·`operations/{server,lease,desktop}.rs`·`operations/run.rs`에 정의. `PrincipalKind::Owner`(`local:owner`)·`Scope::ServerAdmin`을 `principal.rs`에. OpenAPI·`packages/workbench-client` 생성물 재생성(`pnpm --filter @yoophi/workbench-client generate`), operation kinds 표 갱신, drift 검사 통과
+- [X] T007 protocol 새 operation 8개(`server.status`·`server.stop`·`lease.acquire`·`renew`·`release`·`desktop.issueWindowToken`·`desktop.retireWindow`·`bench.list`)와 `run.sendPrompt` 입력 `continuation?`을 `crates/workbench-protocol/src/call.rs`·`operations/{server,lease,desktop}.rs`·`operations/run.rs`에 정의. `PrincipalKind::Owner`(`local:owner`)·`Scope::ServerAdmin`을 `principal.rs`에. OpenAPI·`packages/workbench-client` 생성물 재생성(`pnpm --filter @yoophi/workbench-client generate`), operation kinds 표 갱신, drift 검사 통과
 - [ ] T008 **분류 대조 시험 먼저**: `crates/workbench-core/tests/drain_classification.rs`가 `contracts/drain-classification.md` 표를 파싱해 `OperationId::ALL`·operation 종류와 대조한다(모든 op가 정확히 한 행, query는 Q). red 기록(컴파일 red)
 - [ ] T009 `crates/workbench-core/src/application/drain.rs`: `DrainClass{Q,C,K,N}`, command마다 빠짐없는 match `drain_class(OperationId, &input)`. K 조건 판정은 T027·T037에서 채운다(자리만). T008 green
 - [ ] T010 **R14 작업 관문 시험 먼저**: `crates/workbench-core/tests/work_gate.rs`에 E1 실패 순서를 쓴다. (i) 대기열 prompt만 남은 구간에서 활동 0 아님, (ii) RPC 오류로 끝난 prompt 뒤 활동 0, (iii) 정지 판정과 예약 교차 1000회에서 "멈춘 뒤 실행" 0, (iv) 시작 중·Ralph 반복 사이 활동 0 아님(시험 엔진). red 기록

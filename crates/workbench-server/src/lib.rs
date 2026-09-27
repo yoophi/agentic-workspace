@@ -314,7 +314,8 @@ mod tests {
         let ExposurePolicy::Only(ids) = ExposurePolicy::queries_only() else {
             panic!("queries_only is a set");
         };
-        assert_eq!(ids.len(), 32);
+        // 042의 32개 + 044 `server.status`·`bench.list`.
+        assert_eq!(ids.len(), 34);
         assert!(ids.contains(&OperationId::ProjectList));
         assert!(!ids.contains(&OperationId::ProjectCreate));
         assert!(ExposurePolicy::network_default().allows(OperationId::ProjectCreate));

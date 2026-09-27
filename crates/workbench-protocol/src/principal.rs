@@ -11,6 +11,8 @@ pub enum PrincipalKind {
     Desktop,
     Test,
     Agent,
+    /// 044: 서버 안내 파일의 소유자 자격 증명을 가진 클라이언트(`local:owner`). 모든 작업대를 다루고 서버를 정지할 수 있다.
+    Owner,
 }
 
 impl PrincipalKind {
@@ -20,6 +22,7 @@ impl PrincipalKind {
             PrincipalKind::Desktop => "desktop",
             PrincipalKind::Test => "test",
             PrincipalKind::Agent => "agent",
+            PrincipalKind::Owner => "owner",
         }
     }
 
@@ -28,6 +31,7 @@ impl PrincipalKind {
             "desktop" => Some(PrincipalKind::Desktop),
             "test" => Some(PrincipalKind::Test),
             "agent" => Some(PrincipalKind::Agent),
+            "owner" => Some(PrincipalKind::Owner),
             _ => None,
         }
     }
@@ -97,11 +101,18 @@ pub enum Scope {
     OrchestrationWrite,
     #[serde(rename = "system:describe")]
     SystemDescribe,
+    /// 044: 서버 상태 조회. 소유자 주체만 갖는다.
+    #[serde(rename = "server:read")]
+    ServerRead,
+    /// 044: 서버 정지·임대·창 토큰 발급·창 폐기. 소유자 주체만 갖는다.
+    #[serde(rename = "server:admin")]
+    ServerAdmin,
 }
 
 impl Scope {
-    /// 전체 scope. `desktop()`이 이 집합을 갖는다.
-    pub const ALL: [Scope; 22] = [
+    /// 전체 scope. 소유자(`owner()`)가 이 집합을 갖는다. 데스크톱·창·시험 주체는 소유자 전용 scope를 뺀
+    /// [`desktop_scopes`]를 갖는다(044).
+    pub const ALL: [Scope; 24] = [
         Scope::ProjectRead,
         Scope::ProjectWrite,
         Scope::SavedPromptRead,
@@ -124,6 +135,8 @@ impl Scope {
         Scope::OrchestrationRead,
         Scope::OrchestrationWrite,
         Scope::SystemDescribe,
+        Scope::ServerRead,
+        Scope::ServerAdmin,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -150,6 +163,8 @@ impl Scope {
             Scope::OrchestrationRead => "orchestration:read",
             Scope::OrchestrationWrite => "orchestration:write",
             Scope::SystemDescribe => "system:describe",
+            Scope::ServerRead => "server:read",
+            Scope::ServerAdmin => "server:admin",
         }
     }
 
@@ -167,6 +182,7 @@ impl Scope {
                 | Scope::ExchangeWrite
                 | Scope::PresentationWrite
                 | Scope::OrchestrationWrite
+                | Scope::ServerAdmin
         )
     }
 }
@@ -200,6 +216,14 @@ impl fmt::Display for PrincipalSubject {
 const AGENT_SUBJECT_PREFIX: &str = "agent:";
 const DESKTOP_WINDOW_SUBJECT_PREFIX: &str = "desktop:window:";
 
+/// 데스크톱·창·시험 주체의 scope: 전체에서 소유자 전용 `server:read`·`server:admin`을 뺀다(044). 창 토큰은 서버
+/// 상태 조회·정지·토큰 발급을 할 수 없다.
+pub fn desktop_scopes() -> impl Iterator<Item = Scope> {
+    Scope::ALL
+        .into_iter()
+        .filter(|scope| !matches!(scope, Scope::ServerRead | Scope::ServerAdmin))
+}
+
 /// agent principal의 scope: 교환 조회·쓰기와 표현 요청만(ADR 0006).
 pub const AGENT_SCOPES: [Scope; 6] = [
     Scope::ExchangeRead,
@@ -230,7 +254,15 @@ impl AuthenticatedPrincipal {
 
     /// 데스크톱 앱 조립부가 Tauri compat Adapter에 고정 주입하는 전체 권한 호출자.
     pub fn desktop() -> Self {
-        Self::new(PrincipalKind::Desktop, Scope::ALL)
+        Self::new(PrincipalKind::Desktop, desktop_scopes())
+    }
+
+    /// 044 소유자 주체(`local:owner`): 모든 scope. 작업대 소유 판정 우회는 kind로 판단한다(core).
+    pub fn owner() -> Self {
+        Self {
+            subject: PrincipalSubject::new("local:owner"),
+            ..Self::new(PrincipalKind::Owner, Scope::ALL)
+        }
     }
 
     /// 데스크톱 창 하나(043). 주체 `desktop:window:<label>:<incarnation>` — 창마다 작업대 소유가 갈린다. incarnation은
@@ -250,7 +282,7 @@ impl AuthenticatedPrincipal {
             subject: PrincipalSubject::new("test:readonly"),
             ..Self::new(
                 PrincipalKind::Test,
-                Scope::ALL.into_iter().filter(|scope| scope.is_read()),
+                desktop_scopes().filter(|scope| scope.is_read()),
             )
         }
     }
@@ -259,7 +291,7 @@ impl AuthenticatedPrincipal {
     pub fn test_as(name: &str) -> Self {
         Self {
             subject: PrincipalSubject::new(format!("test:{name}")),
-            ..Self::new(PrincipalKind::Test, Scope::ALL)
+            ..Self::new(PrincipalKind::Test, desktop_scopes())
         }
     }
 
@@ -318,9 +350,16 @@ mod tests {
             "read 11(run·bench·exchange·orchestration 포함) + system:describe"
         );
         for scope in Scope::ALL {
-            assert_eq!(readonly.has_scope(scope), scope.is_read(), "{scope}");
+            // 044: 소유자 전용 scope는 데스크톱·창·시험 주체에게 없다(조회 scope인 `server:read` 포함).
+            let owner_only = matches!(scope, Scope::ServerRead | Scope::ServerAdmin);
+            assert_eq!(readonly.has_scope(scope), scope.is_read() && !owner_only, "{scope}");
+            assert_eq!(desktop.has_scope(scope), !owner_only, "{scope}");
             assert_eq!(serde_json::to_value(scope).unwrap(), scope.as_str());
         }
+        let owner = AuthenticatedPrincipal::owner();
+        assert_eq!(owner.scopes.len(), Scope::ALL.len());
+        assert_eq!(owner.subject.as_str(), "local:owner");
+        assert!(!AuthenticatedPrincipal::desktop_window("w", "i").has_scope(Scope::ServerAdmin));
         assert!(!readonly.has_scope(Scope::GitWrite));
         assert!(readonly.has_scope(Scope::WorktreeRead));
         assert!(readonly.has_scope(Scope::RunRead));

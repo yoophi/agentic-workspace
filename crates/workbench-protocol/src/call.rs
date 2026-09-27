@@ -188,11 +188,27 @@ pub enum OperationId {
     OrchestrationGetAgentRole,
     #[serde(rename = "system.describe")]
     SystemDescribe,
+    #[serde(rename = "server.status")]
+    ServerStatus,
+    #[serde(rename = "server.stop")]
+    ServerStop,
+    #[serde(rename = "lease.acquire")]
+    LeaseAcquire,
+    #[serde(rename = "lease.renew")]
+    LeaseRenew,
+    #[serde(rename = "lease.release")]
+    LeaseRelease,
+    #[serde(rename = "desktop.issueWindowToken")]
+    DesktopIssueWindowToken,
+    #[serde(rename = "desktop.retireWindow")]
+    DesktopRetireWindow,
+    #[serde(rename = "bench.list")]
+    BenchList,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 85] = [
+    pub const ALL: [OperationId; 93] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -278,6 +294,14 @@ impl OperationId {
         OperationId::OrchestrationSendParentMessage,
         OperationId::OrchestrationGetAgentRole,
         OperationId::SystemDescribe,
+        OperationId::ServerStatus,
+        OperationId::ServerStop,
+        OperationId::LeaseAcquire,
+        OperationId::LeaseRenew,
+        OperationId::LeaseRelease,
+        OperationId::DesktopIssueWindowToken,
+        OperationId::DesktopRetireWindow,
+        OperationId::BenchList,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -367,6 +391,14 @@ impl OperationId {
             OperationId::OrchestrationSendParentMessage => "orchestration.sendParentMessage",
             OperationId::OrchestrationGetAgentRole => "orchestration.getAgentRole",
             OperationId::SystemDescribe => "system.describe",
+            OperationId::ServerStatus => "server.status",
+            OperationId::ServerStop => "server.stop",
+            OperationId::LeaseAcquire => "lease.acquire",
+            OperationId::LeaseRenew => "lease.renew",
+            OperationId::LeaseRelease => "lease.release",
+            OperationId::DesktopIssueWindowToken => "desktop.issueWindowToken",
+            OperationId::DesktopRetireWindow => "desktop.retireWindow",
+            OperationId::BenchList => "bench.list",
         }
     }
 

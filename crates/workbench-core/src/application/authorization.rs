@@ -42,16 +42,47 @@ mod tests {
         RequestId::new("r1").unwrap()
     }
 
+    /// 044: 소유자 전용 operation(`server:read`·`server:admin`).
+    const OWNER_ONLY: [OperationId; 7] = [
+        OperationId::ServerStatus,
+        OperationId::ServerStop,
+        OperationId::LeaseAcquire,
+        OperationId::LeaseRenew,
+        OperationId::LeaseRelease,
+        OperationId::DesktopIssueWindowToken,
+        OperationId::DesktopRetireWindow,
+    ];
+
     #[test]
-    fn desktop_may_call_everything() {
+    fn desktop_may_call_everything_except_owner_only_operations() {
         let desktop = AuthenticatedPrincipal::desktop();
         for id in OperationId::ALL {
-            assert_eq!(
-                resolve_operation(&rid(), &desktop, id.as_str()).unwrap(),
-                id
-            );
+            let resolved = resolve_operation(&rid(), &desktop, id.as_str());
+            if OWNER_ONLY.contains(&id) {
+                assert_eq!(resolved.unwrap_err().code, FaultCode::Forbidden, "{id}");
+            } else {
+                assert_eq!(resolved.unwrap(), id);
+            }
         }
-        assert_eq!(visible_operations(&desktop), OperationId::ALL.to_vec());
+        let expected: Vec<OperationId> = OperationId::ALL
+            .into_iter()
+            .filter(|id| !OWNER_ONLY.contains(id))
+            .collect();
+        assert_eq!(visible_operations(&desktop), expected);
+        // 창 주체도 같다(창 토큰으로 서버 정지·토큰 발급을 할 수 없다).
+        assert_eq!(
+            visible_operations(&AuthenticatedPrincipal::desktop_window("w", "i")),
+            expected
+        );
+    }
+
+    #[test]
+    fn owner_may_call_everything() {
+        let owner = AuthenticatedPrincipal::owner();
+        for id in OperationId::ALL {
+            assert_eq!(resolve_operation(&rid(), &owner, id.as_str()).unwrap(), id);
+        }
+        assert_eq!(visible_operations(&owner), OperationId::ALL.to_vec());
     }
 
     #[test]
@@ -63,12 +94,14 @@ mod tests {
         assert!(visible.contains(&OperationId::ProjectList));
         assert!(visible.contains(&OperationId::SystemDescribe));
         assert!(!visible.contains(&OperationId::ProjectCreate));
-        // 조회만 보인다: 표의 Query 수와 같다.
+        // 조회만 보인다: 표의 Query 수에서 소유자 전용 조회(`server.status`)를 뺀 수와 같다.
         let queries = OPERATIONS
             .iter()
             .filter(|spec| spec.kind == workbench_protocol::OperationKind::Query)
+            .filter(|spec| !OWNER_ONLY.contains(&spec.id))
             .count();
         assert_eq!(visible.len(), queries);
+        assert!(!visible.contains(&OperationId::ServerStatus));
     }
 
     #[test]

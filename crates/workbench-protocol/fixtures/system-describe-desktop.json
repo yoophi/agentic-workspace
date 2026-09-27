@@ -660,6 +660,13 @@
             "requiredScopes": [
               "system:describe"
             ]
+          },
+          {
+            "id": "bench.list",
+            "kind": "query",
+            "requiredScopes": [
+              "bench:read"
+            ]
           }
         ],
         "eventSchemas": [
