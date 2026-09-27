@@ -531,7 +531,13 @@ export function createEventClient(options: EventClientOptions): EventClient {
           }
         }
         const delay = Math.min(MAX_BACKOFF_MS, INITIAL_BACKOFF_MS * 2 ** attempt);
-        setTimeout(() => void this.resetListener(state, attempt + 1), delay);
+        setTimeout(() => {
+          // 울릴 때 다시 확인한다: 그 사이 새 재설정·복구가 시작됐으면(세대 증가) 이 재시도는 대체됐다.
+          if (this.isStale(state, generation) || closed) {
+            return;
+          }
+          void this.resetListener(state, attempt + 1);
+        }, delay);
       }
     }
 

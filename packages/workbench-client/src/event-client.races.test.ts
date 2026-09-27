@@ -551,3 +551,105 @@ describe("event client terminal retry budget (Codex follow-up review 9)", () => 
     client.close();
   });
 });
+
+describe("event client retry timers and terminal load failures (Codex follow-up review 10, user N2 audit)", () => {
+  it("does not let a superseded reset's retry timer undo a newer successful resync", async () => {
+    vi.useFakeTimers();
+    const hub = new FakeEventHub();
+    const client = clientFor(hub);
+    let loads = 0;
+    const delivered: number[] = [];
+    let failOnce = true;
+    client.subscribe(
+      "s",
+      {
+        onEvent: (event) => {
+          if (failOnce) {
+            failOnce = false;
+            throw new Error("refetch failed");
+          }
+          delivered.push(event.sequence);
+        },
+        onReset: () => undefined,
+      },
+      {
+        snapshot: {
+          load: () => {
+            loads += 1;
+            if (loads === 1) {
+              return Promise.reject(new Error("snapshot down")); // 재시도 타이머 예약
+            }
+            if (loads === 2) {
+              return Promise.resolve({ lastSequence: 1 }); // 재연결 재설정 성공
+            }
+            return new Promise<never>(() => undefined); // 옛 타이머가 다시 시작하면 여기서 멈춘다
+          },
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+        resyncOnReconnect: true,
+      },
+    );
+    hub.publish("s"); // 1: 실패 → 재동기(적재 실패) → 250ms 재시도 타이머
+    await vi.advanceTimersByTimeAsync(0);
+    expect(loads).toBe(1);
+    expect(client.debugDropSockets()).toBe(1); // 재연결 → 재설정(적재 2 성공)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(loads).toBe(2);
+    hub.publish("s"); // 2
+    await vi.advanceTimersByTimeAsync(0);
+    expect(delivered).toEqual([2]);
+    await vi.advanceTimersByTimeAsync(1_000); // 옛 재시도 타이머가 울린다
+    expect(loads).toBe(2);
+    hub.publish("s"); // 3
+    await vi.advanceTimersByTimeAsync(0);
+    expect(delivered).toEqual([2, 3]);
+    expect(client.debugCursor("s")).toBe(3);
+    client.close();
+  });
+
+  it("bounds a terminal stream's per-listener retries when the final apply fails and every later snapshot load fails", async () => {
+    vi.useFakeTimers();
+    const hub = new FakeEventHub();
+    const errors: string[] = [];
+    const client = clientFor(hub, { maxRecoveryAttempts: 2, onStreamError: (_stream, error) => void errors.push(error) });
+    let loads = 0;
+    let resets = 0;
+    let evicted = false;
+    client.subscribe(
+      "s",
+      {
+        onEvent: () => undefined,
+        onReset: () => {
+          resets += 1;
+          throw new Error("final apply failed"); // 종결 복구의 최종 적용 실패 → 수신자별 재설정으로 넘어간다
+        },
+      },
+      {
+        snapshot: {
+          load: async () => {
+            loads += 1;
+            if (evicted && loads > 1) {
+              throw new Error("snapshot down"); // 복구 적재(1회) 뒤의 수신자별 재적재는 모두 실패
+            }
+            return {};
+          },
+          passes: () => true,
+        },
+      },
+    );
+    hub.publish("s");
+    await vi.advanceTimersByTimeAsync(0);
+    loads = 0;
+    evicted = true;
+    hub.evict("s");
+    expect(client.debugDropSockets()).toBe(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    const settled = loads;
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(loads).toBe(settled); // 예산 뒤 예약된 시도 없음
+    expect(resets).toBe(1); // 최종 적용 1회, 재적재가 실패해 onReset은 다시 불리지 않는다
+    expect(loads).toBeLessThanOrEqual(1 + 2); // 복구 적재 1 + 수신자 재적재 예산 2
+    expect(errors.filter((error) => error.startsWith("listener resync failed"))).toHaveLength(1);
+    client.close();
+  });
+});
