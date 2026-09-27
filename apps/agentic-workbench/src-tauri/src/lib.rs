@@ -34,8 +34,7 @@ use inbound::tauri_commands::{
 use infrastructure::{
     agent_session_registry::AppState,
     json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
-    json_orchestration_repository::JsonOrchestrationRepository, mcp::McpServerState,
-    tauri_orchestration_event_sink::TauriOrchestrationEventSink,
+    mcp::McpServerState, tauri_orchestration_event_sink::TauriOrchestrationEventSink,
 };
 use std::sync::Arc;
 use tauri::{
@@ -152,7 +151,9 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         // 040: 창 닫힘 = 작업대 명시적 닫기(소유 run 취소·교환 작업 영역 삭제, ADR 0005).
                         infrastructure::desktop_benches::close(&runtime, &label).await;
-                        if let Ok(repository) = JsonOrchestrationRepository::from_app(&app) {
+                        if let Ok(repository) =
+                            crate::inbound::tauri_commands::orchestration_repository(&app)
+                        {
                             let _ = OrchestrationService::new(
                                 repository,
                                 TauriOrchestrationEventSink::new(app),

@@ -3,8 +3,8 @@
 use crate::{
     domain::agent_orchestration::{
         CommandFailure, CoordinatorGenerationStatus, CoordinatorNotification,
-        CoordinatorNotificationStatus, MAIN_AGENT_NODE_ID, OrchestrationError,
-        OrchestrationErrorCode, OrchestrationSession,
+        CoordinatorNotificationStatus, OrchestrationError, OrchestrationErrorCode,
+        OrchestrationSession, MAIN_AGENT_NODE_ID,
     },
     ports::{
         agent_worker::WorkerBinding, coordinator_notification::CoordinatorNotificationPort,
@@ -379,13 +379,11 @@ mod tests {
             delivered[0].status,
             CoordinatorNotificationStatus::Delivered
         );
-        assert!(
-            dispatcher
-                .dispatch_pending("window-1")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(dispatcher
+            .dispatch_pending("window-1")
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(calls.lock().unwrap().as_slice(), ["notification-1"]);
     }
 
@@ -396,13 +394,11 @@ mod tests {
             repository.clone(),
             FakeNotifier(Arc::new(Mutex::new(vec![]))),
         );
-        assert!(
-            dispatcher
-                .dispatch_pending("window-1")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(dispatcher
+            .dispatch_pending("window-1")
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(
             repository.load_sessions().unwrap()[0].coordinator_notifications[0].status,
             CoordinatorNotificationStatus::Pending

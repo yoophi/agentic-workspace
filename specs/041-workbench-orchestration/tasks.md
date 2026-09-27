@@ -196,3 +196,6 @@ T019 fixture 생성 ∥ T020 출처 음성 테스트 ∥ T021 liveness ④⑤ �
 
 - [P] = 다른 파일, 미완료 의존 없음
 - 기준선·실측 기록:
+  - (T001, 2026-09-27) 기준선(main `c8b41a4`): `cargo test --workspace --all-targets` 626 passed / 0 failed / 7 ignored(그중 AW 145), `pnpm run check-types` 13/13·`pnpm run test` 12/12(040 측정, main 불변).
+  - (T002) 오늘 동작은 research 사실 요약·contracts와 대조 완료 — 차이 없음. 설계 리뷰가 바로잡은 두 문구(도구 오류 `forbiddenActor`·`scopeMismatch`, 토큰 폐기 시점)는 contracts에 반영됨.
+  - (Foundation 이동 1단계) orchestration 도메인·포트 4·서비스 4·저장소를 core로 `git mv`(테스트 37개 함께 이동, 기대값 불변). core는 edition 2021이라 AW의 let chain 5곳을 중첩 `if let`/`is_some_and`로 풀었다(동작 동일). 저장소는 AW `json_store`의 `load_json`·`save_json`을 tauri 의존만 빼고 `infrastructure/fs/legacy_json_store.rs`로 복사해 `.bak` 복구·오류 문자열을 보존. AW는 `domain`·`ports`·`application`·`infrastructure` mod에서 core 모듈을 재노출(shim)하고 저장소는 임시 `orchestration_repository(app)`로 연다 — US1–US4 compat 전환에서 제거. `boundWindowLabel` serde 생략(T009 일부)은 서비스가 아직 창 label로 조회하므로 US1 묶임 전환과 함께 적용.

@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 use crate::{
     domain::agent_orchestration::{
-        AccessPolicy, AgentNode, AgentRoleProfile, ArtifactReference, CoordinatorGeneration,
-        CoordinatorGenerationStatus, CoordinatorNotification, CoordinatorNotificationStatus,
-        ExecutionStatus, IdempotencyRecord, MAIN_AGENT_NODE_ID, MAX_ORCHESTRATION_NODES,
-        OrchestrationError, OrchestrationErrorCode, OrchestrationSession, OrchestrationTask,
-        PresentationStatus, PromptDelivery, PromptDispatch, PromptDispatchIntent,
-        PromptDispatchTarget, PromptDispatchTargetStatus, PromptTargetMode, TaskFinding,
-        TaskReport, TaskReportType, TaskStatus, full_payload_fingerprint,
+        full_payload_fingerprint, AccessPolicy, AgentNode, AgentRoleProfile, ArtifactReference,
+        CoordinatorGeneration, CoordinatorGenerationStatus, CoordinatorNotification,
+        CoordinatorNotificationStatus, ExecutionStatus, IdempotencyRecord, OrchestrationError,
+        OrchestrationErrorCode, OrchestrationSession, OrchestrationTask, PresentationStatus,
+        PromptDelivery, PromptDispatch, PromptDispatchIntent, PromptDispatchTarget,
+        PromptDispatchTargetStatus, PromptTargetMode, TaskFinding, TaskReport, TaskReportType,
+        TaskStatus, MAIN_AGENT_NODE_ID, MAX_ORCHESTRATION_NODES,
     },
     ports::{
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
@@ -1424,13 +1424,12 @@ where
         target.assigned_task_id = Some(request.task_id.clone());
         target.execution_status = ExecutionStatus::Starting;
         target.presentation_status = PresentationStatus::Background;
-        if let Some(old_id) = old_node_id
-            && old_id != target_node_id
-            && let Some(old) = session.nodes.iter_mut().find(|node| node.id == old_id)
-        {
-            old.assigned_task_id = None;
-            old.current_run_id = None;
-            old.execution_status = ExecutionStatus::Unassigned;
+        if let Some(old_id) = old_node_id.filter(|old_id| *old_id != target_node_id) {
+            if let Some(old) = session.nodes.iter_mut().find(|node| node.id == old_id) {
+                old.assigned_task_id = None;
+                old.current_run_id = None;
+                old.execution_status = ExecutionStatus::Unassigned;
+            }
         }
         let task = &mut session.tasks[task_index];
         task.assigned_node_id = Some(target_node_id);
@@ -1665,24 +1664,27 @@ fn reconcile_session_runtime(session: &mut OrchestrationSession, live_run_ids: &
             node.last_activity_at = Some(now.clone());
             if node.kind == crate::domain::agent_orchestration::AgentNodeKind::Child {
                 node.presentation_status = PresentationStatus::AttentionRequired;
-                if let Some(task_id) = node.assigned_task_id.as_ref()
-                    && let Some(task) = session.tasks.iter_mut().find(|task| task.id == *task_id)
-                    && !task.status.is_terminal()
-                {
-                    task.status = TaskStatus::Blocked;
-                    task.failure = Some(crate::domain::agent_orchestration::TaskFailure {
-                        code: OrchestrationErrorCode::RuntimeLost,
-                        message: "The worker runtime was lost and can be retried.".into(),
-                        retryable: true,
-                        partial_result_report_ids: session
-                            .reports
-                            .iter()
-                            .filter(|report| report.task_id == *task_id)
-                            .map(|report| report.id.clone())
-                            .collect(),
-                    });
-                    task.revision += 1;
-                    task.updated_at = now.clone();
+                if let Some(task_id) = node.assigned_task_id.as_ref() {
+                    if let Some(task) = session
+                        .tasks
+                        .iter_mut()
+                        .find(|task| task.id == *task_id && !task.status.is_terminal())
+                    {
+                        task.status = TaskStatus::Blocked;
+                        task.failure = Some(crate::domain::agent_orchestration::TaskFailure {
+                            code: OrchestrationErrorCode::RuntimeLost,
+                            message: "The worker runtime was lost and can be retried.".into(),
+                            retryable: true,
+                            partial_result_report_ids: session
+                                .reports
+                                .iter()
+                                .filter(|report| report.task_id == *task_id)
+                                .map(|report| report.id.clone())
+                                .collect(),
+                        });
+                        task.revision += 1;
+                        task.updated_at = now.clone();
+                    }
                 }
             }
         }
@@ -1797,8 +1799,8 @@ mod tests {
     use super::*;
     use crate::{
         domain::agent_orchestration::{
-            ArtifactKind, MAIN_AGENT_NODE_ID, OrchestrationError, OrchestrationErrorCode,
-            OrchestrationSession, TaskReportType, TaskStatus,
+            ArtifactKind, OrchestrationError, OrchestrationErrorCode, OrchestrationSession,
+            TaskReportType, TaskStatus, MAIN_AGENT_NODE_ID,
         },
         ports::{
             orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
@@ -2488,12 +2490,10 @@ mod tests {
         let repeated = service.record_prompt_dispatch("window-1", request).unwrap();
         assert_eq!(first.id, repeated.id);
         assert_eq!(first.targets.len(), 2);
-        assert!(
-            first
-                .targets
-                .iter()
-                .all(|target| target.status == PromptDispatchTargetStatus::Accepted)
-        );
+        assert!(first
+            .targets
+            .iter()
+            .all(|target| target.status == PromptDispatchTargetStatus::Accepted));
     }
 
     #[test]

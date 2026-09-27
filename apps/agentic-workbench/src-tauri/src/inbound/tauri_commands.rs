@@ -125,6 +125,21 @@ pub struct BootstrapOrchestrationInput {
     resume_workspace_id: Option<String>,
 }
 
+/// 041 과도기: orchestration 저장소는 core로 옮겼고 US1 compat 전환 전까지 command가 직접 연다.
+pub(crate) fn orchestration_repository(
+    app: &AppHandle,
+) -> Result<JsonOrchestrationRepository, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
+    std::fs::create_dir_all(&directory)
+        .map_err(|error| format!("Failed to create app data directory: {error}"))?;
+    Ok(JsonOrchestrationRepository::from_path(
+        directory.join("orchestration-sessions.json"),
+    ))
+}
+
 pub(crate) fn orchestration_error(
     error: crate::domain::agent_orchestration::OrchestrationError,
 ) -> String {
@@ -142,7 +157,7 @@ pub fn bootstrap_orchestration_workspace(
     if !canonical.is_dir() {
         return Err("Workspace path must be a directory.".into());
     }
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .bootstrap(
             canonical.to_string_lossy().as_ref(),
@@ -157,7 +172,7 @@ pub fn get_orchestration_workspace(
     app: AppHandle,
     window: tauri::Window,
 ) -> Result<Option<crate::domain::agent_orchestration::OrchestrationSession>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .get_for_window(window.label())
         .map_err(orchestration_error)
@@ -180,7 +195,7 @@ pub fn list_recoverable_orchestration_workspaces(
         return Err("Workspace path must be a directory.".into());
     }
     let worktree_path = canonical.to_string_lossy().to_string();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service =
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
     let stale_window_labels: Vec<_> = service
@@ -209,7 +224,7 @@ pub fn bind_main_coordinator_run(
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
     let run_id = input.run_id.clone();
     let binding_state = input.state;
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .bind_main_run(window.label(), input)
         .map_err(orchestration_error)?;
@@ -238,7 +253,7 @@ pub async fn delegate_orchestration_goal(
     input: DelegateGoalRequest,
 ) -> Result<DelegateGoalOutcome, String> {
     let goal = input.goal.clone();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service =
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
     let outcome = service
@@ -276,7 +291,7 @@ pub fn adopt_manual_orchestration_child(
     window: tauri::Window,
     input: AdoptManualChildInput,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .adopt_manual_child(window.label(), &input.panel_id, &input.title)
         .map_err(orchestration_error)
@@ -294,7 +309,7 @@ pub fn list_orchestration_tasks(
     window: tauri::Window,
     input: ListOrchestrationTasksInput,
 ) -> Result<Vec<crate::domain::agent_orchestration::OrchestrationTask>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .list_child_tasks(window.label(), &input.generation_id)
         .map_err(orchestration_error)
@@ -305,7 +320,7 @@ pub fn collect_orchestration_reports(
     app: AppHandle,
     window: tauri::Window,
 ) -> Result<Vec<crate::domain::agent_orchestration::TaskReport>, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     Ok(
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
             .get_for_window(window.label())
@@ -321,7 +336,7 @@ pub fn set_orchestration_presentation(
     window: tauri::Window,
     input: SetPresentationRequest,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .set_presentation(window.label(), input)
         .map_err(orchestration_error)
@@ -347,7 +362,7 @@ pub async fn send_orchestration_child_command(
     mcp_state: State<'_, McpServerState>,
     input: DeliverTaskCommandInput,
 ) -> Result<TaskCommand, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let adapter = AcpAgentWorkerAdapter::new(TauriAcpWorkerRuntime::new(
         app.clone(),
         state.inner().clone(),
@@ -381,7 +396,7 @@ pub async fn respond_orchestration_input(
     mcp_state: State<'_, McpServerState>,
     input: TaskActionRequest,
 ) -> Result<TaskCommand, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let snapshot = OrchestrationService::new(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
@@ -433,7 +448,7 @@ pub async fn cancel_orchestration_task(
     mcp_state: State<'_, McpServerState>,
     input: TaskActionRequest,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let snapshot = OrchestrationService::new(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
@@ -489,7 +504,7 @@ pub async fn retry_orchestration_task(
     mcp_state: State<'_, McpServerState>,
     input: TaskActionRequest,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service =
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()));
     stop_existing_task_worker(
@@ -523,7 +538,7 @@ pub async fn reassign_orchestration_task(
     mcp_state: State<'_, McpServerState>,
     input: TaskActionRequest,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service = OrchestrationService::new(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
@@ -688,14 +703,14 @@ pub fn handoff_orchestration_coordinator(
     input: CoordinatorHandoffRequest,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
     let previous_generation = {
-        let repository = JsonOrchestrationRepository::from_app(&app)?;
+        let repository = orchestration_repository(&app)?;
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
             .get_for_window(window.label())
             .map_err(orchestration_error)?
             .and_then(|session| session.active_coordinator_generation_id)
     };
     let successor_run_id = input.successor_run_id.clone();
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let session = OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app))
         .handoff_coordinator(window.label(), input)
         .map_err(orchestration_error)?;
@@ -745,7 +760,7 @@ pub async fn dispatch_orchestration_prompt(
     mcp_state: State<'_, McpServerState>,
     input: DispatchPromptRequest,
 ) -> Result<crate::domain::agent_orchestration::PromptDispatch, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service = OrchestrationService::new(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
@@ -848,7 +863,7 @@ pub async fn recover_orchestration_workspace(
     state: State<'_, AppState>,
     mcp_state: State<'_, McpServerState>,
 ) -> Result<crate::domain::agent_orchestration::OrchestrationSession, String> {
-    let repository = JsonOrchestrationRepository::from_app(&app)?;
+    let repository = orchestration_repository(&app)?;
     let service = OrchestrationService::new(
         repository.clone(),
         TauriOrchestrationEventSink::new(app.clone()),
@@ -1821,7 +1836,7 @@ pub(crate) fn resolve_agent_run_launch_principal(
         return Ok(None);
     }
 
-    let repository = JsonOrchestrationRepository::from_app(app)?;
+    let repository = orchestration_repository(app)?;
     let session =
         OrchestrationService::new(repository, TauriOrchestrationEventSink::new(app.clone()))
             .get_for_window(window_label)

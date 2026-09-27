@@ -5,9 +5,10 @@ use uuid::Uuid;
 
 use crate::{
     domain::agent_orchestration::{
-        CommandFailure, CoordinatorNotificationStatus, OrchestrationError, OrchestrationErrorCode,
-        OrchestrationSession, PresentationStatus, PromptDelivery, TaskCommand, TaskCommandKind,
-        TaskCommandSource, TaskCommandStatus, TaskReportType, TaskStatus, full_payload_fingerprint,
+        full_payload_fingerprint, CommandFailure, CoordinatorNotificationStatus,
+        OrchestrationError, OrchestrationErrorCode, OrchestrationSession, PresentationStatus,
+        PromptDelivery, TaskCommand, TaskCommandKind, TaskCommandSource, TaskCommandStatus,
+        TaskReportType, TaskStatus,
     },
     ports::{
         agent_worker::{AgentWorkerPort, WorkerBinding, WorkerCommandOutcome},
@@ -69,8 +70,9 @@ where
             .iter()
             .position(|task| task.id == request.task_id)
             .ok_or_else(|| not_found("Task"))?;
-        if let Some(expected) = request.expected_task_revision
-            && session.tasks[task_index].revision != expected
+        if request
+            .expected_task_revision
+            .is_some_and(|expected| session.tasks[task_index].revision != expected)
         {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::RevisionConflict,

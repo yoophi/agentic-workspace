@@ -1,6 +1,7 @@
 pub use acp_agent_core::domain::{acp_session, agent, agent_tool_candidate, events, run};
 
-pub mod agent_orchestration;
+// 041: core로 이동. compat 전환(US1–US4) 동안 기존 경로를 유지하는 재노출이다.
+pub use workbench_core::domain::agent_orchestration;
 // 038 US1: saved prompt·goal·agent 실행 설정 도메인은 `workbench-core`로 이동했다. 기존 import 경로를 유지하기 위해 재노출한다.
 pub use workbench_core::domain::{agent_run_settings, goal, saved_prompt};
 // 038 US2: Git·worktree·파일 도메인도 `workbench-core`로 이동했다. 조회 결과 타입(git-core 재노출 두 모듈)은 그대로 둔다.

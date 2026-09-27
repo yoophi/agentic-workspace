@@ -16,7 +16,7 @@ pub struct OrchestrationEvent {
 
 pub trait OrchestrationEventSink: Send + Sync {
     fn emit(&self, window_label: &str, event: OrchestrationEvent)
-    -> Result<(), OrchestrationError>;
+        -> Result<(), OrchestrationError>;
 }
 
 #[cfg(test)]

@@ -1,15 +1,16 @@
 //! Atomic JSON implementation of the orchestration repository.
 
-use std::{collections::HashSet, fs, path::PathBuf};
-
-use tauri::{AppHandle, Manager};
+use std::{collections::HashSet, path::PathBuf};
 
 use crate::{
     domain::agent_orchestration::{
-        CommandFailure, CoordinatorNotificationStatus, ORCHESTRATION_SCHEMA_VERSION,
-        OrchestrationError, OrchestrationErrorCode, OrchestrationSession, TaskCommandStatus,
+        CommandFailure, CoordinatorNotificationStatus, OrchestrationError, OrchestrationErrorCode,
+        OrchestrationSession, TaskCommandStatus, ORCHESTRATION_SCHEMA_VERSION,
     },
-    infrastructure::json_store::{load_json, save_json},
+    infrastructure::{
+        data_paths::DataPaths,
+        fs::legacy_json_store::{load_json, save_json},
+    },
     ports::orchestration_repository::OrchestrationRepository,
 };
 
@@ -22,16 +23,8 @@ pub struct JsonOrchestrationRepository {
 }
 
 impl JsonOrchestrationRepository {
-    pub fn from_app(app: &AppHandle) -> Result<Self, String> {
-        let directory = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-        fs::create_dir_all(&directory)
-            .map_err(|error| format!("Failed to create app data directory: {error}"))?;
-        Ok(Self::from_path(
-            directory.join("orchestration-sessions.json"),
-        ))
+    pub fn from_paths(paths: &DataPaths) -> Self {
+        Self::from_path(paths.app_data_dir().join("orchestration-sessions.json"))
     }
 
     pub fn from_path(store_path: PathBuf) -> Self {
@@ -235,11 +228,9 @@ mod tests {
         let notification = &loaded[0].coordinator_notifications[0];
 
         assert_eq!(notification.status, CoordinatorNotificationStatus::Pending);
-        assert!(
-            notification
-                .failure
-                .as_ref()
-                .is_some_and(|failure| failure.retryable)
-        );
+        assert!(notification
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.retryable));
     }
 }

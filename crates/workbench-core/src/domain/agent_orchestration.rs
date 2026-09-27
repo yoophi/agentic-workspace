@@ -874,15 +874,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(child.parent_node_id.as_deref(), Some(MAIN_AGENT_NODE_ID));
-        assert!(
-            AgentNode::child(
-                "grandchild",
-                "child-1",
-                AgentRoleProfile::new("reviewer", "Reviewer", "검토", "위험 보고").unwrap(),
-                "2026-07-27T00:00:00Z",
-            )
-            .is_err()
-        );
+        assert!(AgentNode::child(
+            "grandchild",
+            "child-1",
+            AgentRoleProfile::new("reviewer", "Reviewer", "검토", "위험 보고").unwrap(),
+            "2026-07-27T00:00:00Z",
+        )
+        .is_err());
     }
 
     #[test]
@@ -933,11 +931,9 @@ mod tests {
             label: "result".into(),
             description: None,
         };
-        assert!(
-            valid
-                .validate_for_workspace(workspace.to_string_lossy().as_ref())
-                .is_ok()
-        );
+        assert!(valid
+            .validate_for_workspace(workspace.to_string_lossy().as_ref())
+            .is_ok());
         for uri in ["/etc/passwd", "../outside.txt"] {
             let invalid = ArtifactReference {
                 uri: uri.into(),
@@ -998,11 +994,9 @@ mod tests {
             uri: "inside.txt".into(),
             ..escaping.clone()
         };
-        assert!(
-            inside
-                .validate_for_workspace(root.to_string_lossy().as_ref())
-                .is_ok()
-        );
+        assert!(inside
+            .validate_for_workspace(root.to_string_lossy().as_ref())
+            .is_ok());
 
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&outside);
@@ -1063,11 +1057,9 @@ mod tests {
         command
             .transition(TaskCommandStatus::Accepted, now.clone())
             .unwrap();
-        assert!(
-            command
-                .transition(TaskCommandStatus::Pending, now.clone())
-                .is_err()
-        );
+        assert!(command
+            .transition(TaskCommandStatus::Pending, now.clone())
+            .is_err());
 
         let mut notification = CoordinatorNotification {
             id: "notification-1".into(),

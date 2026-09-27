@@ -18,7 +18,6 @@ use crate::{
         acp_agent_launch_factory::inject_mcp_launch_env,
         acp_agent_worker_adapter::{take_worktree_guard, verify_worktree_unchanged},
         desktop_benches,
-        json_orchestration_repository::JsonOrchestrationRepository,
         mcp::McpServerState,
         tauri_orchestration_event_sink::TauriOrchestrationEventSink,
     },
@@ -109,7 +108,8 @@ impl RunTerminalHook for TauriDesktopBridge {
         else {
             return;
         };
-        let Ok(repository) = JsonOrchestrationRepository::from_app(&self.app) else {
+        let Ok(repository) = crate::inbound::tauri_commands::orchestration_repository(&self.app)
+        else {
             return;
         };
         let service = OrchestrationService::new(

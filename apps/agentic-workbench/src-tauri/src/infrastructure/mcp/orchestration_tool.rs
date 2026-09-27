@@ -294,7 +294,7 @@ pub async fn handle_tool(
             false,
         );
     };
-    let repository = match JsonOrchestrationRepository::from_app(app) {
+    let repository = match crate::inbound::tauri_commands::orchestration_repository(app) {
         Ok(repository) => repository,
         Err(error) => return tool_error("persistenceFailed", error, true),
     };

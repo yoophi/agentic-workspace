@@ -17,3 +17,5 @@ pub const WORKSPACE_EXCLUDED_DIRS: &[&str] = &[
     "node_modules",
     "target",
 ];
+pub mod legacy_json_store;
+pub mod orchestration_store;
