@@ -1,4 +1,5 @@
 import { createExchangeReconciler } from "@/features/agent-run/model/exchange-reconciler";
+import { useOrchestrationWorkspaceUpdates } from "@/features/agent-run/ui/use-orchestration-workspace-updates";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { AlertTriangleIcon, FolderGit2Icon } from "lucide-react";
 
@@ -12,7 +13,6 @@ import {
   bootstrapOrchestrationWorkspace,
   getOrchestrationWorkspace,
   listRecoverableOrchestrationWorkspaces,
-  listenOrchestrationWorkspaceUpdated,
   MAIN_AGENT_NODE_ID,
   setOrchestrationPresentation,
   respondOrchestrationInput,
@@ -169,7 +169,6 @@ export function WorktreeAgentRunArea({
 
   useEffect(() => {
     let disposed = false;
-    let unlisten: (() => void) | undefined;
     setOrchestrationSession(null);
     setRecoverableSessions([]);
     setIsStartingOrchestration(true);
@@ -189,31 +188,13 @@ export function WorktreeAgentRunArea({
           setTargetMessage(`복구 가능한 workspace 조회 실패: ${String(error)}`);
         }
       });
-    void listenOrchestrationWorkspaceUpdated(async (event) => {
-      const current = orchestrationSessionRef.current;
-      if (
-        disposed ||
-        (current && event.workspaceId !== current.id) ||
-        (current && event.revision <= current.revision)
-      ) {
-        return;
-      }
-      const snapshot = await getOrchestrationWorkspace();
-      if (!disposed && snapshot) {
-        setOrchestrationSession(snapshot);
-      }
-    }).then((dispose) => {
-      if (disposed) {
-        dispose();
-      } else {
-        unlisten = dispose;
-      }
-    });
     return () => {
       disposed = true;
-      unlisten?.();
     };
   }, [startOrchestrationWorkspace, worktree.path]);
+
+  // 갱신 알림 → 작업 영역 다시 읽기(043 T038: 화면 통합 시험이 같은 hook을 렌더링한다).
+  useOrchestrationWorkspaceUpdates(orchestrationSessionRef, setOrchestrationSession, worktree.path);
 
   const mainRunId =
     state.slots.find((slot) => slot.id === MAIN_AGENT_NODE_ID)?.activeRunId ??

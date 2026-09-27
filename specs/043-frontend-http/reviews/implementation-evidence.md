@@ -350,3 +350,23 @@ AW Rust 합계: 124 passed, 0 failed
   - `worktree-agent-run-area` 컴포넌트 자체를 렌더링한 시험은 아니다. 이 컴포넌트의 기존 시험은 소스 문자열 검사뿐이고, 렌더링 harness가 없다.
   - 화면 경로를 실제로 거친 이벤트 시험은 세 가지다. `agent-run-panel.test.tsx`의 [http] run 이벤트(네트워크 창은 창 삽입을 받지 않음 변이 포함), 교환 키 시험, 앱 스모크의 run 이벤트·새로고침 교환(실제 앱)이다.
 - 수신자 교체 중 도착은 이벤트 클라이언트 시험(T030, T039의 교체 중 끊김)이 확인한다.
+
+## T038 정정 — 운영 화면 구독자를 렌더링한 통합 시험(사용자 검토)
+
+**정정**: 앞 절(T038, dd59ea7)은 `worktree-agent-run-area`의 수신자와 **같은 모양의 시험용 수신자**를 만들어 확인했다. 운영 화면 구독자를 거치지 않았으므로 T038 완료 근거가 아니었다. T038을 다시 열고 아래로 닫았다.
+
+- **운영 코드 추출**: `worktree-agent-run-area`의 orchestration 갱신 구독을 동작 그대로 `features/agent-run/ui/use-orchestration-workspace-updates.ts`로 옮겼다. 운영 컴포넌트는 이 hook을 쓴다(`useOrchestrationWorkspaceUpdates(orchestrationSessionRef, setOrchestrationSession, worktree.path)`). hook의 `resetKey`가 `null`이면 구독하지 않는다(운영은 늘 Worktree 경로를 넘긴다).
+- **시험**: `use-orchestration-workspace-updates.test.tsx`. 운영 hook과 운영 저장소 함수(`getOrchestrationWorkspace`)를 쓰는 최소 화면을 네트워크 경로로 렌더링한다. 호출은 실제 루프백 HTTP의 가짜 서버로 가고, 이벤트는 가짜 hub 스트림에서 온다. 판정은 **화면에 그려진 revision**이다.
+  - **Promise 거절**: 다시 읽기가 한 번 실패하면 이벤트 클라이언트가 이 수신자를 스냅샷(revision 알림)으로 재동기하고, 화면이 `revision:2`를 그린다. 읽기는 실패 1회와 복구 1회 이상이다.
+  - **수신자 교체**(사용자 검토 반영): 화면을 다시 마운트하지 않고(화면 상태 revision 2 유지) 구독자만 내린다. 그 사이 revision 3이 도착하고, 구독자를 다시 올리면 **운영 hook을 통해서만** 화면이 `revision:3`이 된다. 그 뒤 revision 4도 이어 받는다.
+  - **동기 예외**: 운영 수신자는 async라 내부 예외(재조회 실패 포함)가 모두 거절된 Promise가 된다. 이 수신자에는 동기 예외 경로가 없다. 동기 예외는 이벤트 클라이언트 시험(T030 `treats a synchronous throw like a rejection`)이 맡는다.
+
+| 항목 | 종료 코드 | 결과 |
+|---|---|---|
+| 첫 판(화면 재마운트로 교체) | 1 → 0 | 처음에는 소켓 재사용 단정만 실패했다(아래 이벤트 클라이언트 수정). **이 첫 판은 새 화면이 마운트하며 최신을 스스로 읽어 대기열 이벤트를 버려도 통과하는 약한 시험이었다**(사용자 검토). 구독자만 교체하는 설계로 바꿨다 |
+| 현재 판 | 0 | 1 passed |
+| 변이 A: 수신자 없을 때 대기열에만 넣지 않음(최고 순번은 갱신) | **0(못 잡음)** | 새 구독자가 대기열로 받지 못한 순번이 있음을 알고(`lastQueued < highest`) cursor에서 다시 연결해 replay로 받는다. 이 변이는 실제 유실을 만들지 못한다 |
+| 변이 B: 수신자 없을 때 도착한 이벤트를 통째로 버림(존재도 모름) | 1 | `expected 'revision:2' to be 'revision:3'` — 교체 단정에서 정확히 실패 |
+
+- **이벤트 클라이언트 수정**: 새 수신자가 붙을 때의 재연결 판정을 `delivered < highest`에서 `lastQueued < highest`로 바꿨다. 대기열을 넘겨받아 최고 순번까지 받은 수신자는 다시 연결하지 않는다. 이전 판정은 불필요한 재연결을 만들었다. 유실은 없었다(중복은 `lastQueued`가 막음).
+- 패키지 57 tests, AW 624 tests, 두 패키지 타입 검사 통과. 패키지 시험의 종료 코드 1은 통합 시험 파일의 쓰지 않는 import 때문이었다(타입 검사가 모든 파일을 본다). 고친 뒤 0이다.

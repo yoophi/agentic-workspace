@@ -196,8 +196,9 @@ export function createEventClient(options: EventClientOptions): EventClient {
         this.connect();
       } else if (!this.socket && !this.opening) {
         this.connect();
-      } else if (state.delivered < this.highest && !this.recovery) {
-        // 이미 지난 순번부터 받겠다는 수신자: cursor(최솟값)에서 다시 연결한다(다른 수신자는 lastQueued로 중복을 건너뛴다).
+      } else if (state.lastQueued < this.highest && !this.recovery) {
+        // 대기열로 받지 못한 지난 순번부터 받겠다는 수신자: cursor(최솟값)에서 다시 연결한다(다른 수신자는 lastQueued로
+        // 중복을 건너뛴다). 대기열을 넘겨받아 최고 순번까지 받은 수신자는 다시 연결하지 않는다.
         this.reconnectNow();
       }
       return () => this.remove(state);

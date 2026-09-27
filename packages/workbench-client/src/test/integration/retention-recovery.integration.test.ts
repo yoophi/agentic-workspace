@@ -4,7 +4,7 @@
 // 클라이언트는 gap의 lastSequence로 live를 먼저 확보하고 스냅샷으로 재설정한 뒤, 이후 변경을 빠짐·중복 없이 받는다.
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createWorkbenchClient, type WorkbenchClient } from "../../call-client";
+import { createWorkbenchClient } from "../../call-client";
 import type { Connection } from "../../connection";
 import { createEventClient, type EventClient, type SnapshotSource } from "../../event-client";
 import { OPERATION_KINDS } from "../../operation-kinds";
