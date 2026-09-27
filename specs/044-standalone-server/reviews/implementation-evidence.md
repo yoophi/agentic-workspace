@@ -483,3 +483,10 @@ green·최종:
 - `cargo test -p workbench-host` (`f3739-host-1.log`) 종료 0: 7 target, 57 passed, filtered out 0.
 - AW src-tauri `cargo test` (`f3739-aw-1.log`) 종료 0: 4 target, 102 passed, filtered out 0. `cargo clippy --all-targets -D warnings` (`f3739-aw-clippy-1.log`) 종료 0.
 - 끝난 뒤 가짜 ACP agent·서버 잔여 프로세스 없음.
+
+## fork 결과 확인 (T037–T039, 메인 세션)
+
+- green 로그 직접 확인: T037·T038·T039 각각 7 passed, 0 filtered out.
+- 최종 실행 `f3739-*`(clippy 수정 뒤): core 470/0, acp-agent-core 97/0, host 57/0, AW 102/0, AW clippy 0. filtered out은 모두 0이다.
+- fork가 돌리지 않은 `agentic-workbench-server`를 메인 세션이 실행했다: `cargo test -p agentic-workbench-server` 종료 0(7/0), clippy `-D warnings` 종료 0.
+- 디스크 여유가 4.6GB로 줄어, 재빌드로 복구 가능한 산출물을 정리했다(main 저장소 `target` 전체, 044 `target/release`). 정리 뒤 여유는 11GB다.
