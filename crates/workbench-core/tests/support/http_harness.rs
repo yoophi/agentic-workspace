@@ -288,8 +288,14 @@ impl Harness {
 }
 
 impl Harness {
-    /// 요청을 보내고 응답을 읽기 전에 연결을 끊는다(클라이언트 단절 흉내). 서버가 본문을 다 받을 시간을 둔다.
-    pub async fn send_and_disconnect(&self, token: &str, request: &CallRequest) {
+    /// 요청을 보내고, `entered`(그 요청의 효과가 난 뒤·결과 기록 전 구간 진입 확인)가 끝난 뒤 응답을 읽지 않고
+    /// 연결을 끊는다(클라이언트 단절). 시간 대기에 의존하지 않는다.
+    pub async fn send_then_disconnect<F: std::future::Future>(
+        &self,
+        token: &str,
+        request: &CallRequest,
+        entered: F,
+    ) -> F::Output {
         use tokio::io::AsyncWriteExt;
         let body = serde_json::to_vec(request).expect("json");
         let head = format!(
@@ -303,8 +309,9 @@ impl Harness {
         stream.write_all(head.as_bytes()).await.expect("head");
         stream.write_all(&body).await.expect("body");
         stream.flush().await.expect("flush");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let output = entered.await;
         drop(stream);
+        output
     }
 }
 

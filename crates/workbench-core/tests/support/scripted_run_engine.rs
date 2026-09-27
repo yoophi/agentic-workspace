@@ -45,6 +45,9 @@ pub struct RunScript {
     /// 설계 리뷰 C1)을 재현한다.
     #[serde(default)]
     pub prompt_settle_ms: u64,
+    /// run 슬롯을 만들고 Started를 낸 **뒤** 돌아가기 전 지연(`run.start`의 효과 뒤·기록 전 구간).
+    #[serde(default)]
+    pub start_settle_ms: u64,
     /// 동시 실행 상한.
     #[serde(default)]
     pub max_runs: Option<usize>,
@@ -64,6 +67,9 @@ pub struct ScriptedRunEngine {
     pub turn_hook: Mutex<Option<TurnHook>>,
     /// `start`가 슬롯을 만든 뒤·돌아가기 전에 실행한다(자식 첫 턴이 바인딩 전에 도구를 부르는 경우).
     pub start_hook: Mutex<Option<TurnHook>>,
+    /// 효과 표지(`start:<run>`, `prompt:<run>:<text>`). 효과가 난 직후·settle 지연 전에 기록된다(042 R17 시험 동기화).
+    applied: Mutex<Vec<String>>,
+    applied_notify: tokio::sync::Notify,
 }
 
 fn not_active() -> RunEngineError {
@@ -92,6 +98,28 @@ impl ScriptedRunEngine {
                 message: "done".into(),
             },
         );
+    }
+
+    fn mark_applied(&self, label: String) {
+        self.applied.lock().unwrap().push(label);
+        self.applied_notify.notify_waiters();
+    }
+
+    /// `pred`에 맞는 효과 표지가 기록될 때까지 기다린다(settle 지연 구간 진입 확인).
+    pub async fn wait_applied(&self, pred: impl Fn(&str) -> bool, wait: Duration) -> String {
+        tokio::time::timeout(wait, async {
+            loop {
+                let notified = self.applied_notify.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if let Some(found) = self.applied.lock().unwrap().iter().find(|l| pred(l)) {
+                    return found.clone();
+                }
+                notified.await;
+            }
+        })
+        .await
+        .expect("effect marker within the wait")
     }
 
     pub fn run_count(&self) -> usize {
@@ -156,6 +184,10 @@ impl RunEngine for ScriptedRunEngine {
                 message: "started".into(),
             },
         );
+        self.mark_applied(format!("start:{run_id}"));
+        if self.script.start_settle_ms > 0 {
+            tokio::time::sleep(Duration::from_millis(self.script.start_settle_ms)).await;
+        }
         if let Some(permission) = &self.script.permission_id {
             sink.emit(
                 &run_id,
@@ -203,6 +235,7 @@ impl RunEngine for ScriptedRunEngine {
             return Err(not_active());
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
+        self.mark_applied(format!("prompt:{run_id}:{prompt}"));
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
@@ -226,6 +259,7 @@ impl RunEngine for ScriptedRunEngine {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
+        self.mark_applied(format!("prompt:{run_id}:{prompt}"));
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;

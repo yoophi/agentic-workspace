@@ -22,6 +22,7 @@ use support::{
 use workbench_protocol::{AuthenticatedPrincipal, FaultCode, OperationId, Workbench};
 
 const DELAY_MS: u64 = 600;
+const ENTRY_WAIT: Duration = Duration::from_secs(10);
 
 /// 효과는 곧바로 일어나고 호출은 그 뒤 `DELAY_MS` 동안 끝나지 않는다: 연결 단절이 효과 뒤·멱등 기록 전에 온다.
 fn delayed() -> RunScript {
@@ -82,13 +83,21 @@ async fn disconnected_prompt_retry_applies_once() {
     let request = command_request(
         OperationId::RunSendPrompt,
         &uuid_key(),
-        json!({ "benchId": bench, "runId": "r1", "prompt": "hello" }),
+        json!({ "benchId": bench, "runId": "r1", "prompt": "hello-disconnect" }),
     );
-    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
-    // 효과가 아직 진행 중일 때 같은 키로 재시도 → 끝날 때까지 기다려 저장된 결과.
+    // 이 요청의 효과가 난 뒤·결과 기록 전(settle 구간)에 연결을 끊는다.
+    harness
+        .send_then_disconnect(
+            TOKEN_DESKTOP,
+            &request,
+            h.engine
+                .wait_applied(|l| l == "prompt:r1:hello-disconnect", ENTRY_WAIT),
+        )
+        .await;
+    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
+    // 원 호출이 아직 진행 중일 때 같은 키로 재시도 → 끝날 때까지 기다려 저장된 결과.
     let retried = harness.call(Some(TOKEN_DESKTOP), &request).await;
     assert!(retried.is_ok(), "{retried:?}");
-    tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
 }
 
@@ -102,13 +111,21 @@ async fn disconnected_orchestration_write_retry_applies_once() {
         OperationId::OrchestrationDelegateGoal,
         &uuid_key(),
         json!({ "benchId": bench, "request": {
-            "requestId": "goal-1", "goal": "Summarize", "expectedRevision": revision } }),
+            "requestId": "goal-1", "goal": "goal-042-disconnect", "expectedRevision": revision } }),
     );
-    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    harness
+        .send_then_disconnect(
+            TOKEN_DESKTOP,
+            &request,
+            h.engine.wait_applied(
+                |l| l.starts_with("prompt:main-run:") && l.contains("goal-042-disconnect"),
+                ENTRY_WAIT,
+            ),
+        )
+        .await;
     let retried = harness.call(Some(TOKEN_DESKTOP), &request).await;
     let retried = output(retried.expect("retry returns the stored result"));
     assert!(retried["rootTaskId"].is_string(), "{retried}");
-    tokio::time::sleep(Duration::from_millis(100)).await;
     assert_eq!(h.engine.prompts.load(Ordering::SeqCst), before + 1);
     assert_eq!(
         orchestration_revision(&h, &bench).await,
@@ -120,7 +137,7 @@ async fn disconnected_orchestration_write_retry_applies_once() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn disconnected_run_start_retry_starts_once() {
     let h = BenchHarness::new(RunScript {
-        start_delay_ms: DELAY_MS,
+        start_settle_ms: DELAY_MS,
         ..RunScript::default()
     });
     let bench = h.open().await;
@@ -130,7 +147,13 @@ async fn disconnected_run_start_retry_starts_once() {
         &uuid_key(),
         json!({ "benchId": bench, "request": { "goal": "g", "agentId": "codex", "runId": "r1" } }),
     );
-    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    harness
+        .send_then_disconnect(
+            TOKEN_DESKTOP,
+            &request,
+            h.engine.wait_applied(|l| l == "start:r1", ENTRY_WAIT),
+        )
+        .await;
     // run.start의 진행 중 재시도는 오늘 in-process와 같이 retryable conflict(`outcome: unknown`)다 — 클라이언트는
     // 같은 키로 다시 시도해 저장된 결과를 받는다.
     let mut in_progress = 0;
@@ -172,11 +195,20 @@ async fn shutdown_drains_a_disconnected_call_before_returning() {
     let request = command_request(
         OperationId::RunSendPrompt,
         &key,
-        json!({ "benchId": bench, "runId": "r1", "prompt": "hello" }),
+        json!({ "benchId": bench, "runId": "r1", "prompt": "hello-shutdown" }),
     );
-    harness.send_and_disconnect(TOKEN_DESKTOP, &request).await;
+    // 효과가 난 뒤·결과 기록 전 구간 진입을 확인한 그 지점에서 연결을 끊고 곧바로 종료 신호.
+    harness
+        .send_then_disconnect(
+            TOKEN_DESKTOP,
+            &request,
+            h.engine
+                .wait_applied(|l| l == "prompt:r1:hello-shutdown", ENTRY_WAIT),
+        )
+        .await;
     assert_eq!(harness.calls.active(), 1, "the call was accepted");
     let served = harness.begin_shutdown();
+    // 남은 settle(약 600ms)이 경고 간격(50ms)의 여러 배다 — 그 사이 serve가 끝나면 조기 반환이다.
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(
         !served.is_finished(),
