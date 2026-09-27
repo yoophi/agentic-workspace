@@ -8,7 +8,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use workbench_protocol::{AuthenticatedPrincipal, StreamCursor};
+use workbench_protocol::{AuthenticatedPrincipal, PrincipalSubject, StreamCursor};
 
 use crate::auth::{digest, lock, random_token};
 
@@ -90,6 +90,14 @@ impl EventTicketStore {
         let expires_at = chrono::Utc::now()
             + chrono::Duration::from_std(self.ttl).unwrap_or_else(|_| chrono::Duration::zero());
         Ok((token, expires_at))
+    }
+
+    /// 주체의 남은 표를 모두 지운다(043: 창 Destroyed — 폐기 전에 받은 표로 구독하지 못하게). 지운 개수.
+    pub fn revoke_subject(&self, subject: &PrincipalSubject) -> usize {
+        let mut entries = lock(&self.entries);
+        let before = entries.len();
+        entries.retain(|_, ticket| ticket.principal.subject != *subject);
+        before - entries.len()
     }
 
     /// 원자적으로 꺼낸다 — 같은 표로 두 연결이 동시에 와도 하나만 성공한다.

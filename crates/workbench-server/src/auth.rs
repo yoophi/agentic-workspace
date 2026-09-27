@@ -11,7 +11,7 @@ use std::{
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
-use workbench_protocol::AuthenticatedPrincipal;
+use workbench_protocol::{AuthenticatedPrincipal, PrincipalSubject};
 
 /// bearer 토큰 → principal. 요청 Origin(있으면)을 함께 받는다 — Origin에 묶인 자격 증명을 판정한다.
 pub trait CredentialResolver: Send + Sync {
@@ -81,7 +81,18 @@ impl DesktopTokenIssuer {
         }
     }
 
+    /// 공용 데스크톱 주체 토큰(비브라우저 진단 토큰 등). 창 토큰은 [`Self::issue_for`]로 창 주체를 묶는다.
     pub fn issue(&self, origin: TokenOrigin, ttl: Duration) -> IssuedToken {
+        self.issue_for(AuthenticatedPrincipal::desktop(), origin, ttl)
+    }
+
+    /// `principal`에 묶인 토큰(043: 창 주체 `desktop:window:<label>:<incarnation>`).
+    pub fn issue_for(
+        &self,
+        principal: AuthenticatedPrincipal,
+        origin: TokenOrigin,
+        ttl: Duration,
+    ) -> IssuedToken {
         let token = random_token();
         let now = Instant::now();
         let mut entries = lock(&self.entries);
@@ -99,7 +110,7 @@ impl DesktopTokenIssuer {
         entries.insert(
             digest(&token),
             DesktopEntry {
-                principal: AuthenticatedPrincipal::desktop(),
+                principal,
                 origin,
                 expires_at: now + ttl,
             },
@@ -110,6 +121,14 @@ impl DesktopTokenIssuer {
                 + chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::zero()),
             client_instance_id: uuid::Uuid::new_v4().to_string(),
         }
+    }
+
+    /// 주체의 토큰을 모두 지운다(창 Destroyed). 지운 개수.
+    pub fn revoke_subject(&self, subject: &PrincipalSubject) -> usize {
+        let mut entries = lock(&self.entries);
+        let before = entries.len();
+        entries.retain(|_, entry| entry.principal.subject != *subject);
+        before - entries.len()
     }
 
     pub fn len(&self) -> usize {

@@ -73,6 +73,8 @@ pub struct HarnessOptions {
     pub extra_resolver: Option<Arc<dyn workbench_server::auth::CredentialResolver>>,
     pub body_read_timeout: Duration,
     pub connection_grace: Duration,
+    /// 표 저장소를 시험이 들고 있어야 할 때(043 창 토큰 폐기).
+    pub tickets: Option<Arc<EventTicketStore>>,
 }
 
 impl Default for HarnessOptions {
@@ -85,6 +87,7 @@ impl Default for HarnessOptions {
             extra_resolver: None,
             body_read_timeout: workbench_server::DEFAULT_BODY_READ_TIMEOUT,
             connection_grace: workbench_server::DEFAULT_CONNECTION_GRACE,
+            tickets: None,
         }
     }
 }
@@ -149,7 +152,9 @@ impl Harness {
             origins: OriginPolicy::new(options.origins),
             access_log: access_log.clone(),
             exposure: options.exposure,
-            tickets: Arc::new(EventTicketStore::new(options.ticket_ttl, TICKET_CAPACITY)),
+            tickets: options.tickets.unwrap_or_else(|| {
+                Arc::new(EventTicketStore::new(options.ticket_ttl, TICKET_CAPACITY))
+            }),
             body_limit: DEFAULT_BODY_LIMIT,
             drain_warn_after: options.drain_warn_after,
             body_read_timeout: options.body_read_timeout,
