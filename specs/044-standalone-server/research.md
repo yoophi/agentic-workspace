@@ -116,6 +116,7 @@
     - 따라서 확인이 실제 전송보다 **먼저** 도착한다. 교환 상태(`accepted`/`delivered`)로는 "아직 prompt가 안 갔다"를 알 수 없다.
   - 계약:
     - 서버는 교환마다 **전달 prompt 소비 여부**(`deliveryConsumed`)를 따로 관리한다.
+    - **소비는 엔진 대기열 수락과 묶는다(Codex 재검토 E2)**: `SendPromptUseCase`는 전송을 spawn하고 곧바로 성공을 돌려준다(`send_prompt.rs:46-58`). 그 사이 다른 prompt(예: coordinator 알림)가 먼저 turn을 잡으면 전송이 실패하고 Error 이벤트만 남는다(`runner.rs:787-790`). 소비를 이 성공에 묶으면 교환을 잃는다. 그래서 `continuation`이 붙은 `run.sendPrompt`는 **엔진 대기열 경로**(`queue_prompt`: 현재 turn 뒤 차례로 보냄, 바쁨으로 실패하지 않음)로 보낸다. 소비 표시와 대기열 등록을 한 번에 한다. 그 prompt의 활동 예약(아래 실행 수명 계약)이 전달이 끝날 때까지 활성 작업에 남는다. 대기열 전달이 run 종료로 실패하면 소비 표시는 남긴다(대상 run이 없어 교환의 뜻이 사라졌다). 이 경우 `server.status`의 `failedExchangeDeliveries`로 보고한다.
     - `run.sendPrompt` 입력에 선택 필드 `continuation: { exchangeRequestId }`를 더한다.
     - `draining` 중에는 다음을 **원자적으로** 모두 확인하고 `deliveryConsumed`를 세울 때만 받는다:
       - 그 교환이 호출자 작업대에 있다.
@@ -130,7 +131,11 @@
   - 화면의 교환 전달은 이 필드를 싣는다(오늘 키와 함께).
 - **K 경로 2 — 대기 task 배정(Codex 설계 리뷰 C1)**:
   - 동시 실행 상한으로 대기한 자식 task는 서버가 자동 실행하지 **않는다**. 스케줄러 `release`는 다음 준비 task id를 돌려줄 뿐이다(`agent_tools.rs:555-570`). coordinator가 `orchestration.assignChildTask`를 다시 불러야 진행한다(`orchestration_liveness.rs:232-266`).
-  - 계약: `draining` 중 `orchestration.assignChildTask`는 대상 task가 **비우기 시작 전에 만들어진 대기 task**일 때만 받는다(K). 새로 만든 task는 `createChildTask`가 N이라 생기지 않는다. 배정은 task 상태 전이로 1회만 성공한다.
+  - 계약: `draining` 중 `orchestration.assignChildTask`는 대상 task가 **비우기 시작 전에 만들어진 대기 task**일 때만 받는다(K). 새로 만든 task는 `createChildTask`가 N이라 생기지 않는다.
+  - **배정의 원자성(Codex 재검토 E3, 기존 결함 포함)**: 오늘 배정 경로는 원자적이지 않다. `scheduler.acquire`는 이미 active인 task에도 `Acquired`를 돌려준다. 두 요청이 `current_run_id`가 없는 같은 snapshot을 읽으면 둘 다 기동할 수 있고, `reserve_child_run`(`service.rs:802-828`)은 상태·기존 예약을 보지 않고 덮어쓴다. 비우기와 상관없이 같은 task에서 run이 둘 뜨고 한 run의 보고 권한이 밀려날 수 있다.
+    - 수정: 배정은 orchestration 저장소의 단일 RMW 경계(core ADR 0006) 안에서 **비교 후 변경**한다. 조건은 task가 대기(`Ready`)이고 `current_run_id`가 없는 것이고, 변경은 `Starting` 예약이다. 비우기 중이면 "비우기 시작 전 생성" 판정도 같은 경계에서 한다.
+    - 이미 예약이 있으면 기동하지 않고 기존 예약 결과를 돌려준다. `reserve_child_run`도 기존 예약·상태를 검사한다.
+    - 시험: 서로 다른 요청 키의 동시 배정(run 1개만), 배정과 취소의 경합, 비우기 중 K 배정.
   - 시험: 동시 실행 상한 1에서 task 둘을 받아들인 뒤 wait-stop → 첫 task 완료 → coordinator가 둘째를 배정(K) → 완료 → 서버 정지.
 - **서버 내부로 이어지는 경로(입구 판정 없음)**:
   - coordinator 알림 전달(`notification_dispatcher`)
@@ -139,7 +144,13 @@
 - **활성 작업(`ActiveWork`)과 출처(설계 리뷰 D5, Codex 설계 리뷰 C3)**:
   - **바쁜 run 수**(`busyRuns`): 진행 중 turn, 엔진 대기열 prompt, 권한 대기 중 하나라도 있는 run.
     - 세션 수(`active_run_count` = `runs.len()`)는 쓰지 않는다. ACP 프로세스는 turn이 끝나도 다음 prompt를 기다리며 살아 있다(`runner.rs:419-475`, `start_agent_run.rs:87-88`). 세션 수로 세면 wait·유휴가 영원히 끝나지 않는다. 그 accessor는 시험 전용이기도 하다.
-    - 출처: core가 run 이벤트(`lifecycle:promptSent`·`promptCompleted`·`permission` 요청·응답, run 종료)로 유지하는 운영용 run 활동 표(새 port `RunActivity`). `acp-agent-core`는 바꾸지 않는다.
+    - **출처는 이벤트 추정이 아니라 실행 수명 계약이다(Codex 재검토 E1)**. 이벤트로는 정확히 셀 수 없다: `queue_prompt`는 spawn하고 곧바로 돌아가며 등록 이벤트가 없고(`acp_run_engine.rs:125-148`), `PromptSent`는 잠금을 잡은 뒤에야 나온다(`runner.rs:794-799`). RPC 오류는 `PromptCompleted` 없이 돌아간다(`runner.rs:748`). 시작 중인 run과 Ralph 반복 사이의 지연도 이벤트로 드러나지 않는다.
+    - 계약(`RunActivity`, core):
+      - 모든 prompt 실행 진입점에서 **동기적으로 예약**하고, 그 실행 future가 끝날 때(성공·오류·취소·abort로 drop) guard가 해제한다. 진입점은 엔진의 `start`, `send_prompt`, `queue_prompt`, `steer`, `send_and_wait`, orchestration 작업자와 알림 전달기가 부르는 엔진 경로다.
+      - `send_prompt`는 엔진이 `SendPromptUseCase` 대신 세션의 `send_prompt` future를 직접 spawn해 guard를 그 future에 묶는다(오늘 `queue_prompt`와 같은 모양).
+      - **시작의 초기 prompt 순서(Ralph 반복 포함)는 acp-agent-core runner 안에서 끝난다.** runner가 순서를 시작할 때 받는 guard를 순서 끝(`child.wait()` 전)에서 놓게 한다. `acp-agent-core`의 `StartAgentRunUseCase`·runner에 선택 인자(활동 guard 공급자)를 더한다. 다른 소비자(ask-code·hushline)는 인자를 넘기지 않아 동작이 같다. 헌법 V에 따라 두 앱의 Rust 검사·시험을 게이트에 넣는다.
+      - 권한 대기는 그 prompt 실행 future 안에서 일어나므로 같은 guard에 포함된다.
+    - **정지 판정과 예약의 직렬화**: 활동 표는 서버 상태와 한 잠금을 쓴다. 정지 판정은 그 잠금 아래에서 "활동 0이면 `stopping`으로 전이"를 한다. `stopping` 뒤의 예약은 실패한다(내부 경로의 새 실행은 시작하지 않고 run 취소로 처리). 예약이 정지 판정과 엇갈려 "0으로 보고 멈췄는데 방금 예약된 실행이 있는" 경우가 없다.
     - 쉬고 있는 세션(바쁘지 않은 run)은 활성 작업이 아니다. 서버가 멈출 때(wait·idle·force 모두) 남은 세션은 취소되고 run은 끝난다.
   - 진행 중(배정된) orchestration task 수 + 비우기 시작 전에 만든 대기 task 수(K로 배정 가능한 것).
   - **확인했지만 전달 prompt가 아직 소비되지 않은 교환**(`send`/`queue`, `rejected` 아님, 대상 run 살아 있음): **데스크톱 임대가 하나라도 있을 때만** 센다. 임대가 없으면 화면 대기열을 보낼 클라이언트가 없어 기다려도 끝나지 않는다. 이 경우 `server.status`의 `undeliverableExchanges`로 보고한다.
@@ -163,7 +174,7 @@
   2. operation마다 `draining` 입구 판정. K는 조건 충족·불충족 양쪽을 본다.
   3. **실제 경로 wait-stop 시험**: 실제 서버 조립(시험 host), HTTP 클라이언트, 043의 실제 소비자 코드를 쓴다. 각 경우 wait-stop을 요청한 뒤 실제 경로로 작업을 끝내고, 서버가 멈추는지 본다:
      - (a) 권한 대기 run: 권한 응답 → turn 완료 → **세션은 살아 있어도** 바쁜 run 0 → 멈춤(C3 실패 시나리오: 세션 수로 세면 멈추지 않음)
-     - (b) 교환 전달: 대상 run이 바쁜 상태에서 교환 요청 → 043 원장이 라우팅하고 **전송보다 먼저 확인** → turn 종료 뒤 패널 대기열이 `run.sendPrompt(continuation)` → 소비 → 멈춤(C2 실패 시나리오: 확인 뒤 상태로 판정하면 전달 거절)
+     - (b) 교환 전달: 대상 run이 바쁜 상태에서 교환 요청 → 043 원장이 라우팅하고 **전송보다 먼저 확인** → turn 종료 뒤 패널 대기열이 `run.sendPrompt(continuation)` → 엔진 대기열 등록·소비 → 전달 완료 → 멈춤(C2 실패 시나리오: 확인 뒤 상태로 판정하면 전달 거절). 변형: 패널 전송 직전에 coordinator 알림 prompt가 먼저 turn을 잡아도 교환 prompt가 그 뒤에 전달된다(E2 실패 시나리오: 즉시 전송 경로면 Error만 남고 유실)
      - (c) orchestration 자식 task 보고·결과(MCP 경로) → 알림 전달기가 coordinator에 전달 → task 종결 → 멈춤
      - (d) 동시 실행 상한 1, task 둘 → 첫 task 완료 → coordinator가 둘째를 `assignChildTask`(K) → 완료 → 멈춤(C1 실패 시나리오: N이면 멈추지 않음)
      - (e) 대기 자식 명령(`queue`): 엔진 대기열 prompt 전달 → 완료 → 멈춤
@@ -172,6 +183,8 @@
   6. N operation이 `draining`으로 거절되고 효과가 없는 시험.
   7. ledger `unknown`만 남은 서버가 wait·idle에서 멈추고 `unresolvedOperations`에 보이는 시험.
   8. 데스크톱 임대가 없을 때 미소비 교환이 wait를 막지 않고 `undeliverableExchanges`에 보이는 시험.
+  10. **실행 수명 계약(E1)**: 대기열 prompt만 남은 순간(이전 `PromptCompleted`와 다음 `PromptSent` 사이) 바쁜 run이 0이 아님. RPC 오류로 끝난 prompt 뒤 바쁜 run이 0. 시작 중·Ralph 반복 사이에 0이 아님. 정지 판정과 동시에 예약해도 "멈춘 뒤 실행"이 없음.
+  11. **배정 원자성(E3)**: 서로 다른 키의 동시 배정 100회에서 run은 task마다 1개, 배정과 취소의 경합.
   9. **창 폐기 단조성(C4)**: 폐기 완료 뒤 지연된 발급 → `forbidden`. 같은 label 새 incarnation 발급 → 성공. 발급·폐기 동시 100회 → 폐기 뒤 유효 토큰 0.
 
 ## R8. 앱 전체 종료 대 창 닫기 — 실제 종료 이벤트 순서 (사용자 검토 2·4)

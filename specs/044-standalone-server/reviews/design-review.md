@@ -28,3 +28,13 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 | C5 | K 조건이 교환을 소비하지 않아, 한 교환 id로 다른 키·다른 내용의 prompt를 계속 보낼 수 있다. 유한성 논증이 깨진다 | `epoch_idempotency.rs`(키별 중복 제거뿐) | 교환마다 전달 prompt **1회 소비**(원자적), 키는 `exchange-delivery:<id>`로 고정. 둘째 prompt·동시 요청은 N. 내용 결합은 하지 않는다(비우기는 보안 경계가 아님, 유한성에는 1회 소비로 충분) |
 
 사용자 요청에 따라 수정된 설계의 이 5건을 Codex `--wait`로 다시 검토한다(아래).
+
+## Codex 설계 재검토 1 (`--wait --base 00654e9`, 대상 `54b31a8`, 수정된 5건 집중)
+
+판정: needs-attention. C4(폐기 tombstone)는 타당하다고 확인했다. C1·C3·C5의 수정에 High 3건:
+
+| # | 문제 | 근거 | 반영 |
+|---|---|---|---|
+| E1 | run 이벤트만으로는 활동을 정확히 셀 수 없다. 대기열 등록 이벤트가 없고, RPC 오류는 `PromptCompleted` 없이 끝나며, 시작 중·Ralph 반복 사이가 드러나지 않는다 | `acp_run_engine.rs:125-148`, `runner.rs:748·794-799` | 실행 수명 계약: 진입점에서 동기 예약, 실행 future 종료에서 해제. 초기 prompt 순서는 acp-agent-core runner가 순서 끝에서 guard를 놓는다(선택 인자, ask-code·hushline 검증). 정지 판정과 예약을 한 잠금으로 직렬화 |
+| E2 | 소비를 `run.sendPrompt` 성공에 묶으면, 전송이 spawn 뒤 바쁨으로 실패해도 소비·멱등 성공이 남아 교환을 잃는다 | `send_prompt.rs:46-58`, `runner.rs:787-790` | `continuation` prompt는 엔진 대기열 경로로 보내고, 소비 표시와 대기열 등록을 한 번에 한다. 활동 예약이 전달 끝까지 남는다. 알림 prompt와 경합하는 실제 경로 시험 |
+| E3 | 배정은 원자적이지 않다(동시 배정이면 run 둘, `reserve_child_run`이 덮어씀). K의 "상태 전이로 1회"가 성립하지 않는다. 기존 결함이다 | `agent_tools.rs` assign, `service.rs:802-828` | 저장소 단일 RMW 경계 안에서 비교 후 변경(`Ready`·예약 없음 → `Starting`). 기존 예약이면 그 결과를 돌려준다. 동시 배정·취소 경합 시험 |
