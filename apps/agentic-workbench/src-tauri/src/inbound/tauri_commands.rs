@@ -1496,6 +1496,38 @@ mod tests {
         }
     }
 
+    /// 041: orchestration command 오류는 fault `details.orchestrationError`에서 다시 만든다 — 오늘
+    /// `serde_json::to_string(&OrchestrationError)`와 바이트가 같아야 한다(화면이 JSON으로 파싱한다).
+    #[test]
+    fn orchestration_fault_string_is_byte_identical_to_the_domain_error_json() {
+        use workbench_core::domain::agent_orchestration::{
+            OrchestrationError, OrchestrationErrorCode,
+        };
+        let error = OrchestrationError::new(
+            OrchestrationErrorCode::NotFound,
+            "Orchestration workspace is not bootstrapped.",
+        );
+        let fault = workbench_protocol::WorkbenchFault::new(
+            workbench_protocol::FaultCode::NotFound,
+            workbench_protocol::RequestId::random(),
+            error.message.clone(),
+        )
+        .with_details(serde_json::json!({ "orchestrationError": &error }));
+        assert_eq!(
+            orchestration_fault_string(&fault),
+            serde_json::to_string(&error).unwrap()
+        );
+        let plain = workbench_protocol::WorkbenchFault::new(
+            workbench_protocol::FaultCode::PreconditionFailed,
+            workbench_protocol::RequestId::random(),
+            "Orchestration workspace is not bootstrapped.",
+        );
+        assert_eq!(
+            orchestration_fault_string(&plain),
+            "Orchestration workspace is not bootstrapped."
+        );
+    }
+
     #[test]
     fn inject_mcp_launch_env_preserves_existing_user_env() {
         let mut request = sample_request();
