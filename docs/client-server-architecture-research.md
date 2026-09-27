@@ -10,6 +10,8 @@
 >
 > 진행 상태(2026-09-27): **039(2a) 완료** — `specs/039-workbench-events`. `Workbench.events`가 동작한다: core `EventHub`가 run(상태 복원용, 메모리 journal + 서버 세대)·worktree(알림용) 스트림을 발행·구독하고, 구독 경계·gap·보관 한도를 fixture 27개(in-memory·테스트 WebSocket)로 고정했다. AW run 이벤트는 hub에서 순번을 받아 창에 삽입 경로 하나로 전달되고(live·replay 같은 순번), worktree watcher 2개는 구독 task가 됐다. 이벤트 스키마는 describe·OpenAPI `EventBySchema`·TS `EventMap`으로 생성된다. 창 정체 분해와 run·exchange·orchestration 30개 이관은 040(2b)이다. 세부는 [Workbench Seam — 이벤트 스트림](workbench-seam.md#이벤트-스트림-039).
 
+> 진행 상태(2026-09-27): **040(2b-1) 완료** — `specs/040-workbench-owners`. 창 label에 묶였던 소유자를 서버가 발급하는 **작업대(Bench)** 로 바꿨다(연 주체에 묶임, 명시적 열기·닫기, 메모리 전용). run 8·교환 4 command와 MCP 교환·창 제목 도구가 `Workbench.call`을 통과해 operation은 50개가 됐고, MCP 도구는 run에 묶인 agent principal로 호출한다. 교환(상태 복원용)·작업대(알림용) 스트림이 구독 가능하다. 영속 변경 기록은 `run.start`만 쓰고 나머지는 작업대 수명의 멱등 기록을 쓴다. orchestration 18개와 `orchestration:*` 스트림은 041(2b-2)이다. 세부는 [Workbench Seam — 작업대](workbench-seam.md#작업대-040).
+
 ## 결론
 
 권장 구조는 **로컬 우선 독립 AW 서버**다. 서버가 프로젝트·Git·파일 감시·ACP 에이전트·터미널 등 네이티브 프로세스와 영속 상태를 단독 소유하고, 데스크톱·TUI·CLI는 HTTP 요청과 클라이언트당 하나의 WebSocket 이벤트 스트림만 사용한다. Tauri는 서버의 배포·부트스트랩과 창·메뉴·다이얼로그 같은 데스크톱 고유 기능만 맡는다.

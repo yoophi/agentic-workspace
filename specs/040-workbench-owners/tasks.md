@@ -181,11 +181,11 @@ description: "Task list for introducing benches and migrating run/exchange comma
 
 ## Phase 7: Polish & Cross-Cutting Concerns
 
-- [ ] T061 [P] `crates/workbench-core/tests/run_latency.rs`(#[ignore]): `run.sendPrompt` 경유 p95 증가(가짜 엔진 대비 직접 호출) — 결과 Notes(R14)
-- [ ] T062 [P] `docs/workbench-seam.md`: 범위·인벤토리(이관 45, 이연 18, 유지 8), "작업대" 절(수명·입장 경계·주체·데스크톱 대응, Mermaid), 이벤트 스트림 절에 교환·작업대 스트림, MCP agent principal 절, ADR 5건 링크, 2단계 안내(041). `docs/client-server-architecture-research.md` 진행 각주 "040(2b-1) 완료"
-- [ ] T063 전체 게이트(quickstart §1·§2): fmt, clippy `-D warnings`(workspace·core lib), `cargo test --workspace --all-targets`, `pnpm run check-types`, `pnpm run test`, 생성물 drift 0, 경계 grep(acp-agent-core·agent-client diff 0, 화면 diff 0, core·protocol의 창 label 0). 결과 Notes
-- [ ] T064 앱 스모크(quickstart §3): 수행 가능한 항목은 수행, UI 조작 항목은 리뷰어 수동 항목으로 정직하게 기록
-- [ ] T065 SC 증거 매핑(SC-001~008)과 spec·contract 대비 어긋난 점을 Notes에, PR 본문 초안(push·PR은 사용자 지시 후). 커밋 `docs(aw): record 040 bench migration status`
+- [X] T061 [P] `crates/workbench-core/tests/run_latency.rs`(#[ignore]): `run.sendPrompt` 경유 p95 증가(가짜 엔진 대비 직접 호출) — 결과 Notes(R14)
+- [X] T062 [P] `docs/workbench-seam.md`: 범위·인벤토리(이관 45, 이연 18, 유지 8), "작업대" 절(수명·입장 경계·주체·데스크톱 대응, Mermaid), 이벤트 스트림 절에 교환·작업대 스트림, MCP agent principal 절, ADR 5건 링크, 2단계 안내(041). `docs/client-server-architecture-research.md` 진행 각주 "040(2b-1) 완료"
+- [X] T063 전체 게이트(quickstart §1·§2): fmt, clippy `-D warnings`(workspace·core lib), `cargo test --workspace --all-targets`, `pnpm run check-types`, `pnpm run test`, 생성물 drift 0, 경계 grep(acp-agent-core·agent-client diff 0, 화면 diff 0, core·protocol의 창 label 0). 결과 Notes
+- [X] T064 앱 스모크(quickstart §3): 수행 가능한 항목은 수행, UI 조작 항목은 리뷰어 수동 항목으로 정직하게 기록
+- [X] T065 SC 증거 매핑(SC-001~008)과 spec·contract 대비 어긋난 점을 Notes에, PR 본문 초안(push·PR은 사용자 지시 후). 커밋 `docs(aw): record 040 bench migration status`
 
 ---
 
@@ -248,8 +248,6 @@ T030 epoch_idempotency.rs
 
 ## Notes
 
-- US4 (T057–T060): OpenAPI component·`EventBySchema` 3 variant는 앞 단계에서 이미 추가되어 golden만 재확인. agent describe를 위해 `AGENT_SCOPES`에 `system:describe`를 추가(data-model 반영) — scope 기준 필터라 agent describe에는 agent 전용 3개 외에 교환 쓰기·조회 4개(작업대 소유 검사로 실제로는 `forbidden`)와 `bench.requestTitle`·`system.describe`까지 9개, 이벤트 2개가 보인다. 단발 fixture HTTP 경로가 agent 토큰을 모르던 버그(`token_for`→`token_string`)를 수정. US3 커밋의 `bench_title_stream.rs` fmt 차이도 이 커밋에 포함.
-
 - [P] = 다른 파일, 미완료 의존 없음
 - 커밋은 논리 단위마다(Foundation, 각 US 끝, 문서). push·PR은 사용자 지시 후.
 - 각 checkpoint에서 멈춰 스토리를 독립 검증한다.
@@ -259,4 +257,19 @@ T030 epoch_idempotency.rs
   - (Foundation 구현 중 결정) principal 주체는 `AuthenticatedPrincipal.subject`(`new`는 종류 이름을 주체로 — 기존 호출부 불변). ledger 멱등성 키 namespace는 여전히 `principal_kind`(주체 아님): 영속 command는 `run.start` 하나이고 데스크톱 주체가 하나라 충분하다(3단계에서 재검토). 작업대 operation id는 `system.describe` 앞에 끼워 넣어 계약 순서를 도메인별로 유지. hub: 제거 표식을 worktree 외 모든 kind로 확장, 교환은 `exchange_journal_capacity`(512, 보관 run 수 제외), 작업대 알림 스트림은 구독자가 없어도 발행 시 만들어 데스크톱 전달(닫힌 작업대는 표식으로 전달 안 함), idle 정리 대상 = 발행 전 상태 복원용 + 구독자 없는 작업대 스트림. 세대 멱등은 성공만 기록(실패 재시도는 재실행). `bench.close`는 멱등 기록 없이 자연 멱등. fixture `steps` 형식(요청별 principal·`capture` JSON pointer·`{{dir}}` seed)과 두 경로 비교 시 포착값 정규화. describe fixture는 scratchpad `gen_describe.py`로 registry 소스에서 재생성. T023 중 `not-directory`·`limit` fixture는 fixture로 재현하기 어려워(파일 seed·한도 주입 없음) registry 단위 테스트로 대신했다. `epoch.rs`의 일시 `allow(dead_code)`는 US1에서 제거.
   - (US1 구현 중 결정) `run.start`는 aggregate `runs` 하나로 직렬화(예약·spawn까지만 lock). run id는 호출자가 주면 `CallerProvided`, 없으면 `ServerGenerated`로 예약 단계에서 정해 run id 없는 재시도도 같은 지문이 된다. apply는 blocking thread에서 `Handle::block_on`으로 엔진을 부른다. agent 명령 재정의 해석은 aggregate lock 밖(`spawn_blocking`)에서. decorator 실패는 `preconditionFailed`(문구 유지). 재시작 뒤 `run.start` 재시도는 작업대가 메모리 전용이라 ledger 판정 전에 `notFound("bench not found.")`로 끝난다(중복 기동 없음) — `pending` 행은 `unknown`으로 판정됨을 테스트로 확인. `run.start` reconciler는 등록하지 않는다(미등록 operation = `unknown`이 곧 ADR core 0005의 규칙). AW: `AppState`는 `run()`이 만들지 않고 런타임의 운영 엔진에서 받아 manage(041 전 orchestration이 같은 기계 사용). `DesktopBenches`는 `window_manager`처럼 프로세스 전역 표(041 전 교환·제목·orchestration이 label↔작업대 양방향 조회). 교환(`AgentRunOwnerLookup`)·제목(`TitleControlRegistry`)의 run 소유자 조회는 US2·US3 전까지 작업대 → 창 label로 바꿔 돌려준다(과도기). orchestration 자식 기동은 `ensure(label, worktreePath)` → `admit` → 런타임 세션 저장소·`run_sink(bench)`, `is_active`·recover는 창의 작업대와 비교. AW 테스트: 삭제 10(run sink 1·후보 서비스 4·normalize 4·후보 1) — normalize 3건은 core로, 후보 insertText는 core fixture로 옮김; 추가 4(desktop_benches 3·compat 1).
   - (US2 구현 중 결정) 교환 도메인·서비스·포트·registry를 core로 이동(키 = 작업대 id). `AgentExchange`는 내부에 작업대 id를 `#[serde(skip)]`로 들고 wire의 `windowLabel`은 없앴다. registry는 std Mutex(작업대 닫기 hook이 동기) + `remove_bench_now`. 소유 조회는 `EngineRunOwners`(run 엔진 `active_owner_of`). 발행은 `HubExchangeEventSink`: 교환 스트림 상태 복원용 + 같은 lock 안 데스크톱 전달(payload = 오늘 본문 + 순번 필드). 발행은 실패하지 않으므로 오늘의 `windowUnavailable`→`failed` 전이는 더 이상 생기지 않는다(작업대는 창과 수명이 같아 실제 영향 없음). 같은 결과의 두 번째 확인은 서비스가 값만 돌려주고 이벤트를 내지 않는다. 오류: fault `message` = 도메인 문구 + `details.exchangeCode`, compat·MCP가 오늘 `{code,message}` JSON을 재구성(바이트 동일 테스트). 경로 정규화 실패 2종은 오늘처럼 평문. `invalidTransition`(비-terminal 확인 포함)은 계약 표대로 `conflict`. MCP 교환 도구 3개는 agent principal로 `Workbench.call`(도구 쪽 run 일치 검사 유지), `McpServerState::start`는 교환 registry를 받지 않는다. AW 교환 command 4개는 compat(출력 타입은 protocol DTO). T044의 JSON 이벤트 fixture는 이벤트 fixture 실행기가 run 발행만 지원해 Rust 흐름 테스트(`exchange_flow.rs`: 스트림 순번·schema, 닫기 gap, 닫힌 작업대 cursor 0 gap)로 대신했다. 교환 fixture 22개.
+  - (US3 구현 중 결정) 제목 검증(`ValidatedWindowTitle`, 80자·문구 동일)을 core `domain/window_title.rs`로 이동. `bench.requestTitle`은 agent 검사 → 제목 검증 → run의 활성 작업대 조회 순서라, 같은 요청에서 제목과 run이 모두 틀리면 제목 오류가 먼저 나온다(오늘 MCP 경로는 run 검사 뒤 제목 검증 — 오늘 도구 쪽 `runId` 일치 검사가 앞에 있어 실제 차이는 비활성 run + 잘못된 제목 조합뿐). fault는 `details.titleCode`(`invalidTitle`·`unknownRun`·`unauthorized`)를 실어 MCP 도구가 오늘 `TitleChangeResult.code`로 되돌린다. `McpTitleControlService`·네이티브 제목 emit·과도기 `TitleControlRegistry` 삭제. fixture 8개, `bench_title_stream.rs` 2개.
+  - (US4 구현 중 결정) OpenAPI component·`EventBySchema` 3 variant는 앞 단계에서 이미 추가되어 golden만 재확인. agent describe를 위해 `AGENT_SCOPES`에 `system:describe`를 추가(data-model 반영) — scope 기준 필터라 agent describe에는 agent 전용 3개 외에 교환 쓰기·조회 4개(작업대 소유 검사로 실제로는 `forbidden`)와 `bench.requestTitle`·`system.describe`까지 9개, 이벤트 2개가 보인다. 단발 fixture HTTP 경로가 agent 토큰을 모르던 버그(`token_for`→`token_string`)를 수정. US3 커밋의 `bench_title_stream.rs` fmt 차이도 이 커밋에 포함.
+  - (T061, 2026-09-27) `run_latency.rs`(`#[ignore]`, 500회): `run.sendPrompt` p95 — 엔진 직접 13.5µs, `Workbench.call` 경유 66.6µs, 증가 53µs(기준 5ms 미만).
+  - (T063, 2026-09-27) 전체 게이트: `cargo fmt --check` 통과, clippy `-D warnings`(workspace all-targets·core lib) 0건, `cargo test --workspace --all-targets` 619 passed / 0 failed / 7 ignored(기준선 592/6 → +27, ignored +1은 T061), `pnpm run check-types` 13/13, `pnpm run test` 12/12(agentic-workbench 429 — 기준선과 같음, workbench-client 15 → 17), `generate:contracts` 뒤 drift 0. 경계: `crates/acp-agent-core`·`packages/agent-client`·`apps/agentic-workbench/src` diff 0, core·protocol의 창 label 0건(유일한 문자열 일치는 wire에 `windowLabel`이 없음을 단정하는 parity 테스트). 작업 중 디스크가 가득 차(worktree `target` 25G) `target/debug/incremental`을 지우고 `CARGO_INCREMENTAL=0`으로 돌렸다.
+  - (T064) 앱 스모크: quickstart §3의 6항목은 모두 창 두 개와 실제 agent CLI를 손으로 조작해야 하는 UI 항목이라 이 세션에서 수행하지 않았다 — **리뷰어 수동 확인 항목**. 앱 실행 자체도 사용자의 실제 데이터 디렉터리(ledger 포함)를 쓰므로 실행 중인 AW와 겹칠 수 있어 하지 않았다. 대신 자동 검증: AW `cargo build`·clippy·테스트 통과, compat 오류 문자열 바이트 동일 테스트(run·교환·MCP), 창 수명(`desktop_benches` 테스트: 직렬화·닫힌 label 재열기 거절), 작업대 닫기 = 소유 run 취소(`bench_close_race.rs`), 제목·교환이 다른 작업대에 가지 않음(`bench_title_stream.rs`·`exchange_flow.rs`).
+  - (T065) SC 증거:
+    - SC-001: 인벤토리 이관됨 45·이연 18(orchestration)·유지 8(`docs/workbench-seam.md`). 이관 12개 command는 `DesktopBenches` 조회·확보 후 `Workbench.call`만 한다(`inbound/tauri_commands.rs`·`workbench_compat.rs`).
+    - SC-002: core·protocol 창 label 0건(T063 grep).
+    - SC-003: 새 fixture 63개(작업대 15·run 26·교환 22) + describe 3개가 in-memory·HTTP 두 경로에서 같은 결과(`contract_suite.rs`). 이벤트 쪽은 Rust 흐름 테스트(교환 스트림 순번·gap, 작업대 알림 스트림)로 — 이벤트 fixture 실행기가 run 발행만 지원하기 때문(US2 기록).
+    - SC-004: 교차 작업대·교차 주체 거절 fixture 14개(run 제어 5종 other-bench — 오늘 검사가 없던 5종, 작업대 닫기·run 시작·교환의 다른 주체, agent 전용 operation의 데스크톱·다른 run, readonly 쓰기) + 거절 뒤 상태 불변(`bench_run_flow.rs`).
+    - SC-005: `exchange_flow.rs`(다른 작업대 전달 0, 같은 확인 두 번째 이벤트 0), `bench_title_stream.rs`(다른 작업대 스트림·전달 0, 한 번만 전달).
+    - SC-006: 구독 해지는 작업대에 영향 없음(구독과 수명 분리 — `bench_run_flow.rs`), 닫기 반환 시 소유 run 0개(`bench_close_race.rs`).
+    - SC-007: run·교환·MCP 기존 테스트 기대값 수정 없음. 단 AW에서 core로 **옮긴** 테스트(normalize·후보·교환 서비스·제목 검증)는 위치만 바뀌었고, AW 전용 서비스를 지우면서 그 단위 테스트도 삭제했다(US1 기록). 행동이 바뀐 곳은 문서화: 교환 `windowUnavailable`→`failed` 전이 소멸(US2), 제목 요청의 오류 우선순위(US3), 재시작 뒤 `run.start` 재시도는 `notFound`(US1).
+    - SC-008: 화면 코드 diff 0(T063). 화면 동작·문구 동일성의 최종 확인은 T064 수동 항목.
+  - spec·contract 대비 어긋난 점: agent scope에 `system:describe` 추가(US4), 제목 오류 우선순위(US3), T044 JSON 이벤트 fixture → Rust 테스트(US2), not-directory·limit fixture → registry 단위 테스트(Foundation).
 
