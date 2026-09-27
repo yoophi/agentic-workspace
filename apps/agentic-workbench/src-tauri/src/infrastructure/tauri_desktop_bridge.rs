@@ -27,6 +27,22 @@ pub const AGENT_RUN_EVENT_FALLBACK: &str = "agent-run-event-fallback";
 pub const AGENT_EXCHANGE_REQUESTED_FALLBACK: &str = "agent-exchange-requested-fallback";
 pub const AGENT_EXCHANGE_STATUS_FALLBACK: &str = "agent-exchange-status-fallback";
 pub const MCP_WINDOW_TITLE_FALLBACK: &str = "mcp-window-title-fallback";
+/// 041: orchestration 갱신(오늘 `TauriOrchestrationEventSink`의 삽입 경로 이름). 네이티브 emit(전체 창 방송)은 없다.
+pub const ORCHESTRATION_WORKSPACE_UPDATED_FALLBACK: &str = "orchestration-workspace-updated-fallback";
+pub const ORCHESTRATION_COMMAND_UPDATED_FALLBACK: &str = "orchestration-command-updated-fallback";
+pub const ORCHESTRATION_NOTIFICATION_UPDATED_FALLBACK: &str =
+    "orchestration-coordinator-notification-updated-fallback";
+
+/// 오늘과 같은 규칙: 사유에 command/notification이 들어 있으면 상세 이벤트도 한 번 보낸다.
+pub fn orchestration_detail_event(reason: &str) -> Option<&'static str> {
+    if reason.contains("command") || reason.contains("Command") {
+        Some(ORCHESTRATION_COMMAND_UPDATED_FALLBACK)
+    } else if reason.contains("notification") || reason.contains("Notification") {
+        Some(ORCHESTRATION_NOTIFICATION_UPDATED_FALLBACK)
+    } else {
+        None
+    }
+}
 
 pub fn dispatch_script(event_name: &str, payload: &Value) -> String {
     format!("window.dispatchEvent(new CustomEvent('{event_name}', {{ detail: {payload} }}));")
@@ -71,6 +87,16 @@ impl DesktopBridge for TauriDesktopBridge {
             }
             DesktopDelivery::ExchangeStatus { bench_id, payload } => {
                 self.eval_in_bench(&bench_id, AGENT_EXCHANGE_STATUS_FALLBACK, &payload)
+            }
+            DesktopDelivery::Orchestration { bench_id, payload } => {
+                self.eval_in_bench(&bench_id, ORCHESTRATION_WORKSPACE_UPDATED_FALLBACK, &payload);
+                let reason = payload
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if let Some(event_name) = orchestration_detail_event(reason) {
+                    self.eval_in_bench(&bench_id, event_name, &payload);
+                }
             }
             DesktopDelivery::TitleRequested { bench_id, title } => {
                 // `set_title`은 메인 스레드로 넘어가므로 스트림 lock 안에서 부르지 않는다.

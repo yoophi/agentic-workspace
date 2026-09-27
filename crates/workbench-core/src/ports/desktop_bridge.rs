@@ -7,10 +7,27 @@ use serde_json::Value;
 /// 작업대로 보낼 발행 결과. payload는 창이 오늘 받는 모양(공유 봉투의 상위 집합)이다.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DesktopDelivery {
-    Run { bench_id: String, payload: Value },
-    ExchangeRequested { bench_id: String, payload: Value },
-    ExchangeStatus { bench_id: String, payload: Value },
-    TitleRequested { bench_id: String, title: String },
+    Run {
+        bench_id: String,
+        payload: Value,
+    },
+    ExchangeRequested {
+        bench_id: String,
+        payload: Value,
+    },
+    ExchangeStatus {
+        bench_id: String,
+        payload: Value,
+    },
+    TitleRequested {
+        bench_id: String,
+        title: String,
+    },
+    /// 041: orchestration 작업 영역 갱신(`OrchestrationEvent` JSON + 순번 필드는 US3).
+    Orchestration {
+        bench_id: String,
+        payload: Value,
+    },
 }
 
 pub trait DesktopBridge: Send + Sync {
@@ -29,6 +46,22 @@ pub struct LaunchContext {
     pub bench_id: String,
     pub panel_id: Option<String>,
     pub run_id: String,
+    /// 041: orchestration이 정한 이 run의 역할. decorator는 이것으로 MCP 권한을 만든다(창 label 역조회 없음).
+    pub orchestration: Option<OrchestrationLaunchRole>,
+}
+
+/// 041: orchestration run의 역할(서버 상태에서 도출).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OrchestrationLaunchRole {
+    Coordinator {
+        workspace_id: String,
+        generation_id: String,
+    },
+    Child {
+        workspace_id: String,
+        node_id: String,
+        task_id: String,
+    },
 }
 
 pub trait RunLaunchDecorator: Send + Sync {
@@ -37,4 +70,10 @@ pub trait RunLaunchDecorator: Send + Sync {
         request: &mut AgentRunRequest,
         context: &LaunchContext,
     ) -> Result<(), String>;
+
+    /// 041: 재시도·재배정으로 교체된 자식 run의 MCP 토큰을 폐기한다(토큰 수명 관리, 권한 근거는 아님).
+    fn revoke_run(&self, _run_id: &str) {}
+
+    /// 041: coordinator 교대로 끝난 세대의 MCP 토큰을 폐기한다.
+    fn revoke_generation(&self, _workspace_id: &str, _generation_id: &str) {}
 }

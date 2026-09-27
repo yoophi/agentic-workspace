@@ -185,6 +185,33 @@ impl RunEngine for ScriptedRunEngine {
         Ok(())
     }
 
+    async fn queue_prompt(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        if !self.active(run_id) {
+            return Err(RunEngineError::new(
+                RunErrorKind::NotFound,
+                format!("unknown or finished run: {run_id}"),
+            ));
+        }
+        self.prompts.fetch_add(1, Ordering::SeqCst);
+        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        Ok(())
+    }
+
+    async fn send_and_wait(
+        &self,
+        run_id: &str,
+        prompt: String,
+        _queue: bool,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError> {
+        self.queue_prompt(run_id, prompt, sink).await
+    }
+
     async fn steer_prompt(
         &self,
         run_id: &str,

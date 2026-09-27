@@ -67,6 +67,8 @@ impl OperationHandler for StartHandler {
         };
         let services = Arc::clone(&self.services);
         let panel_id = typed.panel_id.clone();
+        let orchestration_role: Option<crate::ports::desktop_bridge::OrchestrationLaunchRole> =
+            None;
         let runtime = tokio::runtime::Handle::current();
         let spec = MutationSpec {
             operation: OperationId::RunStart,
@@ -87,6 +89,7 @@ impl OperationHandler for StartHandler {
                         bench_id: bench_id.clone(),
                         panel_id: panel_id.clone(),
                         run_id: run_id.clone(),
+                        orchestration: orchestration_role.clone(),
                     };
                     if let Err(message) = decorator.decorate(&mut request, &context) {
                         return Ok(Applied::Rejected(WorkbenchFault::new(

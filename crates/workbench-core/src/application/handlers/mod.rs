@@ -8,6 +8,7 @@ pub(crate) mod epoch;
 pub mod exchange;
 pub mod git;
 pub mod goal;
+pub mod orchestration;
 pub mod project;
 pub mod run;
 pub mod saved_prompt;
@@ -254,6 +255,7 @@ pub fn build_registry(
     adapters: &RuntimeAdapters,
     epoch: &str,
     benches: &Arc<crate::application::bench_service::BenchServices>,
+    orchestration: &Arc<crate::application::orchestration::runtime::OrchestrationRuntime>,
 ) -> (Registry, ReconcilerRegistry) {
     let runner = Arc::new(IntentFirst::new(
         Arc::clone(&ledger),
@@ -278,6 +280,7 @@ pub fn build_registry(
     bench::register(&mut registry, benches);
     run::register(&mut registry, &runner, &coordinator, benches);
     exchange::register(&mut registry, benches);
+    orchestration::register(&mut registry, benches, orchestration);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler::new(epoch)),

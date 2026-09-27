@@ -20,6 +20,10 @@ use crate::{
         authorization,
         bench_service::{BenchServices, MESSAGE_BENCH_FORBIDDEN, MESSAGE_BENCH_NOT_FOUND},
         epoch_idempotency::{EpochIdempotency, EpochIdempotencyLimits},
+        orchestration::{
+            binding::OrchestrationBindings,
+            runtime::{OrchestrationConfig, OrchestrationRuntime, OrchestrationTerminalHook},
+        },
         reconcilers::ReconcilerRegistry,
         registry::{CallContext, Registry},
     },
@@ -27,7 +31,14 @@ use crate::{
     infrastructure::event_hub::{EventHub, EventHubLimits},
     infrastructure::{
         bench::in_memory_bench_registry::{BenchAdmission, BenchLimits, InMemoryBenchRegistry},
-        fs::acp_session_store::JsonAcpSessionStore,
+        fs::{
+            acp_session_store::JsonAcpSessionStore,
+            orchestration_store::JsonOrchestrationRepository,
+        },
+        orchestration::{
+            bound_repository::BoundOrchestrationRepository,
+            delivery_sink::DeliveryOrchestrationSink, worktree_guard::WorktreeGuards,
+        },
         run::{acp_run_engine::AcpRunEngine, workbench_run_sink::WorkbenchRunSink},
     },
     infrastructure::{
@@ -60,6 +71,8 @@ pub struct RuntimeAdapters {
     pub launch_decorator: Option<Arc<dyn RunLaunchDecorator>>,
     pub bench_limits: BenchLimits,
     pub idempotency_limits: EpochIdempotencyLimits,
+    /// orchestration 동시 자식 수·자식 프로필(041). 운영은 환경 변수, 테스트는 직접 지정.
+    pub orchestration: OrchestrationConfig,
 }
 
 impl RuntimeAdapters {
@@ -79,6 +92,7 @@ impl RuntimeAdapters {
             launch_decorator: None,
             bench_limits: BenchLimits::default(),
             idempotency_limits: EpochIdempotencyLimits::default(),
+            orchestration: OrchestrationConfig::from_env(),
         }
     }
 }
@@ -170,6 +184,18 @@ pub struct WorkbenchRuntime {
     reconcilers: ReconcilerRegistry,
     hooks: Arc<TestHooks>,
     benches: Arc<BenchServices>,
+    orchestration: Arc<OrchestrationRuntime>,
+}
+
+/// run 종료 hook 여러 개를 차례로 부른다.
+struct ChainedTerminalHook(Vec<Arc<dyn RunTerminalHook>>);
+
+impl RunTerminalHook for ChainedTerminalHook {
+    fn on_terminal(&self, run_id: &str) {
+        for hook in &self.0 {
+            hook.on_terminal(run_id);
+        }
+    }
 }
 
 impl WorkbenchRuntime {
@@ -207,15 +233,49 @@ impl WorkbenchRuntime {
                 Arc::new(JsonAcpSessionStore::from_paths(&paths)),
             )),
         };
+        // orchestration(041): run 종료 hook은 core가 소유한다(worktree 감시). AW가 넘긴 hook이 있으면 뒤에 잇는다.
+        let orchestration_hook = Arc::new(OrchestrationTerminalHook::new());
+        let terminal_hook: Arc<dyn RunTerminalHook> = match adapters.terminal_hook.clone() {
+            Some(extra) => Arc::new(ChainedTerminalHook(vec![
+                orchestration_hook.clone() as Arc<dyn RunTerminalHook>,
+                extra,
+            ])),
+            None => orchestration_hook.clone(),
+        };
         let benches = Arc::new(BenchServices::new(
             Arc::new(InMemoryBenchRegistry::new(adapters.bench_limits)),
             engine,
             Arc::clone(&events),
             adapters.desktop.clone(),
-            adapters.terminal_hook.clone(),
+            Some(terminal_hook),
             adapters.launch_decorator.clone(),
             Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
         ));
+        let orchestration = Arc::new(OrchestrationRuntime::new(
+            BoundOrchestrationRepository::new(
+                JsonOrchestrationRepository::from_paths(&paths),
+                Arc::new(OrchestrationBindings::default()),
+            ),
+            DeliveryOrchestrationSink::new(adapters.desktop.clone()),
+            Arc::clone(&benches),
+            Arc::new(WorktreeGuards::default()),
+            adapters.orchestration.clone(),
+        ));
+        orchestration_hook.attach(&orchestration);
+        {
+            // 작업대 닫기 → 묶인 작업 영역 복구 가능 전환(research R3). 동기 파일 입출력이라 blocking pool에서.
+            let orchestration = Arc::downgrade(&orchestration);
+            benches.add_close_hook(Arc::new(move |bench_id: String| {
+                let orchestration = orchestration.clone();
+                Box::pin(async move {
+                    if let Some(orchestration) = orchestration.upgrade() {
+                        let _ =
+                            tokio::task::spawn_blocking(move || orchestration.release(&bench_id))
+                                .await;
+                    }
+                })
+            }));
+        }
 
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
@@ -225,6 +285,7 @@ impl WorkbenchRuntime {
             &adapters,
             &epoch,
             &benches,
+            &orchestration,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -243,7 +304,13 @@ impl WorkbenchRuntime {
             reconcilers,
             hooks,
             benches,
+            orchestration,
         }))
+    }
+
+    /// orchestration 런타임(041).
+    pub fn orchestration(&self) -> &Arc<OrchestrationRuntime> {
+        &self.orchestration
     }
 
     /// 작업대·run·교환 서비스(040).

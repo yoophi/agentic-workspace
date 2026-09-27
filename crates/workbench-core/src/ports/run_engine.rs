@@ -88,6 +88,24 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError>;
 
+    /// orchestration(041): 지금 턴 뒤에 이어 붙이고 기다리지 않는다. 전달 실패는 run 오류 이벤트
+    /// (`queued prompt delivery failed: …`)로 낸다. run이 없으면 `unknown or finished run: <id>`.
+    async fn queue_prompt(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError>;
+
+    /// orchestration(041): 턴이 끝날 때까지 기다린다(coordinator 알림 전달). `queue`면 지금 턴 뒤에 이어 붙인다.
+    async fn send_and_wait(
+        &self,
+        run_id: &str,
+        prompt: String,
+        queue: bool,
+        sink: WorkbenchRunSink,
+    ) -> Result<(), RunEngineError>;
+
     /// 이미 끝난 run도 성공(오늘과 같음). 취소 lifecycle 이벤트를 sink로 낸다.
     async fn cancel(&self, run_id: &str, sink: WorkbenchRunSink);
 

@@ -3,5 +3,6 @@
 pub mod binding;
 pub mod command_service;
 pub mod notification_dispatcher;
+pub mod runtime;
 pub mod scheduler;
 pub mod service;

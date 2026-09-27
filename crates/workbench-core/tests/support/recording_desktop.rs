@@ -24,7 +24,8 @@ impl RecordingDesktop {
                 DesktopDelivery::Run { bench_id: id, .. }
                 | DesktopDelivery::ExchangeRequested { bench_id: id, .. }
                 | DesktopDelivery::ExchangeStatus { bench_id: id, .. }
-                | DesktopDelivery::TitleRequested { bench_id: id, .. } => id == bench_id,
+                | DesktopDelivery::TitleRequested { bench_id: id, .. }
+                | DesktopDelivery::Orchestration { bench_id: id, .. } => id == bench_id,
             })
             .cloned()
             .collect()
