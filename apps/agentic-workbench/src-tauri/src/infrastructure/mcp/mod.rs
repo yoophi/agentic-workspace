@@ -266,8 +266,9 @@ async fn handle_post(
             };
             let principal = principal.expect("authenticated tool call");
             let runtime = workbench_runtime(&state.app);
+            let rpc_id = id.clone();
             match workbench_server::drain::spawn_accepted(guard, async move {
-                handle_tool_call(&runtime, &principal, request.params).await
+                handle_tool_call(&runtime, &principal, request.params, rpc_id).await
             })
             .await
             {
@@ -295,6 +296,7 @@ pub(crate) async fn handle_tool_call(
     runtime: &std::sync::Arc<workbench_core::application::workbench_runtime::WorkbenchRuntime>,
     principal: &CapabilityPrincipal,
     params: Option<Value>,
+    rpc_id: Option<Value>,
 ) -> Value {
     let name = params
         .as_ref()
@@ -303,11 +305,12 @@ pub(crate) async fn handle_tool_call(
         .unwrap_or_default();
     if is_orchestration_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_orchestration_tool(runtime, principal, name, arguments).await;
+        return handle_orchestration_tool(runtime, principal, name, arguments, rpc_id.as_ref())
+            .await;
     }
     if is_exchange_tool(name) {
         let arguments = params.as_ref().and_then(|value| value.get("arguments"));
-        return handle_exchange_tool(runtime, principal, name, arguments).await;
+        return handle_exchange_tool(runtime, principal, name, arguments, rpc_id.as_ref()).await;
     }
     if name != SET_WINDOW_TITLE_TOOL {
         return unsupported_tool_result(name);
@@ -330,7 +333,13 @@ pub(crate) async fn handle_tool_call(
         workbench_protocol::OperationId::BenchRequestTitle,
         serde_json::json!({ "runId": request.run_id, "title": request.title }),
     );
-    call.idempotency_key = Some(workbench_protocol::IdempotencyKey::random());
+    // 제목 도구에는 requestId가 없다: 같은 wire 요청(JSON-RPC id) 재전송만 식별하고, 새 id는 새 요청(같은 제목으로 수렴).
+    call.idempotency_key = Some(retry_identity::tool_idempotency_key(
+        &principal.run_id,
+        workbench_protocol::OperationId::BenchRequestTitle,
+        arguments,
+        rpc_id.as_ref(),
+    ));
     use workbench_protocol::Workbench as _;
     match runtime
         .call(

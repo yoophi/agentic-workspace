@@ -36,6 +36,8 @@ workbench-protocol = { path = "../../../crates/workbench-protocol" }
 workbench-server = { path = "../../../crates/workbench-server" }
 
 [dev-dependencies]
+async-trait = "0.1"
+futures-util = "0.3"
 tempfile = "3"
 workbench-core = { path = "../../../crates/workbench-core", features = ["test-hooks"] }
 

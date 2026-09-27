@@ -93,7 +93,7 @@ fn operation_for(name: &str) -> Option<OperationId> {
 }
 
 /// 변경 도구는 인자의 `requestId`로 재시도를 식별한다(`retry_identity`).
-fn request(operation: OperationId, input: Value) -> CallRequest {
+fn request(operation: OperationId, input: Value, rpc_id: Option<&Value>) -> CallRequest {
     let key = (!matches!(
         workbench_protocol::operations::spec_for(operation).kind,
         workbench_protocol::OperationKind::Query
@@ -103,6 +103,7 @@ fn request(operation: OperationId, input: Value) -> CallRequest {
             input["runId"].as_str().unwrap_or_default(),
             operation,
             input.get("arguments"),
+            rpc_id,
         )
     });
     let mut call = CallRequest::query(operation, input);
@@ -121,6 +122,7 @@ pub async fn agent_role(
             request(
                 OperationId::OrchestrationGetAgentRole,
                 json!({ "runId": principal.run_id }),
+                None,
             ),
         )
         .await
@@ -137,6 +139,7 @@ pub async fn handle_tool(
     principal: &CapabilityPrincipal,
     name: &str,
     arguments: Option<&Value>,
+    rpc_id: Option<&Value>,
 ) -> Value {
     let Some(operation) = operation_for(name) else {
         return tool_error(
@@ -152,7 +155,7 @@ pub async fn handle_tool(
     match runtime
         .call(
             AuthenticatedPrincipal::agent(&principal.run_id),
-            request(operation, input),
+            request(operation, input, rpc_id),
         )
         .await
     {

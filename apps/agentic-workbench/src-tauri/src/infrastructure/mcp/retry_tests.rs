@@ -19,7 +19,10 @@ use super::{
     agent_exchange_tool::SEND_MESSAGE_TO_AGENT_TOOL,
     capability_registry::CapabilityPrincipal,
     handle_tool_call,
-    orchestration_tool::{COLLECT_CHILD_RESULTS_TOOL, CREATE_CHILD_TASK_TOOL, REPORT_RESULT_TOOL},
+    orchestration_tool::{
+        COLLECT_CHILD_RESULTS_TOOL, CREATE_CHILD_TASK_TOOL, REPORT_PROGRESS_TOOL,
+        REPORT_RESULT_TOOL,
+    },
     title_tool::SET_WINDOW_TITLE_TOOL,
 };
 
@@ -139,10 +142,16 @@ impl Env {
     }
 
     async fn tool(&self, run: &str, name: &str, arguments: Value) -> Value {
+        self.rpc(run, name, arguments, None).await
+    }
+
+    /// JSON-RPC id까지 실어 보낸다(같은 wire 요청의 재전송 흉내).
+    async fn rpc(&self, run: &str, name: &str, arguments: Value, id: Option<Value>) -> Value {
         handle_tool_call(
             &self.runtime,
             &CapabilityPrincipal::run(run),
             Some(json!({ "name": name, "arguments": arguments })),
+            id,
         )
         .await
     }
@@ -229,6 +238,7 @@ async fn tool_call_resent_after_a_disconnect_returns_the_original_child() {
                     &runtime,
                     &CapabilityPrincipal::run("coord"),
                     Some(json!({ "name": CREATE_CHILD_TASK_TOOL, "arguments": create_args("child-1") })),
+                    Some(json!(41)),
                 )
                 .await
             })
@@ -350,4 +360,89 @@ async fn resent_title_request_converges_to_the_same_title() {
     let again = env.tool("r1", SET_WINDOW_TITLE_TOOL, args).await;
     assert_eq!(first["isError"], json!(false), "{first}");
     assert_eq!(again["structuredContent"], first["structuredContent"]);
+}
+
+/// requestId 없는 수집: 응답을 잃은 agent가 **같은 JSON-RPC id**로 다시 보내면 처음 결과를 받는다(그 사이 새 보고서가
+/// 와도). 새 id는 새 수집이다. (수집은 보고서를 지우지 않고 generation의 보고서를 모두 돌려준다 — 부작용은 알림을
+/// 수집됨으로 표시하는 것.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn collection_without_a_request_id_is_identified_by_the_rpc_id() {
+    let env = env(RunScript::default()).await;
+    env.coordinator().await;
+    let created = env
+        .tool("coord", CREATE_CHILD_TASK_TOOL, create_args("child-1"))
+        .await;
+    let child = structured(&created)["runId"].as_str().unwrap().to_owned();
+    let report = |key: &'static str| json!({ "requestId": key, "summary": key, "confidence": 0.9 });
+    structured(
+        &env.tool(&child, REPORT_PROGRESS_TOOL, report("progress-1"))
+            .await,
+    );
+
+    let first = env
+        .rpc(
+            "coord",
+            COLLECT_CHILD_RESULTS_TOOL,
+            json!({}),
+            Some(json!(7)),
+        )
+        .await;
+    let first_reports = structured(&first)["reports"].clone();
+    assert_eq!(first_reports.as_array().unwrap().len(), 1, "{first}");
+
+    // 응답이 유실된 사이 새 보고서가 온다.
+    structured(
+        &env.tool(&child, REPORT_RESULT_TOOL, report("result-1"))
+            .await,
+    );
+
+    let resent = env
+        .rpc(
+            "coord",
+            COLLECT_CHILD_RESULTS_TOOL,
+            json!({}),
+            Some(json!(7)),
+        )
+        .await;
+    assert_eq!(
+        structured(&resent)["reports"],
+        first_reports,
+        "same wire request keeps the first result"
+    );
+    let as_string = env
+        .rpc(
+            "coord",
+            COLLECT_CHILD_RESULTS_TOOL,
+            json!({}),
+            Some(json!("7")),
+        )
+        .await;
+    assert_eq!(
+        structured(&as_string)["reports"].as_array().unwrap().len(),
+        2,
+        "string id \"7\" is another request"
+    );
+    let fresh = env
+        .rpc(
+            "coord",
+            COLLECT_CHILD_RESULTS_TOOL,
+            json!({}),
+            Some(json!(8)),
+        )
+        .await;
+    assert_eq!(
+        structured(&fresh)["reports"].as_array().unwrap().len(),
+        2,
+        "new rpc id is a new collection"
+    );
+    let unidentified = env
+        .rpc("coord", COLLECT_CHILD_RESULTS_TOOL, json!({}), None)
+        .await;
+    assert_eq!(
+        structured(&unidentified)["reports"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 }

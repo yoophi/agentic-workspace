@@ -62,5 +62,5 @@
 
 AW MCP 서버(`POST /mcp`)의 Origin 검사는 §1과 같은 정확 일치 규칙을 쓴다(오늘 접두사 비교 결함 수정). Origin 없음은 오늘처럼 허용(agent는 비브라우저).
 
-**도구 호출 재시도 식별(사용자 검토 추가)**: agent는 응답을 못 받으면 같은 도구를 같은 인자로 다시 부르고 JSON-RPC id는 새로 붙는다. 그래서 어댑터는 멱등성 키를 도구 인자의 `requestId`에서 만든다: `mcp-` + SHA-256(`runId` · operation · `requestId`). 같은 요청의 재전송·동시 전송·단절 뒤 재전송은 원 호출을 기다리거나 저장된 결과를 받는다(세대 범위). `requestId`가 없는 호출은 재시도를 식별할 수 없어 호출마다 새 키다 — 제목 변경(같은 제목으로 수렴), `requestId`를 선택으로 받는 도구(`aw_assign_child_task`·`aw_collect_child_results` 등)에서 생략한 경우. 도구 호출은 서버 소유 task에서 실행하고(`spawn_accepted`), 종료 중 새 호출은 `503`(JSON-RPC `-32000`).
+**도구 호출 재시도 식별(사용자 검토 추가)**: agent는 응답을 못 받으면 같은 도구를 같은 인자로 다시 부르고 JSON-RPC id는 새로 붙는다. 그래서 어댑터는 멱등성 키를 도구 인자의 `requestId`에서 만든다: `mcp-` + SHA-256(`runId` · operation · `requestId`). 같은 요청의 재전송·동시 전송·단절 뒤 재전송은 원 호출을 기다리거나 저장된 결과를 받는다(세대 범위). `requestId`가 없으면 유효한 JSON-RPC 요청 id(숫자·문자열 구분)로 같은 wire 요청의 재전송을 식별한다: `mcp-` + SHA-256(종류 · `runId` · operation · id · 인자 전체). 그래서 응답을 잃은 agent가 같은 id로 다시 보내면 처음 결과를 받는다(예: `aw_collect_child_results`는 그 사이 새 보고서가 와도 처음 목록). 한계: 새 id이고 `requestId`도 없으면 새 요청이다. MCP 클라이언트가 다시 연결해 id를 처음부터 다시 쓰고 인자까지 같으면, 세대 멱등 기록이 남은 동안 재전송으로 본다. 도구 호출은 서버 소유 task에서 실행하고(`spawn_accepted`), 종료 중 새 호출은 `503`(JSON-RPC `-32000`).
 
