@@ -30,13 +30,13 @@ description: "Task list for 043 frontend-http (AW 서버-클라이언트 전환 
 
 ### 시험 먼저
 
-- [ ] T004 [P] 창 격리 시험 `CORE/tests/window_isolation.rs` — 창 A 주체로 연 작업대를 창 B 주체로 `bench.*`·`run.*`·`exchange.*`·`orchestration.*` 호출·`Workbench.events` 구독 시 거절(`forbidden`), 같은 label 새 incarnation도 이전 incarnation 작업대 접근 거절. 실패 확인
+- [X] T004 [P] 창 격리 시험 `CORE/tests/window_isolation.rs` — 창 A 주체로 연 작업대를 창 B 주체로 `bench.*`·`run.*`·`exchange.*`·`orchestration.*` 호출·`Workbench.events` 구독 시 거절(`forbidden`), 같은 label 새 incarnation도 이전 incarnation 작업대 접근 거절. 실패 확인
 - [ ] T005 [P] 토큰 폐기 시험 `crates/workbench-server/tests/window_token_revocation.rs` — 창 incarnation에 묶인 토큰을 폐기하면 `/v1/calls`·event-ticket 401, 다른 창 토큰 영향 없음, 같은 label 재개 창의 새 토큰만 유효. 실패 확인
 - [ ] T006 [P] 보관 한도 재구독 시험 `CORE/tests/retention_resubscribe.rs` — 실제 event hub를 작은 journal 한도로 구성해 orchestration·교환·run 스트림에서 `RetentionExceeded`를 만들고, (a) `after = 0` 재구독은 다시 gap이며 live 미등록, (b) gap의 `lastSequence`로 연 표는 live 등록되어 이후 이벤트 수신을 단정(H1 근거 고정)
 
 ### 구현
 
-- [ ] T007 `AuthenticatedPrincipal::desktop_window(label, incarnation)` 추가 — `crates/workbench-protocol/src/principal.rs` (subject `desktop:window:<label>:<incarnation>`)
+- [X] T007 `AuthenticatedPrincipal::desktop_window(label, incarnation)` 추가 — `crates/workbench-protocol/src/principal.rs` (subject `desktop:window:<label>:<incarnation>`)
 - [ ] T008 토큰 발급에 주체를 묶고 incarnation 단위 폐기 API 제공 — `crates/workbench-server/src/auth.rs`(T005 통과)
 - [ ] T009 hub 보관 한도 설정을 시험에서 주입할 수 있게 노출(test-hooks) — `CORE/src/infrastructure/event_hub/mod.rs`(T006 통과, 운영 기본값 불변)
 - [ ] T010 창 incarnation 발급·보관(창 생성 시 발급, Destroyed 시 토큰 폐기·작업대 닫기) — `AWT/infrastructure/window_manager.rs`, `AWT/infrastructure/workbench_http.rs`
