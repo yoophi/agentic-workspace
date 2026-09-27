@@ -1,4 +1,4 @@
-// 037·038: 생성 타입과 OperationMap만 노출한다. 어떤 앱도 아직 이 패키지를 import하지 않는다.
+// 037·038·039: 생성 타입과 OperationMap만 노출한다. 어떤 앱도 아직 이 패키지를 import하지 않는다.
 // HTTP/WebSocket Adapter는 4단계(Desktop 전환)에서 추가된다.
 export type * from "./generated/workbench";
 export type {
@@ -9,7 +9,15 @@ export type {
   CallReplyByOperation,
   CallRequest,
   DescribeOutput,
+  EventBySchema,
+  EventEnvelope,
+  EventFrame,
+  EventItem,
+  EventMap,
+  EventSchemaId,
   FaultCode,
+  GapNotice,
+  GapReason,
   GitBranch,
   GitCommitDetail,
   GitCommitGraph,
@@ -23,14 +31,18 @@ export type {
   OperationDescriptor,
   OperationId,
   OperationMap,
+  OrchestrationWorkspaceUpdated,
   Outcome,
   Project,
   ProjectCreateInput,
   ProviderSession,
+  RunEvent,
   SavedPrompt,
   Schemas,
+  StreamCursor,
   WorkbenchFault,
   WorktreeChange,
+  WorktreeChanged,
   WorktreeFileEntry,
   WorktreeTextFile,
 } from "./operation-map";

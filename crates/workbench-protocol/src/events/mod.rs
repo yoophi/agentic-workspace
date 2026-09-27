@@ -3,6 +3,7 @@
 //! `system.describe.eventSchemas`, OpenAPI `EventBySchema`, TS `EventMap`이 모두 `EVENT_SCHEMAS`를 읽는다.
 //! 분류(상태 복원용/알림용)는 ADR `crates/workbench-core/docs/adr/0003`.
 
+pub mod orchestration;
 pub mod run;
 pub mod worktree;
 
@@ -92,6 +93,8 @@ pub fn parse_stream_id(stream_id: &str) -> Option<(StreamKind, &str)> {
 pub struct EventSchemaSpec {
     pub schema: &'static str,
     pub stream_kind: StreamKind,
+    /// 본문 DTO의 OpenAPI component 이름. 아직 DTO가 없는 예약 스키마는 `None`(OpenAPI `EventBySchema`에서 빠진다).
+    pub body_schema: Option<&'static str>,
 }
 
 impl EventSchemaSpec {
@@ -111,22 +114,27 @@ pub const EVENT_SCHEMAS: [EventSchemaSpec; 5] = [
     EventSchemaSpec {
         schema: RUN_EVENT_V1,
         stream_kind: StreamKind::Run,
+        body_schema: Some("RunEventDto"),
     },
     EventSchemaSpec {
         schema: WORKTREE_CHANGED_V1,
         stream_kind: StreamKind::Worktree,
+        body_schema: Some("WorktreeChangedDto"),
     },
     EventSchemaSpec {
         schema: ORCHESTRATION_WORKSPACE_UPDATED_V1,
         stream_kind: StreamKind::Orchestration,
+        body_schema: Some("OrchestrationEventDto"),
     },
     EventSchemaSpec {
         schema: EXCHANGE_REQUESTED_V1,
         stream_kind: StreamKind::Exchange,
+        body_schema: None,
     },
     EventSchemaSpec {
         schema: EXCHANGE_STATUS_V1,
         stream_kind: StreamKind::Exchange,
+        body_schema: None,
     },
 ];
 

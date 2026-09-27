@@ -160,10 +160,10 @@ description: "Task list for implementing the Workbench event stream (stage 2a)"
 
 **Independent Test**: describe fixture의 eventSchemas, test-d 상관 타입, drift 실증.
 
-- [ ] T043 [P] [US4] `crates/workbench-protocol/src/events/orchestration.rs`: `OrchestrationEventDto {workspaceId, revision, reason, taskId?, nodeId?}`(2b 예약, 구독 불가) + AW 단위 테스트로 AW `OrchestrationEvent`와 wire parity
-- [ ] T044 [US4] `crates/workbench-protocol/src/openapi.rs`: components에 `GapNotice`·`GapReason`·`EventItem`·`EventFrame`·`EventSchemaDescriptor`·`EventClass`·`RunEventDto`(+보조)·`WorktreeChangedDto`·`OrchestrationEventDto`, `EventBySchema` oneOf를 `EVENT_SCHEMAS`(본문 DTO가 있는 것)로 조립(variant마다 `schema` 단일값 enum + typed `body`). 골든 테스트 갱신 (depends T028, T040, T043)
-- [ ] T045 [US4] `pnpm run generate:contracts`; `packages/workbench-client/src/operation-map.ts`에 `EventSchemaId`·`EventMap`·`EventFrame`·`GapNotice`·`EventEnvelope`·`RunEvent` alias, `index.ts` 재노출, `operation-map.test-d.ts`에 `EventMap["run.event.v1"]` 판별·worktree 본문 오용 `@ts-expect-error`·`EventFrame` 판별 (depends T044)
-- [ ] T046 [US4] `pnpm --filter @yoophi/workbench-client check-types test`, drift 확인. 커밋(`feat(workbench-protocol): generate event schemas and EventMap (039 US4)`)
+- [X] T043 [P] [US4] `crates/workbench-protocol/src/events/orchestration.rs`: `OrchestrationEventDto {workspaceId, revision, reason, taskId?, nodeId?}`(2b 예약, 구독 불가) + AW 단위 테스트로 AW `OrchestrationEvent`와 wire parity
+- [X] T044 [US4] `crates/workbench-protocol/src/openapi.rs`: components에 `GapNotice`·`GapReason`·`EventItem`·`EventFrame`·`EventSchemaDescriptor`·`EventClass`·`RunEventDto`(+보조)·`WorktreeChangedDto`·`OrchestrationEventDto`, `EventBySchema` oneOf를 `EVENT_SCHEMAS`(본문 DTO가 있는 것)로 조립(variant마다 `schema` 단일값 enum + typed `body`). 골든 테스트 갱신 (depends T028, T040, T043)
+- [X] T045 [US4] `pnpm run generate:contracts`; `packages/workbench-client/src/operation-map.ts`에 `EventSchemaId`·`EventMap`·`EventFrame`·`GapNotice`·`EventEnvelope`·`RunEvent` alias, `index.ts` 재노출, `operation-map.test-d.ts`에 `EventMap["run.event.v1"]` 판별·worktree 본문 오용 `@ts-expect-error`·`EventFrame` 판별 (depends T044)
+- [X] T046 [US4] `pnpm --filter @yoophi/workbench-client check-types test`, drift 확인. 커밋(`feat(workbench-protocol): generate event schemas and EventMap (039 US4)`)
 
 ---
 

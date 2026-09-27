@@ -2683,6 +2683,139 @@
           "modify"
         ]
       },
+      "EventBySchema": {
+        "oneOf": [
+          {
+            "type": "object",
+            "title": "Event_run_event_v1",
+            "required": [
+              "eventId",
+              "streamId",
+              "epoch",
+              "sequence",
+              "schema",
+              "occurredAt",
+              "body"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string"
+              },
+              "streamId": {
+                "type": "string"
+              },
+              "epoch": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": "integer",
+                "description": "스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다."
+              },
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "run.event.v1"
+                ]
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "correlationId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "body": {
+                "$ref": "#/components/schemas/RunEventDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Event_worktree_changed_v1",
+            "required": [
+              "eventId",
+              "streamId",
+              "epoch",
+              "sequence",
+              "schema",
+              "occurredAt",
+              "body"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string"
+              },
+              "streamId": {
+                "type": "string"
+              },
+              "epoch": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": "integer",
+                "description": "스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다."
+              },
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "worktree.changed.v1"
+                ]
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "correlationId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "body": {
+                "$ref": "#/components/schemas/WorktreeChangedDto"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "Event_orchestration_workspaceUpdated_v1",
+            "required": [
+              "eventId",
+              "streamId",
+              "epoch",
+              "sequence",
+              "schema",
+              "occurredAt",
+              "body"
+            ],
+            "properties": {
+              "eventId": {
+                "type": "string"
+              },
+              "streamId": {
+                "type": "string"
+              },
+              "epoch": {
+                "type": "string"
+              },
+              "sequence": {
+                "type": "integer",
+                "description": "스트림 안에서 1부터 1씩 증가한다. 알림용 스트림은 구독 단위로만 의미가 있다."
+              },
+              "schema": {
+                "type": "string",
+                "enum": [
+                  "orchestration.workspaceUpdated.v1"
+                ]
+              },
+              "occurredAt": {
+                "type": "string"
+              },
+              "correlationId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "body": {
+                "$ref": "#/components/schemas/OrchestrationEventDto"
+              }
+            }
+          }
+        ]
+      },
       "EventClass": {
         "type": "string",
         "description": "상태 복원용(보관·replay) 또는 알림용(보관 없음, 구독 시작 이후만).",
@@ -2737,6 +2870,157 @@
           "body": {}
         }
       },
+      "EventFrame": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "server → client, 연결 직후 한 번.",
+            "required": [
+              "protocolVersion",
+              "epoch",
+              "type"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "epoch": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "hello"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "client → server, 첫 프레임 한 번.",
+            "required": [
+              "cursors",
+              "type"
+            ],
+            "properties": {
+              "cursors": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/StreamCursor"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "subscribe"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "event",
+              "type"
+            ],
+            "properties": {
+              "event": {
+                "$ref": "#/components/schemas/EventEnvelope"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/GapNotice"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "gap"
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "object",
+            "description": "구독 거절. 뒤이어 연결을 닫는다.",
+            "required": [
+              "fault",
+              "type"
+            ],
+            "properties": {
+              "fault": {
+                "$ref": "#/components/schemas/WorkbenchFault"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "fault"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "테스트 WebSocket(039)과 3단계 운영 WebSocket이 공유하는 프레임."
+      },
+      "EventItem": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "event",
+              "kind"
+            ],
+            "properties": {
+              "event": {
+                "$ref": "#/components/schemas/EventEnvelope"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "event"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "gap",
+              "kind"
+            ],
+            "properties": {
+              "gap": {
+                "$ref": "#/components/schemas/GapNotice"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "gap"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "`EventStream`의 항목."
+      },
       "EventSchemaDescriptor": {
         "type": "object",
         "description": "`system.describe.eventSchemas`의 항목. 구독 가능하고 principal에게 허용된 것만 나온다.",
@@ -2782,6 +3066,56 @@
           "unavailable",
           "deadlineExceeded",
           "internal"
+        ]
+      },
+      "GapNotice": {
+        "type": "object",
+        "description": "gap 신호. 받은 쪽은 상태를 다시 조회해 동기화한다. 해당 스트림에는 그 구독에서 더 이상 이벤트가 오지 않는다.",
+        "required": [
+          "streamId",
+          "epoch",
+          "reason"
+        ],
+        "properties": {
+          "streamId": {
+            "type": "string"
+          },
+          "epoch": {
+            "type": "string",
+            "description": "현재 세대."
+          },
+          "reason": {
+            "$ref": "#/components/schemas/GapReason"
+          },
+          "firstSequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "현재 보관 범위(있으면).",
+            "minimum": 0
+          },
+          "lastSequence": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "GapReason": {
+        "type": "string",
+        "description": "cursor 다음을 이어 붙일 수 없는 이유.",
+        "enum": [
+          "unknownStream",
+          "evicted",
+          "epochChanged",
+          "retentionExceeded",
+          "subscriberLagged",
+          "shutdown"
         ]
       },
       "GitBranchDto": {
@@ -3508,6 +3842,21 @@
         "maxLength": 128,
         "minLength": 1
       },
+      "LifecycleStatusDto": {
+        "type": "string",
+        "enum": [
+          "started",
+          "initialized",
+          "sessionCreated",
+          "promptSent",
+          "promptCompleted",
+          "steerPending",
+          "steerAccepted",
+          "steerRejected",
+          "cancelled",
+          "completed"
+        ]
+      },
       "OperationDescriptor": {
         "type": "object",
         "description": "operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다.",
@@ -3567,6 +3916,39 @@
           "command"
         ]
       },
+      "OrchestrationEventDto": {
+        "type": "object",
+        "required": [
+          "workspaceId",
+          "revision",
+          "reason"
+        ],
+        "properties": {
+          "workspaceId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "reason": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nodeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "Outcome": {
         "type": "string",
         "description": "mutation의 적용 여부. timeout·단절 뒤 같은 멱등성 키로 재확인할지 판단하는 근거다.",
@@ -3586,6 +3968,40 @@
           "acceptEdits",
           "dangerouslySkipAllPermissions"
         ]
+      },
+      "PermissionOptionDto": {
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "optionId"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "optionId": {
+            "type": "string"
+          }
+        }
+      },
+      "PlanEntryDto": {
+        "type": "object",
+        "required": [
+          "status",
+          "content"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          }
+        }
       },
       "ProjectCreateInput": {
         "type": "object",
@@ -3749,10 +4165,384 @@
           }
         }
       },
+      "RalphLoopStatusDto": {
+        "type": "string",
+        "enum": [
+          "started",
+          "completed",
+          "failed",
+          "stopped"
+        ]
+      },
       "RequestId": {
         "type": "string",
         "maxLength": 128,
         "minLength": 1
+      },
+      "RunEventDto": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "status": {
+                "$ref": "#/components/schemas/LifecycleStatusDto"
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "lifecycle"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "agentMessage"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "thought"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "entries",
+              "type"
+            ],
+            "properties": {
+              "entries": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PlanEntryDto"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "plan"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "status",
+              "title",
+              "locations",
+              "type"
+            ],
+            "properties": {
+              "toolCallId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "locations": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "fileChanges": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ToolFileChangeDto"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "used",
+              "size",
+              "type"
+            ],
+            "properties": {
+              "used": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "size": {
+                "type": "integer",
+                "format": "int64"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "usage"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "threadStatus": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "updatedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "sessionInfo"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "title",
+              "options",
+              "requiresResponse",
+              "type"
+            ],
+            "properties": {
+              "permissionId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "input": {
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "options": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PermissionOptionDto"
+                }
+              },
+              "selected": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requiresResponse": {
+                "type": "boolean"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "permission"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operation",
+              "path",
+              "type"
+            ],
+            "properties": {
+              "operation": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "fileSystem"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "operation",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "operation": {
+                "type": "string"
+              },
+              "terminalId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "terminal"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "message",
+              "type"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "diagnostic"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "iteration",
+              "maxIterations",
+              "status",
+              "type"
+            ],
+            "properties": {
+              "iteration": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "maxIterations": {
+                "type": "integer",
+                "format": "int64",
+                "minimum": 0
+              },
+              "status": {
+                "$ref": "#/components/schemas/RalphLoopStatusDto"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "ralphLoop"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "method",
+              "payload",
+              "type"
+            ],
+            "properties": {
+              "method": {
+                "type": "string"
+              },
+              "payload": {
+                "type": "object"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "raw"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "message",
+              "type"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            }
+          }
+        ]
       },
       "SavedPromptCreateInput": {
         "type": "object",
@@ -3895,6 +4685,76 @@
         "description": "`system.describe` input. 필드가 없고 추가 필드는 거절한다.",
         "additionalProperties": false
       },
+      "ToolFileChangeDto": {
+        "type": "object",
+        "required": [
+          "path",
+          "kind",
+          "status",
+          "binary",
+          "truncated"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "oldPath": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ToolFileChangeKindDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ToolFileChangeStatusDto"
+          },
+          "diff": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "content": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "binary": {
+            "type": "boolean"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ToolFileChangeKindDto": {
+        "type": "string",
+        "enum": [
+          "added",
+          "modified",
+          "deleted",
+          "renamed",
+          "unknown"
+        ]
+      },
+      "ToolFileChangeStatusDto": {
+        "type": "string",
+        "enum": [
+          "inProgress",
+          "completed",
+          "failed",
+          "unavailable"
+        ]
+      },
       "WorkbenchFault": {
         "type": "object",
         "description": "호출 실패. `message`는 사람이 읽는 한 문장이며 코드나 스택을 담지 않는다.",
@@ -3970,6 +4830,14 @@
           }
         }
       },
+      "WorktreeChangeKindDto": {
+        "type": "string",
+        "description": "`git`: `.git` 메타데이터(브랜치·index 등) 변경. `file`: 작업 트리 파일 변경.",
+        "enum": [
+          "file",
+          "git"
+        ]
+      },
       "WorktreeChangeType": {
         "type": "string",
         "enum": [
@@ -3979,6 +4847,26 @@
           "renamed",
           "untracked"
         ]
+      },
+      "WorktreeChangedDto": {
+        "type": "object",
+        "required": [
+          "workingDirectory",
+          "changedPath",
+          "kind"
+        ],
+        "properties": {
+          "workingDirectory": {
+            "type": "string"
+          },
+          "changedPath": {
+            "type": "string",
+            "description": "debounce 창 안의 대표 변경 경로."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/WorktreeChangeKindDto"
+          }
+        }
       },
       "WorktreeFileEntryDto": {
         "type": "object",
