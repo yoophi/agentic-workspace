@@ -210,6 +210,29 @@ flowchart LR
 - **데스크톱 조립**: AW는 기동 때 같은 런타임을 루프백 임의 포트로 연다(실패는 기록하고 계속). 화면은 아직 Tauri 호환 command를 쓴다(4단계에서 전환). 종료는 `ExitRequested`(미루고 drain 뒤 재종료)와 `Exit`(macOS Quit, 그 자리에서 drain) 두 경로.
 - **결정**: [server ADR 0001](../crates/workbench-server/docs/adr/0001-network-adapter-depends-only-on-the-protocol.md)(protocol만 의존), [server ADR 0002](../crates/workbench-server/docs/adr/0002-accepted-calls-outlive-their-connection.md)(분리 실행·상한 없는 drain·증거 기반 공개).
 
+## 화면 전환 (043, 4단계)
+
+화면의 서버 소유 호출과 이벤트 수신을 042 네트워크 경로로 옮겼다. 호환 command와 창 삽입 전달은 남아 있다(8단계에서 제거).
+
+- **경로 선택**: 창이 뜰 때 한 번 정한다(`app/bootstrap-transport.ts`).
+  - 연결 정보 → handshake → 네트워크 전달 선언이 모두 성공하면 네트워크 경로, 하나라도 실패하면 처음부터 호환 경로다.
+  - 이후 전환은 없다. 네트워크 창은 끊겨도 재연결만 한다.
+  - 저장소는 창 transport의 `invoke`와 `listen`만 쓴다(`shared/api/transport`). 서버 소유 command를 Tauri로 직접 부르면 시험(`no-direct-invoke`)이 실패한다.
+- **command 표**: `shared/api/transport/command-table.ts`가 호환 command 61개를 operation으로 바꾼다. compat Rust와의 동등성은 golden(`compat-parity.golden.json`)을 Rust·TS 시험이 함께 대조해 지킨다.
+- **창 주체**: 창마다 `desktop:window:<label>:<incarnation>`이다([ADR 0008](adr/0008-desktop-windows-are-separate-principals.md)).
+  - `get_workbench_connection`은 창 주체 토큰을 준다.
+  - `ensure_window_bench`는 창 주체로 작업대를 열거나 찾는다.
+  - `declare_network_delivery`는 창 삽입 전달을 끈다.
+- **호출**(`packages/workbench-client` `call-client`): 결과는 `ok`, `fault`, `notApplied`(보내지 않음), `unknown`(보낸 뒤 답 없음)이다. 응답을 잃은 변경은 보낸 세대가 같을 때만 같은 멱등성 키로 한 번 재시도하고, 세대가 바뀌면 다시 보내지 않는다.
+- **이벤트**(`event-client`, AW `network-events`):
+  - 스트림당 WebSocket 하나이고, 수신자 Promise가 settle해야 그 수신자의 cursor가 전진한다.
+  - 수신자 실패는 스트림 스냅샷으로 재동기한다.
+  - 보관 gap은 lastSequence로 live를 먼저 확보하고 스냅샷과 병합한다.
+  - 교환은 창 원장으로 재조정한다(구독 시작·재연결·gap). 교환 prompt의 run 전송 키는 `exchange-delivery:<requestId>`다.
+  - worktree 알림은 재연결마다 전체 다시 읽기 신호를 보낸다.
+- **연결 상태**: `shared/ui/connection-status.tsx`. 끊겼을 때만 보인다.
+- **증거**: `specs/043-frontend-http/reviews/implementation-evidence.md`, `app-smoke.md`(개발·배포 출처, 새로고침 1회 전달).
+
 ## 호출 규칙
 
 | 항목 | 규칙 |
@@ -444,6 +467,7 @@ flowchart LR
 - [ADR 0005 — 창 닫힘은 작업대를 명시적으로 닫는 것이며, 연결 끊김은 run 취소가 아니다](adr/0005-window-close-explicitly-closes-the-bench.md)
 - [ADR 0006 — MCP 도구는 agent principal로 `Workbench.call`을 거친다](adr/0006-mcp-tools-call-the-workbench-as-an-agent-principal.md)
 - [ADR 0007 — 창 제목 같은 표현 요청은 작업대 알림 스트림으로 보낸다](adr/0007-presentation-requests-are-bench-notifications.md)
+- [ADR 0008 — 데스크톱 창은 창마다 별도의 principal(창 주체)이다](adr/0008-desktop-windows-are-separate-principals.md)
 - [workbench-core ADR 0001 — 외부 부작용의 종료 상태 판정](../crates/workbench-core/docs/adr/0001-end-state-reconciliation-for-external-side-effects.md)
 - [workbench-core ADR 0002 — 이벤트 journal은 메모리에 두고 서버 세대로 구별한다](../crates/workbench-core/docs/adr/0002-event-journal-is-in-memory-with-server-epoch.md)
 - [workbench-core ADR 0003 — 알림 이벤트는 replay하지 않는다](../crates/workbench-core/docs/adr/0003-notification-events-are-not-replayed.md)
