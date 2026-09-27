@@ -7,7 +7,10 @@ use axum::{body::Bytes, extract::State, http::HeaderMap, response::Response};
 use workbench_protocol::{CallRequest, FaultCode, OperationId, RequestId, WorkbenchFault};
 
 use super::{authenticate, json_response, problem, record, unauthenticated};
-use crate::{drain::MESSAGE_SHUTTING_DOWN, AppState, MESSAGE_NOT_EXPOSED};
+use crate::{
+    drain::{spawn_accepted, MESSAGE_SHUTTING_DOWN},
+    AppState, MESSAGE_NOT_EXPOSED,
+};
 
 pub const MESSAGE_BAD_BODY: &str = "invalid request body.";
 
@@ -86,8 +89,7 @@ pub async fn call(State(state): State<Arc<AppState>>, headers: HeaderMap, body: 
     };
     let workbench = Arc::clone(&state.workbench);
     let task_principal = principal.clone();
-    let executed = tokio::spawn(async move {
-        let _guard = guard; // 완료·panic 때 drop → drain이 안다
+    let executed = spawn_accepted(guard, async move {
         workbench.call(task_principal, request).await
     })
     .await;

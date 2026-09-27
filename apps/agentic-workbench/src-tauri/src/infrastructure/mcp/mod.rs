@@ -46,6 +46,8 @@ pub const AW_MCP_SERVER_NAME: &str = "agentic_workbench";
 pub struct McpServerState {
     base_url: String,
     capability_registry: CapabilityRegistry,
+    /// 042 R17: 받아들인 도구 호출. 연결과 무관하게 끝까지 실행되고, 앱 종료는 이것이 비기를 기다린다.
+    calls: std::sync::Arc<workbench_server::drain::DetachedCalls>,
 }
 
 #[derive(Clone)]
@@ -114,6 +116,7 @@ impl McpServerState {
         let server_state = Self {
             base_url: format!("http://{address}/mcp"),
             capability_registry: CapabilityRegistry::default(),
+            calls: std::sync::Arc::default(),
         };
         let router_state = McpRouterState {
             app,
@@ -147,6 +150,11 @@ impl McpServerState {
             token: self.capability_registry.issue(run_id),
             run_id: run_id.to_owned(),
         }
+    }
+
+    /// 받아들인 도구 호출 추적기(앱 종료 drain용).
+    pub fn detached_calls(&self) -> std::sync::Arc<workbench_server::drain::DetachedCalls> {
+        std::sync::Arc::clone(&self.calls)
     }
 
     pub fn revoke_run_capability(&self, run_id: &str) {
@@ -241,13 +249,28 @@ async fn handle_post(
             JsonRpcResponse::result(id, result)
         }
         "tools/call" => {
-            let result = handle_tool_call(
-                &state,
-                principal.as_ref().expect("authenticated tool call"),
-                request.params,
-            )
-            .await;
-            JsonRpcResponse::result(id, result)
+            // 042 R17: 도구 호출은 서버 소유 task에서 실행한다 — agent 연결이 끊겨도 효과와 멱등 기록은 끝난다.
+            let Some(guard) = state.mcp_state.calls.accept() else {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(JsonRpcResponse::error(
+                        id,
+                        -32000,
+                        workbench_server::drain::MESSAGE_SHUTTING_DOWN,
+                    )),
+                )
+                    .into_response();
+            };
+            let principal = principal.expect("authenticated tool call");
+            let task_state = state.clone();
+            match workbench_server::drain::spawn_accepted(guard, async move {
+                handle_tool_call(&task_state, &principal, request.params).await
+            })
+            .await
+            {
+                Ok(result) => JsonRpcResponse::result(id, result),
+                Err(_) => JsonRpcResponse::error(id, -32603, "tool call execution failed"),
+            }
         }
         method => JsonRpcResponse::error(id, -32601, format!("Unsupported MCP method: {method}")),
     };
@@ -364,6 +387,7 @@ mod tests {
         McpServerState {
             base_url: "http://127.0.0.1:1/mcp".into(),
             capability_registry: CapabilityRegistry::default(),
+            calls: std::sync::Arc::default(),
         }
     }
 

@@ -99,6 +99,7 @@ dependencies = [
  "uuid",
  "workbench-core",
  "workbench-protocol",
+ "workbench-server",
 ]
 
 [[package]]

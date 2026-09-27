@@ -87,15 +87,15 @@
 
 ### Tests for User Story 3
 
-- [ ] T025 [P] [US3] `crates/workbench-core/tests/http_security.rs`: 허용 안 된 Host, 허용 안 된·접두사만 같은·`null` Origin(호출·표 발급·WS 각각), 토큰 없음·잘못됨·만료, 데스크톱 토큰을 다른 Origin·Origin 없이, 1 MiB 초과 413, preflight 허용 출처만(credentials 없음) → 모두 거절, 뒤이은 조회로 상태 불변(SC-002). 수집 기록에 토큰·표 문자열 0건(SC-007)
-- [ ] T026 [P] [US3] AW `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/title_tool.rs` 테스트: `http://127.0.0.1.evil.example`·`http://localhost.evil.example`·`null` 거절, 허용 목록 통과, Origin 없음 허용
-- [ ] T027 [P] [US3] AW MCP **연결 단절 재시도(R17)** 테스트: agent 도구 호출 중 연결 단절 → 같은 요청 재시도 → 효과 1회(`apps/agentic-workbench/src-tauri/src/infrastructure/mcp/mod.rs` 테스트 또는 core 쪽 동등 시험)
+- [X] T025 [P] [US3] `crates/workbench-core/tests/http_security.rs`: 허용 안 된 Host, 허용 안 된·접두사만 같은·`null` Origin(호출·표 발급·WS 각각), 토큰 없음·잘못됨·만료, 데스크톱 토큰을 다른 Origin·Origin 없이, 1 MiB 초과 413, preflight 허용 출처만(credentials 없음) → 모두 거절, 뒤이은 조회로 상태 불변(SC-002). 수집 기록에 토큰·표 문자열 0건(SC-007)
+- [X] T026 [P] [US3] AW `apps/agentic-workbench/src-tauri/src/infrastructure/mcp/title_tool.rs` 테스트: `http://127.0.0.1.evil.example`·`http://localhost.evil.example`·`null` 거절, 허용 목록 통과, Origin 없음 허용
+- [X] T027 [P] [US3] AW MCP **연결 단절 재시도(R17)** 테스트: agent 도구 호출 중 연결 단절 → 같은 요청 재시도 → 효과 1회(`apps/agentic-workbench/src-tauri/src/infrastructure/mcp/mod.rs` 테스트 또는 core 쪽 동등 시험)
 
 ### Implementation for User Story 3
 
-- [ ] T028 [US3] `crates/workbench-server`: CORS(`AllowOrigin::list`, `GET, POST`, `authorization, content-type`, 노출 `AW-Protocol-Version`, credentials 없음, max-age 600), 보안 테스트 통과
-- [ ] T029 [US3] AW MCP 서버: `origin_allowed` → `workbench_server::origin::OriginPolicy`(정확 일치, WebView 출처 목록), 도구 호출(`handle_tool_call`)을 분리 task로 실행(R17), T026·T027 통과
-- [ ] T030 [US3] 커밋 `feat(workbench-server): exact host/origin, CORS, body limits; fix MCP origin prefix check (042 US3)`
+- [X] T028 [US3] `crates/workbench-server`: CORS(`AllowOrigin::list`, `GET, POST`, `authorization, content-type`, 노출 `AW-Protocol-Version`, credentials 없음, max-age 600), 보안 테스트 통과
+- [X] T029 [US3] AW MCP 서버: `origin_allowed` → `workbench_server::origin::OriginPolicy`(정확 일치, WebView 출처 목록), 도구 호출(`handle_tool_call`)을 분리 task로 실행(R17), T026·T027 통과
+- [X] T030 [US3] 커밋 `feat(workbench-server): exact host/origin, CORS, body limits; fix MCP origin prefix check (042 US3)`
 
 ---
 
@@ -187,3 +187,6 @@ T009 연결 단절 재시도 ∥ T010 영속 5개 중단 증거 ∥ T011 재시�
 - **T021**: `http_tickets.rs` status=0 — 재사용·임의 표·만료 401, 다른 Origin 403(표 소모), Origin 빠짐 403, 허용 밖 Origin 발급 403, cursor 1,025개 400, cursor 0개·scope 없는 주체는 연결 뒤 fault 프레임, 재연결 이어 받기, 표 비기록. 변이: `take`를 remove 대신 get → 재사용·Origin 두 시험 실패(`us2-m.log`)
 - **T022·T023**: events 경로와 harness 표 흐름(T016 때 적용). 이벤트 suite 통과, fixture 변경 없음
 - **T024**: `docs/workbench-seam.md` 네트워크 어댑터 절·이벤트 테스트 경로 갱신(039 §6 대체 명시)
+- **T025·T028**: `http_security.rs` status=0 — 허용 밖 Host 3종, Origin 6종(접미사·포트·대소문자·`null`·빈 값)을 호출·표 발급·handshake·WS에서 403, 토큰 없음·위조·다른 Origin·Origin 제거·만료·무출처 토큰을 페이지에서 → 401, 1 MiB 초과 413, preflight 허용 출처만(credentials 없음, 노출 헤더 `aw-protocol-version`), 거절 뒤 프로젝트 0개, 기록에 토큰 문자열 0건. 변이: Host 검사 끔 → `evil.example` 200으로 실패, Origin을 접두사 비교로 → `http://localhost:14200` 200으로 실패
+- **T026·T029**: AW MCP `origin_allowed` → 공유 `OriginPolicy`(`infrastructure/workbench_http.rs` `WEBVIEW_ORIGINS`) 정확 일치. 새 시험을 옛 접두사 구현에 돌리면 `http://127.0.0.1.evil.example`에서 실패(`aw-mcp-old.log`). AW `cargo test --lib mcp` status=0(22). 도구 호출은 `workbench_server::drain::spawn_accepted`로 분리 실행, 종료 중 새 호출은 503(JSON-RPC -32000)
+- **T027(한계 명시)**: AW MCP 끝점 e2e 단절 시험은 `AppHandle` 없이 띄울 수 없어 두지 않았다. 과제의 "core 쪽 동등 시험"으로 대신한다 — MCP와 `/v1/calls`가 같은 `spawn_accepted`를 쓰고, 그 함수의 호출자 취소 시험(`drain::tests::accepted_work_survives_caller_cancellation`)과 `/v1/calls` 경로의 단절·변이 증거(T009·T018)가 같은 코드를 잰다. agent 도구 경로 자체의 멱등 범위(RunOwner)는 D-A가 잰다

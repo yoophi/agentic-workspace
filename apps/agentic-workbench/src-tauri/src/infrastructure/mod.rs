@@ -16,3 +16,4 @@ pub mod native_window_menu;
 pub mod perf_log;
 pub mod tauri_desktop_bridge;
 pub mod window_manager;
+pub mod workbench_http;

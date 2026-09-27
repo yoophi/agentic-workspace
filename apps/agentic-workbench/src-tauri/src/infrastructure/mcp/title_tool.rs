@@ -79,13 +79,14 @@ pub fn unsupported_tool_result(name: &str) -> Value {
     ))
 }
 
+/// 042 contracts §7: Workbench HTTP 어댑터와 같은 정확 일치 규칙(오늘의 접두사 비교 결함 수정). Origin 없음은
+/// 허용한다(agent는 비브라우저). 읽을 수 없는 값은 `null`로 보고 거절한다.
 pub fn origin_allowed(headers: &HeaderMap) -> bool {
-    let Some(origin) = headers.get("origin").and_then(|value| value.to_str().ok()) else {
-        return true;
-    };
-    origin == "tauri://localhost"
-        || origin.starts_with("http://127.0.0.1")
-        || origin.starts_with("http://localhost")
+    let origin = headers
+        .get("origin")
+        .map(|value| value.to_str().unwrap_or("null"));
+    crate::infrastructure::workbench_http::origin_policy().check(origin)
+        != workbench_server::origin::OriginCheck::Rejected
 }
 
 #[cfg(test)]
@@ -129,10 +130,22 @@ mod tests {
     #[test]
     fn origin_validation_rejects_untrusted_browser_origin() {
         let mut headers = HeaderMap::new();
-        assert!(origin_allowed(&headers));
-        headers.insert("origin", HeaderValue::from_static("https://example.com"));
-        assert!(!origin_allowed(&headers));
-        headers.insert("origin", HeaderValue::from_static("http://127.0.0.1:1420"));
-        assert!(origin_allowed(&headers));
+        assert!(origin_allowed(&headers), "agents send no Origin");
+        for rejected in [
+            "https://example.com",
+            "http://127.0.0.1.evil.example",
+            "http://localhost.evil.example",
+            "http://localhost:1420.evil.example",
+            "http://127.0.0.1:1420",
+            "http://localhost:5173",
+            "null",
+        ] {
+            headers.insert("origin", HeaderValue::from_static(rejected));
+            assert!(!origin_allowed(&headers), "{rejected}");
+        }
+        for allowed in crate::infrastructure::workbench_http::WEBVIEW_ORIGINS {
+            headers.insert("origin", HeaderValue::from_static(allowed));
+            assert!(origin_allowed(&headers), "{allowed}");
+        }
     }
 }

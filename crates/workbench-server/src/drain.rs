@@ -17,6 +17,20 @@ pub const MESSAGE_SHUTTING_DOWN: &str = "server is shutting down.";
 /// 호출은 끝까지 둔다). 소유 런타임은 `serve`가 반환한 뒤에만 종료해야 한다.
 pub const DEFAULT_DRAIN_WARN_AFTER: Duration = Duration::from_secs(30);
 
+/// 받아들인 호출을 서버 소유 task에서 실행하고 그 결과를 기다린다. 호출자(연결 handler) future가 drop돼도 task는
+/// 끝까지 돈다 — `/v1/calls`와 AW MCP 도구 호출이 이 함수 하나를 쓴다(R17).
+pub async fn spawn_accepted<F, T>(guard: CallGuard, work: F) -> Result<T, tokio::task::JoinError>
+where
+    F: std::future::Future<Output = T> + Send + 'static,
+    T: Send + 'static,
+{
+    tokio::spawn(async move {
+        let _guard = guard; // 완료·panic 때 drop → drain이 안다
+        work.await
+    })
+    .await
+}
+
 #[derive(Debug, Default)]
 pub struct DetachedCalls {
     closing: AtomicBool,
@@ -127,6 +141,42 @@ mod tests {
         assert!(warnings.iter().all(|left| *left == 1));
         releaser.await.unwrap();
         assert_eq!(calls.active(), 0);
+    }
+
+    /// 호출자 future를 중간에 버려도(연결 단절) 받아들인 작업은 끝까지 실행되고 drain은 그 끝을 기다린다.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn accepted_work_survives_caller_cancellation() {
+        let calls = Arc::new(DetachedCalls::default());
+        let finished = Arc::new(AtomicBool::new(false));
+        let entered = Arc::new(Notify::new());
+        let caller = {
+            let (calls, finished, entered) = (
+                Arc::clone(&calls),
+                Arc::clone(&finished),
+                Arc::clone(&entered),
+            );
+            tokio::spawn(async move {
+                let guard = calls.accept().unwrap();
+                spawn_accepted(guard, async move {
+                    entered.notify_one();
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    finished.store(true, Ordering::Release);
+                })
+                .await
+            })
+        };
+        entered.notified().await;
+        caller.abort(); // 연결 handler가 사라진다
+        assert!(caller.await.unwrap_err().is_cancelled());
+        assert!(!finished.load(Ordering::Acquire));
+        calls.close();
+        calls
+            .drain_until_idle(Duration::from_millis(10), |_| {})
+            .await;
+        assert!(
+            finished.load(Ordering::Acquire),
+            "accepted work ran to completion"
+        );
     }
 
     #[tokio::test]

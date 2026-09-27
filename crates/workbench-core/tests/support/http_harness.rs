@@ -69,6 +69,8 @@ pub struct HarnessOptions {
     pub exposure: ExposurePolicy,
     pub ticket_ttl: Duration,
     pub drain_warn_after: Duration,
+    /// 고정 토큰 앞에 이어 붙일 운영 resolver(예: `DesktopTokenIssuer`).
+    pub extra_resolver: Option<Arc<dyn workbench_server::auth::CredentialResolver>>,
 }
 
 impl Default for HarnessOptions {
@@ -78,6 +80,7 @@ impl Default for HarnessOptions {
             exposure: ExposurePolicy::All,
             ticket_ttl: TICKET_TTL,
             drain_warn_after: Duration::from_secs(30),
+            extra_resolver: None,
         }
     }
 }
@@ -131,7 +134,13 @@ impl Harness {
         let addr = listener.local_addr().expect("addr");
         let access_log = Arc::new(CollectingAccessLog::default());
         let config = ServerConfig {
-            resolver: Arc::new(test_resolver()),
+            resolver: match options.extra_resolver {
+                Some(extra) => Arc::new(workbench_server::auth::ChainResolver::new(vec![
+                    extra,
+                    Arc::new(test_resolver()),
+                ])),
+                None => Arc::new(test_resolver()),
+            },
             server_info: Arc::new(TestServerInfo),
             origins: OriginPolicy::new(options.origins),
             access_log: access_log.clone(),
