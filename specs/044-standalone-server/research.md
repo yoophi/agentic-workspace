@@ -204,10 +204,30 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 |---|---|---|
 | A-turn | 엔진의 prompt 실행 진입점(`start` 초기 순서·`send_prompt`·`queue_prompt`·`steer`·`send_and_wait`, orchestration 작업자·알림 전달기 경로) | 그 prompt 실행 future 전체(권한 대기 포함). 초기 순서는 runner가 순서 끝에서 놓는다 |
 | X-deliver | `run.sendPrompt(continuation)` | 교환 전달 prompt의 엔진 대기열 등록부터 그 prompt 실행이 끝날 때까지(등록 뒤 A-turn으로 인계) |
-| T-start | `orchestration.assignChildTask`(대기 task 배정) | `Starting` 예약부터 엔진 등록까지(등록 뒤 A-turn으로 인계) |
+| T-start | `orchestration.assignChildTask`(대기 task 배정) | `Starting` 예약부터 엔진 실행 허용까지(허용과 함께 A-turn으로 인계) |
+| N-notify | 자식 보고·결과·막힘·입력 요청이 coordinator 알림을 저장하는 순간(보고 호출의 C-call을 놓기 전) | 알림 선택·전달(`send_and_wait` 시작 시 A-turn으로 인계)·결과 저장까지 |
 | C-call | HTTP·MCP 받아들인 분리 호출 | 호출 처리 끝까지(042) |
 
-활동 작업 = 예약 수 합계 + 이 프로세스의 ledger `pending` + (데스크톱 임대가 있을 때) 미소비 교환 + 비우기 시작 전 대기 task(K로 배정 가능).
+활동 작업 = 예약 수 합계 + 이 프로세스의 ledger `pending` + (데스크톱 임대가 있을 때) 미소비 교환 + 비우기 시작 전 대기 task(K로 배정 가능) + **저장된 미전달 coordinator 알림 중 대상 coordinator run이 살아 있는 것**(저장소에서 파생, Codex 재검토 3 F2).
+
+### 엔진 시작 장벽 (Codex 재검토 3 F1)
+
+- 오늘 `StartAgentRunUseCase::execute`는 `reserve_run().await` → `tokio::spawn`(곧바로 launcher 실행) → `attach_run_handle().await` 순서다. 토큰 전이를 등록 뒤에 하면 그 사이 성공한 취소가 이미 spawn한 실행을 막지 못한다. 등록 전에 하면 취소가 아직 registry에 없는 run을 "취소"하고 끝난다(`cancel_run`은 없는 run에 false).
+- 그래서 엔진 시작을 **준비**와 **실행 허용**으로 나눈다(`acp-agent-core` 시작 경로에 선택 인자 `start_gate` 추가. 넘기지 않는 다른 소비자는 오늘과 같다):
+  1. 준비: `reserve_run` → spawn(task는 `start_gate`를 기다리며 launcher를 아직 부르지 않음) → `attach_run_handle`. 이 시점에 run은 registry에 있고 취소할 수 있다.
+  2. G 아래: 토큰이 `Pending`이면 `Registered{runId}`로 바꾸고 T-start를 A-turn으로 인계한다. 토큰이 `Cancelled`면 바꾸지 않는다.
+  3. G 밖: `Registered`면 `start_gate`를 연다(launcher 실행). `Cancelled`면 registry에서 그 run을 취소한다. `start_gate`가 닫힌 채 drop되면 task는 launcher를 부르지 않고 끝난다.
+- 선형화 지점은 2의 G 아래 전이다. 그 앞에서 온 취소는 `Pending→Cancelled`(실행 0), 그 뒤에서 온 취소는 registry의 실제 run을 취소한다.
+- 시험(각각 결정적 gate): registry 예약 전 취소, spawn 뒤·attach 전 취소, attach 뒤·전이 전 취소, 전이 뒤·gate 열기 전 취소, 각 지점의 future abort. 모두 "취소가 성공이면 launcher·prompt 실행 0"과 "예약 해제 누락 0"을 단정한다.
+
+### 알림 전달 예약 (Codex 재검토 3 F2)
+
+- 오늘 자식 보고 도구는 결과를 저장하고 알림 전달기를 `tokio::spawn`한 뒤 곧바로 돌아간다(`agent_tools.rs:540-570`). 전달기가 처음 돌기 전에 자식 turn과 보고 호출이 끝나면, 예약만으로 세는 활동이 0이 되어 wait-stop이 `stopping`으로 넘어갈 수 있다. 그 뒤 전달기의 `send_and_wait`는 2'로 거절되어 알림을 잃는다.
+- 수정:
+  - 저장된 미전달 알림(대상 coordinator run이 살아 있음)을 활동에 센다(저장소 파생). 알림은 보고 호출이 돌아가기 전에 저장되므로 공백이 없다.
+  - 보고 도구는 C-call을 놓기 전에 N-notify 예약을 만들어 전달기로 넘긴다. 전달기가 `send_and_wait`에 들어가면 A-turn으로 인계한다.
+  - 비우기에 들어갈 때와 전달 실패 뒤(재시도 가능 실패), 서버가 알림 전달 한 바퀴를 스스로 돈다(backoff). 저장된 미전달 알림이 외부 계기 없이 남아 wait를 영원히 막지 않게 한다.
+- 시험: 전달기 첫 poll을 gate로 막은 채 보고 호출과 자식 turn을 끝내고 wait-stop 요청 → 멈추지 않음 → gate 해제 → 알림 전달 → 멈춤. 재시도 가능 실패 주입 → 서버가 다시 전달 → 멈춤.
 
 ### 상태 전이 표
 
@@ -219,9 +239,10 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 | 2' | prompt 실행 시작 | 상태 `stopping` | 없음 | 실행하지 않음(내부 경로는 run 취소로 처리) | — | — | — |
 | 3 | 교환 전달(`sendPrompt` + continuation) | K 조건 모두 참(R7) + 미소비 + 상태 ≠ `stopping` | 소비 표시 + X-deliver 예약 | 엔진 대기열 등록 | 등록 성공 → A-turn으로 인계(X 해제는 인계와 원자적으로) | 등록 실패(run 없음) → X 해제, 소비는 유지, `failedExchangeDeliveries` 기록 | drop → X 해제, 소비 유지 + 실패 기록 |
 | 3' | 같은 교환으로 둘째 전달 | 소비 표시 있음 | 없음 | 같은 키면 기존 멱등 결과, 다른 키면 N 거절 | — | — | — |
-| 4 | 대기 task 배정 | 상태 ≠ `stopping` + (비우기 중이면 비우기 전 생성) | 기동 토큰 `Pending` 만들기 + T-start 예약 | 저장소 RMW: `Ready`·예약 없음 → `Starting{token}`(아니면 기존 예약 반환하고 T 해제) → 엔진 등록 준비(fingerprint 등) | 토큰 `Pending→Registered`(G 아래, 엔진 등록과 인계) → A-turn으로 인계, T 해제 | 등록 실패 → 토큰 `Failed`, T 해제, task는 오늘 규칙의 실패 상태 | drop → 토큰 `Failed`, T 해제 |
-| 5 | task 취소(배정 전후) | 토큰 상태 | `Pending`이면 `Cancelled`로 바꾸고 기동을 막음. `Registered`면 run id를 넘김 | `Pending→Cancelled`: 엔진 등록 없음, task `Cancelled`. `Registered`: 실제 run 취소 | — | — | — |
-| 5' | 기동 경로가 등록하려는 순간 | 토큰이 `Cancelled` | 등록하지 않음 | 준비한 자원 정리, T 해제 | — | — | — |
+| 4 | 대기 task 배정 | 상태 ≠ `stopping` + (비우기 중이면 비우기 전 생성) | 기동 토큰 `Pending` 만들기 + T-start 예약 | 저장소 RMW: `Ready`·예약 없음 → `Starting{token}`(아니면 기존 예약 반환하고 T 해제) → 엔진 **준비**(fingerprint, registry 예약, 장벽에서 기다리는 spawn, attach) | G 아래 `Pending→Registered{runId}` + T→A 인계 → G 밖에서 시작 장벽 열기 | 준비 실패 → 토큰 `Failed`, T 해제, task는 오늘 규칙의 실패 상태 | drop → 토큰 `Failed`, 준비한 run이 있으면 registry에서 취소, T 해제 |
+| 5 | task 취소(배정 전후) | 토큰 상태 | `Pending`이면 `Cancelled`로 바꾼다. `Registered`면 run id를 넘긴다 | `Pending→Cancelled`: 시작 장벽은 열리지 않음(실행 0), task `Cancelled`. `Registered`: registry의 실제 run 취소 | — | — | — |
+| 5' | 기동 경로가 G 아래 전이를 하려는 순간 | 토큰이 `Cancelled` | 전이하지 않음 | 준비한 run을 registry에서 취소(장벽 닫힌 채 drop → launcher 실행 0), T 해제 | — | — | — |
+| 6' | 자식 보고가 coordinator 알림 저장 | 상태 ≠ `stopping` | N-notify 예약(보고 C-call 해제 전) | 전달기로 넘김 → `send_and_wait` 시작 때 A-turn 인계 | 전달 결과 저장 후 해제 | 재시도 가능 실패: 알림은 미전달로 남고(활동에 셈) 서버가 backoff로 다시 전달 | drop → 해제, 알림은 미전달로 남음(활동에 셈) |
 | 6 | 자식 run 바인딩(`bind_child_run`) | task가 `Cancelled`면 거절 | — | — | — | — | — |
 | 7 | 정지 판정(wait·idle) | 활동 작업 0(임대 조건 포함) | 상태 `stopping` | 받아들인 호출 drain → 쉬는 세션 취소 → 안내 파일 삭제 | — | — | — |
 | 8 | 강제 정지·SIGTERM | 항상 | 상태 `stopping` 직전 `close_all_benches` 예약 | 작업대 닫기(모든 run 취소 → A-turn들이 drop으로 해제) → 7의 G 밖 동작 | — | — | — |
@@ -238,10 +259,12 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 | E3: 동시 배정으로 run 둘 | 4(RMW 비교 후 변경) | 서로 다른 키 동시 배정 100회 |
 | E4: 예약 뒤·등록 전 취소가 성공했는데 run이 뜸 | 5·5'·6(토큰 인계) | 엔진 등록 직전 gate로 멈춤 → 취소 완료 → gate 해제 → prompt 실행 0, task `Cancelled` |
 | E4: 등록이 먼저면 취소가 실제 run을 멈춤 | 5(`Registered`) | 등록 뒤 취소 → run 취소 확인 |
+| F1: 비동기 등록 중간의 취소(예약 전·spawn 뒤·attach 전·전이 전·장벽 전) | 4·5·5'(시작 장벽 + G 아래 선형화) | 지점별 gate 시험, abort 포함 |
+| F2: 보고 반환 뒤 전달기 첫 poll 전에 활동 0 | 6'(저장소 파생 + N-notify) | 전달기 첫 poll gate 시험, 재시도 실패 주입 |
 
 ### 데스크톱 없이 실행을 유지한다는 목표와의 관계
 
-- 서버가 소유하는 것: A-turn(엔진 실행과 엔진 대기열), T-start, 알림 전달기, 대기 자식 명령. 데스크톱이 없어도 이미 시작한 turn·대기열 prompt·orchestration 알림은 끝까지 간다.
+- 서버가 소유하는 것: A-turn(엔진 실행과 엔진 대기열), T-start(시작 장벽 포함), 알림 전달(N-notify, 저장된 미전달 알림의 서버 재시도), 대기 자식 명령. 데스크톱이 없어도 이미 시작한 turn·대기열 prompt·orchestration 알림은 끝까지 간다.
 - **아직 데스크톱 UI에 의존하는 것**: 교환 요청의 라우팅·패널 대기열(043). 교환 요청은 창의 원장이 받아 대상 패널로 라우팅하고, 패널 대기열이 `run.sendPrompt`를 부른다. 데스크톱이 없으면 새 교환은 전달되지 않는다(서버는 `undeliverableExchanges`로 보고하고 활동에 세지 않는다).
 - 따라서 "교환 전달의 서버 소유(서버가 `send`/`queue` 교환을 대상 run 엔진 대기열에 직접 넣기)"는 **044 밖**이다. 후속 미완료 표(plan)에 두고 5단계 (a) 완료로 세지 않는다.
 

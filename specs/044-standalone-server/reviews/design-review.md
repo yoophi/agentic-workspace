@@ -50,3 +50,12 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 **사용자 검토 5 반영**: 개별 조건을 덧붙이지 않고, 활동 예약·교환 전달 수락·task 기동 예약·정지 판정을 한 경계(작업 관문 G)와 한 상태 전이 표로 정리했다(research R14). 표는 성공·오류·취소 해제와, 닫는 실패 순서·검증을 함께 적는다.
 
 아직 데스크톱 UI에 의존하는 교환 전달(창 원장 라우팅·패널 대기열)은 plan·spec의 후속 미완료 표에 적었다. 5단계 (a) 완료로 세지 않는다.
+
+## Codex 설계 재검토 3 (`--wait --base 7902e15`, 대상 `5ce3744`)
+
+판정: needs-attention. UI 의존 교환 전달의 미완료 표기는 정확하다고 확인했다. High 2건:
+
+| # | 문제 | 근거 | 반영 |
+|---|---|---|---|
+| F1 | 비동기 엔진 등록(`reserve_run` → spawn → `attach_run_handle`)과 `Pending→Registered` 사이에 선형화 지점이 없다. 등록 뒤에 전이하면 그 사이 취소가 spawn한 실행을 못 막고, 등록 전에 전이하면 없는 run을 취소하고 끝난다 | `start_agent_run.rs`, `AppState::cancel_run` | 엔진 시작을 준비(예약·장벽에서 기다리는 spawn·attach)와 실행 허용으로 나눈다(`acp-agent-core` 선택 인자 `start_gate`). G 아래 전이를 선형화 지점으로 삼는다. 지점별 결정적 취소·abort 시험 |
+| F2 | 자식 보고는 결과를 저장하고 전달기를 spawn한 뒤 돌아간다. 전달기 첫 poll 전에 활동이 0이 되어 정지하면 알림을 잃는다 | `agent_tools.rs:540-570` | 저장된 미전달 알림(대상 coordinator 살아 있음)을 활동에 센다. 보고 C-call 해제 전 N-notify 예약, 비우기 진입·재시도 실패 뒤 서버가 전달 한 바퀴. 전달기 첫 poll gate 시험 |
