@@ -25,7 +25,7 @@ stateDiagram-v2
     Closing --> [*]: 입장한 동작 종료 대기 → 소유 run 취소 → 교환 삭제 → 스트림 제거 → registry 삭제
 ```
 
-- 입장(admission): `run.start`(소유 기록까지), `exchange.syncWorkspace`·`send`·`sendFromRun`, 과도기 orchestration run 기동. `Open`일 때만 가능(`Closing`이면 `notFound`).
+- 입장(admission): `run.start`(소유 기록까지), `exchange.syncWorkspace`·`send`·`sendFromRun`, 과도기 orchestration run 기동. `Open`일 때만 가능(`Closing`이면 `notFound`). registry lock 안에서 `try_read_owned()`로 얻고 lock 밖에서 await.
 - 입장하지 않는 동작: 기존 run 제어·조회 — 닫기를 막지 않는다.
 - 닫기 불변식: `bench.close`가 `closed: true`로 반환한 시점에 그 작업대 소유의 살아 있는 run은 0개.
 - 상한 256(`Closing` 포함).
@@ -93,4 +93,4 @@ stateDiagram-v2
 
 ## 데스크톱 어댑터 (AW)
 
-`DesktopBenches{by_label, by_bench}` — 창 label ↔ `BenchId`. `ensure(label, hint_path)`(single-flight), `close(label)`(창 `Destroyed`). 창 label은 이 표 밖으로 나가지 않는다.
+`DesktopBenches{by_label, by_bench, closed_labels}` + label별 lock — 창 label ↔ `BenchId`. `ensure(label, hint_path)`(single-flight, 닫힌 label이면 실패), `close(label)`(창 `Destroyed`, 같은 label lock 안에서 닫힌 표시 → `bench.close` → 대응 제거). 창 label은 이 표 밖으로 나가지 않는다.

@@ -31,7 +31,7 @@
 | `exchange.syncWorkspace`·`exchange.send`·`exchange.sendFromRun` | 교환 작업 영역에 쓰는 동안 |
 | orchestration 자식·Main 위임 run 기동(AW, 041 전) | 같은 `run.start` 구간 — 런타임 `admit(bench_id) -> BenchAdmission` guard로 |
 
-입장권 = 작업대의 `admission` read guard를 **상태가 `Open`인 것을 확인한 같은 registry lock 안에서** 얻는 것. `Closing`이면 `notFound` `"bench not found."`(닫히는 작업대는 이미 없는 것으로 본다). 이미 있는 run의 제어(프롬프트·조향·취소·권한)와 조회는 입장권을 잡지 않는다 — 닫기가 run을 취소하므로 경합해도 "비활성 run" 오류로 끝나고, `cancelAndSend`처럼 오래 기다리는 동작이 닫기를 막지 않는다.
+입장권 = 작업대의 `admission`(`Arc<tokio::sync::RwLock<()>>`) read guard를 **상태가 `Open`인 것을 확인한 같은 registry lock(`std::sync::Mutex`) 안에서 `try_read_owned()`로** 얻는 것. std lock을 쥔 채 await하지 않기 위해서다. `try_read_owned`는 대기 중인 writer가 있을 때만 실패하는데, writer(닫기)는 `Closing` 전이 뒤에만 생기므로 `Open`을 확인한 lock 안에서는 실패하지 않는다(실패하면 방어적으로 `Closing`과 같게 `notFound`). 얻은 owned guard를 들고 lock을 푼 뒤 await 구간(decorator·엔진 `start`)을 진행한다. `Closing`이면 `notFound` `"bench not found."`(닫히는 작업대는 이미 없는 것으로 본다). 이미 있는 run의 제어(프롬프트·조향·취소·권한)와 조회는 입장권을 잡지 않는다 — 닫기가 run을 취소하므로 경합해도 "비활성 run" 오류로 끝나고, `cancelAndSend`처럼 오래 기다리는 동작이 닫기를 막지 않는다.
 
 **`bench.close{benchId}`**: (1) registry lock 안에서 `Open → Closing`(원자적; 모르는 id·이미 `Closing`/삭제 → 성공 `closed: false`, 이미 `Closing`이면 먼저 시작한 닫기가 끝날 때까지 기다린 뒤 반환) → (2) `admission` write guard 획득 = 입장한 동작이 모두 끝날 때까지 대기(새 입장은 (1) 때문에 불가) → (3) 소유 run 전부 취소(`cancel_runs_owned_by`; 입장한 `run.start`는 이미 소유를 기록했으므로 스냅샷에 포함) → (4) 교환 작업 영역 삭제 → (5) 교환·작업대 스트림 제거 → (6) registry에서 삭제(`closed: true`, `cancelledRuns`).
 
@@ -166,7 +166,8 @@ operation:
 **Decision**: AW `infrastructure/desktop_benches.rs`의 `DesktopBenches{by_label: HashMap<label, BenchId>, by_bench: HashMap<BenchId, label>}` + 창 label별 single-flight(`tokio::sync::Mutex`).
 
 - `ensure(label, hint_path) -> BenchId`: 있으면 그대로, 없으면 `window_manager`의 label → worktree 경로(없으면 `hint_path`: run 요청 `cwd`·교환 `worktreePath`)로 `bench.open`. 경로가 전혀 없으면(작업대 없는 창에서 프롬프트) 오늘과 같은 결과가 나도록 run 제어는 `"agent run is not active"`를 낸다(작업대가 없으면 그 창이 소유한 run도 없다).
-- `close(label)`: 창 `Destroyed`에서 `bench.close` 호출 후 대응 제거(orchestration `release_window`는 그대로 AW, 041).
+- `close(label)`: 창 `Destroyed`에서 호출. **`ensure`와 같은 label별 lock을 잡고** (1) label을 "닫힌 창"으로 표시 → (2) 대응이 있으면 `bench.close` → (3) 대응 제거. 이후 같은 label의 `ensure`는 작업대를 새로 열지 않고 실패한다(`"Owner Worktree Session window is unavailable."`). orchestration `release_window`는 그대로 AW(041).
+- 경합 방지 근거: `ensure`가 `bench.open`을 await하는 도중 창이 닫히면, 같은 lock 때문에 `close`는 `ensure`가 끝나(대응 등록) 기다린 뒤 그 작업대를 닫는다. lock이 없으면 `close`가 "대응 없음"을 보고 끝난 뒤 `ensure`가 닫힌 창의 작업대를 등록해 run이 영영 남을 수 있다. "닫힌 창" 표시는 창 label이 재사용되지 않으므로(`session-<uuid>`) 세대 동안 유지해도 작다(창 수만큼).
 - `TauriDesktopBridge`(core `DesktopBridge` 구현): `by_bench`로 창을 찾아 `window.eval(CustomEvent(...))` — run `agent-run-event-fallback`, 교환 `agent-exchange-requested-fallback`·`agent-exchange-status-fallback`(오늘 payload 형태), 제목은 lock 밖 async task에서 `set_title` + 메뉴 동기화 + `mcp-window-title-fallback`. 네이티브 `emit`은 모두 제거.
 
 **Rationale**: FR-004·FR-005. 화면은 창 삽입 경로를 이미 듣는다(교환 `listenWithFallback`, 제목 `App.tsx`). `set_title`은 메인 스레드로 넘어가므로 스트림 lock 안에서 부르지 않는다.

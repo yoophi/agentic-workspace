@@ -27,6 +27,7 @@
 |---|---|---|
 | 세션 창 `Destroyed` | `cancel_runs_owned_by(label)` → `remove_window(label)` → orchestration `release_window(label)` | `DesktopBenches::close(label)` → `bench.close`(run 취소·교환 삭제) → orchestration `release_window(label)`(041까지 그대로) |
 | 작업대 열기 | — | 창이 처음 작업대가 필요한 command를 부를 때(창 생성 코드 불변) |
+| 열기와 닫기가 겹침 | — | label별 lock으로 직렬화: 닫기는 진행 중인 열기가 끝난 뒤 그 작업대를 닫고, 닫힌 창의 열기는 `"Owner Worktree Session window is unavailable."` |
 
 ## 이벤트 전달 (데스크톱)
 
