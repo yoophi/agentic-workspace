@@ -12,7 +12,7 @@ use workbench_core::{
 
 use super::{
     descriptor::{
-        Descriptor, FORMAT_VERSION, read_descriptor, remove_descriptor_if, write_descriptor,
+        Descriptor, read_descriptor, remove_descriptor_if, write_descriptor,
     },
     ensure::{EXIT_ALREADY_RUNNING, EXIT_UNSUPPORTED_SCHEMA},
     identity::OwnerIdentity,
@@ -86,19 +86,13 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
         );
         return Ok(1);
     };
-    let descriptor = Descriptor {
-        format_version: FORMAT_VERSION,
-        mode: "server".into(),
-        instance_id: identity.instance_id().to_owned(),
-        server_epoch: host.runtime.epoch().to_owned(),
-        pid: std::process::id(),
-        base_url: http.base_url().to_owned(),
-        server_version: options.server_version.clone(),
-        protocol_versions: vec![workbench_protocol::PROTOCOL_VERSION],
-        storage_schema_version: sqlite_ledger::SCHEMA_VERSION,
-        owner_token: identity.token().to_owned(),
-        started_at: chrono::Utc::now().to_rfc3339(),
-    };
+    let descriptor = Descriptor::for_endpoint(
+        "server",
+        &identity,
+        host.runtime.epoch(),
+        http.base_url(),
+        &options.server_version,
+    );
     write_descriptor(&server_dir, &descriptor)?;
     eprintln!(
         "[workbench-server] ready: {}",

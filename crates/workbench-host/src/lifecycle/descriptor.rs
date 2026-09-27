@@ -47,6 +47,29 @@ impl Descriptor {
         OwnerIdentity::from_parts(&self.instance_id, &self.owner_token)
     }
 
+    /// 준비된 끝점의 안내(`serve`와 AW embedded 모드). `mode`는 `server`·`embedded`.
+    pub fn for_endpoint(
+        mode: &str,
+        identity: &OwnerIdentity,
+        server_epoch: &str,
+        base_url: &str,
+        server_version: &str,
+    ) -> Self {
+        Self {
+            format_version: FORMAT_VERSION,
+            mode: mode.to_owned(),
+            instance_id: identity.instance_id().to_owned(),
+            server_epoch: server_epoch.to_owned(),
+            pid: std::process::id(),
+            base_url: base_url.to_owned(),
+            server_version: server_version.to_owned(),
+            protocol_versions: vec![workbench_protocol::PROTOCOL_VERSION],
+            storage_schema_version: workbench_core::infrastructure::sqlite_ledger::SCHEMA_VERSION,
+            owner_token: identity.token().to_owned(),
+            started_at: chrono::Utc::now().to_rfc3339(),
+        }
+    }
+
     /// 시험용: 신원과 끝점만 채운 안내.
     pub fn for_test(identity: &OwnerIdentity, base_url: &str) -> Self {
         Self {

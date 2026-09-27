@@ -132,6 +132,18 @@ pub fn request(
     body: Option<&Value>,
     bearer: Option<&str>,
 ) -> Result<(u16, Value), String> {
+    request_with_origin(base_url, method, path, body, bearer, None)
+}
+
+/// `request`와 같되 `Origin` 헤더를 싣는다(044 T029: 데스크톱이 창 토큰으로 부를 때 — 창 토큰은 WebView 출처에 묶인다).
+pub fn request_with_origin(
+    base_url: &str,
+    method: &str,
+    path: &str,
+    body: Option<&Value>,
+    bearer: Option<&str>,
+    origin: Option<&str>,
+) -> Result<(u16, Value), String> {
     let authority = base_url
         .strip_prefix("http://")
         .ok_or_else(|| format!("unsupported base url {base_url}"))?;
@@ -151,6 +163,9 @@ pub fn request(
     }
     if let Some(token) = bearer {
         head.push_str(&format!("authorization: Bearer {token}\r\n"));
+    }
+    if let Some(origin) = origin {
+        head.push_str(&format!("origin: {origin}\r\n"));
     }
     head.push_str("\r\n");
 
