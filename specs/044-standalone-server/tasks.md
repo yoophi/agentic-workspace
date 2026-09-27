@@ -12,7 +12,7 @@
 
 ## Phase 1: Setup (선행 확인)
 
-- [ ] T001 기준선: main `cb0bd4c`에서 `cargo test --workspace --all-targets`, `pnpm check-types`, `pnpm test`, 두 `test:integration`을 한 번씩 실행해 결과·종료 코드를 `specs/044-standalone-server/reviews/baseline.md`에 기록
+- [X] T001 기준선: main `cb0bd4c`에서 `cargo test --workspace --all-targets`, `pnpm check-types`, `pnpm test`, 두 `test:integration`을 한 번씩 실행해 결과·종료 코드를 `specs/044-standalone-server/reviews/baseline.md`에 기록
 - [ ] T002 **R8-spike**: AW `lib.rs`에 debug 전용 이벤트 로거를 임시로 붙인다(창 `CloseRequested`·`Destroyed`, `RunEvent::ExitRequested`·`Exit`, 메뉴 이벤트, 시각·label). 실제 앱(격리 identifier `…smoke044`)에서 종료 경로 (a) 빨간 버튼, (b) Cmd+W, (c) 앱 메뉴 Quit, (d) Dock Quit, (e) AppleScript `quit`, (f) 마지막 창 닫기, (g) `SIGTERM`, (h) 로그아웃(자동화 불가면 관측 불가로 기록)을 실행한다. 순서를 `specs/044-standalone-server/research.md` R8에 표로 기록. 로거는 기록 뒤 제거(커밋하지 않음)
 - [ ] T003 T002 결과로 R8의 창 닫기 판정 규칙과 종료 의도 수단을 확정해 `research.md` R8·`contracts/desktop-client.md` §3에 적는다. 관측된 각 종료 경로를 T048·T052의 검증 목록으로 옮긴다
 - [ ] T004 [P] 새 crate 골격 `crates/workbench-host/Cargo.toml`·`src/lib.rs`, 새 앱 골격 `apps/agentic-workbench-server/Cargo.toml`·`src/main.rs`(빈 `main`), 루트 `Cargo.toml` workspace members에 `apps/agentic-workbench-server` 추가. `cargo check --workspace` 통과
