@@ -3,9 +3,13 @@
 
 pub mod agent;
 pub mod agent_run_settings;
+pub mod bench;
+pub(crate) mod epoch;
+pub mod exchange;
 pub mod git;
 pub mod goal;
 pub mod project;
+pub mod run;
 pub mod saved_prompt;
 pub mod system;
 pub mod worktree;
@@ -249,6 +253,7 @@ pub fn build_registry(
     hooks: Arc<TestHooks>,
     adapters: &RuntimeAdapters,
     epoch: &str,
+    benches: &Arc<crate::application::bench_service::BenchServices>,
 ) -> (Registry, ReconcilerRegistry) {
     let runner = Arc::new(IntentFirst::new(
         Arc::clone(&ledger),
@@ -270,6 +275,9 @@ pub fn build_registry(
         &adapters.agent_catalog,
         &adapters.provider_sessions,
     );
+    bench::register(&mut registry, benches);
+    run::register(&mut registry, &runner, &coordinator, benches);
+    exchange::register(&mut registry, benches);
     registry.register(
         OperationId::SystemDescribe,
         Arc::new(system::describe::SystemDescribeHandler::new(epoch)),

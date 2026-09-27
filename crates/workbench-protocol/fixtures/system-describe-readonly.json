@@ -140,6 +140,34 @@
             ]
           },
           {
+            "id": "run.listToolCandidates",
+            "kind": "query",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "id": "exchange.list",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.listPeers",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.getForRun",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [
@@ -162,6 +190,30 @@
             "class": "notification",
             "requiredScopes": [
               "worktree:read"
+            ]
+          },
+          {
+            "schema": "exchange.requested.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "exchange.status.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "bench.titleRequested.v1",
+            "streamKind": "bench",
+            "class": "notification",
+            "requiredScopes": [
+              "bench:read"
             ]
           }
         ]

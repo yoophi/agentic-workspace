@@ -1,0 +1,76 @@
+{
+  "name": "bench-request-title-too-long",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-4",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-1",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.requestTitle",
+        "requestId": "r-5",
+        "input": {
+          "runId": "r1",
+          "title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        "idempotencyKey": "k-5"
+      },
+      "expect": {
+        "fault": {
+          "code": "invalidArgument",
+          "details": {
+            "titleCode": "invalidTitle"
+          },
+          "message": "Window title must be at most 80 characters."
+        }
+      },
+      "principal": "agent:r1"
+    }
+  ]
+}

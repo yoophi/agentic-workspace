@@ -1,0 +1,124 @@
+{
+  "name": "run-bench-close-cancels-owned-runs",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-74",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-74"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-75",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-75"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-76",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r2"
+          }
+        },
+        "idempotencyKey": "k-76"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r2",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.close",
+        "requestId": "r-77",
+        "input": {
+          "benchId": "{{bench}}"
+        },
+        "idempotencyKey": "k-77"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "closed": true,
+            "cancelledRuns": [
+              "r1",
+              "r2"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.sendPrompt",
+        "requestId": "r-78",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "hi"
+        },
+        "idempotencyKey": "k-78"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "bench not found."
+        }
+      }
+    }
+  ]
+}

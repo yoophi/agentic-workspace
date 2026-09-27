@@ -1,0 +1,60 @@
+{
+  "name": "exchange-sync-invalid-panels",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-5",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-5"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "exchange.syncWorkspace",
+        "requestId": "r-6",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "worktreePath": "{{dir}}",
+            "revision": 1,
+            "focusedPanelId": "main",
+            "panels": []
+          }
+        },
+        "idempotencyKey": "k-6"
+      },
+      "expect": {
+        "fault": {
+          "code": "invalidArgument",
+          "details": {
+            "exchangeCode": "invalidPanels"
+          },
+          "message": "Workspace must contain 1..=8 panels."
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ]
+}

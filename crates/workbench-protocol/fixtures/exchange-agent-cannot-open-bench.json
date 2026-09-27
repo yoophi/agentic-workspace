@@ -1,0 +1,29 @@
+{
+  "name": "exchange-agent-cannot-open-bench",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-35",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-35"
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden"
+        }
+      },
+      "principal": "agent:r1"
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ]
+}

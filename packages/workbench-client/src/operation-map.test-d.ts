@@ -2,12 +2,19 @@ import { expectTypeOf, test } from "vitest";
 
 import type {
   AgentDescriptor,
+  AgentExchange,
+  AgentRun,
+  AgentRunRequest,
   AgentRunSettings,
+  BenchCloseOutput,
+  BenchOpenOutput,
+  BenchTitleRequested,
   CallReply,
   DescribeOutput,
   EventFrame,
   EventMap,
   EventSchemaId,
+  ExchangeRequested,
   GitCommitHistory,
   GitRemote,
   GitWorktree,
@@ -17,11 +24,12 @@ import type {
   Project,
   ProviderSession,
   SavedPrompt,
+  TitleChangeResult,
   WorktreeFileEntry,
   WorktreeTextFile,
 } from "./operation-map";
 
-test("operation ids are exactly the registered 32 operations (037 + 038)", () => {
+test("operation ids are exactly the registered operations (037 + 038 + 040)", () => {
   expectTypeOf<OperationId>().toEqualTypeOf<
     | "project.list"
     | "project.create"
@@ -54,6 +62,24 @@ test("operation ids are exactly the registered 32 operations (037 + 038)", () =>
     | "worktree.getCommitFileDiff"
     | "agent.list"
     | "agent.listProviderSessions"
+    | "bench.open"
+    | "bench.close"
+    | "bench.requestTitle"
+    | "run.listToolCandidates"
+    | "run.start"
+    | "run.sendPrompt"
+    | "run.steer"
+    | "run.cancelAndSend"
+    | "run.setPermissionMode"
+    | "run.cancel"
+    | "run.respondPermission"
+    | "exchange.syncWorkspace"
+    | "exchange.send"
+    | "exchange.acknowledge"
+    | "exchange.list"
+    | "exchange.listPeers"
+    | "exchange.sendFromRun"
+    | "exchange.getForRun"
     | "system.describe"
   >();
 });
@@ -123,6 +149,31 @@ test("agent queries: catalog list and provider sessions with optional cwd", () =
   void withoutCwd;
 });
 
+test("bench, run and exchange operations are typed (040)", () => {
+  expectTypeOf<OperationMap["bench.open"]["output"]>().toEqualTypeOf<BenchOpenOutput>();
+  expectTypeOf<OperationMap["bench.close"]["output"]>().toEqualTypeOf<BenchCloseOutput>();
+  expectTypeOf<OperationMap["bench.requestTitle"]["output"]>().toEqualTypeOf<TitleChangeResult>();
+  expectTypeOf<OperationMap["run.start"]["output"]>().toEqualTypeOf<AgentRun>();
+  expectTypeOf<OperationMap["run.start"]["input"]>().toHaveProperty("benchId");
+  expectTypeOf<OperationMap["run.start"]["input"]["request"]>().toEqualTypeOf<AgentRunRequest>();
+  expectTypeOf<OperationMap["exchange.send"]["output"]>().toEqualTypeOf<AgentExchange>();
+  expectTypeOf<OperationMap["exchange.list"]["output"]>().toEqualTypeOf<AgentExchange[]>();
+  // @ts-expect-error run.start의 output은 AgentRun이며 교환이 아니다
+  const wrongRun: OperationMap["run.start"]["output"] = {} as AgentExchange;
+  // @ts-expect-error exchange.list의 output은 배열이다
+  const wrongList: OperationMap["exchange.list"]["output"] = {} as AgentExchange;
+  void wrongRun;
+  void wrongList;
+});
+
+test("exchange and bench events carry typed bodies (040)", () => {
+  expectTypeOf<EventMap["exchange.status.v1"]["body"]>().toEqualTypeOf<AgentExchange>();
+  expectTypeOf<EventMap["exchange.requested.v1"]["body"]>().toEqualTypeOf<ExchangeRequested>();
+  expectTypeOf<EventMap["bench.titleRequested.v1"]["body"]>().toEqualTypeOf<BenchTitleRequested>();
+  // @ts-expect-error 교환 상태 본문에는 창 label이 없다(작업대 단위)
+  void ({} as EventMap["exchange.status.v1"]).body.windowLabel;
+});
+
 test("system.describe returns DescribeOutput", () => {
   expectTypeOf<OperationMap["system.describe"]["output"]>().toEqualTypeOf<DescribeOutput>();
 });
@@ -149,7 +200,12 @@ test("generic CallReply output is unconstrained JSON and Accepted uses camelCase
 
 test("event schema ids correlate with typed bodies (039)", () => {
   expectTypeOf<EventSchemaId>().toEqualTypeOf<
-    "run.event.v1" | "worktree.changed.v1" | "orchestration.workspaceUpdated.v1"
+    | "run.event.v1"
+    | "worktree.changed.v1"
+    | "orchestration.workspaceUpdated.v1"
+    | "exchange.requested.v1"
+    | "exchange.status.v1"
+    | "bench.titleRequested.v1"
   >();
 
   const run = {} as EventMap["run.event.v1"];

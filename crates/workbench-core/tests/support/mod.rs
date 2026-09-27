@@ -6,6 +6,8 @@ pub mod event_fixtures;
 pub mod fixtures;
 pub mod git_repo;
 pub mod http_harness;
+pub mod recording_desktop;
+pub mod scripted_run_engine;
 
 use std::{fs, sync::Arc};
 
@@ -69,11 +71,29 @@ pub fn stub_adapters(
     agents: Vec<AgentDescriptor>,
     sessions: Vec<ProviderSession>,
 ) -> RuntimeAdapters {
-    RuntimeAdapters {
-        agent_catalog: Arc::new(StubCatalog(agents)),
-        provider_sessions: Arc::new(StubProviderSessions(sessions)),
-        event_limits: workbench_core::infrastructure::event_hub::EventHubLimits::default(),
-    }
+    stub_adapters_with(agents, sessions, scripted_run_engine::RunScript::default()).0
+}
+
+/// 040: 가짜 run 엔진·기록형 데스크톱을 넣은 stub. 테스트가 엔진·데스크톱을 관찰할 수 있게 함께 돌려준다.
+pub fn stub_adapters_with(
+    agents: Vec<AgentDescriptor>,
+    sessions: Vec<ProviderSession>,
+    script: scripted_run_engine::RunScript,
+) -> (
+    RuntimeAdapters,
+    Arc<scripted_run_engine::ScriptedRunEngine>,
+    Arc<recording_desktop::RecordingDesktop>,
+) {
+    let engine = Arc::new(scripted_run_engine::ScriptedRunEngine::new(script));
+    let desktop = Arc::new(recording_desktop::RecordingDesktop::default());
+    let mut adapters = RuntimeAdapters::production();
+    adapters.agent_catalog = Arc::new(StubCatalog(agents));
+    adapters.provider_sessions = Arc::new(StubProviderSessions(sessions));
+    adapters.run_engine = Some(engine.clone());
+    adapters.desktop = Some(desktop.clone());
+    adapters.terminal_hook = Some(desktop.clone());
+    adapters.launch_decorator = Some(desktop.clone());
+    (adapters, engine, desktop)
 }
 
 pub struct TestRuntime {
@@ -193,4 +213,110 @@ impl TestRuntime {
     pub fn agent_run_settings(&self) -> Vec<Value> {
         read_store(&self.paths.agent_run_settings_file())
     }
+}
+
+/// 040: 가짜 엔진·기록형 데스크톱과 함께 만든 런타임. 작업대 대상 디렉터리도 만든다.
+pub struct BenchHarness {
+    pub rt: TestRuntime,
+    pub engine: Arc<scripted_run_engine::ScriptedRunEngine>,
+    pub desktop: Arc<recording_desktop::RecordingDesktop>,
+    pub dir: String,
+}
+
+impl BenchHarness {
+    pub fn new(script: scripted_run_engine::RunScript) -> Self {
+        Self::with(|_| {}, script)
+    }
+
+    pub fn with(
+        configure: impl FnOnce(&mut RuntimeAdapters),
+        script: scripted_run_engine::RunScript,
+    ) -> Self {
+        let (mut adapters, engine, desktop) = stub_adapters_with(Vec::new(), Vec::new(), script);
+        configure(&mut adapters);
+        let rt = TestRuntime::with_adapters(adapters);
+        let dir = rt.paths.app_data_dir().join("bench-work");
+        fs::create_dir_all(&dir).unwrap();
+        let dir = fs::canonicalize(dir)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        Self {
+            rt,
+            engine,
+            desktop,
+            dir,
+        }
+    }
+
+    pub async fn call(
+        &self,
+        principal: &AuthenticatedPrincipal,
+        operation: OperationId,
+        input: Value,
+    ) -> Result<Value, WorkbenchFault> {
+        let request = if matches!(
+            workbench_protocol::operations::spec_for(operation).kind,
+            workbench_protocol::OperationKind::Query
+        ) {
+            query_request(operation, input)
+        } else {
+            command_request(operation, &uuid_key(), input)
+        };
+        self.rt
+            .runtime
+            .call(principal.clone(), request)
+            .await
+            .map(|reply| reply.output().cloned().unwrap_or(Value::Null))
+    }
+
+    pub async fn keyed(
+        &self,
+        operation: OperationId,
+        key: &str,
+        input: Value,
+    ) -> Result<Value, WorkbenchFault> {
+        self.rt
+            .runtime
+            .call(
+                AuthenticatedPrincipal::desktop(),
+                command_request(operation, key, input),
+            )
+            .await
+            .map(|reply| reply.output().cloned().unwrap_or(Value::Null))
+    }
+
+    pub async fn open(&self) -> String {
+        let output = self
+            .call(
+                &AuthenticatedPrincipal::desktop(),
+                OperationId::BenchOpen,
+                json!({ "workingDirectory": self.dir }),
+            )
+            .await
+            .expect("bench.open");
+        output["benchId"].as_str().unwrap().to_owned()
+    }
+
+    pub async fn start(&self, bench: &str, run: &str) -> Result<Value, WorkbenchFault> {
+        self.call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::RunStart,
+            json!({ "benchId": bench, "request": { "goal": "g", "agentId": "codex", "runId": run } }),
+        )
+        .await
+    }
+
+    pub async fn close(&self, bench: &str) -> Result<Value, WorkbenchFault> {
+        self.call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::BenchClose,
+            json!({ "benchId": bench }),
+        )
+        .await
+    }
+}
+
+pub fn uuid_key() -> String {
+    format!("k-{}", uuid::Uuid::new_v4())
 }

@@ -1,0 +1,52 @@
+{
+  "name": "run-start-readonly-forbidden",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-13",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-13"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-14",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-14"
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden"
+        }
+      },
+      "principal": "readonly"
+    }
+  ]
+}

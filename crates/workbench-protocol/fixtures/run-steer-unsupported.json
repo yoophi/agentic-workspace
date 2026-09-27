@@ -1,0 +1,75 @@
+{
+  "name": "run-steer-unsupported",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-29",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-29"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-30",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-30"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.steer",
+        "requestId": "r-31",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "hi"
+        },
+        "idempotencyKey": "k-31"
+      },
+      "expect": {
+        "fault": {
+          "code": "preconditionFailed",
+          "message": "steer unsupported: active-turn steer is not supported by this ACP agent; choose Cancel & send or Queue"
+        }
+      }
+    }
+  ]
+}

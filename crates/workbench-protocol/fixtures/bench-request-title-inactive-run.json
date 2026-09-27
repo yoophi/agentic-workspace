@@ -1,0 +1,52 @@
+{
+  "name": "bench-request-title-inactive-run",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-10",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-10"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.requestTitle",
+        "requestId": "r-11",
+        "input": {
+          "runId": "gone",
+          "title": "t"
+        },
+        "idempotencyKey": "k-11"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "details": {
+            "titleCode": "unknownRun"
+          },
+          "message": "Agent run is not active or is not owned by a session window."
+        }
+      },
+      "principal": "agent:gone"
+    }
+  ]
+}

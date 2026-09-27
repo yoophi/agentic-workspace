@@ -80,13 +80,49 @@ pub enum OperationId {
     AgentList,
     #[serde(rename = "agent.listProviderSessions")]
     AgentListProviderSessions,
+    #[serde(rename = "bench.open")]
+    BenchOpen,
+    #[serde(rename = "bench.close")]
+    BenchClose,
+    #[serde(rename = "bench.requestTitle")]
+    BenchRequestTitle,
+    #[serde(rename = "run.listToolCandidates")]
+    RunListToolCandidates,
+    #[serde(rename = "run.start")]
+    RunStart,
+    #[serde(rename = "run.sendPrompt")]
+    RunSendPrompt,
+    #[serde(rename = "run.steer")]
+    RunSteer,
+    #[serde(rename = "run.cancelAndSend")]
+    RunCancelAndSend,
+    #[serde(rename = "run.setPermissionMode")]
+    RunSetPermissionMode,
+    #[serde(rename = "run.cancel")]
+    RunCancel,
+    #[serde(rename = "run.respondPermission")]
+    RunRespondPermission,
+    #[serde(rename = "exchange.syncWorkspace")]
+    ExchangeSyncWorkspace,
+    #[serde(rename = "exchange.send")]
+    ExchangeSend,
+    #[serde(rename = "exchange.acknowledge")]
+    ExchangeAcknowledge,
+    #[serde(rename = "exchange.list")]
+    ExchangeList,
+    #[serde(rename = "exchange.listPeers")]
+    ExchangeListPeers,
+    #[serde(rename = "exchange.sendFromRun")]
+    ExchangeSendFromRun,
+    #[serde(rename = "exchange.getForRun")]
+    ExchangeGetForRun,
     #[serde(rename = "system.describe")]
     SystemDescribe,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 32] = [
+    pub const ALL: [OperationId; 50] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -118,6 +154,24 @@ impl OperationId {
         OperationId::WorktreeGetCommitFileDiff,
         OperationId::AgentList,
         OperationId::AgentListProviderSessions,
+        OperationId::BenchOpen,
+        OperationId::BenchClose,
+        OperationId::BenchRequestTitle,
+        OperationId::RunListToolCandidates,
+        OperationId::RunStart,
+        OperationId::RunSendPrompt,
+        OperationId::RunSteer,
+        OperationId::RunCancelAndSend,
+        OperationId::RunSetPermissionMode,
+        OperationId::RunCancel,
+        OperationId::RunRespondPermission,
+        OperationId::ExchangeSyncWorkspace,
+        OperationId::ExchangeSend,
+        OperationId::ExchangeAcknowledge,
+        OperationId::ExchangeList,
+        OperationId::ExchangeListPeers,
+        OperationId::ExchangeSendFromRun,
+        OperationId::ExchangeGetForRun,
         OperationId::SystemDescribe,
     ];
 
@@ -154,6 +208,24 @@ impl OperationId {
             OperationId::WorktreeGetCommitFileDiff => "worktree.getCommitFileDiff",
             OperationId::AgentList => "agent.list",
             OperationId::AgentListProviderSessions => "agent.listProviderSessions",
+            OperationId::BenchOpen => "bench.open",
+            OperationId::BenchClose => "bench.close",
+            OperationId::BenchRequestTitle => "bench.requestTitle",
+            OperationId::RunListToolCandidates => "run.listToolCandidates",
+            OperationId::RunStart => "run.start",
+            OperationId::RunSendPrompt => "run.sendPrompt",
+            OperationId::RunSteer => "run.steer",
+            OperationId::RunCancelAndSend => "run.cancelAndSend",
+            OperationId::RunSetPermissionMode => "run.setPermissionMode",
+            OperationId::RunCancel => "run.cancel",
+            OperationId::RunRespondPermission => "run.respondPermission",
+            OperationId::ExchangeSyncWorkspace => "exchange.syncWorkspace",
+            OperationId::ExchangeSend => "exchange.send",
+            OperationId::ExchangeAcknowledge => "exchange.acknowledge",
+            OperationId::ExchangeList => "exchange.list",
+            OperationId::ExchangeListPeers => "exchange.listPeers",
+            OperationId::ExchangeSendFromRun => "exchange.sendFromRun",
+            OperationId::ExchangeGetForRun => "exchange.getForRun",
             OperationId::SystemDescribe => "system.describe",
         }
     }

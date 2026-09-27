@@ -7,8 +7,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 use workbench_core::{
-    application::{agent_run_settings_service, workbench_runtime::WorkbenchRuntime},
-    infrastructure::event_hub::RunReplay,
+    application::workbench_runtime::WorkbenchRuntime, infrastructure::event_hub::RunReplay,
 };
 use workbench_protocol::{
     AuthenticatedPrincipal, EventItem, OperationId, StreamCursor, Subscription, Workbench,
@@ -18,11 +17,7 @@ use workbench_protocol::{
 use crate::inbound::workbench_compat;
 use crate::{
     application::{
-        agent_exchange_service::AgentExchangeService,
-        agent_tool_candidate_service::AgentToolCandidateService,
         appearance_preferences_service::AppearancePreferencesService,
-        cancel_agent_run::CancelAgentRunUseCase,
-        cancel_prompt_and_send::CancelPromptAndSendUseCase,
         coordinator_notification_dispatcher::CoordinatorNotificationDispatcher,
         orchestration_command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
         orchestration_service::{
@@ -31,24 +26,15 @@ use crate::{
             SetPresentationRequest, TaskActionRequest,
         },
         send_prompt::SendPromptUseCase,
-        set_permission_mode::SetPermissionModeUseCase,
-        start_agent_run::StartAgentRunUseCase,
-        steer_prompt::SteerPromptUseCase,
         worktree_workspace_layout_service,
     },
     domain::{
         agent::AgentDescriptor,
-        agent_exchange::{
-            AgentExchange, AgentExchangeAckRequest, AgentWorkspaceSyncRequest,
-            AgentWorkspaceSyncResponse, SendAgentExchangeRequest,
-        },
         agent_orchestration::{
             AccessPolicy, MAIN_AGENT_NODE_ID, PromptDelivery, PromptDispatchTargetStatus,
             TaskCommand, TaskCommandKind, TaskCommandSource, TaskReportType, WorkerRuntimeProfile,
         },
-        agent_run_settings::{
-            APP_COMMAND_OVERRIDE_SETTINGS_KEY, AgentCommandSource, AgentRunSettings,
-        },
+        agent_run_settings::AgentRunSettings,
         agent_tool_candidate::{AgentToolCandidateQuery, AgentToolCandidateResponse},
         appearance_preferences::AppearancePreferences,
         git_branch::GitBranch,
@@ -68,36 +54,27 @@ use crate::{
         worktree_workspace_layout::WorkspaceLayoutSettings,
     },
     infrastructure::{
-        acp::runner::AcpAgentRunner,
-        acp_agent_launch_factory::{inject_mcp_launch_env, normalize_run_request},
         acp_agent_worker_adapter::{AcpAgentWorkerAdapter, TauriAcpWorkerRuntime},
-        agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
-        in_memory_agent_workspace_registry::{
-            InMemoryAgentWorkspaceRegistry, TauriAgentExchangeEventSink,
-        },
-        json_acp_session_store::JsonAcpSessionStore,
+        desktop_benches,
         json_appearance_preferences_repository::JsonAppearancePreferencesRepository,
         json_orchestration_repository::JsonOrchestrationRepository,
         json_worktree_workspace_layout_repository::JsonWorkspaceLayoutRepository,
-        mcp::{McpServerState, capability_registry::CapabilityPrincipal, title_tool},
+        mcp::{McpServerState, capability_registry::CapabilityPrincipal},
         perf_log::{log_async_command, log_async_command_error, run_blocking_command},
         tauri_orchestration_event_sink::TauriOrchestrationEventSink,
-        tauri_run_event_sink::TauriRunEventSink,
         window_manager,
     },
     ports::{
-        agent_catalog::AgentCatalog,
         agent_worker::{AgentWorkerPort, StartWorkerOutcome, WorkerAssignment, WorkerBinding},
         orchestration_event_sink::{OrchestrationEvent, OrchestrationEventSink},
-        permission::PermissionDecision,
     },
 };
 
 #[cfg(test)]
-use crate::{
-    domain::run::RalphLoopRequest,
-    infrastructure::mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
+use crate::infrastructure::{
+    acp_agent_launch_factory::inject_mcp_launch_env,
+    mcp::{AW_MCP_RUN_ID_ENV, AW_MCP_TOKEN_ENV, AW_MCP_URL_ENV, McpLaunchEnv},
 };
 #[cfg(test)]
 use std::collections::BTreeMap;
@@ -148,7 +125,9 @@ pub struct BootstrapOrchestrationInput {
     resume_workspace_id: Option<String>,
 }
 
-fn orchestration_error(error: crate::domain::agent_orchestration::OrchestrationError) -> String {
+pub(crate) fn orchestration_error(
+    error: crate::domain::agent_orchestration::OrchestrationError,
+) -> String {
     serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
 }
 
@@ -275,12 +254,10 @@ pub async fn delegate_orchestration_goal(
         .find(|node| node.id == crate::domain::agent_orchestration::MAIN_AGENT_NODE_ID)
         .and_then(|node| node.current_run_id.clone())
         .ok_or_else(|| "Main Coordinator run is unavailable.".to_string())?;
+    // 040 과도기: Main run 이벤트는 그 창 작업대의 sink로(run 소유자 = 작업대).
+    let bench = desktop_benches::lookup(window.label()).unwrap_or_default();
     SendPromptUseCase::new(state.inner().clone())
-        .execute(
-            TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string()),
-            run_id,
-            goal,
-        )
+        .execute(workbench_runtime(&app).run_sink(&bench), run_id, goal)
         .await
         .map_err(String::from)?;
     Ok(outcome)
@@ -881,12 +858,14 @@ pub async fn recover_orchestration_workspace(
         .map_err(orchestration_error)?
         .ok_or_else(|| "Orchestration workspace is not bootstrapped.".to_string())?;
     let mut live_run_ids = Vec::new();
+    // 040 과도기: run 소유자는 창의 작업대다.
+    let bench = desktop_benches::lookup(window.label());
     for run_id in snapshot
         .nodes
         .iter()
         .filter_map(|node| node.current_run_id.as_ref())
     {
-        if state.active_owner_of(run_id).await.as_deref() == Some(window.label()) {
+        if bench.is_some() && state.active_owner_of(run_id).await == bench {
             live_run_ids.push(run_id.clone());
         }
     }
@@ -977,84 +956,114 @@ pub struct WorktreeWatcherState {
     handles: Mutex<HashMap<String, tauri::async_runtime::JoinHandle<()>>>,
 }
 
-fn exchange_error(error: crate::domain::agent_exchange::AgentExchangeError) -> String {
-    serde_json::to_string(&error).unwrap_or_else(|_| error.to_string())
+use workbench_core::domain::agent_exchange::{
+    AgentExchangeAckRequest, AgentWorkspaceSyncRequest, SendAgentExchangeRequest,
+};
+use workbench_protocol::operations::exchange::{AgentExchangeDto, AgentWorkspaceSyncResponseDto};
+
+// 040 US2: 교환 command 4개는 `exchange.*` 호환 어댑터다. 작업 영역은 창의 작업대에 묶이고, 오류는 오늘과 같은
+// `{code, message}` JSON 문자열이다(도메인 코드는 fault `details.exchangeCode`).
+fn exchange_command_error(fault: &workbench_protocol::WorkbenchFault) -> String {
+    match fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("exchangeCode"))
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(code) => workbench_compat::exchange_error_string(code, &fault.message),
+        None => fault.message.clone(),
+    }
+}
+
+async fn call_exchange<Out: serde::de::DeserializeOwned>(
+    app: &AppHandle,
+    request: workbench_protocol::CallRequest,
+) -> Result<Out, String> {
+    let runtime = workbench_runtime(app);
+    match runtime
+        .call(workbench_compat::desktop_principal(), request)
+        .await
+    {
+        Ok(reply) => workbench_compat::decode_output(reply),
+        Err(fault) => Err(exchange_command_error(&fault)),
+    }
+}
+
+fn unregistered_workspace() -> String {
+    workbench_compat::exchange_error_string(
+        "unknownWorkspace",
+        "Agent workspace is not registered.",
+    )
 }
 
 #[tauri::command]
 pub async fn sync_agent_workspace(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
-    mut request: AgentWorkspaceSyncRequest,
-) -> Result<AgentWorkspaceSyncResponse, String> {
-    let canonical = std::fs::canonicalize(&request.worktree_path)
-        .map_err(|error| format!("Failed to resolve workspace path: {error}"))?;
-    if !canonical.is_dir() {
-        return Err("Workspace path must be a directory.".into());
-    }
-    request.worktree_path = canonical.to_string_lossy().into_owned();
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+    request: AgentWorkspaceSyncRequest,
+) -> Result<AgentWorkspaceSyncResponseDto, String> {
+    let runtime = workbench_runtime(&app);
+    let bench =
+        desktop_benches::ensure(&runtime, window.label(), Some(&request.worktree_path)).await?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeSyncWorkspace,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .sync_workspace(window.label().to_string(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn send_agent_exchange(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
     request: SendAgentExchangeRequest,
-) -> Result<AgentExchange, String> {
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<AgentExchangeDto, String> {
+    let bench = desktop_benches::lookup(window.label()).ok_or_else(unregistered_workspace)?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeSend,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .send_user_exchange(window.label(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn acknowledge_agent_exchange(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
     request: AgentExchangeAckRequest,
-) -> Result<AgentExchange, String> {
-    AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<AgentExchangeDto, String> {
+    let bench = desktop_benches::lookup(window.label()).ok_or_else(|| {
+        workbench_compat::exchange_error_string("unknownExchange", "Exchange was not found.")
+    })?;
+    call_exchange(
+        &app,
+        workbench_compat::command_request(
+            OperationId::ExchangeAcknowledge,
+            json!({ "benchId": bench, "request": request }),
+        ),
     )
-    .acknowledge(window.label(), request)
     .await
-    .map_err(exchange_error)
 }
 
 #[tauri::command]
 pub async fn list_agent_exchanges(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    workspace_registry: State<'_, InMemoryAgentWorkspaceRegistry>,
-) -> Result<Vec<AgentExchange>, String> {
-    Ok(AgentExchangeService::new(
-        workspace_registry.inner().clone(),
-        state.inner().clone(),
-        TauriAgentExchangeEventSink::new(app),
+) -> Result<Vec<AgentExchangeDto>, String> {
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(Vec::new());
+    };
+    call_exchange(
+        &app,
+        workbench_compat::query_request(OperationId::ExchangeList, json!({ "benchId": bench })),
     )
-    .list_exchanges(window.label())
-    .await)
+    .await
 }
 
 impl WorktreeWatcherState {
@@ -1802,7 +1811,7 @@ fn open_url_with_system_browser(url: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to open external URL: {error}"))
 }
 
-fn resolve_agent_run_launch_principal(
+pub(crate) fn resolve_agent_run_launch_principal(
     app: &AppHandle,
     window_label: &str,
     panel_id: Option<&str>,
@@ -1854,198 +1863,152 @@ fn coordinator_principal_for_bound_session(
     )))
 }
 
+// 040 US1: run command 8개는 `Workbench.call`의 `run.*` 호환 어댑터다. 창은 작업대(Bench)로 바뀌고 소유 검사는
+// 서버가 한다(specs/040-workbench-owners/contracts/tauri-compat.md). 인자·반환·오류 문구는 이전과 같다.
 #[tauri::command]
 pub async fn start_agent_run(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
-    mcp_state: State<'_, McpServerState>,
     request: AgentRunRequest,
     panel_id: Option<String>,
 ) -> Result<AgentRun, String> {
-    let mut request = normalize_run_request(request);
-    let run_id = request
-        .run_id
-        .clone()
-        .ok_or_else(|| "agent run id is unavailable after normalization".to_string())?;
-    let launch_principal =
-        resolve_agent_run_launch_principal(&app, window.label(), panel_id.as_deref(), &run_id)?;
-    let launch_env = match launch_principal {
-        Some(principal) => mcp_state
-            .launch_env_for_principal(principal)
-            .map_err(orchestration_error)?,
-        None => mcp_state.launch_env(&run_id),
-    };
-    inject_mcp_launch_env(&mut request, launch_env);
-    let catalog = ConfigurableAgentCatalog::from_env();
-    if request
-        .agent_command
-        .as_deref()
-        .is_none_or(|command| command.trim().is_empty())
-    {
-        // 038: 설정 저장소는 workbench-core가 소유한다. 같은 aggregate lock 안에서 읽는다(run 시작은 2단계 이관 대상).
-        let runtime = workbench_runtime(&app);
-        let settings = tokio::task::spawn_blocking(move || {
-            runtime
-                .coordinator()
-                .with_agent_run_settings(|repository| {
-                    agent_run_settings_service::get_settings(
-                        repository,
-                        APP_COMMAND_OVERRIDE_SETTINGS_KEY.into(),
-                    )
-                })
-                .map_err(|error| error.to_string())
-        })
-        .await
-        .map_err(|error| error.to_string())??;
-        if let Some(settings) = settings {
-            let resolution = agent_run_settings_service::resolve_agent_command(
-                &request.agent_id,
-                &settings.command_overrides,
-                catalog.command_for_agent(&request.agent_id),
-            )
-            .map_err(|error| error.to_string())?;
-            if resolution.source != AgentCommandSource::DefaultCommand {
-                request.agent_command = Some(resolution.command);
-            }
-        }
-    }
-
-    let owner_window_label = window.label().to_string();
-    let session_store = JsonAcpSessionStore::from_app(&app)?;
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), owner_window_label.clone());
-    let registry = state.inner().clone();
-    let permissions = state.permissions();
-    let runner = AcpAgentRunner::new(catalog, permissions, Arc::new(session_store));
-
-    StartAgentRunUseCase::new(registry)
-        .execute(runner, sink, request, Some(owner_window_label))
-        .await
-        .map_err(String::from)
+    let runtime = workbench_runtime(&app);
+    let bench = desktop_benches::ensure(&runtime, window.label(), request.cwd.as_deref()).await?;
+    workbench_compat::call_command(
+        &runtime,
+        OperationId::RunStart,
+        workbench_compat::run_start_input(&bench, &request, panel_id.as_deref()),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn list_agent_tool_command_candidates(
+    app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     input: AgentToolCandidateQuery,
 ) -> Result<AgentToolCandidateResponse, String> {
-    let owner_window_label = window.label().to_string();
-    let candidates = title_tool::tool_command_candidates(
-        input.run_id.as_deref(),
-        &input.agent_id,
-        &input.working_directory,
-    );
-    AgentToolCandidateService::new(state.inner().clone())
-        .list_candidates(&owner_window_label, input, candidates)
-        .await
+    let runtime = workbench_runtime(&app);
+    let bench = desktop_benches::ensure(
+        &runtime,
+        window.label(),
+        Some(input.working_directory.as_str()),
+    )
+    .await?;
+    workbench_compat::call_query(
+        &runtime,
+        OperationId::RunListToolCandidates,
+        json!({ "benchId": bench, "query": input }),
+    )
+    .await
+}
+
+/// 창에 작업대가 없으면 그 창이 소유한 run도 없다(작업대는 처음 run을 시작할 때 열린다).
+fn bench_or_inactive(window: &tauri::Window) -> Result<String, String> {
+    desktop_benches::lookup(window.label()).ok_or_else(|| "agent run is not active".to_owned())
+}
+
+async fn run_prompt_command(
+    app: &AppHandle,
+    window: &tauri::Window,
+    operation: OperationId,
+    run_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    let bench = bench_or_inactive(window)?;
+    workbench_compat::call_command(
+        &workbench_runtime(app),
+        operation,
+        json!({ "benchId": bench, "runId": run_id, "prompt": prompt }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn send_prompt_to_run(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
-    let registry = state.inner().clone();
-    SendPromptUseCase::new(registry)
-        .execute(sink, run_id, prompt)
-        .await
-        .map_err(String::from)
+    run_prompt_command(&app, &window, OperationId::RunSendPrompt, run_id, prompt).await
 }
 
 #[tauri::command]
 pub async fn steer_prompt_to_run(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
-    let registry = state.inner().clone();
-    SteerPromptUseCase::new(registry)
-        .execute(sink, run_id, prompt)
-        .await
-        .map_err(String::from)
+    run_prompt_command(&app, &window, OperationId::RunSteer, run_id, prompt).await
 }
 
 #[tauri::command]
 pub async fn cancel_current_prompt_and_send_to_run(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
     prompt: String,
 ) -> Result<(), String> {
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
-    let registry = state.inner().clone();
-    CancelPromptAndSendUseCase::new(registry)
-        .execute(sink, run_id, prompt)
-        .await
-        .map_err(String::from)
+    run_prompt_command(&app, &window, OperationId::RunCancelAndSend, run_id, prompt).await
 }
 
 #[tauri::command]
 pub async fn set_run_permission_mode(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
     permission_mode: PermissionMode,
 ) -> Result<(), String> {
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
-    let registry = state.inner().clone();
-    SetPermissionModeUseCase::new(registry)
-        .execute(sink, run_id, permission_mode)
-        .await
-        .map_err(String::from)
+    let bench = bench_or_inactive(&window)?;
+    workbench_compat::call_command(
+        &workbench_runtime(&app),
+        OperationId::RunSetPermissionMode,
+        json!({ "benchId": bench, "runId": run_id, "mode": permission_mode }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn cancel_agent_run(
     app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
 ) -> Result<(), String> {
-    let sink =
-        TauriRunEventSink::with_target(app, state.inner().clone(), window.label().to_string());
-    let registry = state.inner().clone();
-    CancelAgentRunUseCase::new(registry)
-        .execute(sink, run_id)
-        .await;
-    Ok(())
+    // 오늘처럼 항상 성공: 작업대가 없으면 취소할 run도 없다.
+    let Some(bench) = desktop_benches::lookup(window.label()) else {
+        return Ok(());
+    };
+    workbench_compat::call_command(
+        &workbench_runtime(&app),
+        OperationId::RunCancel,
+        json!({ "benchId": bench, "runId": run_id }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn respond_agent_permission(
+    app: AppHandle,
     window: tauri::Window,
-    state: State<'_, AppState>,
     run_id: String,
     permission_id: String,
     option_id: String,
 ) -> Result<(), String> {
-    let owner = state
-        .owner_of(&run_id)
-        .await
+    let bench = desktop_benches::lookup(window.label())
         .ok_or_else(|| format!("unknown or finished run: {run_id}"))?;
-    if owner != window.label() {
-        return Err("permission response was sent from a non-owner window".to_string());
-    }
-    state
-        .permissions()
-        .respond_for_run(&run_id, &permission_id, PermissionDecision { option_id })
-        .await
-        .map_err(|err| err.to_string())
+    workbench_compat::call_command(
+        &workbench_runtime(&app),
+        OperationId::RunRespondPermission,
+        json!({
+            "benchId": bench,
+            "runId": run_id,
+            "permissionId": permission_id,
+            "optionId": option_id,
+        }),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -2208,57 +2171,6 @@ mod tests {
         assert!(request.goal.contains("set_window_title"));
         assert!(request.goal.contains("runId`: `run-1`"));
         assert!(request.goal.contains("User request:\ndo it"));
-    }
-
-    // 회귀 방지: 과거 start_agent_run이 resume 필드를 None으로 덮어써 재사용이
-    // 동작하지 않던 버그가 재발하지 않도록 보존을 검증한다.
-    #[test]
-    fn normalize_preserves_resume_fields() {
-        let out = normalize_run_request(sample_request());
-        assert_eq!(out.resume_session_id.as_deref(), Some("sess-1"));
-        assert_eq!(out.resume_policy, Some(ResumePolicy::ResumeIfAvailable));
-    }
-
-    #[test]
-    fn normalize_generates_run_id_and_clears_unsupported() {
-        let out = normalize_run_request(sample_request());
-        assert!(out.run_id.is_some_and(|id| !id.is_empty()));
-        assert!(out.workspace_id.is_none());
-        assert!(out.checkout_id.is_none());
-    }
-
-    #[test]
-    fn normalize_sanitizes_ralph_loop_into_safe_range() {
-        let mut request = sample_request();
-        request.ralph_loop = Some(RalphLoopRequest {
-            enabled: true,
-            max_iterations: 10_000,
-            prompt_template: "  continue  ".into(),
-            stop_on_error: true,
-            stop_on_permission: false,
-            delay_ms: u64::MAX,
-        });
-
-        let loop_settings = normalize_run_request(request)
-            .ralph_loop
-            .expect("ralph loop should be preserved");
-        assert_eq!(
-            loop_settings.max_iterations,
-            crate::domain::run::MAX_RALPH_ITERATIONS
-        );
-        assert_eq!(
-            loop_settings.delay_ms,
-            crate::domain::run::MAX_RALPH_DELAY_MS
-        );
-        assert_eq!(loop_settings.prompt_template, "continue");
-    }
-
-    #[test]
-    fn normalize_keeps_existing_run_id() {
-        let mut request = sample_request();
-        request.run_id = Some("fixed-id".into());
-        let out = normalize_run_request(request);
-        assert_eq!(out.run_id.as_deref(), Some("fixed-id"));
     }
 
     #[test]

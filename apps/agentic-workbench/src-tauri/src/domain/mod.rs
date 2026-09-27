@@ -1,6 +1,5 @@
 pub use acp_agent_core::domain::{acp_session, agent, agent_tool_candidate, events, run};
 
-pub mod agent_exchange;
 pub mod agent_orchestration;
 // 038 US1: saved prompt·goal·agent 실행 설정 도메인은 `workbench-core`로 이동했다. 기존 import 경로를 유지하기 위해 재노출한다.
 pub use workbench_core::domain::{agent_run_settings, goal, saved_prompt};

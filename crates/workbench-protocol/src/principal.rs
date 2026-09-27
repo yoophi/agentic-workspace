@@ -5,11 +5,12 @@ use std::{collections::BTreeSet, fmt};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-/// 호출자 종류. 037에는 데스크톱과 테스트용만 있다. 3단계에서 human CLI·agent 등이 추가된다.
+/// 호출자 종류. 040에서 MCP 실행 토큰으로 인증된 agent가 추가됐다(ADR 0006). 3단계에서 human CLI 등이 추가된다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PrincipalKind {
     Desktop,
     Test,
+    Agent,
 }
 
 impl PrincipalKind {
@@ -18,6 +19,16 @@ impl PrincipalKind {
         match self {
             PrincipalKind::Desktop => "desktop",
             PrincipalKind::Test => "test",
+            PrincipalKind::Agent => "agent",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "desktop" => Some(PrincipalKind::Desktop),
+            "test" => Some(PrincipalKind::Test),
+            "agent" => Some(PrincipalKind::Agent),
+            _ => None,
         }
     }
 }
@@ -57,16 +68,34 @@ pub enum Scope {
     WorktreeRead,
     #[serde(rename = "agent:read")]
     AgentRead,
-    /// run 이벤트 스트림 구독(039). 2b에서 run 제어용 `run:write`가 추가된다.
+    /// run 이벤트 스트림 구독(039).
     #[serde(rename = "run:read")]
     RunRead,
+    /// run 시작·제어(040).
+    #[serde(rename = "run:write")]
+    RunWrite,
+    /// 작업대 알림 스트림 구독(040).
+    #[serde(rename = "bench:read")]
+    BenchRead,
+    /// 작업대 열기·닫기(040).
+    #[serde(rename = "bench:write")]
+    BenchWrite,
+    /// 교환 조회·교환 스트림 구독(040).
+    #[serde(rename = "exchange:read")]
+    ExchangeRead,
+    /// 교환 동기화·전송·확인(040).
+    #[serde(rename = "exchange:write")]
+    ExchangeWrite,
+    /// 창 제목 같은 표현 요청(040, ADR 0007).
+    #[serde(rename = "presentation:write")]
+    PresentationWrite,
     #[serde(rename = "system:describe")]
     SystemDescribe,
 }
 
 impl Scope {
     /// 전체 scope. `desktop()`이 이 집합을 갖는다.
-    pub const ALL: [Scope; 14] = [
+    pub const ALL: [Scope; 20] = [
         Scope::ProjectRead,
         Scope::ProjectWrite,
         Scope::SavedPromptRead,
@@ -80,6 +109,12 @@ impl Scope {
         Scope::WorktreeRead,
         Scope::AgentRead,
         Scope::RunRead,
+        Scope::RunWrite,
+        Scope::BenchRead,
+        Scope::BenchWrite,
+        Scope::ExchangeRead,
+        Scope::ExchangeWrite,
+        Scope::PresentationWrite,
         Scope::SystemDescribe,
     ];
 
@@ -98,6 +133,12 @@ impl Scope {
             Scope::WorktreeRead => "worktree:read",
             Scope::AgentRead => "agent:read",
             Scope::RunRead => "run:read",
+            Scope::RunWrite => "run:write",
+            Scope::BenchRead => "bench:read",
+            Scope::BenchWrite => "bench:write",
+            Scope::ExchangeRead => "exchange:read",
+            Scope::ExchangeWrite => "exchange:write",
+            Scope::PresentationWrite => "presentation:write",
             Scope::SystemDescribe => "system:describe",
         }
     }
@@ -111,6 +152,10 @@ impl Scope {
                 | Scope::GoalWrite
                 | Scope::AgentRunSettingsWrite
                 | Scope::GitWrite
+                | Scope::RunWrite
+                | Scope::BenchWrite
+                | Scope::ExchangeWrite
+                | Scope::PresentationWrite
         )
     }
 }
@@ -121,17 +166,50 @@ impl fmt::Display for Scope {
     }
 }
 
+/// 호출자 주체(040). 작업대는 연 주체에 묶인다(ADR core 0004). `desktop`, `test:<name>`, `agent:<runId>`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PrincipalSubject(String);
+
+impl PrincipalSubject {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for PrincipalSubject {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+const AGENT_SUBJECT_PREFIX: &str = "agent:";
+
+/// agent principal의 scope: 교환 조회·쓰기와 표현 요청만(ADR 0006).
+pub const AGENT_SCOPES: [Scope; 4] = [
+    Scope::ExchangeRead,
+    Scope::ExchangeWrite,
+    Scope::PresentationWrite,
+    Scope::SystemDescribe,
+];
+
 /// 인증을 통과한 호출자. `Serialize`를 의도적으로 구현하지 않는다 — 입력으로 정체를 지정할 수 없어야 한다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthenticatedPrincipal {
     pub kind: PrincipalKind,
+    pub subject: PrincipalSubject,
     pub scopes: BTreeSet<Scope>,
 }
 
 impl AuthenticatedPrincipal {
+    /// 주체는 종류 이름과 같다(`desktop`, `test`). 다른 주체가 필요하면 전용 생성자를 쓴다.
     pub fn new(kind: PrincipalKind, scopes: impl IntoIterator<Item = Scope>) -> Self {
         Self {
             kind,
+            subject: PrincipalSubject::new(kind.as_str()),
             scopes: scopes.into_iter().collect(),
         }
     }
@@ -143,10 +221,37 @@ impl AuthenticatedPrincipal {
 
     /// 테스트용 조회 전용 호출자: 모든 `:read` + `system:describe`.
     pub fn test_readonly() -> Self {
-        Self::new(
-            PrincipalKind::Test,
-            Scope::ALL.into_iter().filter(|scope| scope.is_read()),
-        )
+        Self {
+            subject: PrincipalSubject::new("test:readonly"),
+            ..Self::new(
+                PrincipalKind::Test,
+                Scope::ALL.into_iter().filter(|scope| scope.is_read()),
+            )
+        }
+    }
+
+    /// 테스트용 다른 주체: 데스크톱과 같은 scope, 주체 `test:<name>`(교차 주체 시나리오).
+    pub fn test_as(name: &str) -> Self {
+        Self {
+            subject: PrincipalSubject::new(format!("test:{name}")),
+            ..Self::new(PrincipalKind::Test, Scope::ALL)
+        }
+    }
+
+    /// MCP 실행 토큰으로 인증된 agent(040). run 하나에 묶인다.
+    pub fn agent(run_id: &str) -> Self {
+        Self {
+            subject: PrincipalSubject::new(format!("{AGENT_SUBJECT_PREFIX}{run_id}")),
+            ..Self::new(PrincipalKind::Agent, AGENT_SCOPES)
+        }
+    }
+
+    /// agent principal이면 묶인 run id.
+    pub fn agent_run_id(&self) -> Option<&str> {
+        if self.kind != PrincipalKind::Agent {
+            return None;
+        }
+        self.subject.as_str().strip_prefix(AGENT_SUBJECT_PREFIX)
     }
 
     pub fn has_scope(&self, scope: Scope) -> bool {
@@ -178,14 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn desktop_has_all_14_and_readonly_has_only_reads() {
+    fn desktop_has_all_20_and_readonly_has_only_reads() {
         let desktop = AuthenticatedPrincipal::desktop();
-        assert_eq!(desktop.scopes.len(), 14);
+        assert_eq!(desktop.scopes.len(), 20);
         let readonly = AuthenticatedPrincipal::test_readonly();
         assert_eq!(
             readonly.scopes.len(),
-            9,
-            "read 8(run:read 포함) + system:describe"
+            11,
+            "read 10(run·bench·exchange 포함) + system:describe"
         );
         for scope in Scope::ALL {
             assert_eq!(readonly.has_scope(scope), scope.is_read(), "{scope}");
@@ -207,5 +312,35 @@ mod tests {
             Scope::AgentRunSettingsWrite.to_string(),
             "agentRunSettings:write"
         );
+    }
+
+    #[test]
+    fn subjects_distinguish_principals_and_agent_is_bound_to_its_run() {
+        assert_eq!(
+            AuthenticatedPrincipal::desktop().subject.as_str(),
+            "desktop"
+        );
+        assert_eq!(
+            AuthenticatedPrincipal::test_readonly().subject.as_str(),
+            "test:readonly"
+        );
+        let other = AuthenticatedPrincipal::test_as("desktop2");
+        assert_eq!(other.subject.as_str(), "test:desktop2");
+        assert_eq!(other.scopes.len(), 20);
+
+        let agent = AuthenticatedPrincipal::agent("r1");
+        assert_eq!(agent.kind.as_str(), "agent");
+        assert_eq!(agent.agent_run_id(), Some("r1"));
+        assert_eq!(
+            agent.scopes.iter().copied().collect::<Vec<_>>(),
+            vec![
+                Scope::ExchangeRead,
+                Scope::ExchangeWrite,
+                Scope::PresentationWrite,
+                Scope::SystemDescribe
+            ]
+        );
+        assert_eq!(AuthenticatedPrincipal::desktop().agent_run_id(), None);
+        assert_eq!(PrincipalKind::parse("agent"), Some(PrincipalKind::Agent));
     }
 }

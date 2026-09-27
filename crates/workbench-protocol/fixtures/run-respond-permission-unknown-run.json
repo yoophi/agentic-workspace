@@ -1,0 +1,50 @@
+{
+  "name": "run-respond-permission-unknown-run",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-59",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-59"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.respondPermission",
+        "requestId": "r-60",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "permissionId": "p1",
+          "optionId": "allow"
+        },
+        "idempotencyKey": "k-60"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "unknown or finished run: r1"
+        }
+      }
+    }
+  ]
+}

@@ -21,9 +21,11 @@ pub use call::{
     CallReply, CallRequest, IdempotencyKey, InvalidIdentifier, OperationId, RequestId,
     CONTRACT_REVISION, PROTOCOL_VERSION,
 };
-pub use descriptor::{DescribeOutput, Effect, OperationDescriptor, OperationKind};
+pub use descriptor::{
+    DescribeOutput, Effect, IdempotencyScope, OperationDescriptor, OperationKind,
+};
 pub use fault::{FaultCode, Outcome, WorkbenchFault};
-pub use principal::{AuthenticatedPrincipal, PrincipalKind, Scope};
+pub use principal::{AuthenticatedPrincipal, PrincipalKind, PrincipalSubject, Scope, AGENT_SCOPES};
 pub use workbench::{
     EventEnvelope, EventItem, EventStream, GapNotice, GapReason, StreamCursor, Subscription,
     Workbench,

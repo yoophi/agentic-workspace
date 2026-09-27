@@ -1,0 +1,109 @@
+{
+  "name": "run-cancel-ok-then-finished-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-44",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-44"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-45",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-45"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.cancel",
+        "requestId": "r-46",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1"
+        },
+        "idempotencyKey": "k-46"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.cancel",
+        "requestId": "r-47",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1"
+        },
+        "idempotencyKey": "k-47"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.sendPrompt",
+        "requestId": "r-48",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "prompt": "hi"
+        },
+        "idempotencyKey": "k-48"
+      },
+      "expect": {
+        "fault": {
+          "code": "notFound",
+          "message": "agent run is not active"
+        }
+      }
+    }
+  ]
+}

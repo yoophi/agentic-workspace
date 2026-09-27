@@ -1,0 +1,25 @@
+{
+  "name": "bench-open-readonly-forbidden",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-5",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-5"
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden"
+        }
+      },
+      "principal": "readonly"
+    }
+  ]
+}

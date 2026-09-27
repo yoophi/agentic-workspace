@@ -1,0 +1,24 @@
+{
+  "name": "bench-open-key-required",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-6",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        }
+      },
+      "expect": {
+        "fault": {
+          "code": "invalidArgument",
+          "message": "idempotencyKey is required for bench.open."
+        }
+      }
+    }
+  ]
+}

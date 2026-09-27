@@ -19,6 +19,15 @@ pub enum Effect {
     Modify,
 }
 
+/// command의 멱등 기록 범위(040, ADR core 0005). `durable`은 SQLite 변경 기록(재시작 뒤에도 같은 결과),
+/// `epoch`은 서버 세대 안에서 작업대별로 기억한다(작업대가 닫히면 사라짐).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum IdempotencyScope {
+    Durable,
+    Epoch,
+}
+
 /// operation 하나의 계약. `inputSchema`/`outputSchema`는 OpenAPI 3.1 호환 JSON Schema다.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +38,9 @@ pub struct OperationDescriptor {
     pub effect: Effect,
     /// command면 멱등성 키가 필수라는 뜻. query는 항상 false.
     pub idempotent: bool,
+    /// command만 있다(040).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotency_scope: Option<IdempotencyScope>,
     pub required_scopes: Vec<Scope>,
     #[schema(value_type = Object)]
     pub input_schema: serde_json::Value,
@@ -67,6 +79,7 @@ mod tests {
             kind: OperationKind::Query,
             effect: Effect::Read,
             idempotent: false,
+            idempotency_scope: None,
             required_scopes: vec![Scope::ProjectRead],
             input_schema: json!({"type": "object"}),
             output_schema: json!({"type": "array"}),

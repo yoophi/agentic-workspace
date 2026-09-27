@@ -1,0 +1,151 @@
+{
+  "name": "exchange-send-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-1",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-2",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-2"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-3",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r2"
+          }
+        },
+        "idempotencyKey": "k-3"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r2"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "exchange.syncWorkspace",
+        "requestId": "r-4",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "worktreePath": "{{dir}}",
+            "revision": 1,
+            "focusedPanelId": "main",
+            "panels": [
+              {
+                "panelId": "main",
+                "title": "Main",
+                "runId": "r1",
+                "status": "running"
+              },
+              {
+                "panelId": "extra",
+                "title": "Extra",
+                "runId": "r2",
+                "status": "running"
+              }
+            ]
+          }
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "revision": 1,
+            "acceptedPanels": 2
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "exchange.send",
+        "requestId": "r-10",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "requestId": "q1",
+            "sourcePanelId": "main",
+            "sourceRunId": "r1",
+            "targetPanelId": "extra",
+            "targetRunId": "r2",
+            "message": "hello",
+            "delivery": "send"
+          }
+        },
+        "idempotencyKey": "k-10"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "requestId": "q1",
+            "status": "accepted",
+            "worktreePath": "{{dir}}"
+          }
+        }
+      }
+    }
+  ],
+  "ignoreFields": [
+    "createdAt",
+    "updatedAt"
+  ]
+}

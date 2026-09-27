@@ -1,0 +1,74 @@
+{
+  "name": "run-set-permission-mode-ok",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-38",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-38"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-39",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "do it",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-39"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1",
+            "goal": "do it",
+            "agentId": "codex"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.setPermissionMode",
+        "requestId": "r-40",
+        "input": {
+          "benchId": "{{bench}}",
+          "runId": "r1",
+          "mode": "plan"
+        },
+        "idempotencyKey": "k-40"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete"
+        }
+      }
+    }
+  ]
+}

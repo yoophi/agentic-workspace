@@ -2,10 +2,13 @@
 
 pub mod agent;
 pub mod agent_run_settings;
+pub mod bench;
 pub mod common;
+pub mod exchange;
 pub mod git;
 pub mod goal;
 pub mod project;
+pub mod run;
 pub mod saved_prompt;
 pub mod system;
 pub mod worktree;
@@ -14,7 +17,7 @@ use utoipa::PartialSchema;
 
 use crate::{
     call::OperationId,
-    descriptor::{Effect, OperationKind},
+    descriptor::{Effect, IdempotencyScope, OperationKind},
     principal::Scope,
 };
 
@@ -25,6 +28,8 @@ pub struct OperationSpec {
     pub kind: OperationKind,
     pub effect: Effect,
     pub idempotent: bool,
+    /// command만 `Some`(040).
+    pub idempotency_scope: Option<IdempotencyScope>,
     pub required_scopes: &'static [Scope],
 }
 
@@ -34,6 +39,7 @@ const fn query(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
         kind: OperationKind::Query,
         effect: Effect::Read,
         idempotent: false,
+        idempotency_scope: None,
         required_scopes: scope,
     }
 }
@@ -44,12 +50,25 @@ const fn command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
         kind: OperationKind::Command,
         effect: Effect::Modify,
         idempotent: true,
+        idempotency_scope: Some(IdempotencyScope::Durable),
+        required_scopes: scope,
+    }
+}
+
+/// 세대 범위 멱등성 command(040): 메모리 상태를 바꾸는 작업대·run 제어·교환.
+const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpec {
+    OperationSpec {
+        id,
+        kind: OperationKind::Command,
+        effect: Effect::Modify,
+        idempotent: true,
+        idempotency_scope: Some(IdempotencyScope::Epoch),
         required_scopes: scope,
     }
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 32] = [
+pub const OPERATIONS: [OperationSpec; 50] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -90,6 +109,24 @@ pub const OPERATIONS: [OperationSpec; 32] = [
     ),
     query(OperationId::AgentList, &[Scope::AgentRead]),
     query(OperationId::AgentListProviderSessions, &[Scope::AgentRead]),
+    epoch_command(OperationId::BenchOpen, &[Scope::BenchWrite]),
+    epoch_command(OperationId::BenchClose, &[Scope::BenchWrite]),
+    epoch_command(OperationId::BenchRequestTitle, &[Scope::PresentationWrite]),
+    query(OperationId::RunListToolCandidates, &[Scope::RunRead]),
+    command(OperationId::RunStart, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunSendPrompt, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunSteer, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunCancelAndSend, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunSetPermissionMode, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunCancel, &[Scope::RunWrite]),
+    epoch_command(OperationId::RunRespondPermission, &[Scope::RunWrite]),
+    epoch_command(OperationId::ExchangeSyncWorkspace, &[Scope::ExchangeWrite]),
+    epoch_command(OperationId::ExchangeSend, &[Scope::ExchangeWrite]),
+    epoch_command(OperationId::ExchangeAcknowledge, &[Scope::ExchangeWrite]),
+    query(OperationId::ExchangeList, &[Scope::ExchangeRead]),
+    query(OperationId::ExchangeListPeers, &[Scope::ExchangeRead]),
+    epoch_command(OperationId::ExchangeSendFromRun, &[Scope::ExchangeWrite]),
+    query(OperationId::ExchangeGetForRun, &[Scope::ExchangeRead]),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
 ];
 
@@ -213,6 +250,63 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::AgentListProviderSessions => (
             agent::AgentListProviderSessionsInput::schema(),
             common::array_schema(agent::ProviderSessionDto::schema()),
+        ),
+        OperationId::BenchOpen => (
+            bench::BenchOpenInput::schema(),
+            bench::BenchOpenOutput::schema(),
+        ),
+        OperationId::BenchClose => (
+            bench::BenchCloseInput::schema(),
+            bench::BenchCloseOutput::schema(),
+        ),
+        OperationId::BenchRequestTitle => (
+            bench::BenchRequestTitleInput::schema(),
+            bench::TitleChangeResultDto::schema(),
+        ),
+        OperationId::RunListToolCandidates => (
+            run::RunListToolCandidatesInput::schema(),
+            run::AgentToolCandidateResponseDto::schema(),
+        ),
+        OperationId::RunStart => (run::RunStartInput::schema(), run::AgentRunDto::schema()),
+        OperationId::RunSendPrompt => (run::RunPromptInput::schema(), EmptyOutput::schema()),
+        OperationId::RunSteer => (run::RunPromptInput::schema(), EmptyOutput::schema()),
+        OperationId::RunCancelAndSend => (run::RunPromptInput::schema(), EmptyOutput::schema()),
+        OperationId::RunSetPermissionMode => (
+            run::RunSetPermissionModeInput::schema(),
+            EmptyOutput::schema(),
+        ),
+        OperationId::RunCancel => (run::RunCancelInput::schema(), EmptyOutput::schema()),
+        OperationId::RunRespondPermission => (
+            run::RunRespondPermissionInput::schema(),
+            EmptyOutput::schema(),
+        ),
+        OperationId::ExchangeSyncWorkspace => (
+            exchange::ExchangeSyncWorkspaceInput::schema(),
+            exchange::AgentWorkspaceSyncResponseDto::schema(),
+        ),
+        OperationId::ExchangeSend => (
+            exchange::ExchangeSendInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeAcknowledge => (
+            exchange::ExchangeAcknowledgeInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeList => (
+            exchange::ExchangeListInput::schema(),
+            exchange::exchange_list_output_schema(),
+        ),
+        OperationId::ExchangeListPeers => (
+            exchange::ExchangeListPeersInput::schema(),
+            exchange::AgentPeersDto::schema(),
+        ),
+        OperationId::ExchangeSendFromRun => (
+            exchange::ExchangeSendFromRunInput::schema(),
+            exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeGetForRun => (
+            exchange::ExchangeGetForRunInput::schema(),
+            exchange::AgentExchangeDto::schema(),
         ),
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),

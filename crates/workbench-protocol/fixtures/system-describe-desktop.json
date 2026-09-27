@@ -25,21 +25,24 @@
             "kind": "command",
             "requiredScopes": [
               "project:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "project.update",
             "kind": "command",
             "requiredScopes": [
               "project:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "project.delete",
             "kind": "command",
             "requiredScopes": [
               "project:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "savedPrompt.list",
@@ -53,21 +56,24 @@
             "kind": "command",
             "requiredScopes": [
               "savedPrompt:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "savedPrompt.update",
             "kind": "command",
             "requiredScopes": [
               "savedPrompt:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "savedPrompt.delete",
             "kind": "command",
             "requiredScopes": [
               "savedPrompt:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "goal.get",
@@ -81,28 +87,32 @@
             "kind": "command",
             "requiredScopes": [
               "goal:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "goal.update",
             "kind": "command",
             "requiredScopes": [
               "goal:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "goal.clear",
             "kind": "command",
             "requiredScopes": [
               "goal:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "goal.recordProgress",
             "kind": "command",
             "requiredScopes": [
               "goal:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "agentRunSettings.get",
@@ -116,7 +126,8 @@
             "kind": "command",
             "requiredScopes": [
               "agentRunSettings:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "git.listRemotes",
@@ -144,14 +155,16 @@
             "kind": "command",
             "requiredScopes": [
               "git:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "git.deleteWorktree",
             "kind": "command",
             "requiredScopes": [
               "git:write"
-            ]
+            ],
+            "idempotencyScope": "durable"
           },
           {
             "id": "worktree.listChanges",
@@ -231,6 +244,146 @@
             ]
           },
           {
+            "id": "bench.open",
+            "kind": "command",
+            "requiredScopes": [
+              "bench:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "bench.close",
+            "kind": "command",
+            "requiredScopes": [
+              "bench:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "bench.requestTitle",
+            "kind": "command",
+            "requiredScopes": [
+              "presentation:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.listToolCandidates",
+            "kind": "query",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
+            "id": "run.start",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "durable"
+          },
+          {
+            "id": "run.sendPrompt",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.steer",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.cancelAndSend",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.setPermissionMode",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.cancel",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "run.respondPermission",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.syncWorkspace",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.send",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.acknowledge",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.list",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.listPeers",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "id": "exchange.sendFromRun",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "exchange.getForRun",
+            "kind": "query",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [
@@ -253,6 +406,30 @@
             "class": "notification",
             "requiredScopes": [
               "worktree:read"
+            ]
+          },
+          {
+            "schema": "exchange.requested.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "exchange.status.v1",
+            "streamKind": "exchange",
+            "class": "state",
+            "requiredScopes": [
+              "exchange:read"
+            ]
+          },
+          {
+            "schema": "bench.titleRequested.v1",
+            "streamKind": "bench",
+            "class": "notification",
+            "requiredScopes": [
+              "bench:read"
             ]
           }
         ]

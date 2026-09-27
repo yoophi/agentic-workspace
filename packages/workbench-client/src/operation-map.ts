@@ -39,6 +39,17 @@ export type GitFileDiff = Schemas["GitFileDiffDto"];
 // 038 US3: 새 run 화면의 agent 목록과 이어 붙일 provider 세션.
 export type AgentDescriptor = Schemas["AgentDescriptorDto"];
 export type ProviderSession = Schemas["ProviderSessionDto"];
+// 040: 작업대(Bench)·run·교환.
+export type BenchOpenInput = Schemas["BenchOpenInput"];
+export type BenchOpenOutput = Schemas["BenchOpenOutput"];
+export type BenchCloseOutput = Schemas["BenchCloseOutput"];
+export type TitleChangeResult = Schemas["TitleChangeResultDto"];
+export type AgentRun = Schemas["AgentRunDto"];
+export type AgentRunRequest = Schemas["AgentRunRequestDto"];
+export type AgentToolCandidateResponse = Schemas["AgentToolCandidateResponseDto"];
+export type AgentExchange = Schemas["AgentExchangeDto"];
+export type AgentPanelEndpoint = Schemas["AgentPanelEndpointDto"];
+export type AgentWorkspaceSyncResponse = Schemas["AgentWorkspaceSyncResponseDto"];
 
 export type OperationId = CallRequest["operation"];
 
@@ -66,6 +77,8 @@ export type StreamCursor = Schemas["StreamCursor"];
 export type RunEvent = Schemas["RunEventDto"];
 export type WorktreeChanged = Schemas["WorktreeChangedDto"];
 export type OrchestrationWorkspaceUpdated = Schemas["OrchestrationEventDto"];
+export type ExchangeRequested = Schemas["ExchangeRequestedDto"];
+export type BenchTitleRequested = Schemas["TitleRequestedDto"];
 export type EventBySchema = Schemas["EventBySchema"];
 export type EventSchemaId = EventBySchema["schema"];
 

@@ -30,6 +30,23 @@ pub struct Fixture {
     pub expect_after: Option<ExpectAfter>,
     #[serde(default, rename = "ignoreFields")]
     pub ignore_fields: Vec<String>,
+    /// 040: 요청마다 principal·값 포착을 지정하는 순차 호출. 있으면 `request(s)`/`expect(s)` 대신 쓴다.
+    #[serde(default)]
+    pub steps: Vec<StepSpec>,
+    /// 040: 가짜 run 엔진 동작.
+    #[serde(default, rename = "runScript")]
+    pub run_script: Option<super::scripted_run_engine::RunScript>,
+}
+
+/// 040 순차 호출 한 단계. `capture`는 이 단계 응답 JSON(`CallReply` 직렬화)의 JSON pointer를 `{{name}}`으로 저장한다.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StepSpec {
+    #[serde(default)]
+    pub principal: Option<String>,
+    pub request: Value,
+    pub expect: Expect,
+    #[serde(default)]
+    pub capture: BTreeMap<String, String>,
 }
 
 fn default_principal() -> String {
@@ -55,6 +72,9 @@ pub struct Seed {
     /// US3: stub provider 세션 목록.
     #[serde(default)]
     pub provider_sessions: Vec<Value>,
+    /// 040: 작업대 대상 디렉터리를 만들고 `{{dir}}`(실제 경로)로 치환한다.
+    #[serde(default)]
+    pub bench_dir: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -94,9 +114,26 @@ pub struct ExpectAfter {
 pub struct SeedContext {
     pub repo: Option<BuiltRepo>,
     substitutions: BTreeMap<String, String>,
+    captured: Vec<(String, String)>,
 }
 
 impl SeedContext {
+    /// 040: 순차 호출에서 포착한 값. 두 경로 비교 전에 값 → 자리표시자로 되돌린다.
+    pub fn capture(&mut self, name: &str, value: String) {
+        self.substitutions
+            .insert(format!("{{{{{name}}}}}"), value.clone());
+        self.captured.push((value, format!("{{{{{name}}}}}")));
+    }
+
+    pub fn normalize_captured(&self, value: &mut Value) {
+        let pairs: Vec<(&String, &str)> = self
+            .captured
+            .iter()
+            .map(|(actual, placeholder)| (actual, placeholder.as_str()))
+            .collect();
+        normalize(value, &pairs);
+    }
+
     fn from_repo(repo: Option<BuiltRepo>) -> Self {
         let mut substitutions = BTreeMap::new();
         if let Some(repo) = &repo {
@@ -117,13 +154,14 @@ impl SeedContext {
         Self {
             repo,
             substitutions,
+            captured: Vec::new(),
         }
     }
 
     /// 두 경로(in-memory·HTTP)는 서로 다른 임시 저장소를 쓰므로, 결과를 비교하기 전에 저장소 경로를 자리표시자로
     /// 되돌린다. 긴 경로(`{{repo}}`)를 먼저 바꾼다 — `{{repoParent}}`는 그 접두어다. 해시는 결정적이라 두지 않는다.
     pub fn normalize_paths(&self, value: &mut Value) {
-        let mut pairs: Vec<(&String, &str)> = ["{{repo}}", "{{repoParent}}"]
+        let mut pairs: Vec<(&String, &str)> = ["{{repo}}", "{{repoParent}}", "{{dir}}"]
             .into_iter()
             .filter_map(|key| self.substitutions.get(key).map(|actual| (actual, key)))
             .collect();
@@ -184,13 +222,44 @@ impl Seed {
     }
 }
 
+/// 이름 → principal. `desktop2`는 데스크톱과 같은 scope의 다른 주체, `agent:<runId>`는 run에 묶인 agent(040).
+pub fn principal_named(fixture: &str, name: &str) -> AuthenticatedPrincipal {
+    match name {
+        "desktop" => AuthenticatedPrincipal::desktop(),
+        "readonly" => AuthenticatedPrincipal::test_readonly(),
+        "desktop2" => AuthenticatedPrincipal::test_as("desktop2"),
+        other => match other.strip_prefix("agent:") {
+            Some(run_id) => AuthenticatedPrincipal::agent(run_id),
+            None => panic!("fixture {fixture}: unknown principal {other}"),
+        },
+    }
+}
+
 impl Fixture {
     pub fn principal(&self) -> AuthenticatedPrincipal {
-        match self.principal.as_str() {
-            "desktop" => AuthenticatedPrincipal::desktop(),
-            "readonly" => AuthenticatedPrincipal::test_readonly(),
-            other => panic!("fixture {}: unknown principal {other}", self.name),
-        }
+        principal_named(&self.name, &self.principal)
+    }
+
+    /// seed의 stub 어댑터 + `runScript`의 가짜 엔진(040).
+    pub fn adapters(&self) -> workbench_core::application::workbench_runtime::RuntimeAdapters {
+        let agents = self
+            .seed
+            .agents
+            .iter()
+            .map(|agent| serde_json::from_value(agent.clone()).expect("seed agent"))
+            .collect();
+        let sessions = self
+            .seed
+            .provider_sessions
+            .iter()
+            .map(|session| serde_json::from_value(session.clone()).expect("seed provider session"))
+            .collect();
+        super::stub_adapters_with(
+            agents,
+            sessions,
+            self.run_script.clone().unwrap_or_default(),
+        )
+        .0
     }
 
     /// (요청, 기대) 순서쌍. 치환 없음(037 호환).
@@ -291,7 +360,14 @@ pub fn apply_seed(paths: &DataPaths, seed: &Seed) -> SeedContext {
         fs::create_dir_all(&parent).expect("repos dir");
         git_repo::build(git_seed, &parent)
     });
-    SeedContext::from_repo(repo)
+    let mut ctx = SeedContext::from_repo(repo);
+    if seed.bench_dir {
+        let dir = paths.app_data_dir().join("bench-work");
+        fs::create_dir_all(&dir).expect("bench dir");
+        ctx.substitutions
+            .insert("{{dir}}".to_owned(), git_repo::canonical_string(&dir));
+    }
+    ctx
 }
 
 fn strip_ignored(value: &mut Value, ignore: &[String]) {

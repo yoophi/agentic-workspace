@@ -1,0 +1,76 @@
+{
+  "name": "bench-request-title-other-run-forbidden",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-12",
+        "input": {
+          "workingDirectory": "{{dir}}"
+        },
+        "idempotencyKey": "k-12"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "workingDirectory": "{{dir}}"
+          }
+        }
+      },
+      "capture": {
+        "bench": "/output/benchId"
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "run.start",
+        "requestId": "r-1",
+        "input": {
+          "benchId": "{{bench}}",
+          "request": {
+            "goal": "g",
+            "agentId": "codex",
+            "runId": "r1"
+          }
+        },
+        "idempotencyKey": "k-1"
+      },
+      "expect": {
+        "reply": {
+          "kind": "complete",
+          "output": {
+            "id": "r1"
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.requestTitle",
+        "requestId": "r-13",
+        "input": {
+          "runId": "r1",
+          "title": "t"
+        },
+        "idempotencyKey": "k-13"
+      },
+      "expect": {
+        "fault": {
+          "code": "forbidden",
+          "details": {
+            "titleCode": "unauthorized"
+          },
+          "message": "The requested run does not match the authenticated capability."
+        }
+      },
+      "principal": "agent:r2"
+    }
+  ]
+}

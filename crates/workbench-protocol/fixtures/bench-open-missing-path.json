@@ -1,0 +1,25 @@
+{
+  "name": "bench-open-missing-path",
+  "seed": {
+    "benchDir": true
+  },
+  "steps": [
+    {
+      "request": {
+        "protocolVersion": 1,
+        "operation": "bench.open",
+        "requestId": "r-4",
+        "input": {
+          "workingDirectory": "{{dir}}/missing"
+        },
+        "idempotencyKey": "k-4"
+      },
+      "expect": {
+        "fault": {
+          "code": "invalidArgument",
+          "message": "Failed to resolve workspace path: No such file or directory (os error 2)"
+        }
+      }
+    }
+  ]
+}

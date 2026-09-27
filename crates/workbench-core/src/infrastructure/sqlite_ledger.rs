@@ -274,11 +274,8 @@ fn read_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<LedgerRecord> {
     Ok(LedgerRecord {
         execution_id: row.get("execution_id")?,
         key: LedgerKey {
-            principal_kind: match principal_kind.as_str() {
-                "desktop" => PrincipalKind::Desktop,
-                "test" => PrincipalKind::Test,
-                other => return Err(invalid(format!("unknown principal kind {other}"))),
-            },
+            principal_kind: PrincipalKind::parse(&principal_kind)
+                .ok_or_else(|| invalid(format!("unknown principal kind {principal_kind}")))?,
             operation: OperationId::parse(&operation)
                 .ok_or_else(|| invalid(format!("unknown operation {operation}")))?,
             contract_revision: contract_revision as u32,
