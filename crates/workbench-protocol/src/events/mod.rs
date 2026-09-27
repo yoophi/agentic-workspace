@@ -51,7 +51,7 @@ impl StreamKind {
         }
     }
 
-    /// 구독을 여는 kind인지. orchestration은 041에서 연다.
+    /// 구독을 여는 kind인지. orchestration은 041 US3에서 구독 권한 검사(묶임의 작업대 주체)와 함께 연다.
     pub fn is_subscribable(self) -> bool {
         !matches!(self, StreamKind::Orchestration)
     }
@@ -69,8 +69,7 @@ impl StreamKind {
             StreamKind::Worktree => Scope::WorktreeRead,
             StreamKind::Exchange => Scope::ExchangeRead,
             StreamKind::Bench => Scope::BenchRead,
-            // 041에서 정한다. 구독이 열리기 전까지 쓰이지 않는다.
-            StreamKind::Orchestration => Scope::RunRead,
+            StreamKind::Orchestration => Scope::OrchestrationRead,
         }
     }
 

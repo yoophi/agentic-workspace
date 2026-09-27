@@ -37,11 +37,11 @@
 
 ### protocol (research R5·R6·R13, contracts/workbench-orchestration.md)
 
-- [ ] T004 `crates/workbench-protocol/src/principal.rs`: `Scope::OrchestrationRead`(`orchestration:read`)·`OrchestrationWrite`(`orchestration:write`) 추가(22개), 데스크톱 전체, readonly `:read`, `AGENT_SCOPES`에 두 scope 추가, 단위 테스트 갱신
-- [ ] T005 `crates/workbench-protocol/src/operations/orchestration.rs`(신규): 미러 DTO — `OrchestrationSessionDto`(boundWindowLabel 없음, `eventStreamId: Option<String>`), 노드·세대·과제·보고·명령·알림·분배·멱등 기록·요청(`BindMainRunRequest`·`DelegateGoalRequest`·`SetPresentationRequest`·`TaskActionRequest`·`CoordinatorHandoffRequest`·`DispatchPromptRequest`·`DeliverTaskCommandInput`)·결과(`DelegateGoalOutcome`·`PromptDispatchDto`·`TaskCommandDto`·`TaskReportDto`)·agent 도구 입력 16종·`AgentRoleDto`. 입력 최상위 `deny_unknown_fields`
-- [ ] T006 `crates/workbench-protocol/src/operations/run.rs`: `RunReplayInput{benchId, runId, afterSequence}`·`RunReplayDto`
-- [ ] T007 `crates/workbench-protocol/src/operations/mod.rs`·`call.rs`: operation id 35개(데스크톱 17 `orchestration.*` + `run.replay` + agent 17), descriptor(scope, `idempotencyScope: epoch`), `schema_for`. OPERATIONS 85
-- [ ] T008 `crates/workbench-protocol/src/events/mod.rs`: `StreamKind::Orchestration` 구독 가능, `required_scope = OrchestrationRead`, 분류 상태 복원용. hub 테스트(`event_hub/mod.rs` 구독 거절 테스트) 기대 갱신
+- [X] T004 `crates/workbench-protocol/src/principal.rs`: `Scope::OrchestrationRead`(`orchestration:read`)·`OrchestrationWrite`(`orchestration:write`) 추가(22개), 데스크톱 전체, readonly `:read`, `AGENT_SCOPES`에 두 scope 추가, 단위 테스트 갱신
+- [X] T005 `crates/workbench-protocol/src/operations/orchestration.rs`(신규): 미러 DTO — `OrchestrationSessionDto`(boundWindowLabel 없음, `eventStreamId: Option<String>`), 노드·세대·과제·보고·명령·알림·분배·멱등 기록·요청(`BindMainRunRequest`·`DelegateGoalRequest`·`SetPresentationRequest`·`TaskActionRequest`·`CoordinatorHandoffRequest`·`DispatchPromptRequest`·`DeliverTaskCommandInput`)·결과(`DelegateGoalOutcome`·`PromptDispatchDto`·`TaskCommandDto`·`TaskReportDto`)·agent 도구 입력 16종·`AgentRoleDto`. 입력 최상위 `deny_unknown_fields`
+- [X] T006 `crates/workbench-protocol/src/operations/run.rs`: `RunReplayInput{benchId, runId, afterSequence}`·`RunReplayDto`
+- [X] T007 `crates/workbench-protocol/src/operations/mod.rs`·`call.rs`: operation id 35개(데스크톱 17 `orchestration.*` + `run.replay` + agent 17), descriptor(scope, `idempotencyScope: epoch`), `schema_for`. OPERATIONS 85
+- [X] T008 `crates/workbench-protocol/src/events/mod.rs`: `StreamKind::Orchestration` 구독 가능, `required_scope = OrchestrationRead`, 분류 상태 복원용. hub 테스트(`event_hub/mod.rs` 구독 거절 테스트) 기대 갱신
 
 ### core 이동과 저장 경계 (research R1·R3·R13)
 
@@ -199,3 +199,5 @@ T019 fixture 생성 ∥ T020 출처 음성 테스트 ∥ T021 liveness ④⑤ �
   - (T001, 2026-09-27) 기준선(main `c8b41a4`): `cargo test --workspace --all-targets` 626 passed / 0 failed / 7 ignored(그중 AW 145), `pnpm run check-types` 13/13·`pnpm run test` 12/12(040 측정, main 불변).
   - (T002) 오늘 동작은 research 사실 요약·contracts와 대조 완료 — 차이 없음. 설계 리뷰가 바로잡은 두 문구(도구 오류 `forbiddenActor`·`scopeMismatch`, 토큰 폐기 시점)는 contracts에 반영됨.
   - (Foundation 이동 1단계) orchestration 도메인·포트 4·서비스 4·저장소를 core로 `git mv`(테스트 37개 함께 이동, 기대값 불변). core는 edition 2021이라 AW의 let chain 5곳을 중첩 `if let`/`is_some_and`로 풀었다(동작 동일). 저장소는 AW `json_store`의 `load_json`·`save_json`을 tauri 의존만 빼고 `infrastructure/fs/legacy_json_store.rs`로 복사해 `.bak` 복구·오류 문자열을 보존. AW는 `domain`·`ports`·`application`·`infrastructure` mod에서 core 모듈을 재노출(shim)하고 저장소는 임시 `orchestration_repository(app)`로 연다 — US1–US4 compat 전환에서 제거. `boundWindowLabel` serde 생략(T009 일부)은 서비스가 아직 창 label로 조회하므로 US1 묶임 전환과 함께 적용.
+  - (Foundation protocol) scope 22개(`orchestration:read`·`orchestration:write`, agent 6개). 미러 DTO는 scratchpad `gen_orch_dto.py`가 core 도메인·요청 타입 48개를 `…Dto`로 생성(`operations/orchestration_dto.rs`, serde 속성 그대로, 세션은 `boundWindowLabel` 대신 `eventStreamId`). operation 등록은 `add_ops_041.py`(모듈 경로 component 지원) — 이 단계에서 데스크톱 17 + `run.replay` = 68개. **분할**: agent operation 17개와 입력 타입은 도구 로직을 옮기는 US2(T039)에서, `StreamKind::Orchestration` 구독 개방은 구독 권한 검사(T045)와 함께 US3에서 한다(권한 검사 없이 구독을 먼저 열지 않기 위해). 이 단계의 scope는 `orchestration:read`로 확정. describe fixture는 `gen_describe_041.py`로 재생성(데스크톱 68·readonly 28·agent 26).
+

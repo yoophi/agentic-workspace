@@ -168,6 +168,41 @@
             ]
           },
           {
+            "id": "orchestration.get",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.listRecoverable",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.listTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.collectReports",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "run.replay",
+            "kind": "query",
+            "requiredScopes": [
+              "run:read"
+            ]
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

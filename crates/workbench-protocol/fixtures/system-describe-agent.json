@@ -75,6 +75,138 @@
             ]
           },
           {
+            "id": "orchestration.bootstrap",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.get",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.listRecoverable",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.bindCoordinator",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.delegateGoal",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.adoptManualChild",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.listTasks",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.collectReports",
+            "kind": "query",
+            "requiredScopes": [
+              "orchestration:read"
+            ]
+          },
+          {
+            "id": "orchestration.setPresentation",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.sendChildCommand",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.respondInput",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.cancelTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.retryTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.reassignTask",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.handoffCoordinator",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.dispatchPrompt",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
+            "id": "orchestration.recover",
+            "kind": "command",
+            "requiredScopes": [
+              "orchestration:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
             "id": "system.describe",
             "kind": "query",
             "requiredScopes": [

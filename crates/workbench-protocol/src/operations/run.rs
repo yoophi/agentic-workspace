@@ -185,3 +185,34 @@ pub struct RunRespondPermissionInput {
     pub permission_id: String,
     pub option_id: String,
 }
+
+/// `run.replay`(041): 작업대가 소유했던 run(또는 작업대에 묶인 orchestration 작업 영역의 노드 run)의 journal.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RunReplayInput {
+    pub bench_id: String,
+    pub run_id: String,
+    pub after_sequence: u64,
+}
+
+/// core `RunReplay`의 미러(오늘 `RuntimeEventSnapshot`과 같은 JSON).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunReplayDto {
+    pub run_id: String,
+    pub events: Vec<RunReplayEventDto>,
+    pub last_sequence: u64,
+    pub terminal: bool,
+    pub gap_detected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RunReplayEventDto {
+    pub run_id: String,
+    pub sequence: u64,
+    #[schema(value_type = Object)]
+    pub event: serde_json::Value,
+    pub terminal: bool,
+}
+

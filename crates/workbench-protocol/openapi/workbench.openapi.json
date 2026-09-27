@@ -52,6 +52,12 @@
   },
   "components": {
     "schemas": {
+      "AccessPolicyDto": {
+        "type": "string",
+        "enum": [
+          "readOnly"
+        ]
+      },
       "AgentCommandOverridesDto": {
         "type": "object",
         "properties": {
@@ -320,6 +326,93 @@
           }
         ]
       },
+      "AgentNodeCreatorDto": {
+        "type": "string",
+        "enum": [
+          "user",
+          "coordinator"
+        ]
+      },
+      "AgentNodeDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "role",
+          "executionStatus",
+          "presentationStatus",
+          "promotionPolicy",
+          "createdBy",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AgentNodeKindDto"
+          },
+          "parentNodeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "role": {
+            "$ref": "#/components/schemas/AgentRoleProfileDto"
+          },
+          "currentRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "assignedTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "executionStatus": {
+            "$ref": "#/components/schemas/ExecutionStatusDto"
+          },
+          "presentationStatus": {
+            "$ref": "#/components/schemas/PresentationStatusDto"
+          },
+          "promotionPolicy": {
+            "$ref": "#/components/schemas/PromotionPolicyDto"
+          },
+          "runtimeProfile": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/WorkerRuntimeProfileDto"
+              }
+            ]
+          },
+          "lastActivityAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/AgentNodeCreatorDto"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentNodeKindDto": {
+        "type": "string",
+        "enum": [
+          "main",
+          "child"
+        ]
+      },
       "AgentOptionDescriptorDto": {
         "type": "object",
         "required": [
@@ -419,6 +512,35 @@
           },
           "builtIn": {
             "type": "boolean"
+          }
+        }
+      },
+      "AgentRoleProfileDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "responsibility",
+          "expectedOutput"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "responsibility": {
+            "type": "string"
+          },
+          "expectedOutput": {
+            "type": "string"
+          },
+          "systemInstructions": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -839,6 +961,39 @@
           }
         }
       },
+      "ArtifactKindDto": {
+        "type": "string",
+        "enum": [
+          "file",
+          "url",
+          "text"
+        ]
+      },
+      "ArtifactReferenceDto": {
+        "type": "object",
+        "required": [
+          "kind",
+          "uri",
+          "label"
+        ],
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ArtifactKindDto"
+          },
+          "uri": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "BenchCloseInput": {
         "type": "object",
         "required": [
@@ -916,6 +1071,35 @@
           }
         },
         "additionalProperties": false
+      },
+      "BindMainRunRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "panelId",
+          "runId",
+          "state",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "panelId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/MainRunBindingStateDto"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "CallReply": {
         "oneOf": [
@@ -2481,6 +2665,562 @@
               },
               "output": {
                 "$ref": "#/components/schemas/AgentExchangeDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_bootstrap",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.bootstrap"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_get",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.get"
+                ]
+              },
+              "output": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/OrchestrationSessionDto"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_listRecoverable",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.listRecoverable"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OrchestrationSessionDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_bindCoordinator",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.bindCoordinator"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_delegateGoal",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.delegateGoal"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/DelegateGoalOutcomeDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_adoptManualChild",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.adoptManualChild"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_listTasks",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.listTasks"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/OrchestrationTaskDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_collectReports",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.collectReports"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/TaskReportDto"
+                }
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_setPresentation",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.setPresentation"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_sendChildCommand",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.sendChildCommand"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/TaskCommandDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_respondInput",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.respondInput"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/TaskCommandDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_cancelTask",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.cancelTask"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_retryTask",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.retryTask"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_reassignTask",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.reassignTask"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_handoffCoordinator",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.handoffCoordinator"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_dispatchPrompt",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.dispatchPrompt"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/PromptDispatchDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_orchestration_recover",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.recover"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/OrchestrationSessionDto"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_run_replay",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.replay"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/RunReplayDto"
               },
               "revision": {
                 "type": "integer",
@@ -4462,6 +5202,721 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_orchestration_bootstrap",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.bootstrap"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationBootstrapInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_get",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.get"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationBenchInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_listRecoverable",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.listRecoverable"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationListRecoverableInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_bindCoordinator",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.bindCoordinator"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationBindCoordinatorInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_delegateGoal",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.delegateGoal"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationDelegateGoalInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_adoptManualChild",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.adoptManualChild"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationAdoptManualChildInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_listTasks",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.listTasks"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationListTasksInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_collectReports",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.collectReports"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationBenchInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_setPresentation",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.setPresentation"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationSetPresentationInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_sendChildCommand",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.sendChildCommand"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationSendChildCommandInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_respondInput",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.respondInput"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationTaskActionInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_cancelTask",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.cancelTask"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationTaskActionInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_retryTask",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.retryTask"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationTaskActionInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_reassignTask",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.reassignTask"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationTaskActionInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_handoffCoordinator",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.handoffCoordinator"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationHandoffCoordinatorInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_dispatchPrompt",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.dispatchPrompt"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationDispatchPromptInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_orchestration_recover",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "orchestration.recover"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/OrchestrationBenchInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_run_replay",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "run.replay"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/RunReplayInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_system_describe",
             "required": [
               "protocolVersion",
@@ -4501,6 +5956,25 @@
           }
         ]
       },
+      "CommandFailureDto": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/OrchestrationErrorCodeDto"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        }
+      },
       "ContextSizePreset": {
         "type": "string",
         "enum": [
@@ -4509,6 +5983,384 @@
           "large",
           "xLarge"
         ]
+      },
+      "CoordinatorGenerationDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "ordinal",
+          "mainNodeId",
+          "runId",
+          "status",
+          "startedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "mainNodeId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "previousGenerationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoordinatorGenerationStatusDto"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "endedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "handoffSummary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "successorGenerationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "CoordinatorGenerationStatusDto": {
+        "type": "string",
+        "enum": [
+          "active",
+          "ended",
+          "superseded"
+        ]
+      },
+      "CoordinatorHandoffRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "successorRunId",
+          "summary",
+          "confirmed",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "successorRunId": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "confirmed": {
+            "type": "boolean"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "CoordinatorNotificationDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "reportId",
+          "taskId",
+          "reportType",
+          "generationId",
+          "status",
+          "attemptCount",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reportId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "reportType": {
+            "$ref": "#/components/schemas/TaskReportTypeDto"
+          },
+          "generationId": {
+            "type": "string"
+          },
+          "mainRunId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/CoordinatorNotificationStatusDto"
+          },
+          "attemptCount": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CommandFailureDto"
+              }
+            ]
+          },
+          "collectedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "CoordinatorNotificationStatusDto": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "dispatching",
+          "accepted",
+          "delivered",
+          "processed",
+          "failed",
+          "superseded"
+        ]
+      },
+      "CreateChildTaskOutcomeDto": {
+        "type": "object",
+        "required": [
+          "taskId",
+          "nodeId",
+          "status",
+          "executionStatus"
+        ],
+        "properties": {
+          "taskId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatusDto"
+          },
+          "executionStatus": {
+            "$ref": "#/components/schemas/ExecutionStatusDto"
+          }
+        }
+      },
+      "CreateChildTaskRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "title",
+          "role",
+          "objective",
+          "constraints",
+          "expectedResult",
+          "dependencyTaskIds"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "role": {
+            "$ref": "#/components/schemas/AgentRoleProfileDto"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedResult": {
+            "type": "string"
+          },
+          "dependencyTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "preferredNodeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "DelegateGoalOutcomeDto": {
+        "type": "object",
+        "required": [
+          "rootTaskId",
+          "generationId",
+          "dispatchId",
+          "status"
+        ],
+        "properties": {
+          "rootTaskId": {
+            "type": "string"
+          },
+          "generationId": {
+            "type": "string"
+          },
+          "dispatchId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DelegateGoalRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "goal",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "goal": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliverTaskCommandInputDto": {
+        "type": "object",
+        "description": "오늘 `send_orchestration_child_command`의 입력(`DeliverTaskCommandInput`). 명령 출처는 화면(`ui`)으로 고정된다.",
+        "required": [
+          "requestId",
+          "taskId",
+          "kind",
+          "delivery"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskCommandKindDto"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputReportId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/PromptDeliveryDto"
+          },
+          "expectedTaskRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DeliverTaskCommandRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "taskId",
+          "kind",
+          "delivery",
+          "source"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskCommandKindDto"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputReportId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/PromptDeliveryDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskCommandSourceDto"
+          },
+          "expectedTaskRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          }
+        }
       },
       "DescribeOutput": {
         "type": "object",
@@ -4541,6 +6393,46 @@
               "$ref": "#/components/schemas/EventSchemaDescriptor"
             },
             "description": "principal에게 허용되고 구독 가능한 이벤트 스키마(039)."
+          }
+        }
+      },
+      "DispatchPromptRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "intent",
+          "targetMode",
+          "message",
+          "delivery",
+          "panelIds",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/PromptDispatchIntentDto"
+          },
+          "targetMode": {
+            "$ref": "#/components/schemas/PromptTargetModeDto"
+          },
+          "message": {
+            "type": "string"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/PromptDeliveryDto"
+          },
+          "panelIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -5181,6 +7073,16 @@
         },
         "additionalProperties": false
       },
+      "ExecutionStatusDto": {
+        "type": "string",
+        "enum": [
+          "unassigned",
+          "starting",
+          "active",
+          "idle",
+          "stopped"
+        ]
+      },
       "FaultCode": {
         "type": "string",
         "description": "안정적 오류 코드. 정본 `client-server-architecture-research.md` §Errors 표와 1:1이다.",
@@ -5199,6 +7101,14 @@
           "unavailable",
           "deadlineExceeded",
           "internal"
+        ]
+      },
+      "FindingSeverityDto": {
+        "type": "string",
+        "enum": [
+          "info",
+          "warning",
+          "critical"
         ]
       },
       "GapNotice": {
@@ -5975,6 +7885,37 @@
         "maxLength": 128,
         "minLength": 1
       },
+      "IdempotencyRecordDto": {
+        "type": "object",
+        "required": [
+          "actorKey",
+          "operation",
+          "requestId",
+          "payloadFingerprint",
+          "resultRef",
+          "createdAt"
+        ],
+        "properties": {
+          "actorKey": {
+            "type": "string"
+          },
+          "operation": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "payloadFingerprint": {
+            "type": "string"
+          },
+          "resultRef": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
       "IdempotencyScope": {
         "type": "string",
         "description": "command의 멱등 기록 범위(040, ADR core 0005). `durable`은 SQLite 변경 기록(재시작 뒤에도 같은 결과),\n`epoch`은 서버 세대 안에서 작업대별로 기억한다(작업대가 닫히면 사라짐).",
@@ -5996,6 +7937,13 @@
           "steerRejected",
           "cancelled",
           "completed"
+        ]
+      },
+      "MainRunBindingStateDto": {
+        "type": "string",
+        "enum": [
+          "active",
+          "ended"
         ]
       },
       "OperationDescriptor": {
@@ -6068,6 +8016,128 @@
           "command"
         ]
       },
+      "OrchestrationAdoptManualChildInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "panelId",
+          "title"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "panelId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationBenchInput": {
+        "type": "object",
+        "description": "`orchestration.get`·`collectReports`·`recover`: 작업대만 받는다.",
+        "required": [
+          "benchId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationBindCoordinatorInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/BindMainRunRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationBootstrapInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "worktreePath"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "worktreePath": {
+            "type": "string"
+          },
+          "resumeWorkspaceId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationDelegateGoalInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DelegateGoalRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationDispatchPromptInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/DispatchPromptRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationErrorCodeDto": {
+        "type": "string",
+        "enum": [
+          "invalidInput",
+          "invalidTopology",
+          "invalidTransition",
+          "scopeMismatch",
+          "revisionConflict",
+          "duplicateConflict",
+          "notFound",
+          "unauthorized",
+          "capacityExceeded",
+          "runtimeLost",
+          "workerUnavailable",
+          "readOnlyViolation",
+          "coordinatorInactive",
+          "coordinatorBusy"
+        ]
+      },
       "OrchestrationEventDto": {
         "type": "object",
         "required": [
@@ -6098,6 +8168,322 @@
               "string",
               "null"
             ]
+          }
+        }
+      },
+      "OrchestrationHandoffCoordinatorInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/CoordinatorHandoffRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationListRecoverableInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "worktreePath"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "worktreePath": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationListTasksInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "generationId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "generationId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationSendChildCommandInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "input"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "input": {
+            "$ref": "#/components/schemas/DeliverTaskCommandInputDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationSessionDto": {
+        "type": "object",
+        "required": [
+          "schemaVersion",
+          "id",
+          "worktreePath",
+          "mainNodeId",
+          "nodes",
+          "generations",
+          "tasks",
+          "reports",
+          "dispatches",
+          "idempotencyRecords",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string"
+          },
+          "worktreePath": {
+            "type": "string"
+          },
+          "eventStreamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "현재 묶임의 orchestration 스트림(`orchestration:<bindingId>`). 묶이지 않았으면 null."
+          },
+          "mainNodeId": {
+            "type": "string"
+          },
+          "activeCoordinatorGenerationId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentNodeDto"
+            }
+          },
+          "generations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CoordinatorGenerationDto"
+            }
+          },
+          "tasks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrchestrationTaskDto"
+            }
+          },
+          "reports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskReportDto"
+            }
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskCommandDto"
+            }
+          },
+          "coordinatorNotifications": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CoordinatorNotificationDto"
+            }
+          },
+          "dispatches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptDispatchDto"
+            }
+          },
+          "idempotencyRecords": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdempotencyRecordDto"
+            }
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "OrchestrationSetPresentationInput": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/SetPresentationRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationTaskActionInput": {
+        "type": "object",
+        "description": "`respondInput`·`cancelTask`·`retryTask`·`reassignTask`.",
+        "required": [
+          "benchId",
+          "request"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/TaskActionRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "OrchestrationTaskDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "coordinatorGenerationId",
+          "title",
+          "objective",
+          "constraints",
+          "expectedResult",
+          "dependencyTaskIds",
+          "status",
+          "awaitingHandoff",
+          "accessPolicy",
+          "attempt",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "parentTaskId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "coordinatorGenerationId": {
+            "type": "string"
+          },
+          "assignedNodeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "objective": {
+            "type": "string"
+          },
+          "constraints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedResult": {
+            "type": "string"
+          },
+          "dependencyTaskIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatusDto"
+          },
+          "awaitingHandoff": {
+            "type": "boolean"
+          },
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicyDto"
+          },
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "latestResultReportId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TaskFailureDto"
+              }
+            ]
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "completedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
           }
         }
       },
@@ -6154,6 +8540,17 @@
             "type": "string"
           }
         }
+      },
+      "PresentationStatusDto": {
+        "type": "string",
+        "enum": [
+          "background",
+          "attentionRequired",
+          "promoting",
+          "panel",
+          "detached",
+          "archived"
+        ]
       },
       "ProjectCreateInput": {
         "type": "object",
@@ -6248,6 +8645,134 @@
           }
         },
         "additionalProperties": false
+      },
+      "PromotionPolicyDto": {
+        "type": "string",
+        "enum": [
+          "manual",
+          "onAttention",
+          "always",
+          "onFailure",
+          "onCompletion"
+        ]
+      },
+      "PromptDeliveryDto": {
+        "type": "string",
+        "enum": [
+          "send",
+          "queue",
+          "draft"
+        ]
+      },
+      "PromptDispatchDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "intent",
+          "targetMode",
+          "message",
+          "delivery",
+          "targets",
+          "createdBy",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "intent": {
+            "$ref": "#/components/schemas/PromptDispatchIntentDto"
+          },
+          "targetMode": {
+            "$ref": "#/components/schemas/PromptTargetModeDto"
+          },
+          "message": {
+            "type": "string"
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/PromptDeliveryDto"
+          },
+          "targets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PromptDispatchTargetDto"
+            }
+          },
+          "createdBy": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "PromptDispatchIntentDto": {
+        "type": "string",
+        "enum": [
+          "direct",
+          "delegate"
+        ]
+      },
+      "PromptDispatchTargetDto": {
+        "type": "object",
+        "required": [
+          "panelId",
+          "requestId",
+          "status"
+        ],
+        "properties": {
+          "panelId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PromptDispatchTargetStatusDto"
+          },
+          "failureCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "failureReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "PromptDispatchTargetStatusDto": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "delivered",
+          "rejected",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "PromptTargetModeDto": {
+        "type": "string",
+        "enum": [
+          "focused",
+          "selected",
+          "all",
+          "coordinator"
+        ]
       },
       "ProviderSessionDto": {
         "type": "object",
@@ -6359,6 +8884,73 @@
           "failed",
           "stopped"
         ]
+      },
+      "ReportTaskRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "taskId",
+          "reporterNodeId",
+          "reporterRunId",
+          "reportType",
+          "summary",
+          "findings",
+          "artifactRefs",
+          "unresolved"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "reporterNodeId": {
+            "type": "string"
+          },
+          "reporterRunId": {
+            "type": "string"
+          },
+          "reportType": {
+            "$ref": "#/components/schemas/TaskReportTypeDto"
+          },
+          "progressPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskFindingDto"
+            }
+          },
+          "artifactRefs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactReferenceDto"
+            }
+          },
+          "unresolved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
       },
       "RequestId": {
         "type": "string",
@@ -6791,6 +9383,87 @@
         },
         "additionalProperties": false
       },
+      "RunReplayDto": {
+        "type": "object",
+        "description": "core `RunReplay`의 미러(오늘 `RuntimeEventSnapshot`과 같은 JSON).",
+        "required": [
+          "runId",
+          "events",
+          "lastSequence",
+          "terminal",
+          "gapDetected"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunReplayEventDto"
+            }
+          },
+          "lastSequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "terminal": {
+            "type": "boolean"
+          },
+          "gapDetected": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RunReplayEventDto": {
+        "type": "object",
+        "required": [
+          "runId",
+          "sequence",
+          "event",
+          "terminal"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "event": {
+            "type": "object"
+          },
+          "terminal": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RunReplayInput": {
+        "type": "object",
+        "description": "`run.replay`(041): 작업대가 소유했던 run(또는 작업대에 묶인 orchestration 작업 영역의 노드 run)의 journal.",
+        "required": [
+          "benchId",
+          "runId",
+          "afterSequence"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "afterSequence": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "RunRespondPermissionInput": {
         "type": "object",
         "required": [
@@ -6953,6 +9626,8 @@
           "exchange:read",
           "exchange:write",
           "presentation:write",
+          "orchestration:read",
+          "orchestration:write",
           "system:describe"
         ]
       },
@@ -6992,6 +9667,31 @@
           },
           "delivery": {
             "$ref": "#/components/schemas/AgentExchangeDeliveryDto"
+          }
+        }
+      },
+      "SetPresentationRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "nodeId",
+          "presentationStatus",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "presentationStatus": {
+            "$ref": "#/components/schemas/PresentationStatusDto"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
           }
         }
       },
@@ -7044,6 +9744,299 @@
         "type": "object",
         "description": "`system.describe` input. 필드가 없고 추가 필드는 거절한다.",
         "additionalProperties": false
+      },
+      "TaskActionRequestDto": {
+        "type": "object",
+        "required": [
+          "requestId",
+          "taskId",
+          "expectedRevision"
+        ],
+        "properties": {
+          "requestId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "targetNodeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TaskCommandDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "requestId",
+          "payloadFingerprint",
+          "taskId",
+          "nodeId",
+          "runId",
+          "attempt",
+          "kind",
+          "delivery",
+          "source",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "payloadFingerprint": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "runId": {
+            "type": "string"
+          },
+          "attempt": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskCommandKindDto"
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inputReportId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "$ref": "#/components/schemas/PromptDeliveryDto"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TaskCommandSourceDto"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskCommandStatusDto"
+          },
+          "failure": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CommandFailureDto"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskCommandKindDto": {
+        "type": "string",
+        "enum": [
+          "message",
+          "inputResponse",
+          "interrupt",
+          "cancel"
+        ]
+      },
+      "TaskCommandSourceDto": {
+        "type": "string",
+        "enum": [
+          "user",
+          "coordinator",
+          "recovery"
+        ]
+      },
+      "TaskCommandStatusDto": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "dispatching",
+          "accepted",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "TaskFailureDto": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable",
+          "partialResultReportIds"
+        ],
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/OrchestrationErrorCodeDto"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "partialResultReportIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "TaskFindingDto": {
+        "type": "object",
+        "required": [
+          "title",
+          "detail",
+          "evidence",
+          "severity"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "severity": {
+            "$ref": "#/components/schemas/FindingSeverityDto"
+          }
+        }
+      },
+      "TaskReportDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "requestId",
+          "taskId",
+          "reporterNodeId",
+          "reporterRunId",
+          "type",
+          "summary",
+          "findings",
+          "artifactRefs",
+          "unresolved",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
+          },
+          "taskId": {
+            "type": "string"
+          },
+          "reporterNodeId": {
+            "type": "string"
+          },
+          "reporterRunId": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TaskReportTypeDto"
+          },
+          "progressPercent": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 0
+          },
+          "summary": {
+            "type": "string"
+          },
+          "findings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TaskFindingDto"
+            }
+          },
+          "artifactRefs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactReferenceDto"
+            }
+          },
+          "unresolved": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "createdAt": {
+            "type": "string"
+          }
+        }
+      },
+      "TaskReportTypeDto": {
+        "type": "string",
+        "enum": [
+          "progress",
+          "result",
+          "inputRequest",
+          "blocked",
+          "message"
+        ]
+      },
+      "TaskStatusDto": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "ready",
+          "running",
+          "inputRequired",
+          "blocked",
+          "completed",
+          "failed",
+          "cancelled"
+        ]
       },
       "TitleChangeResultDto": {
         "type": "object",
@@ -7187,6 +10180,35 @@
               "object",
               "null"
             ]
+          }
+        }
+      },
+      "WorkerRuntimeProfileDto": {
+        "type": "object",
+        "required": [
+          "agentProfileId",
+          "providerId",
+          "accessPolicy",
+          "supportsReadOnly"
+        ],
+        "properties": {
+          "agentProfileId": {
+            "type": "string"
+          },
+          "providerId": {
+            "type": "string"
+          },
+          "modelId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "accessPolicy": {
+            "$ref": "#/components/schemas/AccessPolicyDto"
+          },
+          "supportsReadOnly": {
+            "type": "boolean"
           }
         }
       },
