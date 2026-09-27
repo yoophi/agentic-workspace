@@ -437,3 +437,38 @@ describe("event client recovery cursors (Codex follow-up review 3)", () => {
     client.close();
   });
 });
+
+describe("event client epoch change followed by a gap (Codex follow-up review 4)", () => {
+  it("resets with applied 0 and reconnects in the new epoch when a retention gap follows an epoch change", async () => {
+    const hub = new FakeEventHub(2);
+    const client = clientFor(hub);
+    const contexts: number[] = [];
+    const events: number[] = [];
+    client.subscribe(
+      "s",
+      { onEvent: (event) => void events.push(event.sequence), onReset: (_data, context) => void contexts.push(context.delivered) },
+      {
+        snapshot: {
+          load: async () => ({ lastSequence: hub.lastSequence("s") }),
+          passes: (event, data) => event.sequence > (data as { lastSequence: number }).lastSequence,
+        },
+      },
+    );
+    for (let i = 0; i < 3; i += 1) {
+      hub.publish("s");
+    }
+    await until(() => client.debugCursor("s") === 3, "old epoch applied");
+    hub.ticketsDown = true;
+    hub.restart("epoch-2");
+    for (let i = 0; i < 5; i += 1) {
+      hub.publish("s"); // 새 세대 1–5, 보관 한도 2
+    }
+    hub.ticketsDown = false;
+    await until(() => contexts.length >= 1 && client.debugCursor("s") === 5, "recovered in the new epoch", 100_000);
+    expect(contexts[contexts.length - 1]).toBe(0);
+    hub.publish("s"); // 새 세대 6
+    await until(() => events.includes(6), "live 6 in the new epoch", 100_000);
+    expect(client.debugCursor("s")).toBe(6);
+    client.close();
+  });
+});

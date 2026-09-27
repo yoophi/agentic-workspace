@@ -129,3 +129,21 @@ OCR이 고른 검토 대상은 82개 파일(시험·문서 제외)이고, 운영
 | H2 적재 중 재연결에도 `[6, 7]` 한 번씩 | 1: `expected [ 6, 7, 6, 7 ] to deeply equal [ 6, 7 ]` | 0 |
 
 회귀(각 1회, 종료 0): workbench-client 68 tests·통합 7, AW 626 tests·통합 1.
+
+## T057 Codex 후속 집중 리뷰 4 (`--wait --base 4f4f939`, 대상 `f60edc6`)
+
+판정: needs-attention. 단일 복구에서는 H1·H2가 의도대로 동작한다고 확인했다. High 1건:
+
+| # | 문제(Codex 재현) | 조치 |
+|---|---|---|
+| I1 | 세대 변경 복구 뒤 보관 gap이 이어지면, 두 번째 복구가 세대 변경 표시(`epochReset`)를 지워 옛 세대 반영 순번(10)을 재설정에 넘긴다. run 소비자는 새 세대 1–5를 잃고, 이후 재연결은 새 세대에 cursor 10을 요청해 cursor-ahead fault로 스트림이 종결된다 | 세대 변경 gap을 받는 즉시 스트림·수신자의 순번 상태(최고 순번, 빈 스트림 cursor, 대기열, 반영 cursor, 대기열 중복 기준, 걸러내기)를 0으로 되돌린다. 진행 중 전달은 세대를 올려 무효로 한다. 복구 객체의 표시(`epochReset`)는 없앴다. 뒤이은 gap·재시도·재설정이 모두 이 값에서 시작한다 |
+
+**실제 run 소비자 회귀 시험(사용자 요청)**: `network-events.test.ts` "run snapshot replay after retention recovery". 실제 `createEventClient` + `createNetworkEvents`의 `agent-run-event` 수신자와, 서버 run 기록 전체를 돌려주는 `run.replay` 가짜 호출을 쓴다. 기존 실제 host 보관 시험은 `snapshot.lastSequence`와 다음 live 경계만 보므로, 소비자가 틀린 반영 순번으로 replay 출력을 모두 걸러도 잡지 못한다.
+
+| 시험 | 결과 |
+|---|---|
+| 보관 한도 2에서 구독 → 스냅샷의 1–5 출력 → live 6·7, 정확히 `[1..7]` 한 번씩·순서대로 | H1 수정 뒤 0. **H1을 되돌린 변이**(재설정에 `max(실제 반영, 기준점)` 전달)에서 종료 1: `expected [] to deeply equal [ 'eepoch-1-1', 'eepoch-1-2', …(3) ]`(replay 출력 전부 걸러짐). 변이 복원 확인 |
+| 세대 변경 → 새 세대 보관 gap → 새 세대 1–5, 그 뒤 live 6 | red 1: `expected 5 to be greater than or equal to 8`(옛 cursor 3으로 걸러져 새 세대 4·5만 나옴) → I1 수정 뒤 0 |
+| 이벤트 클라이언트 단위: 세대 변경 뒤 gap에서 재설정 context 0, 새 세대 cursor 5 → live 6 | red 1: `expected 3 to be +0` → 0 |
+
+회귀(각 1회, 종료 0): workbench-client 69 tests·통합 7, AW 628 tests·통합 1.

@@ -95,8 +95,6 @@ interface ListenerState {
 
 interface Recovery {
   after: number;
-  /** 세대가 바뀐 복구: 옛 세대의 반영 순번은 새 세대에서 뜻이 없다(재설정에 0을 넘긴다). */
-  epochReset: boolean;
   buffer: EventEnvelope[];
   terminal: boolean;
   helloSeen: boolean;
@@ -505,7 +503,8 @@ export function createEventClient(options: EventClientOptions): EventClient {
         case "epochChanged":
           this.epoch = gap.epoch;
           options.onEpochChanged?.(gap.epoch);
-          this.startRecovery(0, false, true);
+          this.forgetEpochSequences();
+          this.startRecovery(0, false);
           return;
         case "evicted":
           this.startRecovery(this.highest, true);
@@ -516,7 +515,22 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
     }
 
-    startRecovery(after: number, terminal: boolean, epochReset = false) {
+    /** 세대가 바뀌면 옛 세대의 순번은 새 세대에서 뜻이 없다: 반영 cursor·대기열·최고 순번을 모두 0으로 되돌린다. 뒤이은
+     *  gap·재시도·재설정도 이 값에서 시작하므로 옛 cursor를 다시 쓰지 않는다. 진행 중인 전달은 세대를 올려 무효로 한다. */
+    forgetEpochSequences() {
+      this.highest = 0;
+      this.cursorWhenEmpty = 0;
+      this.backlog = [];
+      for (const state of this.listeners) {
+        state.generation += 1;
+        state.delivered = 0;
+        state.lastQueued = 0;
+        state.queue = [];
+        state.covered = undefined;
+      }
+    }
+
+    startRecovery(after: number, terminal: boolean) {
       this.recoveryAttempts += 1;
       if (this.recoveryAttempts > maxRecoveryAttempts) {
         this.recovery = undefined;
@@ -525,7 +539,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
         options.onStreamError?.(this.id, "stream recovery failed repeatedly");
         return;
       }
-      this.recovery = { after, epochReset, buffer: [], terminal, helloSeen: false };
+      this.recovery = { after, buffer: [], terminal, helloSeen: false };
       this.closeSocket();
       if (terminal) {
         void this.completeRecovery(this.recovery);
@@ -541,7 +555,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       } catch (error) {
         if (this.recovery === recovery) {
           options.onStreamError?.(this.id, `snapshot failed: ${String(error)}`);
-          this.startRecovery(recovery.after, recovery.terminal, recovery.epochReset);
+          this.startRecovery(recovery.after, recovery.terminal);
         }
         return;
       }
@@ -575,10 +589,7 @@ export function createEventClient(options: EventClientOptions): EventClient {
       state.covered = undefined;
       // 재설정에는 이 수신자가 실제로 반영한 순번을 넘긴다(run은 그 뒤 스냅샷 이벤트를 다시 반영한다). 반영 완료 cursor는
       // 재설정이 끝난 뒤에 기준점으로 올린다. 대기열 중복 방지(lastQueued)는 곧바로 기준점·버퍼 기준이다.
-      const appliedBefore = recovery.epochReset ? 0 : state.delivered;
-      if (recovery.epochReset) {
-        state.delivered = 0;
-      }
+      const appliedBefore = state.delivered;
       state.queue = [];
       state.lastQueued = after;
       for (const event of pending) {

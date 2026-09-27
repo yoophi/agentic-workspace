@@ -295,3 +295,82 @@ describe("network events — orchestration listeners that refetch asynchronously
     events.close();
   });
 });
+
+// 043 T057 Codex 후속 리뷰 3·4(사용자 검토): 실제 run 소비자(`createNetworkEvents`의 RUN_EVENT 수신자)가 보관 gap 복구의
+// `run.replay` 스냅샷에서 놓친 출력을 다시 내보내는지. 이벤트 클라이언트가 재설정에 틀린 반영 순번을 넘기면 소비자가
+// 스냅샷 출력을 모두 걸러 버린다 — 순번 경계만 보는 시험으로는 잡히지 않는다.
+describe("network events — run snapshot replay after retention recovery", () => {
+  function runClient(hub: FakeEventHub, streamId: string) {
+    const calls: string[] = [];
+    const client: WorkbenchClient = {
+      call: vi.fn(async (operation: string) => {
+        calls.push(operation);
+        if (operation === "run.replay") {
+          // 서버의 run 기록 전체(보관 한도와 무관): 이 세대에서 발행된 모든 출력.
+          const last = hub.lastSequence(streamId);
+          const events = Array.from({ length: last }, (_, index) => ({ sequence: index + 1, event: { out: `e${hub.epoch}-${index + 1}` } }));
+          return { kind: "ok", output: { events, lastSequence: last, epoch: hub.epoch }, revision: undefined } as CallOutcome<unknown>;
+        }
+        throw new Error(`unexpected ${operation}`);
+      }) as never,
+    };
+    return { client, calls };
+  }
+
+  function outputs(received: unknown[]) {
+    return received.map((payload) => (payload as { event: { out: string } }).event.out);
+  }
+
+  it("emits the missing outputs 1–5 from the snapshot, then later live outputs once and in order", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `e${hub.epoch}-${i}` }); // 보관 한도 2: 구독 시점에 1–3은 journal에 없다
+    }
+    const { client } = runClient(hub, stream);
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    await network.listen("agent-run-event", (payload) => void received.push(payload));
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    const e = hub.epoch;
+    await vi.waitFor(() => expect(outputs(received)).toEqual([1, 2, 3, 4, 5].map((n) => `e${e}-${n}`)));
+    hub.publish(stream, { out: `e${e}-6` });
+    hub.publish(stream, { out: `e${e}-7` });
+    await vi.waitFor(() => expect(received).toHaveLength(7));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received)).toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `e${e}-${n}`));
+    events.close();
+  });
+
+  it("replays the new epoch from its first output when an epoch change is followed by a retention gap", async () => {
+    const hub = new FakeEventHub(2);
+    const stream = "run:r1";
+    const { client } = runClient(hub, stream);
+    const events = createEventClient({ connection: connection(hub), fetch: hub.fetch, openSocket: hub.openSocket as never, random: () => 0.5 });
+    const network = createNetworkEvents({ events, client });
+    const received: unknown[] = [];
+    await network.listen("agent-run-event", (payload) => void received.push(payload));
+    network.noteBench("b1");
+    network.noteRuns(["r1"]);
+    const oldEpoch = hub.epoch;
+    for (let i = 1; i <= 3; i += 1) {
+      hub.publish(stream, { out: `e${oldEpoch}-${i}` });
+    }
+    await vi.waitFor(() => expect(received).toHaveLength(3));
+    // 서버 재기동: 새 세대, 소켓 끊김. 다시 붙기 전에 새 세대 출력 5개(보관 한도 2) → epochChanged 뒤 보관 gap.
+    hub.ticketsDown = true;
+    hub.restart("epoch-2");
+    for (let i = 1; i <= 5; i += 1) {
+      hub.publish(stream, { out: `eepoch-2-${i}` });
+    }
+    hub.ticketsDown = false;
+    await vi.waitFor(() => expect(received.length).toBeGreaterThanOrEqual(8), { timeout: 5_000 });
+    hub.publish(stream, { out: "eepoch-2-6" });
+    await vi.waitFor(() => expect(outputs(received)).toContain("eepoch-2-6"), { timeout: 5_000 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(outputs(received).slice(3)).toEqual([1, 2, 3, 4, 5, 6].map((n) => `eepoch-2-${n}`));
+    events.close();
+  }, 20_000);
+});
