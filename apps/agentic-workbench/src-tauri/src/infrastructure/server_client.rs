@@ -591,18 +591,18 @@ mod tests {
             pick_executable(
                 Some(explicit.clone()),
                 Some(sibling.clone()),
-                &[dev.clone()]
+                std::slice::from_ref(&dev)
             ),
             explicit
         );
         assert_eq!(
-            pick_executable(None, Some(sibling.clone()), &[dev.clone()]),
+            pick_executable(None, Some(sibling.clone()), std::slice::from_ref(&dev)),
             dev,
             "missing sibling falls back to dev output"
         );
         std::fs::write(&sibling, b"").unwrap();
         assert_eq!(
-            pick_executable(None, Some(sibling.clone()), &[dev.clone()]),
+            pick_executable(None, Some(sibling.clone()), std::slice::from_ref(&dev)),
             sibling
         );
         let none = dir.path().join("none");

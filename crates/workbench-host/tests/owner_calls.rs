@@ -40,7 +40,10 @@ fn owner_and_window_calls_round_trip_through_the_http_adapter() {
         true,
     )
     .expect("owner lease");
-    assert!(lease["leaseId"].as_str().is_some_and(|id| !id.is_empty()), "{lease}");
+    assert!(
+        lease["leaseId"].as_str().is_some_and(|id| !id.is_empty()),
+        "{lease}"
+    );
 
     let issued = call(
         &base,
@@ -83,7 +86,14 @@ fn owner_and_window_calls_round_trip_through_the_http_adapter() {
 
     runtime.block_on(host.shutdown());
     // 닫힌 끝점: 전송 오류.
-    match call(&base, identity.token(), None, "bench.list", json!({}), false) {
+    match call(
+        &base,
+        identity.token(),
+        None,
+        "bench.list",
+        json!({}),
+        false,
+    ) {
         Err(CallError::Transport(_)) => {}
         other => panic!("a closed endpoint is a transport error: {other:?}"),
     }

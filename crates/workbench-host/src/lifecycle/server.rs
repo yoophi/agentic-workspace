@@ -11,9 +11,7 @@ use workbench_core::{
 };
 
 use super::{
-    descriptor::{
-        Descriptor, read_descriptor, remove_descriptor_if, write_descriptor,
-    },
+    descriptor::{Descriptor, read_descriptor, remove_descriptor_if, write_descriptor},
     ensure::{EXIT_ALREADY_RUNNING, EXIT_UNSUPPORTED_SCHEMA},
     identity::OwnerIdentity,
     lock::{ensure_server_dir, try_owner_lock},
