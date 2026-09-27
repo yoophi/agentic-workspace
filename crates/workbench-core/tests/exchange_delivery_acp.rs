@@ -53,12 +53,18 @@ async fn wait_until_finished(path: &std::path::Path, needle: &str) -> Vec<String
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    panic!("agent did not finish the prompt with {needle:?}: {:?}", agent_log(path));
+    panic!(
+        "agent did not finish the prompt with {needle:?}: {:?}",
+        agent_log(path)
+    );
 }
 
 async fn call(rt: &TestRuntime, operation: OperationId, key: &str, input: Value) -> Value {
     rt.runtime
-        .call(AuthenticatedPrincipal::desktop(), command_request(operation, key, input))
+        .call(
+            AuthenticatedPrincipal::desktop(),
+            command_request(operation, key, input),
+        )
         .await
         .unwrap_or_else(|fault| panic!("{operation:?}: {fault:?}"))
         .output()
@@ -72,8 +78,17 @@ async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
     let log = rt.dir.path().join("agent.log");
     let work = rt.dir.path().join("work");
     std::fs::create_dir_all(&work).unwrap();
-    let work = std::fs::canonicalize(work).unwrap().to_string_lossy().into_owned();
-    let bench = call(&rt, OperationId::BenchOpen, &uuid_key(), json!({ "workingDirectory": work })).await["benchId"]
+    let work = std::fs::canonicalize(work)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+    let bench = call(
+        &rt,
+        OperationId::BenchOpen,
+        &uuid_key(),
+        json!({ "workingDirectory": work }),
+    )
+    .await["benchId"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -89,10 +104,22 @@ async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
     wait_until_finished(&log, "first").await; // 시작 목표 prompt
 
     let exchange = json!({ "benchId": bench, "runId": "r1", "prompt": "peer message x-1" });
-    call(&rt, OperationId::RunSendPrompt, "exchange-delivery:x-1", exchange.clone()).await;
+    call(
+        &rt,
+        OperationId::RunSendPrompt,
+        "exchange-delivery:x-1",
+        exchange.clone(),
+    )
+    .await;
     wait_until_finished(&log, "peer message x-1").await;
     // 새로고침 뒤 원장 없이 다시 라우팅된 같은 교환: 같은 키.
-    call(&rt, OperationId::RunSendPrompt, "exchange-delivery:x-1", exchange).await;
+    call(
+        &rt,
+        OperationId::RunSendPrompt,
+        "exchange-delivery:x-1",
+        exchange,
+    )
+    .await;
     // 장벽: 다른 교환 x-2가 끝나면 그 앞의 전송은 모두 처리됐다.
     call(
         &rt,
@@ -102,9 +129,20 @@ async fn the_same_exchange_delivery_key_reaches_the_acp_agent_process_once() {
     )
     .await;
     let lines = wait_until_finished(&log, "peer message x-2").await;
-    assert_eq!(prompt_ids_with(&lines, "peer message x-1").len(), 1, "x-1 reached the agent once: {lines:?}");
-    assert_eq!(prompt_ids_with(&lines, "peer message x-2").len(), 1, "{lines:?}");
-    let prompts = lines.iter().filter(|line| line.starts_with("prompt:")).count();
+    assert_eq!(
+        prompt_ids_with(&lines, "peer message x-1").len(),
+        1,
+        "x-1 reached the agent once: {lines:?}"
+    );
+    assert_eq!(
+        prompt_ids_with(&lines, "peer message x-2").len(),
+        1,
+        "{lines:?}"
+    );
+    let prompts = lines
+        .iter()
+        .filter(|line| line.starts_with("prompt:"))
+        .count();
     assert_eq!(prompts, 3, "agent prompts (goal, x-1 once, x-2): {lines:?}");
     rt.runtime.close_all_benches().await;
 }

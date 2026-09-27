@@ -78,10 +78,10 @@ struct AppTeardown<'a> {
 
 impl Teardown for AppTeardown<'_> {
     fn revoke_credentials(&self, principal: &AuthenticatedPrincipal) {
-        if let Some(http) = self.app.try_state::<WorkbenchHttp>() {
-            if let Some(state) = http.state.as_ref() {
-                state.revoke_window(&principal.subject);
-            }
+        if let Some(http) = self.app.try_state::<WorkbenchHttp>()
+            && let Some(state) = http.state.as_ref()
+        {
+            state.revoke_window(&principal.subject);
         }
     }
 

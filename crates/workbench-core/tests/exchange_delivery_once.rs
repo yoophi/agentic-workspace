@@ -18,18 +18,34 @@ async fn the_same_exchange_delivery_key_reaches_the_agent_once() {
     let prompt = json!({ "benchId": bench, "runId": "r1", "prompt": "peer message" });
 
     let first = h
-        .keyed(OperationId::RunSendPrompt, "exchange-delivery:x-1", prompt.clone())
+        .keyed(
+            OperationId::RunSendPrompt,
+            "exchange-delivery:x-1",
+            prompt.clone(),
+        )
         .await
         .expect("first delivery");
     let again = h
-        .keyed(OperationId::RunSendPrompt, "exchange-delivery:x-1", prompt.clone())
+        .keyed(
+            OperationId::RunSendPrompt,
+            "exchange-delivery:x-1",
+            prompt.clone(),
+        )
         .await
         .expect("same key replays the stored result");
     assert_eq!(first, again);
-    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), 1, "agent received the exchange once");
+    assert_eq!(
+        h.engine.prompts.load(Ordering::SeqCst),
+        1,
+        "agent received the exchange once"
+    );
 
     h.keyed(OperationId::RunSendPrompt, "exchange-delivery:x-2", prompt)
         .await
         .expect("another exchange");
-    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), 2, "a different key is a different delivery");
+    assert_eq!(
+        h.engine.prompts.load(Ordering::SeqCst),
+        2,
+        "a different key is a different delivery"
+    );
 }
