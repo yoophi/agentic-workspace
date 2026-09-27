@@ -62,9 +62,9 @@
 
 **Goal**: 외부 모드 thin client. **Independent Test**: 서버 없음·있음에서 앱 연결, 창 닫기 뒤 토큰 거절·작업대 닫힘, 연결 실패 화면.
 
-- [ ] T025 [US2] **창 폐기 단조성 시험 먼저** `crates/workbench-host/tests/window_tokens.rs`(C4): 폐기 완료 뒤 지연된 발급 → `forbidden`, 같은 label 새 incarnation → 성공, 발급·폐기 동시 100회 → 폐기 뒤 유효 토큰 0, 폐기 뒤 표로 구독 불가. red 기록
-- [ ] T026 [US2] core 핸들러: `desktop.issueWindowToken`(발급기 잠금 아래 tombstone 확인)·`desktop.retireWindow`(토큰·표 폐기 + tombstone + `closeBench`면 그 주체가 연 작업대 모두 닫기)·`lease.*`·`bench.list`·`server.status`. 소유자 전용 scope 검사. T025 green
-- [ ] T027 [US2] 소유자 우회 두 지점: `crates/workbench-core/src/application/bench_service.rs`(`resolve`·`admit`·`close_as`)와 이벤트 hub 스트림 구독 판정. agent 전용 op는 우회 제외. 시험 `crates/workbench-core/tests/owner_principal.rs`(소유자는 모든 작업대 조회·구독·취소, 창·agent는 여전히 자기 것만, agent 전용 op는 `forbidden`) — 시험 먼저 red
+- [X] T025 [US2] **창 폐기 단조성 시험 먼저** `crates/workbench-host/tests/window_tokens.rs`(C4): 폐기 완료 뒤 지연된 발급 → `forbidden`, 같은 label 새 incarnation → 성공, 발급·폐기 동시 100회 → 폐기 뒤 유효 토큰 0, 폐기 뒤 표로 구독 불가. red 기록
+- [X] T026 [US2] core 핸들러: `desktop.issueWindowToken`(발급기 잠금 아래 tombstone 확인)·`desktop.retireWindow`(토큰·표 폐기 + tombstone + `closeBench`면 그 주체가 연 작업대 모두 닫기)·`lease.*`·`bench.list`·`server.status`. 소유자 전용 scope 검사. T025 green
+- [X] T027 [US2] 소유자 우회 두 지점: `crates/workbench-core/src/application/bench_service.rs`(`resolve`·`admit`·`close_as`)와 이벤트 hub 스트림 구독 판정. agent 전용 op는 우회 제외. 시험 `crates/workbench-core/tests/owner_principal.rs`(소유자는 모든 작업대 조회·구독·취소, 창·agent는 여전히 자기 것만, agent 전용 op는 `forbidden`) — 시험 먼저 red
 - [ ] T028 [US2] AW 모드 선택(`apps/agentic-workbench/src-tauri/src/lib.rs`): 기본 external = 런타임 관리 상태 없음 + `infrastructure/server_client.rs`(host `ensure`, 임대 10초 갱신, 창 토큰 발급, `retireWindow`), `embedded` = host 조립 + 같은 `owner.lock` + 안내 파일 `mode: embedded`. 서버 실행 파일 탐색 규칙(contracts/desktop-client.md §1)
 - [ ] T029 [US2] command 외부 모드(`inbound/tauri_commands.rs`): `get_workbench_connection`(ensure + 창 토큰), `ensure_window_bench`(창 토큰으로 `bench.open`·조회), 전달 선언 no-op, compat 서버 소유 command는 정해진 오류(런타임 `Option`), 신규 `apply_window_title`. `no-direct-invoke.test.ts` 허용 목록 갱신
 - [ ] T030 [US2] **창 닫기 판정 시험 먼저**: T003에서 확정한 규칙으로 순수 함수 `apps/agentic-workbench/src-tauri/src/application/window_close_intent.rs`의 시험(관측한 이벤트 순서 조합마다 CloseBench/KeepBench). red 기록 → 구현 → green

@@ -207,3 +207,60 @@ T018 시험 내용(프로세스, 고정 sleep 없이 프로세스 종료 대기�
 - 소유자 자격 증명은 uuid v4 두 개의 바이트(32바이트) hex다(새 난수 crate를 더하지 않았다). v4는 버전 비트를 빼면 244비트 엔트로피다.
 - 저장 형식 거절은 조립 전에 읽기 전용으로 검사한다(데이터 무변경을 보장). 다만 `workbench/server/`(잠금·로그 디렉터리)는 소유 잠금을 위해 먼저 만든다. 도메인 파일·ledger는 건드리지 않는다.
 - 소유자 resolver는 Origin이 있는 요청을 받지 않는다(WebView가 자격 증명을 얻어도 쓰지 못하게). contracts에 명시돼 있지 않던 규칙이다.
+
+## T025–T027 (US2 서버 측: 창 토큰 tombstone·소유자 전용 op·소유자 우회)
+
+로그: `scratchpad/044/`(세션 scratchpad). 한 번씩 실행하고 종료 코드를 `.status`에 남겼다.
+
+red(시험 먼저):
+
+| 로그 | 종료 | 종류 | 내용 |
+|---|---|---|---|
+| `t027-red-1.log` | 101 | 컴파일 | `server_control()` 없음 → 최소 `ServerControl`·임대 표를 더해 동작 red로 넘김 |
+| `t027-red-2.log` | 101 | 시험 오류 | agent 전용 op 입력 키를 `input`으로 적음(`AgentToolInput`은 `arguments`) → 시험 수정 |
+| `t027-red-3.log` | 101 | 동작 | 3 실패: `lease.acquire`·`bench.list` "handler가 등록되지 않았습니다". `owner_only_forbidden`·`agent_only`는 기존 동작(scope·`ensure_run`)으로 이미 통과 |
+| `t025-red-1.log` | 101 | 동작 | 5 실패 전부: `desktop.issueWindowToken`/`retireWindow` 500 "handler가 등록되지 않았습니다" |
+
+green·최종:
+
+| 명령 | 종료 | 결과 |
+|---|---|---|
+| `cargo test -p workbench-core --features test-hooks --test owner_principal` (`t027-green-1`) | 0 | 7 passed, 0 filtered out |
+| `cargo test -p workbench-host --test window_tokens` (`t025-green-2`) | 0 | 6 passed, 0 filtered out |
+| `cargo test -p workbench-protocol` (`t027-final-protocol-1`) | 0 | 45 passed, 모든 target 0 filtered out |
+| `cargo test -p workbench-server` (`-1` 101: 단위 시험이 옛 `issuer.entries` 참조 → 고침, `-2`) | 0 | 18 passed, 0 filtered out |
+| `cargo test -p workbench-core --features test-hooks` (`t027-final-core-2`) | 0 | 449 passed, 54 target 모두 0 filtered out |
+| `cargo test -p workbench-host` (`t027-final-host-2`) | 0 | 54 passed, 5 target |
+| `cargo test` agentic-workbench-server (`-2`) | 0 | 5 passed |
+| `cargo test` AW src-tauri (`-2`) | 0 | 87 passed |
+| clippy `-D warnings` core·protocol·server·host(`-1` 101: `build_registry` 인자 8개 → `benches`를 `server_control.benches()`로, `-2` 0)·AW server·AW src-tauri | 0 | clippy 수정 뒤 core·host·AW server·src-tauri 전체 재실행(위 `-2`) |
+| `pnpm --filter @yoophi/workbench-client generate` 재실행 후 `cmp` | 0 | OpenAPI·TS 동일(최신) |
+| `pnpm --filter @yoophi/workbench-client test` / `test:integration` / `check-types` | 0 | 73 passed / 7 passed / 0 |
+
+구현 요약:
+- **workbench-server**: `DesktopTokenIssuer`와 `EventTicketStore`가 폐기 주체 tombstone을 항목과 **같은 잠금** 아래에 둔다. `issue_window`는 잠금 안에서 tombstone을 확인하고, `retire_subject`는 tombstone을 세운 뒤 항목을 지운다. 폐기 주체의 표는 `take`에서도 무효다. `routes/events`는 `IssueError::Retired` → 401.
+- **core port `ServerHost`**(`ports/server_host.rs`): 창 토큰 발급·폐기·인스턴스 식별자·받아들인 호출 수. core는 `workbench-server`에 의존하지 않는다. host `HttpServerHost`(`http.rs`)가 구현하고, `assembly::assemble`이 HTTP 기동 뒤 `runtime.attach_server_host`로 넣는다.
+- **core handler**(`handlers/server/mod.rs`):
+  - `desktop.issueWindowToken`: 출처가 허용 목록 밖이거나 tombstone이면 `forbidden`, label·incarnation이 비었거나 `:`를 포함하면 `invalidArgument`(주체 문자열 위조 방지).
+  - `desktop.retireWindow`: 먼저 폐기(토큰+표 수 = `revokedTokens`)하고, `closeBench`면 그 주체가 연 작업대를 모두 닫는다(`BenchServices::close_opened_by`).
+  - `lease.acquire`/`renew`(모르면 `notFound`)/`release`.
+  - `bench.list`: 소유자는 전부, 그 밖은 자기 것만. run은 hub claim(`EventHub::runs_of_bench`) 중 엔진이 아직 그 작업대 소유로 두는 것만, 상태는 WorkGate Turn 예약으로 `busy`/`idle`.
+  - `server.status`.
+  - 새 command는 모두 `Scope::None`이다(토큰 비밀을 멱등 기록에 남기지 않음). 소유자 전용 여부는 기존 scope(`server:admin`/`server:read`)로 판정한다.
+- **소유자 우회**: `bench_service`의 `resolve`(→ `resolve_any`)·`admit`(주체 검사 없음)·`close`(연 주체로 `close_as`), `workbench_runtime`의 `owns_bench`·`authorize_bench_streams`. agent 전용 op는 run 대조(`ensure_run`)로 소유자도 `forbidden`.
+
+`server.status`에서 아직 파생하지 않는 필드(coordinator 지적 반영):
+- 0으로 채우지 않는다. 프로토콜을 바꿔 `activeWork.{orchestrationTasks, queuedTasks, pendingExchanges, pendingNotifications, pendingOperations}`, `unresolvedOperations`, `undeliverableExchanges`, `failedExchangeDeliveries`를 nullable로 했고, `null`로 싣는다. `idleSince`는 생략한다.
+- 새 필드 `notYetDerived: string[]`에 그 JSON 경로를 싣는다. OpenAPI·TS를 재생성했고 contracts §4를 갱신했다.
+- 파생되는 값: `state`(WorkGate), `instanceId`(host 소유자 신원; embedded·host 없음은 빈 문자열), `serverEpoch`, `busyRuns`, `acceptedCalls`(HTTP+MCP 분리 호출 + WorkGate Call 예약), `reservations`, `idleRuns`, `leases`.
+- 정지 판정: `ActiveWorkDto::blocks_stop()`은 `null`인 수를 활동 작업으로 본다(보수적). T041의 유휴·`default`·`wait` 정지는 이것을 써야 한다. 이 규칙이 아니면 정지 판단을 T041에 둔다.
+- 고정 시험:
+  - `owner_principal::server_status_reports_underived_fields_as_unknown_not_zero`(core): 목록의 필드는 `null`/부재이고 `notYetDerived`와 같으며, 알려진 수가 0이어도 `blocks_stop` 참.
+  - `window_tokens::server_status_carries_the_instance_id_and_marks_underived_fields`(host): 실제 instanceId, 창 토큰으로는 403.
+  - protocol 단위 시험 2개.
+  - 이 시험들은 구현 뒤에 더해서 red 기록이 없다.
+
+설계와 다른 점:
+- 임대 표는 plan의 host `lifecycle/lease.rs`가 아니라 core `application/lease.rs`(`ServerControl` 안)에 둔다. 임대가 `server.status`와 T041 유휴 판정(core WorkGate와 함께 읽음)에 쓰이고, core가 host에 의존할 수 없기 때문이다.
+- 폐기 결과 `revokedTokens`는 폐기한 토큰 수와 이벤트 표 수의 합이다.
+- `server.stop`은 등록하지 않았다(T041).
