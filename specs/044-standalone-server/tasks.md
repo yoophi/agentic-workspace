@@ -48,13 +48,13 @@
 
 **Goal**: 단일 writer, 안내 파일, 신원 증명, 복구. **Independent Test**: 같은 데이터 디렉터리 동시 시작, kill -9 뒤 복구, 권한.
 
-- [ ] T018 [US3] **프로세스 시험 먼저** `apps/agentic-workbench-server/tests/process.rs`: (i) 동시 `serve` 10개 → 데이터 여는 서버 1개, 나머지 종료 코드 3, (ii) `kill -9` 뒤 `ensure`가 5초 안에 준비, (iii) `server.json`·디렉터리 권한 0600·0700, (iv) 다른 데이터 디렉터리는 따로 뜸, (v) 모르는 저장 형식 데이터 디렉터리는 종료 코드 4·데이터 무변경. red 기록
-- [ ] T019 [P] [US3] `crates/workbench-host/src/lifecycle/lock.rs`: `owner.lock`·`startup.lock`(표준 파일 잠금), `workbench/server/` 0700 생성
-- [ ] T020 [P] [US3] `crates/workbench-host/src/lifecycle/descriptor.rs`: `server.json` 원자적 쓰기(0600 임시 → fsync → rename), 자기 인스턴스일 때만 삭제, 32바이트 소유자 토큰
-- [ ] T021 [US3] **신원 증명 시험 먼저** `crates/workbench-host/tests/identify.rs`: 남은 안내 파일의 포트에 가짜 서버를 띄우면 `ensure`가 소유자 토큰을 **보내지 않음**(가짜 서버가 받은 헤더 0건), 올바른 서버는 HMAC 증명 통과. red 기록
-- [ ] T022 [US3] `/v1/system/identify`(`crates/workbench-server/src/routes`, 인증 없음, `HMAC-SHA256(ownerToken, nonce ‖ instanceId)`)와 `ServerInfo`에 증명 함수. 소유자 resolver(`crates/workbench-host/src/assembly.rs`, 토큰 digest 비교 → `Owner` 주체). T021 green
-- [ ] T023 [US3] `crates/workbench-host/src/lifecycle/ensure.rs`: 시작 절차(contracts/server-lifecycle.md §3), 실행 파일 spawn은 `process_group(0)`·null stdio·로그 파일
-- [ ] T024 [US3] `apps/agentic-workbench-server/src/main.rs`: `serve`·`ensure`·`status`·`stop`(종료 코드 계약), 시작 복구 뒤 준비 → 안내 파일. T018 green 기록
+- [X] T018 [US3] **프로세스 시험 먼저** `apps/agentic-workbench-server/tests/process.rs`: (i) 동시 `serve` 10개 → 데이터 여는 서버 1개, 나머지 종료 코드 3, (ii) `kill -9` 뒤 `ensure`가 5초 안에 준비, (iii) `server.json`·디렉터리 권한 0600·0700, (iv) 다른 데이터 디렉터리는 따로 뜸, (v) 모르는 저장 형식 데이터 디렉터리는 종료 코드 4·데이터 무변경. red 기록
+- [X] T019 [P] [US3] `crates/workbench-host/src/lifecycle/lock.rs`: `owner.lock`·`startup.lock`(표준 파일 잠금), `workbench/server/` 0700 생성
+- [X] T020 [P] [US3] `crates/workbench-host/src/lifecycle/descriptor.rs`: `server.json` 원자적 쓰기(0600 임시 → fsync → rename), 자기 인스턴스일 때만 삭제, 32바이트 소유자 토큰
+- [X] T021 [US3] **신원 증명 시험 먼저** `crates/workbench-host/tests/identify.rs`: 남은 안내 파일의 포트에 가짜 서버를 띄우면 `ensure`가 소유자 토큰을 **보내지 않음**(가짜 서버가 받은 헤더 0건), 올바른 서버는 HMAC 증명 통과. red 기록
+- [X] T022 [US3] `/v1/system/identify`(`crates/workbench-server/src/routes`, 인증 없음, `HMAC-SHA256(ownerToken, nonce ‖ instanceId)`)와 `ServerInfo`에 증명 함수. 소유자 resolver(`crates/workbench-host/src/assembly.rs`, 토큰 digest 비교 → `Owner` 주체). T021 green
+- [X] T023 [US3] `crates/workbench-host/src/lifecycle/ensure.rs`: 시작 절차(contracts/server-lifecycle.md §3), 실행 파일 spawn은 `process_group(0)`·null stdio·로그 파일
+- [X] T024 [US3] `apps/agentic-workbench-server/src/main.rs`: `serve`·`ensure`·`status`·`stop`(종료 코드 계약), 시작 복구 뒤 준비 → 안내 파일. T018 green 기록
 
 ---
 

@@ -149,3 +149,61 @@
 2. 시험 host는 런타임·MCP만 host 조립(`assemble_core`)으로 만든다. HTTP router는 오늘처럼 시험 전용 설정(고정 창 토큰 `StaticResolver`, 빈 출처 정책, 작은 journal 한도)을 쓴다. TS 통합 시험이 고정 토큰에 기대기 때문이다.
 3. `McpLaunchDecorator`는 옛 Tauri decorator의 "작업대에 창이 있어야 함"(`MESSAGE_WINDOW_UNAVAILABLE`) 검사를 하지 않는다(R2 의도). embedded 모드에서 창을 닫으면 작업대가 닫히므로, 닫힌 창의 run.start는 작업대 조회에서 먼저 거절된다.
 4. 시험 엔진(`ScriptedRunEngine`, `test-hooks`)에 `start_requests`(받은 시작 요청 기록)를 더했다.
+
+## T018–T024 단일 writer·안내 파일·신원 증명·ensure·서버 앱 (US3)
+
+| 항목 | 명령 | 종료 코드 | 결과 |
+|---|---|---|---|
+| T021 red | `cargo test -p workbench-host --test identify` (`t021-red-1.log`) | 101 | 컴파일 red: `workbench_host::lifecycle` 없음, `HostOptions.owner` 없음 |
+| T018 red | `cargo test -p agentic-workbench-server --test process` (`t018-red-1.log`) | 101 | 컴파일 red: `workbench_host::lifecycle` 없음 |
+| T021 첫 실행 | 같음(`t021-green-1.log`) | 101 | 실제 서버 시험 통과, 가짜 서버 시험 실패(`Unreachable("Connection reset by peer")`). **원인은 시험 도구**: 가짜 서버가 요청을 한 번만 읽고 닫아, 헤더와 본문을 두 번에 나눠 쓴 클라이언트 쪽이 RST를 받았다. 가짜 서버가 요청 전체(헤더 + content-length 본문)를 읽게 고치고, 클라이언트도 요청을 한 번에 쓰게 했다 |
+| T021 green | 같음(`t021-green-2.log`) | 0 | 2 passed, 0 filtered out |
+| T021 변이 | 클라이언트의 증명 검증을 끔(`t021-mut-1.log`) | 101 | 가짜 서버 시험 실패(검증 없이 handshake로 넘어가 `Incompatible`, 변형 단정에서 잡힘). 원본 복원 |
+| T018 green | `cargo test -p agentic-workbench-server --test process` (`t018-green-1.log`, 클라이언트 한 번 쓰기 수정 전) | 0 | 5 passed, 0 filtered out |
+| T018 green(최종 코드) | `cargo test -p agentic-workbench-server` (`t024-final/server-app-2.log`) | 0 | 5 passed, 0 filtered out |
+
+T018 시험 내용(프로세스, 고정 sleep 없이 프로세스 종료 대기·상한 있는 polling):
+- (i) 같은 데이터 디렉터리에 `serve` 10개를 동시에 띄운다 → 9개가 종료 코드 3, 1개만 서빙한다. 안내 파일의 `pid`가 그 서버이고, 신원 증명·handshake·ready를 통과한다. `SIGTERM` → 종료 코드 0, 안내 파일 삭제.
+- (ii) `ensure` → `kill -9` → 남은 안내 파일 확인 → 다음 `ensure`가 5초 안에 새 인스턴스로 준비된다(측정값 단정). 표준 출력에 자격 증명 없음.
+- (iii) `workbench/server/` 0700, `server.json`·`owner.lock`·`startup.lock` 0600.
+- (iv) 다른 데이터 디렉터리는 서로 다른 인스턴스·끝점으로 뜬다.
+- (v) 저장 형식 99인 ledger → `serve` 종료 코드 4, ledger 바이트 불변, 안내 파일 없음.
+- 모든 시험은 자기가 띄운 PID만 `Cleanup` drop에서 끝낸다.
+
+최종 실행(`t024-final/`, 각 1회):
+
+| 게이트 | 종료 코드 | 결과 |
+|---|---|---|
+| `cargo test -p workbench-host --features test-hooks` | 0 | 48 passed |
+| `cargo test -p agentic-workbench-server` | 0 | 5 passed(clippy 수정 뒤 재실행 `server-app-2.log`) |
+| `cargo test -p workbench-server` | 0 | 18 passed |
+| `cargo test -p workbench-core --features test-hooks` | 0 | 441 passed |
+| `cargo test -p agentic-workbench` | 0 | 87 passed |
+| clippy `-D warnings`(host·server·core·server 앱·AW) | 101 → 0 | 첫 실행: 시험 코드 2곳(`while let`, 접을 수 있는 `if`). 고친 뒤 `clippy-2.log` 0. identify 시험 재실행 0(2 passed) |
+| `cargo fmt --check` | 0 | — |
+| `pnpm --filter @yoophi/workbench-client test:integration` | 0 | 7 passed |
+
+구현 요약:
+- **workbench-server**: `ServerInfo::instance_id`·`identity_proof`(기본 `None`)를 더했다. router는 인스턴스 식별자를 서버 정보에서 받는다. 인증 없는 `POST /v1/system/identify`: `{nonce}` 16–256자 → `{instanceId, proof}`, 증명 수단이 없으면 `notFound`.
+- **workbench-core**: `sqlite_ledger::read_schema_version`(읽기 전용).
+- **workbench-host `lifecycle`**:
+  - `lock`: `owner.lock`·`startup.lock`, 표준 파일 잠금, 0700·0600.
+  - `descriptor`: 원자적 쓰기, 자기 인스턴스일 때만 삭제, 자격 증명 뺀 공개 JSON.
+  - `identity`: 인스턴스·32바이트 자격 증명, RFC 2104 HMAC-SHA256(RFC 4231 벡터 시험), Origin 없는 소유자 자격 증명만 받는 `OwnerResolver`.
+  - `client`: 루프백 HTTP/1.1, **신원 증명 → handshake·ready**.
+  - `ensure`: contracts §3, `process_group(0)`, null stdio, stderr → `server.log`, 종료 회수 스레드.
+  - `server`: `serve`.
+- **HostOptions.owner / HttpAssembly.owner**: 소유자 resolver와 서버 정보(인스턴스·증명)를 넣는다. AW embedded는 `None`(T028).
+- **서버 앱**: `serve`·`ensure`·`status`·`stop`.
+
+중간 구현·미완료(완료로 세지 않음):
+- `stop` 명령: "not implemented yet"과 종료 코드 1을 돌려준다. T041·T044에서 구현한다.
+- `serve`의 신호 처리: 열린 작업대를 닫고(run 취소) 받아들인 호출을 drain한 뒤 끝낸다(오늘 조립의 종료 순서). 상태 기계·비우기 분류·정지 세 방식·SIGTERM = force(30초 상한)는 T041.
+- `--idle-timeout`·`--log` 인자는 아직 받지 않는다. 서버 로그는 `ensure`가 서버 stderr를 `server.log`로 돌린다. 유휴는 T041.
+- `ensure`의 서버 상태 확인은 `/health/ready`까지다. `draining`·`stopping` 상태를 기다리는 부분은 `server.status`(T026)·상태 기계(T041) 뒤에 넣는다.
+
+설계와 다른 점:
+- 신원 증명 입력은 `nonce ‖ "\n" ‖ instanceId`다(구분자를 둬 이어 붙임의 모호함을 없앴다).
+- 소유자 자격 증명은 uuid v4 두 개의 바이트(32바이트) hex다(새 난수 crate를 더하지 않았다). v4는 버전 비트를 빼면 244비트 엔트로피다.
+- 저장 형식 거절은 조립 전에 읽기 전용으로 검사한다(데이터 무변경을 보장). 다만 `workbench/server/`(잠금·로그 디렉터리)는 소유 잠금을 위해 먼저 만든다. 도메인 파일·ledger는 건드리지 않는다.
+- 소유자 resolver는 Origin이 있는 요청을 받지 않는다(WebView가 자격 증명을 얻어도 쓰지 못하게). contracts에 명시돼 있지 않던 규칙이다.

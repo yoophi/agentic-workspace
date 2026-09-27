@@ -4,4 +4,5 @@
 pub mod assembly;
 pub mod http;
 pub mod launch;
+pub mod lifecycle;
 pub mod mcp;

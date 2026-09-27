@@ -15,7 +15,8 @@ workbench-server = { path = "../workbench-server" }
 acp-agent-core = { path = "../acp-agent-core" }
 anyhow = "1.0"
 axum = "0.7"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time", "net", "io-util", "signal"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

@@ -110,6 +110,10 @@ dependencies = [
 name = "agentic-workbench-server"
 version = "0.1.0"
 dependencies = [
+ "libc",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
  "workbench-host",
 ]
 
@@ -5646,6 +5650,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "chrono",
  "futures-util",
  "serde",
  "serde_json",

@@ -15,6 +15,7 @@ use workbench_protocol::Workbench;
 use crate::{
     http::{AwServerInfo, HttpAssembly, WorkbenchHttpState, drain_for_exit},
     launch::McpLaunchDecorator,
+    lifecycle::identity::OwnerIdentity,
     mcp::McpServerState,
 };
 
@@ -33,6 +34,8 @@ pub struct HostOptions {
     pub spawner: tokio::runtime::Handle,
     pub drain_warn_after: Duration,
     pub http: HttpStart,
+    /// 독립 서버의 소유자 신원(044). embedded 모드는 T028에서 넣는다.
+    pub owner: Option<OwnerIdentity>,
 }
 
 impl HostOptions {
@@ -49,6 +52,7 @@ impl HostOptions {
             spawner,
             drain_warn_after: crate::http::default_drain_warn_after(),
             http: HttpStart::Start,
+            owner: None,
         }
     }
 }
@@ -69,6 +73,7 @@ pub fn assemble(options: HostOptions) -> Result<HostAssembly> {
         spawner,
         drain_warn_after,
         http,
+        owner,
     } = options;
     let (runtime, mcp) = assemble_core(data_dir, adapters, &spawner)?;
     let started = match http {
@@ -82,6 +87,7 @@ pub fn assemble(options: HostOptions) -> Result<HostAssembly> {
                     epoch: runtime.epoch().to_owned(),
                 },
                 drain_warn_after,
+                owner,
             },
             &spawner,
         ),

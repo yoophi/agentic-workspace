@@ -23,7 +23,10 @@ use workbench_server::{
     tickets::EventTicketStore,
 };
 
-use crate::mcp::capability_registry::CapabilityRegistry;
+use crate::{
+    lifecycle::identity::{OwnerIdentity, OwnerResolver},
+    mcp::capability_registry::CapabilityRegistry,
+};
 
 pub const WEBVIEW_ORIGINS: [&str; 3] = [
     "http://localhost:1420",
@@ -108,6 +111,37 @@ pub struct HttpAssembly {
     pub mcp_registry: CapabilityRegistry,
     pub server_info: AwServerInfo,
     pub drain_warn_after: Duration,
+    /// 독립 서버의 소유자 신원(044 R5·R6): 소유자 자격 증명 resolver, 인스턴스 식별자, `/v1/system/identify` 증명.
+    /// embedded·시험 조립은 `None`.
+    pub owner: Option<OwnerIdentity>,
+}
+
+/// 소유자 신원을 더한 서버 정보(인스턴스 식별자·신원 증명).
+struct HostServerInfo {
+    base: AwServerInfo,
+    owner: Option<OwnerIdentity>,
+}
+
+impl ServerInfo for HostServerInfo {
+    fn server_version(&self) -> String {
+        self.base.server_version()
+    }
+    fn server_epoch(&self) -> String {
+        self.base.server_epoch()
+    }
+    fn storage_schema_version(&self) -> i64 {
+        self.base.storage_schema_version()
+    }
+    fn instance_id(&self) -> Option<String> {
+        self.owner
+            .as_ref()
+            .map(|owner| owner.instance_id().to_owned())
+    }
+    fn identity_proof(&self, nonce: &str, instance_id: &str) -> Option<String> {
+        self.owner
+            .as_ref()
+            .map(|owner| owner.proof(nonce, instance_id))
+    }
 }
 
 impl WorkbenchHttpState {
@@ -123,13 +157,20 @@ impl WorkbenchHttpState {
             .context("failed to read the Workbench HTTP address")?;
         let issuer = Arc::new(DesktopTokenIssuer::default());
         let tickets = Arc::new(EventTicketStore::default());
-        let resolver = ChainResolver::new(vec![
+        let mut resolvers: Vec<Arc<dyn CredentialResolver>> = vec![
             issuer.clone() as Arc<dyn CredentialResolver>,
             Arc::new(McpCapabilityResolver::new(assembly.mcp_registry)),
-        ]);
+        ];
+        if let Some(owner) = &assembly.owner {
+            resolvers.push(Arc::new(OwnerResolver::new(owner)));
+        }
+        let resolver = ChainResolver::new(resolvers);
         let config = ServerConfig {
             resolver: Arc::new(resolver),
-            server_info: Arc::new(assembly.server_info),
+            server_info: Arc::new(HostServerInfo {
+                base: assembly.server_info,
+                owner: assembly.owner,
+            }),
             origins: origin_policy(),
             access_log: Arc::new(StderrAccessLog),
             exposure: ExposurePolicy::network_default(),
@@ -451,6 +492,7 @@ mod tests {
                     epoch: "e".into(),
                 },
                 drain_warn_after: Duration::from_millis(20),
+                owner: None,
             },
             &tokio::runtime::Handle::current(),
         )
@@ -598,6 +640,7 @@ mod tests {
                         epoch: "e".into(),
                     },
                     drain_warn_after: Duration::from_millis(20),
+                    owner: None,
                 },
                 &tokio::runtime::Handle::current(),
             )
