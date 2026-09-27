@@ -30,6 +30,8 @@ function deps(overrides: Partial<BootstrapDeps> = {}): BootstrapDeps & { logs: s
     declareNetworkDelivery: vi.fn(async () => undefined),
     withdrawNetworkDelivery: vi.fn(async () => undefined),
     windowLabel: () => "session-1",
+    // 043 호환 경로 시험은 embedded 모드(앱 안 서버)다. 외부 서버 모드 시험은 아래 묶음에서 따로 넣는다(044 T032).
+    getMode: vi.fn(async () => "embedded" as const),
     fetch: vi.fn(async () => handshake()) as unknown as typeof fetch,
     log: (line: string) => logs.push(line),
     ...overrides,
@@ -128,3 +130,50 @@ describe("bootstrapTransport", () => {
   });
 });
 
+// 044 T032(contracts/desktop-client.md §4): 외부 서버 모드는 호환 경로가 없다. 연결 정보·handshake 중 하나라도 실패하면 창은
+// 연결 실패 상태로 부팅한다(이유 표시 + 다시 시도). 호환 transport로 가지 않고, 전달 선언 철회(호환 전용)도 하지 않는다.
+describe("bootstrapTransport in external server mode", () => {
+  it("uses the network path exactly like the embedded path when the server is reachable", async () => {
+    setTransport(compatTransport);
+    const d = deps({ getMode: vi.fn(async () => "external" as const) });
+    const result = await bootstrapTransport(d);
+    expect(result.kind).toBe("http");
+    expect(getTransport().kind).toBe("http");
+    result.connection?.close();
+  });
+
+  it.each([
+    ["connection info", { getConnection: vi.fn(async () => { throw "Workbench server executable was not found"; }) }],
+    ["handshake", { fetch: vi.fn(async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch }],
+  ] as const)("fails the boot without the compat fallback when the %s fails", async (_label, override) => {
+    setTransport(compatTransport);
+    const before = getTransport();
+    const d = deps({ getMode: vi.fn(async () => "external" as const), ...(override as Partial<BootstrapDeps>) });
+    const result = await bootstrapTransport(d);
+    expect(result.kind).toBe("failed");
+    expect(result.reason).toBeTruthy();
+    expect(getTransport()).toBe(before);
+    expect(d.withdrawNetworkDelivery).not.toHaveBeenCalled();
+    expect(d.logs).toEqual([`[workbench-client] connection failed: ${result.reason}`]);
+  });
+
+  it("reports the server's reason text verbatim", async () => {
+    const d = deps({
+      getMode: vi.fn(async () => "external" as const),
+      getConnection: vi.fn(async () => { throw "Workbench server did not become ready within 20s"; }),
+    });
+    const result = await bootstrapTransport(d);
+    expect(result.reason).toBe("Workbench server did not become ready within 20s");
+  });
+
+  it("treats an undeterminable mode as external (the default), never as compat", async () => {
+    setTransport(compatTransport);
+    const d = deps({
+      getMode: vi.fn(async () => { throw "command not found"; }),
+      getConnection: vi.fn(async () => { throw "unreachable"; }),
+    });
+    const result = await bootstrapTransport(d);
+    expect(result.kind).toBe("failed");
+    expect(d.withdrawNetworkDelivery).not.toHaveBeenCalled();
+  });
+});

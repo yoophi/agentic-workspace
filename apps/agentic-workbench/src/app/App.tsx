@@ -1,7 +1,7 @@
 import { listen } from "@/shared/api/transport";
+import { applyWindowTitle } from "@/shared/api/window-title";
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { SettingsIcon } from "lucide-react";
 import {
   Route,
@@ -465,7 +465,10 @@ function ProjectWorktreeSessionRoute({
       return;
     }
 
-    void getCurrentWindow().setTitle(windowTitle);
+    // 044: 데스크톱 표현 command로 창 제목과 네이티브 Window 메뉴를 함께 맞춘다(외부 서버는 창에 넣지 않는다).
+    applyWindowTitle(windowTitle).catch((error) => {
+      console.error("Failed to apply the window title", error);
+    });
   }, [standalone, windowTitle]);
 
   if (project && worktree) {

@@ -32,6 +32,8 @@ describe("App settings entrypoints", () => {
     expect(APP_SOURCE).toContain('listen<McpWindowTitleEvent>(MCP_WINDOW_TITLE_EVENT');
     expect(COMPAT_TRANSPORT_SOURCE).toContain(`"${MCP_WINDOW_TITLE_EVENT}": { tauri: true, fallback: "${MCP_WINDOW_TITLE_FALLBACK_EVENT}" }`);
     expect(APP_SOURCE).toContain("normalizeAgentWindowTitle(title)");
-    expect(APP_SOURCE).toContain("getCurrentWindow().setTitle(windowTitle)");
+    // 044 T029·T032: 제목 적용은 데스크톱 표현 command(`apply_window_title`)가 한다 — 창 제목과 네이티브 Window 메뉴를 함께 맞춘다.
+    expect(APP_SOURCE).toContain("applyWindowTitle(windowTitle)");
+    expect(APP_SOURCE).not.toContain("getCurrentWindow().setTitle(");
   });
 });

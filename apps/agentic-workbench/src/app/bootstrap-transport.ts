@@ -1,6 +1,9 @@
 // 창 부팅 때 경로를 한 번 정한다(043 T026, research R3·R4, contracts §3): 연결 정보 → handshake → 네트워크 전달 선언이 모두
 // 성공하면 네트워크 경로, 하나라도 실패하면 처음부터 호환 경로(진단 기록 `[workbench-client] using compat path: <이유>`).
 // 이후 전환은 없다 — 네트워크 창은 끊겨도 재연결만 하고, 호출·이벤트가 한 경로를 쓴다.
+// 044 T032: 호환 경로는 embedded 모드(앱 안 서버)에만 있다. 외부 서버 모드(기본)는 실패하면 연결 실패 상태로 부팅한다
+// (`[workbench-client] connection failed: <이유>`). 모드는 데스크톱 command `get_workbench_mode`로 한 번 묻는다 — 물을 수 없으면
+// 기본값인 외부 서버 모드로 본다(호환 경로로 새지 않음).
 import { invoke as invokeDesktop } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -24,6 +27,8 @@ export interface BootstrapDeps {
   /** 호환 경로로 부팅할 때: 새로고침 전 페이지가 남긴 선언을 거둬 앱 내부 삽입 전달을 되살린다. */
   withdrawNetworkDelivery: () => Promise<void>;
   windowLabel: () => string;
+  /** 데스크톱의 Workbench 모드(044). */
+  getMode: () => Promise<WorkbenchMode>;
   fetch?: typeof fetch;
   log?: (line: string) => void;
   /** 이벤트 소켓(시험은 가짜 소켓을 넣는다). */
@@ -33,9 +38,13 @@ export interface BootstrapDeps {
   onEpochChanged?: (epoch: string) => void;
 }
 
+export type WorkbenchMode = "external" | "embedded";
+
 export interface BootstrapResult {
-  kind: "http" | "compat";
+  kind: "http" | "compat" | "failed";
   connection?: Connection;
+  /** `failed`일 때 사용자에게 보여 줄 이유. */
+  reason?: string;
 }
 
 export const desktopBootstrapDeps: BootstrapDeps = {
@@ -44,7 +53,16 @@ export const desktopBootstrapDeps: BootstrapDeps = {
   declareNetworkDelivery: (incarnation) => invokeDesktop<void>("declare_network_delivery", { incarnation }),
   withdrawNetworkDelivery: () => invokeDesktop<void>("withdraw_network_delivery"),
   windowLabel: () => getCurrentWindow().label,
+  getMode: () => invokeDesktop<WorkbenchMode>("get_workbench_mode"),
 };
+
+async function resolveMode(deps: BootstrapDeps): Promise<WorkbenchMode> {
+  try {
+    return (await deps.getMode()) === "embedded" ? "embedded" : "external";
+  } catch {
+    return "external";
+  }
+}
 
 function reason(error: unknown): string {
   if (error instanceof Error) {
@@ -55,6 +73,7 @@ function reason(error: unknown): string {
 
 export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapDeps): Promise<BootstrapResult> {
   const log = deps.log ?? ((line: string) => console.info(line));
+  const mode = await resolveMode(deps);
   const connection = createConnection({ fetchConnection: deps.getConnection, fetch: deps.fetch });
   try {
     await connection.start();
@@ -65,6 +84,12 @@ export async function bootstrapTransport(deps: BootstrapDeps = desktopBootstrapD
     await deps.declareNetworkDelivery(incarnation);
   } catch (error) {
     connection.close();
+    if (mode === "external") {
+      const why = reason(error);
+      log(`[workbench-client] connection failed: ${why}`);
+      exposeDebugProbe(undefined, undefined);
+      return { kind: "failed", reason: why };
+    }
     setTransport(compatTransport);
     log(`[workbench-client] using compat path: ${reason(error)}`);
     try {
