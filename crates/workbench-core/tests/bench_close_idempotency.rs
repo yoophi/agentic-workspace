@@ -30,7 +30,11 @@ async fn a_call_that_finishes_after_its_bench_closed_leaves_no_idempotency_recor
     h.engine
         .wait_applied(|label| label == "prompt:r1:late", Duration::from_secs(10))
         .await;
-    assert_eq!(h.rt.runtime.close_all_benches().await, 1, "the bench closes while the call is in flight");
+    assert_eq!(
+        h.rt.runtime.close_all_benches().await,
+        1,
+        "the bench closes while the call is in flight"
+    );
 
     gate.add_permits(1);
     pending
@@ -44,5 +48,9 @@ async fn a_call_that_finishes_after_its_bench_closed_leaves_no_idempotency_recor
         .await
         .expect_err("the closed bench's record must not come back");
     assert_eq!(retry.code, FaultCode::NotFound, "{retry:?}");
-    assert_eq!(h.engine.prompts.load(Ordering::SeqCst), 1, "no second execution");
+    assert_eq!(
+        h.engine.prompts.load(Ordering::SeqCst),
+        1,
+        "no second execution"
+    );
 }

@@ -110,3 +110,10 @@
 - `AcpRunEngine::start`는 run id가 없으면 엔진에서 uuid를 정한다(초기 순서 예약을 run으로 세기 위해. 유스케이스의 `build_run`과 같은 형식).
 - `active_work()`는 관문 예약 파생분만 돌려준다(`GateActiveWork`). 저장소·ledger 파생 수(`orchestrationTasks`·`queuedTasks`·`pendingExchanges`·`pendingOperations`)는 `server.status` 조립(T026 이후)이 채운다 — 이 범위에서는 미완.
 - 가짜 agent 선택 인자 추가: `--end-turn-gate`, `--rpc-error-text`, `--respond-gate`/`--respond-gate-text`.
+
+## fork 결과 확인 (T007–T013, 메인 세션)
+
+- 기동 토큰 시험: 필터 없는 `cargo test -p workbench-core --test work_gate`(`t011-token-green-3-nofilter.log`)에서 7개가 모두 실행돼 통과했다(0 filtered out). 이 로그를 직접 확인했다. 필터 때문에 단위 시험 3개만 돈 `t011-token-green-1.log`는 근거로 쓰지 않는다.
+- `exchange_delivery_acp` 실패: 결정적 재현(`race-repro-red-1.log`, 변경을 stash한 기준에서 `race-repro-base-red-1.log`) 두 로그 모두 `exchange_delivery_acp.rs:62`에서 실패했다. 수정 뒤 `race-fix-green-1.log`는 2 passed다. 전체 `t013-wc-all-3.log`는 441 passed, 0 failed다. 모두 직접 확인했다.
+- **남은 기존 제품 결함(추적)**: 앞 prompt의 완료 로그 직후(응답 처리 중) 보낸 `run.sendPrompt`는 세션 in-flight 잠금을 한 번만 시도해 거절되고, Error 이벤트만 남기고 버려진다. `SendPromptUseCase`도 같다. 044 이전부터 있던 동작이다. 교환 전달(K)은 엔진 대기열 경로라 이 경쟁을 피한다(R7·R14). 일반 `sendPrompt`의 이 경쟁은 이 증분에서 고치지 않는다. 구현 리뷰에서 다시 보고, 후속 추적 항목으로 둔다.
+- `cargo fmt`: fork 커밋에 남은 서식 차이 3개 파일(`bench_close_idempotency.rs`, `operations/mod.rs`, `principal.rs`)을 정리했다.

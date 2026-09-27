@@ -352,7 +352,11 @@ mod tests {
         for scope in Scope::ALL {
             // 044: 소유자 전용 scope는 데스크톱·창·시험 주체에게 없다(조회 scope인 `server:read` 포함).
             let owner_only = matches!(scope, Scope::ServerRead | Scope::ServerAdmin);
-            assert_eq!(readonly.has_scope(scope), scope.is_read() && !owner_only, "{scope}");
+            assert_eq!(
+                readonly.has_scope(scope),
+                scope.is_read() && !owner_only,
+                "{scope}"
+            );
             assert_eq!(desktop.has_scope(scope), !owner_only, "{scope}");
             assert_eq!(serde_json::to_value(scope).unwrap(), scope.as_str());
         }
