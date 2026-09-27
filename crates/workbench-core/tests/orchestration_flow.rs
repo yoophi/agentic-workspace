@@ -431,3 +431,189 @@ async fn retention_evicted_run_replays_as_evicted_for_any_bench() {
         .unwrap_err();
     assert_eq!(kept.code, FaultCode::Forbidden);
 }
+
+async fn start_main(h: &BenchHarness, bench: &str, run: &str) -> Result<Value, WorkbenchFault> {
+    h.call(
+        &desktop(),
+        OperationId::RunStart,
+        json!({ "benchId": bench, "panelId": "main-agent-run",
+                "request": { "goal": "g", "agentId": "codex", "runId": run } }),
+    )
+    .await
+}
+
+/// 화면은 Main run을 띄우기 **전에** 계획한 run id로 먼저 묶는다(`onBeforeRunStart`). 흔적 없는 계획 id는 묶을 때
+/// 이 작업대 소유로 claim되고, 이어서 같은 작업대가 그 id로 Main run을 띄울 수 있다(research R18 계획 id).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn main_runs_are_prebound_with_a_planned_id_then_launched() {
+    let h = BenchHarness::new(RunScript::default());
+    let a = h.open().await;
+
+    // 작업 영역이 없으면 Main run을 띄울 수 없다(오늘 문구).
+    let none = start_main(&h, &a, "main-1").await.unwrap_err();
+    assert_eq!(
+        (none.code, none.message.as_str()),
+        (
+            FaultCode::PreconditionFailed,
+            "Main Coordinator workspace is unavailable."
+        )
+    );
+    let session = bootstrap(&h, &a, &h.dir, None).await.unwrap();
+    let unbound = start_main(&h, &a, "main-1").await.unwrap_err();
+    assert_eq!(
+        unbound.message,
+        "Main Coordinator generation must be bound before launch."
+    );
+
+    let bound = bind_main(&h, &a, "main-1", session["revision"].as_u64().unwrap())
+        .await
+        .unwrap();
+    assert!(bound["activeCoordinatorGenerationId"].is_string());
+    let mismatch = start_main(&h, &a, "other").await.unwrap_err();
+    assert_eq!(
+        mismatch.message,
+        "Main Coordinator generation does not match the run being launched."
+    );
+    start_main(&h, &a, "main-1").await.unwrap();
+
+    // 교대도 계획 id로 먼저 한다.
+    let handed = h
+        .call(
+            &desktop(),
+            OperationId::OrchestrationHandoffCoordinator,
+            json!({ "benchId": a, "request": {
+                "requestId": "handoff-1", "successorRunId": "main-2", "summary": "next",
+                "confirmed": true, "expectedRevision": get(&h, &a).await["revision"] } }),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        handed["activeCoordinatorGenerationId"],
+        bound["activeCoordinatorGenerationId"]
+    );
+    start_main(&h, &a, "main-2").await.unwrap();
+}
+
+/// 계획 id는 claim한 작업대의 것이다: 다른 작업대는 그 id로 run을 띄우거나 묶을 수 없고, 다른 작업대가 쓰는
+/// id(살아 있거나 끝난 run)를 계획 id로 가로챌 수도 없다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn planned_run_ids_belong_to_the_claiming_bench() {
+    let h = BenchHarness::new(RunScript::default());
+    let a = h.open().await;
+    let b = h.open().await;
+    let dir_b = extra_dir(&h, "wt-b");
+    let session_a = bootstrap(&h, &a, &h.dir, None).await.unwrap();
+    let session_b = bootstrap(&h, &b, &dir_b, None).await.unwrap();
+    bind_main(&h, &a, "planned-a", session_a["revision"].as_u64().unwrap())
+        .await
+        .unwrap();
+
+    let started = h.start(&b, "planned-a").await.unwrap_err();
+    assert_eq!(started.message, "duplicate run id: planned-a");
+    let rebound = bind_main(&h, &b, "planned-a", session_b["revision"].as_u64().unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(rebound.code, FaultCode::Forbidden);
+
+    // b가 띄운 run(살아 있음)과 끝난 run은 a의 계획 id가 될 수 없다.
+    h.start(&b, "live-b").await.unwrap();
+    let revision = get(&h, &a).await["revision"].as_u64().unwrap();
+    let taken = h
+        .call(
+            &desktop(),
+            OperationId::OrchestrationHandoffCoordinator,
+            json!({ "benchId": a, "request": {
+                "requestId": "handoff-x", "successorRunId": "live-b", "summary": "x",
+                "confirmed": true, "expectedRevision": revision } }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        (taken.code, taken.message.as_str()),
+        (FaultCode::Forbidden, "run is owned by another bench.")
+    );
+    h.engine
+        .finish("live-b", &h.rt.runtime.benches().run_sink(&b));
+    let ended = h
+        .call(
+            &desktop(),
+            OperationId::OrchestrationHandoffCoordinator,
+            json!({ "benchId": a, "request": {
+                "requestId": "handoff-y", "successorRunId": "live-b", "summary": "y",
+                "confirmed": true, "expectedRevision": revision } }),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(ended.code, FaultCode::Forbidden);
+}
+
+/// 사용자 점검: 작업대 A가 계획 id를 claim한 직후(저장 전)에 작업대 B가 같은 id로 run을 띄우는 경합. 매 회차 정확히
+/// 한쪽만 성공하고, hub 소유 기록은 이긴 쪽이며 발행이 그 기록을 뒤집지 않는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn prebind_and_foreign_start_race_leaves_one_consistent_owner() {
+    let h = Arc::new(BenchHarness::new(RunScript::default()));
+    for round in 0..60 {
+        let (a, b) = (h.open().await, h.open().await);
+        let dir = extra_dir(&h, &format!("race-{round}"));
+        let session = bootstrap(&h, &a, &dir, None).await.unwrap();
+        let run = format!("planned-{round}");
+        let bind = {
+            let (h, a, run) = (Arc::clone(&h), a.clone(), run.clone());
+            let revision = session["revision"].as_u64().unwrap();
+            tokio::spawn(async move { bind_main(&h, &a, &run, revision).await })
+        };
+        let start = {
+            let (h, b, run) = (Arc::clone(&h), b.clone(), run.clone());
+            tokio::spawn(async move { h.start(&b, &run).await })
+        };
+        let (bound, started) = (bind.await.unwrap(), start.await.unwrap());
+        assert!(
+            bound.is_ok() != started.is_ok(),
+            "round {round}: exactly one wins: bind={bound:?} start={started:?}"
+        );
+        let owner = h.rt.runtime.events_hub().run_owner(&run);
+        let winner = if bound.is_ok() { &a } else { &b };
+        assert_eq!(owner.as_deref(), Some(winner.as_str()), "round {round}");
+        h.close(&a).await.unwrap();
+        h.close(&b).await.unwrap();
+    }
+}
+
+/// 실패한 묶기는 새로 만든 계획 id claim을 되돌린다 — 그 id를 다른 작업대가 쓸 수 있다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_prebind_releases_its_claim() {
+    let h = BenchHarness::new(RunScript::default());
+    let a = h.open().await;
+    let session = bootstrap(&h, &a, &h.dir, None).await.unwrap();
+    let stale = session["revision"].as_u64().unwrap() + 7;
+    let failed = bind_main(&h, &a, "planned-x", stale).await.unwrap_err();
+    assert_eq!(failed.code, FaultCode::Conflict);
+    assert_eq!(h.rt.runtime.events_hub().run_owner("planned-x"), None);
+    let b = h.open().await;
+    h.start(&b, "planned-x").await.unwrap();
+}
+
+/// 같은 작업대의 정상 흐름: 계획 id로 묶고 띄우다 엔진이 거절해도(동시 실행 한도) claim은 남아, 자리가 나면 같은
+/// id로 다시 띄울 수 있다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn prebound_main_start_can_be_retried_after_an_engine_failure() {
+    let h = BenchHarness::new(RunScript {
+        max_runs: Some(1),
+        ..RunScript::default()
+    });
+    let a = h.open().await;
+    h.start(&a, "filler").await.unwrap();
+    let session = bootstrap(&h, &a, &h.dir, None).await.unwrap();
+    bind_main(&h, &a, "main-r", session["revision"].as_u64().unwrap())
+        .await
+        .unwrap();
+    let limited = start_main(&h, &a, "main-r").await.unwrap_err();
+    assert_eq!(limited.code, FaultCode::RateLimited);
+    assert_eq!(
+        h.rt.runtime.events_hub().run_owner("main-r").as_deref(),
+        Some(a.as_str())
+    );
+    h.engine
+        .finish("filler", &h.rt.runtime.benches().run_sink(&a));
+    start_main(&h, &a, "main-r").await.unwrap();
+}

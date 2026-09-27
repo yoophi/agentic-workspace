@@ -54,11 +54,19 @@ impl OrchestrationEventSink for DeliveryOrchestrationSink {
             ORCHESTRATION_WORKSPACE_UPDATED_V1,
             payload.clone(),
             false,
-            &mut |_| {
+            &mut |envelope| {
                 if let Some(desktop) = desktop {
+                    // 창 payload: 오늘 `OrchestrationEvent` + 스트림 위치(run 전달과 같은 필드).
+                    let mut delivered = payload.clone();
+                    if let Some(object) = delivered.as_object_mut() {
+                        object.insert("sequence".into(), envelope.sequence.into());
+                        object.insert("epoch".into(), envelope.epoch.clone().into());
+                        object.insert("streamId".into(), envelope.stream_id.clone().into());
+                        object.insert("eventId".into(), envelope.event_id.clone().into());
+                    }
                     desktop.deliver(DesktopDelivery::Orchestration {
                         bench_id: bench_id.to_owned(),
-                        payload: payload.clone(),
+                        payload: delivered,
                     });
                 }
             },

@@ -22,7 +22,7 @@
 | `orchestration.bootstrap` | command | `orchestration:write` | `{benchId, worktreePath, resumeWorkspaceId?}` → `OrchestrationSessionDto`. 작업대에 이미 묶인 작업 영역이 있으면 그것(다른 worktree면 `"The window is already bound to another worktree."`), `resumeWorkspaceId`가 있으면 그 복구 가능 작업 영역을 묶고(이미 묶였거나 worktree가 다르면 `"The workspace cannot be bound to this window."`), 없으면 새 작업 영역을 만든다 — 같은 worktree라도 작업대마다 따로(오늘 창마다 따로와 같음) |
 | `orchestration.get` | query | `orchestration:read` | `{benchId}` → `OrchestrationSessionDto \| null` |
 | `orchestration.listRecoverable` | query | `orchestration:read` | `{benchId, worktreePath}` → `[OrchestrationSessionDto]`(묶이지 않은 것) |
-| `orchestration.bindCoordinator` | command | `orchestration:write` | `{benchId, request: BindMainRunRequest}` → Session. 활성 연결의 `request.runId`는 이 작업대 소유의 살아 있는 run이어야 함(아니면 `forbidden` `"run is owned by another bench."`, 상태 불변 — research R18) |
+| `orchestration.bindCoordinator` | command | `orchestration:write` | `{benchId, request: BindMainRunRequest}` → Session. 활성 연결의 `request.runId`는 이 작업대 소유의 살아 있는 run이거나 흔적 없는 계획 id여야 함(계획 id는 이 작업대 소유로 claim — 화면은 Main run을 띄우기 전에 묶는다). 그 외 `forbidden` `"run is owned by another bench."`, 상태 불변(research R18) |
 | `orchestration.delegateGoal` | command | `orchestration:write` | `{benchId, request: DelegateGoalRequest}` → `DelegateGoalOutcome`(coordinator run에 프롬프트 전송 포함) |
 | `orchestration.adoptManualChild` | command | `orchestration:write` | `{benchId, panelId, title}` → Session |
 | `orchestration.listTasks` | query | `orchestration:read` | `{benchId, generationId}` → `[OrchestrationTaskDto]` |
@@ -31,7 +31,7 @@
 | `orchestration.sendChildCommand` | command | `orchestration:write` | `{benchId, input: DeliverTaskCommandInput}` → `TaskCommandDto` |
 | `orchestration.respondInput` | command | `orchestration:write` | `{benchId, request: TaskActionRequest}` → TaskCommand |
 | `orchestration.cancelTask` · `retryTask` · `reassignTask` | command | `orchestration:write` | `{benchId, request: TaskActionRequest}` → Session |
-| `orchestration.handoffCoordinator` | command | `orchestration:write` | `{benchId, request: CoordinatorHandoffRequest}` → Session. `request.successorRunId`에 bindCoordinator와 같은 소유 검사 |
+| `orchestration.handoffCoordinator` | command | `orchestration:write` | `{benchId, request: CoordinatorHandoffRequest}` → Session. `request.successorRunId`에 bindCoordinator와 같은 소유 검사(살아 있는 자기 run 또는 계획 id claim) |
 | `orchestration.dispatchPrompt` | command | `orchestration:write` | `{benchId, request: DispatchPromptRequest}` → `PromptDispatchDto` |
 | `orchestration.recover` | command | `orchestration:write` | `{benchId}` → Session. **이미 이 작업대에 묶인** 작업 영역을 재조정한다(살아 있는 run 반영·scheduler 재구성·중단된 명령/알림 복구·대기 알림 백그라운드 전달). 묶이지 않았으면 평문 `"Orchestration workspace is not bootstrapped."`. 복구 가능한 작업 영역을 묶는 것은 `bootstrap`의 `resumeWorkspaceId`다(오늘과 같음) |
 | `run.replay` | query | `run:read` | `{benchId, runId, afterSequence}` → `RunReplayDto`. 허용: run 스트림의 소유 작업대 기록(첫 발행 때 hub가 기록, journal과 같은 수명)이 호출자 작업대이거나, run이 호출자 작업대에 지금 묶인 작업 영역의 노드 run(노드·세대·과제 시도 run id — 모두 삽입 시점에 출처 검증됨, research R18)이다. 그 외 `forbidden` `"run is owned by another bench."`. 보관 한도로 제거된 run은 소유 검사 없이 오늘 Evicted 형태(`terminal: true, gapDetected: true`), 모르는 run은 Missing 형태(`gapDetected: afterSequence > 0`) |
@@ -48,7 +48,7 @@ coordinator(현재 세대): `orchestration.createChildTask`·`assignChildTask`·
 
 ## `run.start` 보강 (041)
 
-- 끝난 run의 id는 다시 쓸 수 없다: hub에 그 run의 발행 이력·제거 표식이 있거나 어떤 orchestration 작업 영역(묶임과 무관)이 노드·세대로 기록 중이면 `conflict` `"duplicate run id: <id>"`(오늘 살아 있는 중복과 같은 문구). 같은 멱등성 키의 재시도는 저장된 결과를 돌려준다(research R18).
+- 끝난 run의 id는 다시 쓸 수 없다: hub에 그 run의 발행 이력·제거 표식이 있거나 어떤 orchestration 작업 영역(묶임과 무관)이 노드·세대로 기록 중이면 `conflict` `"duplicate run id: <id>"`(오늘 살아 있는 중복과 같은 문구). 예외는 이 작업대가 묶기 전에 claim한 계획 id다. 다른 작업대가 claim한 id도 엔진을 부르기 전에 같은 `conflict`로 거절한다. 같은 멱등성 키의 재시도는 저장된 결과를 돌려준다(research R18).
 - Main 패널(`panelId = main-agent-run`) run은 작업대에 묶인 작업 영역의 활성 세대 run과 같아야 한다 — 아니면 `preconditionFailed`, 오늘 문구(`"Main Coordinator workspace is unavailable."` · `"Main Coordinator generation must be bound before launch."` · `"Active Main Coordinator generation is unavailable."` · `"Main Coordinator generation does not match the run being launched."`).
 
 ## 이벤트

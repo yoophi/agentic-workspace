@@ -253,14 +253,6 @@ impl RunEngine for AcpRunEngine {
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String> {
         self.registry.cancel_runs_owned_by(owner).await
     }
-
-    fn acp_registry(&self) -> Option<AppState> {
-        Some(self.registry.clone())
-    }
-
-    fn acp_session_store(&self) -> Option<Arc<JsonAcpSessionStore>> {
-        Some(self.session_store.clone())
-    }
 }
 
 fn unknown_or_finished(run_id: &str) -> RunEngineError {

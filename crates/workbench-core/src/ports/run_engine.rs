@@ -4,17 +4,12 @@
 //!
 //! run의 소유자는 작업대 id 문자열이다(acp-agent-core의 소유자는 원래 불투명한 문자열, ADR core 0004).
 
-use std::{fmt, sync::Arc};
+use std::fmt;
 
-use acp_agent_core::{
-    domain::run::{AgentRun, AgentRunRequest, PermissionMode},
-    infrastructure::agent_session_registry::AppState,
-};
+use acp_agent_core::domain::run::{AgentRun, AgentRunRequest, PermissionMode};
 use async_trait::async_trait;
 
-use crate::infrastructure::{
-    fs::acp_session_store::JsonAcpSessionStore, run::workbench_run_sink::WorkbenchRunSink,
-};
+use crate::infrastructure::run::workbench_run_sink::WorkbenchRunSink;
 
 /// 엔진 오류의 분류. fault 코드로 옮겨지고, `message`는 오늘 문자열 그대로다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -124,14 +119,4 @@ pub trait RunEngine: Send + Sync {
 
     /// 소유자의 run을 모두 취소하고 취소한 run id를 돌려준다.
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String>;
-
-    /// 041 전 과도기: AW orchestration이 같은 run 기계를 쓰기 위한 접근자. 041에서 제거한다.
-    fn acp_registry(&self) -> Option<AppState> {
-        None
-    }
-
-    /// 041 전 과도기: 같은 세션 저장소 인스턴스. 041에서 제거한다.
-    fn acp_session_store(&self) -> Option<Arc<JsonAcpSessionStore>> {
-        None
-    }
 }

@@ -71,9 +71,7 @@ pub trait RunLaunchDecorator: Send + Sync {
         context: &LaunchContext,
     ) -> Result<(), String>;
 
-    /// 041: 재시도·재배정으로 교체된 자식 run의 MCP 토큰을 폐기한다(토큰 수명 관리, 권한 근거는 아님).
+    /// 041: 재시도·재배정으로 교체된 자식 run, 교대로 물러난 coordinator run의 MCP 토큰을 폐기한다(토큰 수명
+    /// 관리일 뿐 권한 근거는 아니다 — 역할은 서버 상태로 판정한다).
     fn revoke_run(&self, _run_id: &str) {}
-
-    /// 041: coordinator 교대로 끝난 세대의 MCP 토큰을 폐기한다.
-    fn revoke_generation(&self, _workspace_id: &str, _generation_id: &str) {}
 }

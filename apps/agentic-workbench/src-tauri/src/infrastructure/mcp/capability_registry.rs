@@ -1,82 +1,24 @@
-//! Run-scoped MCP capability registry.
+//! Run-scoped MCP capability registry. 041: 토큰은 **run 하나**만 가리킨다(research R7) — orchestration 역할은
+//! 토큰 주장이 아니라 서버 상태(`orchestration.getAgentRole`)로 정한다. 재시도·재배정·교대로 물러난 run의 토큰은
+//! core가 `RunLaunchDecorator::revoke_run`으로 폐기한다(토큰 수명 관리, 권한 근거는 아니다).
 
 use std::{
     collections::HashMap,
     sync::{Arc, RwLock},
 };
 
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::domain::agent_orchestration::{
-    MAIN_AGENT_NODE_ID, OrchestrationError, OrchestrationErrorCode,
-};
-
-#[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub enum CapabilityActorKind {
-    Coordinator,
-    Child,
-    LegacyRun,
-}
-
-#[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// 토큰이 인증한 주체: MCP 실행 토큰이 묶인 run.
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct CapabilityPrincipal {
-    pub actor_kind: CapabilityActorKind,
-    pub workspace_id: Option<String>,
-    pub window_label: Option<String>,
-    pub node_id: Option<String>,
     pub run_id: String,
-    pub task_id: Option<String>,
-    pub generation_id: Option<String>,
 }
 
 impl CapabilityPrincipal {
-    pub fn legacy_run(run_id: impl Into<String>) -> Self {
+    pub fn run(run_id: impl Into<String>) -> Self {
         Self {
-            actor_kind: CapabilityActorKind::LegacyRun,
-            workspace_id: None,
-            window_label: None,
-            node_id: None,
             run_id: run_id.into(),
-            task_id: None,
-            generation_id: None,
-        }
-    }
-
-    pub fn coordinator(
-        workspace_id: impl Into<String>,
-        window_label: impl Into<String>,
-        run_id: impl Into<String>,
-        generation_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            actor_kind: CapabilityActorKind::Coordinator,
-            workspace_id: Some(workspace_id.into()),
-            window_label: Some(window_label.into()),
-            node_id: Some(MAIN_AGENT_NODE_ID.into()),
-            run_id: run_id.into(),
-            task_id: None,
-            generation_id: Some(generation_id.into()),
-        }
-    }
-
-    pub fn child(
-        workspace_id: impl Into<String>,
-        window_label: impl Into<String>,
-        node_id: impl Into<String>,
-        run_id: impl Into<String>,
-        task_id: impl Into<String>,
-    ) -> Self {
-        Self {
-            actor_kind: CapabilityActorKind::Child,
-            workspace_id: Some(workspace_id.into()),
-            window_label: Some(window_label.into()),
-            node_id: Some(node_id.into()),
-            run_id: run_id.into(),
-            task_id: Some(task_id.into()),
-            generation_id: None,
         }
     }
 }
@@ -86,75 +28,34 @@ pub struct CapabilityRegistry {
     entries: Arc<RwLock<HashMap<String, CapabilityPrincipal>>>,
 }
 
-impl CapabilityRegistry {
-    pub fn issue(&self, principal: CapabilityPrincipal) -> Result<String, OrchestrationError> {
-        let token = format!("awcap_{}", Uuid::new_v4().simple());
-        self.entries
-            .write()
-            .map_err(|_| registry_error())?
-            .insert(token.clone(), principal);
-        Ok(token)
-    }
-
-    pub fn resolve(&self, token: &str) -> Result<CapabilityPrincipal, OrchestrationError> {
-        self.entries
-            .read()
-            .map_err(|_| registry_error())?
-            .get(token)
-            .cloned()
-            .ok_or_else(|| {
-                OrchestrationError::new(
-                    OrchestrationErrorCode::Unauthorized,
-                    "MCP capability is invalid or expired.",
-                )
-            })
-    }
-
-    pub fn revoke_run(&self, run_id: &str) -> Result<(), OrchestrationError> {
-        self.entries
-            .write()
-            .map_err(|_| registry_error())?
-            .retain(|_, principal| principal.run_id != run_id);
-        Ok(())
-    }
-
-    pub fn bind_run(
-        &self,
-        run_id: &str,
-        principal: CapabilityPrincipal,
-    ) -> Result<usize, OrchestrationError> {
-        if principal.run_id != run_id {
-            return Err(OrchestrationError::new(
-                OrchestrationErrorCode::Unauthorized,
-                "Capability principal run does not match the requested run.",
-            ));
-        }
-        let mut entries = self.entries.write().map_err(|_| registry_error())?;
-        let mut updated = 0;
-        for current in entries.values_mut() {
-            if current.run_id == run_id {
-                *current = principal.clone();
-                updated += 1;
-            }
-        }
-        Ok(updated)
-    }
-
-    pub fn revoke_generation(&self, generation_id: &str) -> Result<(), OrchestrationError> {
-        self.entries
-            .write()
-            .map_err(|_| registry_error())?
-            .retain(|_, principal| principal.generation_id.as_deref() != Some(generation_id));
-        Ok(())
-    }
+fn write(
+    registry: &CapabilityRegistry,
+) -> std::sync::RwLockWriteGuard<'_, HashMap<String, CapabilityPrincipal>> {
+    registry
+        .entries
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn registry_error() -> OrchestrationError {
-    OrchestrationError::new(
-        OrchestrationErrorCode::WorkerUnavailable,
-        "MCP capability registry is unavailable.",
-    )
-    .retryable()
+impl CapabilityRegistry {
+    pub fn issue(&self, run_id: &str) -> String {
+        let token = format!("awcap_{}", Uuid::new_v4().simple());
+        write(self).insert(token.clone(), CapabilityPrincipal::run(run_id));
+        token
+    }
+
+    /// 모르는·폐기된 토큰이면 `None`(호출자가 "MCP capability is invalid or expired."로 답한다).
+    pub fn resolve(&self, token: &str) -> Option<CapabilityPrincipal> {
+        self.entries
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(token)
+            .cloned()
+    }
+
+    pub fn revoke_run(&self, run_id: &str) {
+        write(self).retain(|_, principal| principal.run_id != run_id);
+    }
 }
 
 #[cfg(test)]
@@ -162,41 +63,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn issues_run_scoped_capabilities_and_derives_the_principal() {
+    fn tokens_resolve_to_their_run_only() {
         let registry = CapabilityRegistry::default();
-        let principal =
-            CapabilityPrincipal::child("workspace-1", "window-1", "child-1", "run-1", "task-1");
-        let token = registry.issue(principal.clone()).unwrap();
-
+        let token = registry.issue("run-1");
         assert_ne!(token, "run-1");
-        assert_eq!(registry.resolve(&token).unwrap(), principal);
-        assert!(registry.resolve("run-1").is_err());
+        assert_eq!(
+            registry.resolve(&token),
+            Some(CapabilityPrincipal::run("run-1"))
+        );
+        assert!(registry.resolve("run-1").is_none());
     }
 
     #[test]
-    fn revokes_stale_run_and_generation_capabilities() {
+    fn revoking_a_run_drops_only_its_tokens() {
         let registry = CapabilityRegistry::default();
-        let old = registry
-            .issue(CapabilityPrincipal::coordinator(
-                "workspace-1",
-                "window-1",
-                "run-old",
-                "generation-old",
-            ))
-            .unwrap();
-        let current = registry
-            .issue(CapabilityPrincipal::coordinator(
-                "workspace-1",
-                "window-1",
-                "run-current",
-                "generation-current",
-            ))
-            .unwrap();
-
-        registry.revoke_generation("generation-old").unwrap();
-        assert!(registry.resolve(&old).is_err());
-        assert!(registry.resolve(&current).is_ok());
-        registry.revoke_run("run-current").unwrap();
-        assert!(registry.resolve(&current).is_err());
+        let old = registry.issue("run-old");
+        let current = registry.issue("run-current");
+        registry.revoke_run("run-old");
+        assert!(registry.resolve(&old).is_none());
+        assert!(registry.resolve(&current).is_some());
     }
 }

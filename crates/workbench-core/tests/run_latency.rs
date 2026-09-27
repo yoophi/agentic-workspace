@@ -27,7 +27,7 @@ async fn send_prompt_through_workbench_adds_under_5ms_at_p95() {
 
     let mut direct = Vec::with_capacity(ITERATIONS);
     for _ in 0..ITERATIONS {
-        let sink = h.rt.runtime.run_sink(&bench);
+        let sink = h.rt.runtime.benches().run_sink(&bench);
         let started = Instant::now();
         engine.send_prompt("r1", "p".into(), sink).await.unwrap();
         direct.push(started.elapsed());

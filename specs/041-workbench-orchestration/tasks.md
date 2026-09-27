@@ -81,9 +81,9 @@
 - [X] T026 [US1] core `application/handlers/orchestration/desktop.rs`: 데스크톱 17 handler(`epoch_handler`, 작업대 주체 검사, `spawn_blocking` 저장소 호출, fault 매핑 `details.orchestrationError`), `bootstrap`·`recover`는 입장권 + binding mutex(R3), `delegateGoal`은 coordinator run에 엔진 `send_prompt`
 - [X] T027 [US1] core `application/handlers/run/mod.rs`: `run.replay`(R17 허용 조건 1·2, Evicted·Missing 형태)
 - [X] T028 [US1] core 작업대 닫기 hook(`application/orchestration/mod.rs` 등록): binding mutex 안에서 표 제거 + release `update`(오늘 `release_window` 규칙) → 마지막 이벤트 → 스트림 제거
-- [ ] T029 [US1] AW `inbound/tauri_commands.rs`·`inbound/workbench_compat.rs`: orchestration command 18개를 compat로(`DesktopBenches` ensure/조회, `Workbench.call`, 결과에 `boundWindowLabel` 재구성·`eventStreamId` 제거, 오류 JSON 재구성, 작업대 없는 창은 오늘 결과), `replay`는 항상 `RunReplay`
-- [ ] T030 [US1] AW `lib.rs`: 창 `Destroyed`의 `release_window` 제거(작업대 닫기가 처리), `OrchestrationService` 조립 제거, `list_recoverable`의 사라진 창 정리 제거
-- [ ] T031 [US1] AW orchestration 서비스·도메인·저장소·명령 서비스 테스트를 core로 이동(기대값 유지, 창 label 입력 → 작업대 id), AW 통합 `tests/orchestration_delegation.rs`를 core 흐름 테스트로 이전
+- [X] T029 [US1] AW `inbound/tauri_commands.rs`·`inbound/workbench_compat.rs`: orchestration command 18개를 compat로(`DesktopBenches` ensure/조회, `Workbench.call`, 결과에 `boundWindowLabel` 재구성·`eventStreamId` 제거, 오류 JSON 재구성, 작업대 없는 창은 오늘 결과), `replay`는 항상 `RunReplay`
+- [X] T030 [US1] AW `lib.rs`: 창 `Destroyed`의 `release_window` 제거(작업대 닫기가 처리), `OrchestrationService` 조립 제거, `list_recoverable`의 사라진 창 정리 제거
+- [X] T031 [US1] AW orchestration 서비스·도메인·저장소·명령 서비스 테스트를 core로 이동(기대값 유지, 창 label 입력 → 작업대 id), AW 통합 `tests/orchestration_delegation.rs`를 core 흐름 테스트로 이전
 - [ ] T032 [US1] 게이트(fmt·clippy·test·describe/contracts 재생성)·커밋 `feat(aw): migrate orchestration workspaces behind benches with a whole-store write boundary (041 US1)`
 
 **Checkpoint**: 화면 동작이 작업대 기준, 창 label 없는 서비스.
@@ -108,8 +108,8 @@
 - [X] T037 [P] [US2] AW `application/orchestration_scheduler.rs` → core `application/orchestration/scheduler.rs`(런타임당 1개, 용량 `RuntimeAdapters.orchestration`), 테스트 이동
 - [X] T038 [P] [US2] AW `application/coordinator_notification_dispatcher.rs` → core `application/orchestration/notification_dispatcher.rs`(3단계, lock 없이 `notify_coordinator`), 테스트 이동(`processed_collection_wins_over_late_delivery_completion` 유지)
 - [X] T039 [US2] core `application/handlers/orchestration/agent.rs`: agent 16 + `getAgentRole` handler(주체 run 일치, 역할 판정, run id는 principal에서, `waitChildTasks`는 lock 없이 `read` + revision watch, 최대 30초), 도구 오류 `details.toolError`
-- [ ] T040 [US2] AW `infrastructure/mcp/orchestration_tool.rs`: 16개 도구 → `Workbench.call`(agent principal), 결과·오류 오늘 형태, 도구 쪽 runId 검사 유지. `infrastructure/mcp/mod.rs` `tools/list`는 `getAgentRole`로
-- [ ] T041 [US2] AW `infrastructure/mcp/capability_registry.rs`: token → run id(역할 주장 제거), 재시도·재배정·교대 시 폐기 유지. `tauri_desktop_bridge.rs` decorator: `resolve_agent_run_launch_principal` 제거, run 묶인 토큰만. `RuntimeAdapters.orchestration`에 환경 변수 주입(`lib.rs`)
+- [X] T040 [US2] AW `infrastructure/mcp/orchestration_tool.rs`: 16개 도구 → `Workbench.call`(agent principal), 결과·오류 오늘 형태, 도구 쪽 runId 검사 유지. `infrastructure/mcp/mod.rs` `tools/list`는 `getAgentRole`로
+- [X] T041 [US2] AW `infrastructure/mcp/capability_registry.rs`: token → run id(역할 주장 제거), 재시도·재배정·교대 시 폐기 유지. `tauri_desktop_bridge.rs` decorator: `resolve_agent_run_launch_principal` 제거, run 묶인 토큰만. `RuntimeAdapters.orchestration`에 환경 변수 주입(`lib.rs`)
 - [ ] T042 [US2] AW MCP·worker 테스트 이동/갱신, 게이트·커밋 `feat(aw): route MCP orchestration tools through agent operations with server-derived roles (041 US2)`
 
 ---
@@ -139,7 +139,7 @@
 
 - [ ] T049 [US4] core worktree 감시: 기동 시 지문 등록(`EngineAgentWorker`), `WorkbenchRunSink` 종료 처리에서 조건부 `update`(`(taskId, attempt, runId)`)를 `spawn_blocking`으로(lock 대기 없음)
 - [ ] T050 [US4] core 복구 흐름(`orchestration.recover`): `reconcile_runtime`·`scheduler.reconcile`·`reconcile_pending`·`recover_interrupted`·백그라운드 `dispatch_pending`
-- [ ] T051 [US4] 과도기 통로 제거(R14): core `WorkbenchRuntime::run_sink`·`admit` 공개 제거(테스트 전용이면 `cfg(test)`/support로), `run_engine().acp_registry()`·`acp_session_store()` 공개 제거, AW `RunTerminalHook`(비면 포트 삭제), `desktop_benches::label_for`의 서버 방향 사용 제거, AW `acp_agent_worker_adapter.rs` orchestration 부분·`McpServerState` scheduler 삭제, projector 삭제
+- [X] T051 [US4] 과도기 통로 제거(R14): core `WorkbenchRuntime::run_sink`·`admit` 공개 제거(테스트 전용이면 `cfg(test)`/support로), `run_engine().acp_registry()`·`acp_session_store()` 공개 제거, AW `RunTerminalHook`(비면 포트 삭제), `desktop_benches::label_for`의 서버 방향 사용 제거, AW `acp_agent_worker_adapter.rs` orchestration 부분·`McpServerState` scheduler 삭제, projector 삭제
 - [ ] T052 [US4] 경계 grep(quickstart §2) 0건 확인, 게이트·커밋 `feat(aw): run orchestration post-processing in the server and remove 040 interim paths (041 US4)`
 
 ---
@@ -209,4 +209,7 @@ T019 fixture 생성 ∥ T020 출처 음성 테스트 ∥ T021 liveness ④⑤ �
   - (T016·T045) run 소유 작업대는 hub `run_owners`에 둔다: `run.start`·자식 기동이 엔진 호출 전에 claim(실패 시 되돌림), 발행하는 sink가 확정(`assign_run_owner`), 보관 한도로 스트림이 제거될 때 함께 지운다. research R17의 "엔진에 소유가 등록된 run만 발행 전 대기"는 seam `events`가 동기라 엔진 async 조회 대신 이 claim으로 구현했다. 구독 권한은 주체 기준(스트림에 작업대 문맥이 없음), `run.replay`는 입력 작업대 기준(더 좁음). 이벤트 fixture 실행기는 언급된 run을 principal 작업대 소유로 등록하고(`unownedRuns`·`foreignRuns`로 예외), `stream-kind-not-available` → `orchestration-unknown-binding-not-found`, 새 `run-unowned-not-found`·`run-other-bench-forbidden`.
   - (T027 보완, 사용자 점검) `run.replay`의 Evicted 판정은 응답 모양(`terminal && gapDetected && 빈 이벤트`) 추론 대신 hub 실제 제거 표식(`is_evicted`)으로 바꿨다. 테스트: 다른 작업대의 기동 중(소유 등록·미발행) run 재생·구독 거절, 보관 한도로 실제 제거된 run은 어느 작업대든 Evicted 형태. 정직한 기록: 옛 추론식으로 되돌려도 두 테스트는 통과한다 — 현재 hub에서는 미발행 run이 Missing(`terminal: false`)이라 모양이 겹치지 않기 때문이다. 이 변경은 두 상태가 우연히 구별되는 것에 기대지 않게 하는 구조적 수정이다.
   - (T043·T044) `tests/orchestration_stream.rs`: 묶임 스트림 순번(재생 포함), 다른 주체·agent 거절·모르는 묶임 notFound, 이벤트마다 창 전달 1회, 작업대 닫기 → `Gap(evicted)`·닫힌 뒤 전달 0, 재개 → 새 `eventStreamId`, run 스트림 소유·복구 작업 영역 허용. 발행은 저장 뒤·binding mutex 밖이라 그 사이 묶임이 바뀌었으면 버린다(새 묶임은 `orchestration.get`으로 따라잡음). 작업대 닫기 release에는 마지막 이벤트를 두지 않는다 — 묶임이 풀리는 commit에서 스트림이 제거되어 구독자는 `Gap(evicted)`를 받는다(T028 설명의 "마지막 이벤트"는 두지 않음).
+  - (R18 정정, 구현 중 발견 + 사용자 점검) 설계의 "살아 있는 run만 연결"은 실제 화면 흐름(`worktree-agent-run-area.tsx:220–247`·`:686–690` — Main run을 띄우기 **전에** 계획 id로 `bindMainCoordinatorRun(state: active)`, 교대도 시작 전)과 맞지 않아 Main을 띄울 수 없었다. 흔적 없는 계획 id는 연결 때 hub 소유로 claim하고, `run.start`·자식 기동은 claim에 실패하면 엔진 호출 전에 거절, 발행 sink는 claim을 뒤집지 않으며(`assign_run_owner` 제거), 실패한 연결은 새 claim을 되돌린다. C1(외부 run 기록 주입 방지)은 그대로 — 다른 작업대의 살아 있는·끝난 run, 다른 작업 영역 기록, 다른 작업대 claim은 거절. research R18·contracts·data-model·spec FR-016·quickstart 동기화.
+  - (T029–T031·T040·T041·T051) AW: orchestration command 18개는 `Workbench.call` 호환 어댑터(창 → 작업대 `ensure`, 작업대 없는 창의 `get`→`null`·`collectReports`→`[]`·`replay`→Missing 형태, 오류는 `details.orchestrationError` JSON, 결과 `boundWindowLabel` 재구성·`eventStreamId` 제거). MCP 도구 16개는 agent operation(`{runId, arguments}`)을 부르고 `tools/list`는 `getAgentRole`로 고른다. capability registry는 토큰 → run id만(교대는 core가 이전 coordinator run을 `revoke_run` — `revoke_generation` 포트 제거). decorator는 run 토큰만 발급. 삭제: AW 워커 어댑터·이벤트 sink·projector·재노출 shim·`resolve_agent_run_launch_principal`·창 `Destroyed`의 `release_bench`·`RunTerminalHook` 구현·`McpServerState` scheduler, core `WorkbenchRuntime::run_sink`·`admit` 공개 접근자와 `RunEngine::acp_registry`·`acp_session_store`. AW 통합 테스트는 서비스 흐름을 core `tests/orchestration_delegation.rs`로, 실제 ACP smoke를 AW `tests/orchestration_smoke_agent.rs`로 나눴다. 창 전달 payload에 `sequence`·`epoch`·`streamId`·`eventId`를 더했다(contracts tauri-compat).
+  - (게이트, 2026-09-27) `cargo fmt --all -- --check` status=0, `cargo test --no-fail-fast -p workbench-core -p workbench-protocol -p agentic-workbench` status=0(498 passed/0 failed), `cargo clippy … --all-targets -D warnings` status=0.
 

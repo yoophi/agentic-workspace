@@ -418,23 +418,14 @@ impl EventHub {
         }
     }
 
-    /// run의 소유 작업대를 기록한다(041 research R17). 이미 있으면 그대로 둔다 — 첫 소유자가 이긴다(끝난 run id
-    /// 재사용은 `run.start`가 거절하므로 두 작업대가 같은 run을 claim하는 일은 없다).
-    pub fn claim_run(&self, run_id: &str, bench_id: &str) {
+    /// run의 소유 작업대를 기록한다(041 research R17). 이미 있으면 그대로 둔다 — 첫 소유자가 이긴다. 기록 뒤 소유자가
+    /// 이 작업대인지 돌려준다(묶기 전 claim이 경합에서 졌는지 판단한다).
+    pub fn claim_run(&self, run_id: &str, bench_id: &str) -> bool {
         lock(&self.retention)
             .run_owners
             .entry(StreamKind::Run.stream_id(run_id))
-            .or_insert_with(|| bench_id.to_owned());
-    }
-
-    /// 발행하는 쪽(엔진이 run에 준 소유 작업대의 sink)이 소유를 확정한다. 같은 id로 두 작업대가 동시에 기동해
-    /// 먼저 claim한 쪽이 엔진에서 지면, 이긴 쪽의 첫 발행이 소유를 바로잡는다.
-    pub fn assign_run_owner(&self, run_id: &str, bench_id: &str) {
-        let stream_id = StreamKind::Run.stream_id(run_id);
-        let mut retention = lock(&self.retention);
-        if retention.run_owners.get(&stream_id).map(String::as_str) != Some(bench_id) {
-            retention.run_owners.insert(stream_id, bench_id.to_owned());
-        }
+            .or_insert_with(|| bench_id.to_owned())
+            == bench_id
     }
 
     /// 기동 실패로 run이 생기지 않았으면 claim을 되돌린다(발행 이력이 있으면 두는데, 이력이 있는 run은 이미 소유가

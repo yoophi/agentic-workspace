@@ -57,7 +57,7 @@ stateDiagram-v2
 
 ### run 소속 (research R18)
 
-작업 영역의 노드·세대·과제 시도에 있는 run id는 모두 출처가 검증된 것이다 — 데스크톱 입력은 대상 작업대 소유의 살아 있는 run, agent 입력은 principal run, 자식은 서버가 발급. 한 run은 작업 영역 하나에만 속한다 — 끝난 run id는 `run.start`가 재사용을 거절하고(`duplicate run id: <id>`), 작업대 하나에 작업 영역 하나이므로 활성 연결의 run이 두 작업 영역에 들어가는 경로가 없다(research R18).
+작업 영역의 노드·세대·과제 시도에 있는 run id는 모두 출처가 검증된 것이다 — 데스크톱 입력은 대상 작업대 소유의 살아 있는 run 또는 이 작업대가 claim한 계획 id(화면은 Main run을 띄우기 전에 묶는다), agent 입력은 principal run, 자식은 서버가 발급. 한 run은 작업 영역 하나에만 속한다 — 끝난 run id는 `run.start`가 재사용을 거절하고(`duplicate run id: <id>`), 작업대 하나에 작업 영역 하나이므로 활성 연결의 run이 두 작업 영역에 들어가는 경로가 없다(research R18).
 
 ### agent 역할 (메모리 도출, research R7)
 

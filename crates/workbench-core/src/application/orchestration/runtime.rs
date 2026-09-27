@@ -232,13 +232,43 @@ impl OrchestrationRuntime {
             .ok_or_else(|| OrchestrationFailure::Plain(missing.into()))
     }
 
-    async fn require_owned_run(&self, bench_id: &str, run_id: &str) -> OrchestrationResult<()> {
+    /// research R18: 활성 연결에 넣을 수 있는 run — 이 작업대가 소유한 살아 있는 run, 또는 **아직 어디에도 흔적이
+    /// 없는 계획 run id**(화면은 Main run을 띄우기 전에 계획한 id로 먼저 묶는다: `onBeforeRunStart`). 계획 id는 여기서
+    /// 이 작업대 소유로 claim하므로, 다른 작업대는 그 id로 run을 띄우거나 묶을 수 없다(`run.start` 재사용 검사).
+    /// 돌려주는 값: 이 호출이 계획 id를 **새로** claim했는가(묶기가 실패하면 그 claim만 되돌린다).
+    async fn require_bindable_run(
+        &self,
+        bench_id: &str,
+        run_id: &str,
+    ) -> OrchestrationResult<bool> {
+        let forbidden = || OrchestrationFailure::Forbidden(MESSAGE_RUN_OWNED_BY_OTHER_BENCH.into());
         if self.benches.engine.active_owner_of(run_id).await.as_deref() == Some(bench_id) {
-            Ok(())
-        } else {
-            Err(OrchestrationFailure::Forbidden(
-                MESSAGE_RUN_OWNED_BY_OTHER_BENCH.into(),
-            ))
+            return Ok(false);
+        }
+        let hub = &self.benches.hub;
+        if self.benches.engine.owner_of(run_id).await.is_some() || hub.has_run_history(run_id) {
+            return Err(forbidden());
+        }
+        let existing = hub.run_owner(run_id);
+        if existing.as_deref().is_some_and(|owner| owner != bench_id) {
+            return Err(forbidden());
+        }
+        let recorded_elsewhere = self.repository.snapshot().is_ok_and(|sessions| {
+            sessions.iter().any(|session| {
+                session.bound_bench_id.as_deref() != Some(bench_id)
+                    && session_records_run(session, run_id)
+            })
+        });
+        if recorded_elsewhere || !hub.claim_run(run_id, bench_id) {
+            return Err(forbidden());
+        }
+        Ok(existing.is_none())
+    }
+
+    /// 묶기 실패 뒤: 이 호출이 새로 만든 계획 id claim을 되돌린다(발행 이력이 생겼거나 작업 영역이 기록했으면 둔다).
+    fn release_failed_prebind(&self, bench_id: &str, run_id: &str, newly_claimed: bool) {
+        if newly_claimed && !self.references_run(run_id) {
+            self.benches.hub.release_run_claim(run_id, bench_id);
         }
     }
 
@@ -360,12 +390,20 @@ impl OrchestrationRuntime {
     ) -> OrchestrationResult<OrchestrationSession> {
         // research R18: 활성 연결은 이 작업대가 소유한 살아 있는 run만 넣는다. 작업대 하나에 작업 영역 하나이므로
         // 한 run이 두 작업 영역에 들어가는 일도 없다.
-        if request.state == MainRunBindingState::Active {
-            self.require_owned_run(bench_id, &request.run_id).await?;
+        let newly_claimed = if request.state == MainRunBindingState::Active {
+            self.require_bindable_run(bench_id, &request.run_id).await?
+        } else {
+            false
+        };
+        let run_id = request.run_id.clone();
+        let bench = bench_id.to_owned();
+        let result = self
+            .blocking(move |service| service.bind_main_run(&bench, request))
+            .await;
+        if result.is_err() {
+            self.release_failed_prebind(bench_id, &run_id, newly_claimed);
         }
-        let bench_id = bench_id.to_owned();
-        self.blocking(move |service| service.bind_main_run(&bench_id, request))
-            .await
+        result
     }
 
     pub async fn delegate_goal(
@@ -651,21 +689,32 @@ impl OrchestrationRuntime {
         bench_id: &str,
         request: CoordinatorHandoffRequest,
     ) -> OrchestrationResult<OrchestrationSession> {
-        // research R18: 후계 run도 이 작업대가 소유한 살아 있는 run이어야 한다.
-        self.require_owned_run(bench_id, &request.successor_run_id)
+        // research R18: 후계 run도 이 작업대가 소유한 살아 있는 run이거나 흔적 없는 계획 id여야 한다(화면은 후계를 띄우기 전에 교대한다).
+        let previous_run = self.get(bench_id).await?.and_then(|session| {
+            let generation_id = session.active_coordinator_generation_id.as_ref()?;
+            session
+                .generations
+                .iter()
+                .find(|generation| &generation.id == generation_id)
+                .map(|generation| generation.run_id.clone())
+        });
+        let newly_claimed = self
+            .require_bindable_run(bench_id, &request.successor_run_id)
             .await?;
-        let previous_generation = self
-            .get(bench_id)
-            .await?
-            .and_then(|session| session.active_coordinator_generation_id);
+        let successor = request.successor_run_id.clone();
         let bench = bench_id.to_owned();
-        let session = self
+        let session = match self
             .blocking(move |service| service.handoff_coordinator(&bench, request))
-            .await?;
-        if let (Some(generation_id), Some(decorator)) =
-            (previous_generation, &self.benches.launch_decorator)
+            .await
         {
-            decorator.revoke_generation(&session.id, &generation_id);
+            Ok(session) => session,
+            Err(error) => {
+                self.release_failed_prebind(bench_id, &successor, newly_claimed);
+                return Err(error);
+            }
+        };
+        if let (Some(run_id), Some(decorator)) = (previous_run, &self.benches.launch_decorator) {
+            decorator.revoke_run(&run_id);
         }
         Ok(session)
     }

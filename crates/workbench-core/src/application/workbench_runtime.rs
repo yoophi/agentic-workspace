@@ -30,7 +30,7 @@ use crate::{
     domain::project_error::ProjectError,
     infrastructure::event_hub::{EventHub, EventHubLimits},
     infrastructure::{
-        bench::in_memory_bench_registry::{BenchAdmission, BenchLimits, InMemoryBenchRegistry},
+        bench::in_memory_bench_registry::{BenchLimits, InMemoryBenchRegistry},
         fs::{
             acp_session_store::JsonAcpSessionStore,
             orchestration_store::JsonOrchestrationRepository,
@@ -39,7 +39,7 @@ use crate::{
             bound_repository::BoundOrchestrationRepository,
             delivery_sink::DeliveryOrchestrationSink, worktree_guard::WorktreeGuards,
         },
-        run::{acp_run_engine::AcpRunEngine, workbench_run_sink::WorkbenchRunSink},
+        run::acp_run_engine::AcpRunEngine,
     },
     infrastructure::{
         data_paths::DataPaths,
@@ -341,20 +341,9 @@ impl WorkbenchRuntime {
         &self.benches
     }
 
-    /// run 기계(040). AW 과도기 orchestration은 `acp_registry()`·`acp_session_store()`로 같은 기계를 빌린다.
+    /// run 기계(040). 서버 안(handler·orchestration)과 테스트만 쓴다 — 041에서 AW 과도기 접근자는 없앴다.
     pub fn run_engine(&self) -> &Arc<dyn RunEngine> {
         &self.benches.engine
-    }
-
-    /// 041 전 과도기: AW orchestration이 자식 run을 작업대 단위 sink로 발행하게 한다. 041에서 제거한다.
-    pub fn run_sink(&self, bench_id: &str) -> WorkbenchRunSink {
-        self.benches.run_sink(bench_id)
-    }
-
-    /// 041 전 과도기: AW orchestration이 run을 띄우는 동안 작업대 입장권을 잡는다(research R1·R12). 041에서 제거한다.
-    pub fn admit(&self, bench_id: &str) -> Result<BenchAdmission, WorkbenchFault> {
-        self.benches
-            .admit(&workbench_protocol::RequestId::random(), None, bench_id)
     }
 
     /// 작업대에 속한 스트림(`exchange:<id>`·`bench:<id>`)은 작업대를 연 주체만 구독한다(040). hub의 scope 검사는

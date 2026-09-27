@@ -4,7 +4,6 @@ pub use acp_agent_core::infrastructure::{
 };
 
 pub mod acp_agent_launch_factory;
-pub mod acp_agent_worker_adapter;
 pub mod desktop_benches;
 #[cfg(debug_assertions)]
 pub mod devtools;
@@ -16,7 +15,4 @@ pub mod mcp;
 pub mod native_window_menu;
 pub mod perf_log;
 pub mod tauri_desktop_bridge;
-pub mod tauri_orchestration_event_sink;
 pub mod window_manager;
-// 041: core로 이동. compat 전환(US1–US4) 동안 기존 경로를 유지하는 재노출이다.
-pub use workbench_core::infrastructure::fs::orchestration_store as json_orchestration_repository;

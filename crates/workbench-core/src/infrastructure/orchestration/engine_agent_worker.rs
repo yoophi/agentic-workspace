@@ -73,9 +73,13 @@ impl EngineAgentWorker {
                 },
             )?;
         }
-        self.benches
+        if !self
+            .benches
             .hub
-            .claim_run(&assignment.planned_run_id, &assignment.bench_id);
+            .claim_run(&assignment.planned_run_id, &assignment.bench_id)
+        {
+            return Err(format!("duplicate run id: {}", assignment.planned_run_id));
+        }
         let run = match self
             .benches
             .engine

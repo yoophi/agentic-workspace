@@ -135,7 +135,7 @@ orchestration 작업 영역이 바뀔 때(과제 상태, 명령 전달, coordina
 - **FR-012**: 040이 남긴 과도기 통로(작업대 → 창 label 역조회를 쓰는 서버 동작, 런타임 내부 접근자, 데스크톱의 run 종료 orchestration 후처리, 창 닫힘 시 별도 해제)는 제거된다. 서버 core·계약에 창 label이 없다.
 - **FR-013**: run 이벤트 재생(과거 이벤트 조회)은 그 run을 소유한 작업대의 주체만 할 수 있다.
 - **FR-014**: 새 operation·이벤트 스키마·권한은 계약 조회, 생성 OpenAPI·TypeScript 타입, 메모리/HTTP 두 경로 계약 테스트에 포함된다. 조회 전용 principal에게는 조회 operation만, agent principal에게는 agent orchestration operation만 보인다.
-- **FR-016**: 끝난 run의 id는 다시 쓸 수 없다(이벤트 기록이나 작업 영역이 그 id를 기록하고 있는 동안). 그래서 한 run은 작업 영역 하나에만 속하고, 복구한 작업대가 재생하는 run 기록은 원래 run의 것이다.
+- **FR-016**: 끝난 run의 id는 다시 쓸 수 없다(이벤트 기록이나 작업 영역이 그 id를 기록하고 있는 동안). 그래서 한 run은 작업 영역 하나에만 속하고, 복구한 작업대가 재생하는 run 기록은 원래 run의 것이다. coordinator 연결·교대는 화면이 run을 띄우기 전에 하므로, 아직 어디에도 쓰이지 않은 계획 run id는 연결할 수 있고 그 순간 그 작업대의 것이 된다 — 다른 작업대는 그 id로 run을 띄우거나 연결할 수 없고, 다른 작업대의 run(살아 있거나 끝난)은 연결할 수 없다.
 - **FR-015**: 기존 영속 orchestration 파일은 그대로 열린다. 남아 있는 창 label 값은 무시되고 다음 저장에서 사라지며, 이전 빌드가 새 파일을 여전히 읽을 수 있다.
 
 ### Key Entities *(include if feature involves data)*
