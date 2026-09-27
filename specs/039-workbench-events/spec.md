@@ -168,14 +168,28 @@ AW 사용자가 worktree 창을 열어 두면 파일이나 Git 상태가 바뀔 
 - **SC-007**: 계약 조회 결과에 이벤트 스키마 목록이 있고, 생성된 타입에서 스키마 ↔ 본문을 잘못 짝지은 코드가 타입 검사에서 실패하며, drift 검사가 정의 변경을 검출한다.
 - **SC-008**: 프론트엔드 변경은 run 화면의 순번 처리에 한정되며(`features/agent-run`, `entities/agent-run/api`), 다른 화면 코드 diff는 0건이다.
 
+## Clarifications
+
+### Session 2026-09-27 (`/grill-with-docs`)
+
+- Q1 분할: **2a(039) 이벤트 Seam + run 발행 전환 + watcher 구독 / 2b(040) 창 정체 분해 + command 30개 이관**으로 확정. orchestration·exchange는 039에서 스키마 정의만.
+- Q2 프론트: run 화면의 순번 추정 제거에 한해 **최소 프론트 수정 허용**(`features/agent-run`, `entities/agent-run/api`).
+- Q3 run 데스크톱 전달: **창 스크립트 삽입 경로 하나만** 남기고 Tauri `agent-run-event` 발행 제거. Tauri 2.11.6 `WebviewWindow::emit`이 모든 창에 방송함을 확인(ADR `docs/adr/0004`).
+- Q4 데스크톱 연결: 데스크톱은 구독자가 아니라 **발행 결과(봉투)를 그대로 전달**(ADR `docs/adr/0003`). journal·구독 조정자는 workbench-core.
+- Q5 run 본문 타입: 스키마 **`run.event.v1` 하나** + RunEvent 전체 union의 protocol DTO 미러와 wire 동일성 테스트. acp-agent-core 불변.
+- Q6 권한: **`run:read` 신설**, worktree 스트림은 `worktree:read` 재사용. 조회 전용 호출자도 구독 가능.
+- Q7 테스트 HTTP 전송: 테스트 하네스에 **WebSocket**(event·gap·hello 제어 프레임)으로 미리 두어 3단계가 같은 프레임 계약을 재사용.
+- Q8 journal 정리: run당 512 유지 + **보관 run 수 상한, 가장 오래전에 끝난 run부터** 제거. 진행 중 run은 제거하지 않음.
+- Q9 ADR 4건: `crates/workbench-core/docs/adr/0002`(메모리 journal + 세대), `0003`(알림용 이벤트 replay 안 함), `docs/adr/0003`(데스크톱은 발행 결과 전달), `docs/adr/0004`(run 삽입 경로만 유지). 용어집 `crates/workbench-core/CONTEXT.md`에 "이벤트" 절 추가.
+
 ## Assumptions
 
-- **2단계 분할**: 정본 2단계를 037·038과 같은 방식으로 **2a(039, 이벤트 Seam)** 와 **2b(040, 창 정체 분해 + run·exchange·orchestration command 30개 이관)** 로 나눈다. 이 분할과 경계(특히 orchestration·exchange 발행 전환을 2b로 미루는 것)는 grill에서 확인이 필요한 가정이다.
+- **2단계 분할**: 정본 2단계를 **2a(039, 이벤트 Seam)** 와 **2b(040, 창 정체 분해 + run·exchange·orchestration command 30개 이관)** 로 나눈다(Clarifications Q1 확정).
 - **내구성**: 정본 결정 7을 따른다 — memory journal + 세대 + 유실 표시. durable journal은 없고, 서버 재시작 뒤 일부 transcript가 사라질 수 있다.
 - **프론트 변경 허용 범위**: 1단계와 달리 run 화면의 순번 추정 제거라는 **결함 수정**에 한해 프론트 변경을 허용한다. 화면에 보이는 동작은 같다.
-- **창 스크립트 삽입(fallback) 경로**: run 이벤트는 오늘 화면이 fallback 경로만 듣는다. 이 spec은 run 이벤트를 새 발행자 → 기존 데스크톱 전달로 흘리되, 두 경로 중 무엇을 남길지는 plan에서 정한다(화면 동작 불변이 조건).
+- **창 스크립트 삽입(fallback) 경로**: run 이벤트는 삽입 경로 하나만 남긴다(Clarifications Q3).
 - **worktree 변경 알림은 replay하지 않는다**: 알림은 "다시 조회하라"는 뜻이므로 놓친 알림 대신 구독 시작 시 화면이 다시 조회하는 오늘의 동작을 유지한다.
-- **테스트 HTTP 이벤트 전송**: 037의 테스트 전용 HTTP 하네스에 이벤트 전송(예: 스트리밍 응답)을 추가해 세 번째 경로를 검증한다. 운영 WebSocket·ticket 인증은 3단계다.
+- **테스트 HTTP 이벤트 전송**: 037의 테스트 전용 HTTP 하네스에 WebSocket 이벤트 전송을 추가해 세 번째 경로를 검증한다(Clarifications Q7). 운영 노출·ticket 인증은 3단계다.
 - **권한 범위**: 이벤트 구독 권한은 도메인별 조회 scope(`run`은 신설, `worktree:read` 재사용)를 따른다. 조회 전용 테스트 호출자도 조회 가능한 스트림은 구독할 수 있다.
-- **한도 기본값**: run당 512(오늘 값), 구독자 대기열·전역 한도는 plan에서 측정 근거와 함께 정한다.
+- **한도 기본값**: run당 512(오늘 값), 보관 run 수 상한과 구독자 대기열 크기는 plan에서 측정 근거와 함께 정한다(정리 규칙은 Clarifications Q8).
 - **4단계까지의 시리즈 범위**(2026-09-26 결정)와 단계별 PR·squash merge 규칙은 그대로다.

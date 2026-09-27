@@ -68,6 +68,40 @@ _Avoid_: recovery(손상 파일 복구와 혼동), replay
 외부 부작용(Git Worktree 생성·삭제)의 재시작 판정 규칙. 원하는 종료 상태가 관찰되면 누가 만들었는지 구별하지 않고 `적용됨`으로 보고, 아니면 `불명`이다.
 _Avoid_: 존재 확인, idempotent check
 
+### 이벤트
+
+**이벤트 스트림 (Event Stream)**:
+순서가 보장되는 이벤트의 단위. 한 run, 한 Worktree처럼 대상 하나에 대응한다. 서로 다른 스트림 사이의 순서는 약속하지 않는다.
+_Avoid_: topic, channel, event name
+
+**세대 (Server Epoch)**:
+서버 기동 한 번을 가리키는 표식. 세대가 다르면 순번을 비교하지 않는다.
+_Avoid_: session, instance id, boot id
+
+**Cursor**:
+호출자가 마지막으로 반영한 스트림·세대·순번. 구독은 cursor 다음부터 이어 받는다.
+_Avoid_: offset, checkpoint, last event id
+
+**Gap**:
+cursor 다음을 이어 붙일 수 없다는 신호(보관 범위 밖, 세대 다름, 구독자가 너무 느림). 받은 쪽은 상태를 다시 조회해 동기화한다.
+_Avoid_: error, lag(원인 하나일 뿐), missing events
+
+**상태 복원용 이벤트 (State Event)**:
+순서대로 적용하면 대상의 상태가 복원되는 이벤트. 보관되고 replay된다. run 이벤트가 이에 해당한다.
+_Avoid_: persistent event, durable event(메모리에만 보관된다)
+
+**알림용 이벤트 (Notification Event)**:
+"다시 조회하라"는 신호일 뿐 본문이 상태가 아닌 이벤트. 보관·replay하지 않는다. Worktree 변경이 이에 해당한다.
+_Avoid_: diagnostic event, ephemeral event
+
+**실행 정보 유실 (Runtime Lost)**:
+서버 재시작 등으로 run의 이벤트를 더는 이어 받을 수 없게 된 상태. run이 실패했다는 뜻은 아니다.
+_Avoid_: crashed, failed, disconnected
+
+**Client Instance**:
+이벤트 구독을 여는 주체 하나(데스크톱 창 하나, HTTP 연결 하나). 이벤트를 누구에게 보낼지만 정하며 run이나 Worktree를 소유하지 않는다.
+_Avoid_: window, client, session(Provider Session과 혼동)
+
 ### 도메인
 
 **Project**:
