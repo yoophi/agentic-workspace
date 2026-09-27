@@ -39,6 +39,13 @@ impl OrchestrationScheduler {
             return Ok(LeaseOutcome::Acquired);
         }
         if let Some(position) = state.queued.iter().position(|queued| queued == task_id) {
+            // 복구(`reconcile`)는 Ready task를 자리와 무관하게 대기열에 넣는다. 자리가 비어 있으면 배정이 곧 시작이다
+            // — 그러지 않으면 실행 중 task가 없어 `release`가 오지 않아 영원히 대기한다.
+            if state.active.len() < self.capacity {
+                state.queued.remove(position);
+                state.active.insert(task_id.into());
+                return Ok(LeaseOutcome::Acquired);
+            }
             return Ok(LeaseOutcome::Queued {
                 position: position + 1,
             });
@@ -124,6 +131,25 @@ mod tests {
         assert_eq!(scheduler.release("task-a").unwrap(), Some("task-c".into()));
         assert_eq!(scheduler.active_count().unwrap(), 2);
         assert_eq!(scheduler.queued_count().unwrap(), 0);
+    }
+
+    /// 044: 복구(`reconcile`)가 대기열에 넣은 Ready task는 자리가 비어 있으면 배정(`acquire`)으로 바로 시작한다.
+    /// 그러지 않으면 실행 중 task가 없어 `release`가 없으므로 영원히 대기열에 남는다(재시작 뒤 재배정 불가).
+    #[test]
+    fn a_reconciled_ready_task_is_acquired_when_capacity_is_free() {
+        let scheduler = OrchestrationScheduler::new(1);
+        scheduler
+            .reconcile(&[], &["task-a".into(), "task-b".into()])
+            .unwrap();
+        assert_eq!(scheduler.acquire("task-b").unwrap(), LeaseOutcome::Acquired);
+        assert_eq!(scheduler.active_count().unwrap(), 1);
+        assert_eq!(scheduler.queued_count().unwrap(), 1);
+        assert_eq!(
+            scheduler.acquire("task-a").unwrap(),
+            LeaseOutcome::Queued { position: 1 },
+            "capacity is respected"
+        );
+        assert_eq!(scheduler.release("task-b").unwrap(), Some("task-a".into()));
     }
 
     #[test]
