@@ -67,3 +67,11 @@ OCR은 `.md`를 검토 대상에서 뺀다(10개 중 `.specify/feature.json` 1�
 | # | 문제 | 근거 | 반영 |
 |---|---|---|---|
 | G1 | 중단된 `Dispatching` 알림을 다시 전달 가능한 상태로 되돌리는 전이가 없다. 전달기는 `Pending`·재시도 가능 `Failed`만 고르므로, `Dispatching` 저장 뒤 drop이나 결과 저장 실패가 나면 활동으로만 남아 wait가 끝나지 않는다 | `notification_dispatcher.rs`, `recover_interrupted`는 재시작 경로 | 전달 시도 `attemptId` 소유권을 둔다. 예약 없이 남은 같은 시도의 `Dispatching`만 `Failed(retryable)`로 회수하고 서버가 다시 전달한다(6''). abort·결과 저장 실패 주입 시험, 정상 시도 비회수 시험 |
+
+## Codex 설계 재검토 5 (`--wait --base dd79a23`, 대상 `4d6d3ff`)
+
+판정: needs-attention. High 1건:
+
+| # | 문제 | 근거 | 반영 |
+|---|---|---|---|
+| G2 | 6'는 N-notify를 `send_and_wait` 시작 때 A-turn으로 인계하는데, 2행은 A-turn을 실행 future 끝에 놓는다. 전달기는 `notify_coordinator().await` 뒤 별도 transaction으로 결과를 저장하므로, prompt 완료 뒤·결과 저장 전에 `Dispatching`만 있고 예약은 없는 구간이 생긴다. 그때 회수가 돌면 정상 시도를 되돌리고 coordinator turn을 한 번 더 만든다 | `notification_dispatcher.rs` | N-notify를 결과 저장 commit까지 A-turn과 별개로 유지한다(인계하지 않음). 회수 조건은 N-notify 예약 유무만 본다. 결과 transaction 직전 gate 시험(회수 → 변경 0, abort → 회수) |
