@@ -105,6 +105,11 @@ impl EventStream {
             inner: Box::pin(inner),
         }
     }
+
+    /// 다음 항목. 스트림 유틸 crate 없이 소비할 수 있게 둔다(Tauri 호환 어댑터용).
+    pub async fn next_item(&mut self) -> Option<EventItem> {
+        std::future::poll_fn(|cx| self.inner.as_mut().poll_next(cx)).await
+    }
 }
 
 impl fmt::Debug for EventStream {

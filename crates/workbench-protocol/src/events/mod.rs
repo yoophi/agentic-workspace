@@ -4,6 +4,7 @@
 //! 분류(상태 복원용/알림용)는 ADR `crates/workbench-core/docs/adr/0003`.
 
 pub mod run;
+pub mod worktree;
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;

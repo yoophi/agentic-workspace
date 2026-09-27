@@ -155,4 +155,24 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn worktree_changed_wire_parity_for_every_kind() {
+        use crate::infrastructure::fs::worktree_watcher::{
+            WorktreeChangeKind, WorktreeChangedEvent,
+        };
+        use workbench_protocol::events::worktree::WorktreeChangedDto;
+
+        for kind in [WorktreeChangeKind::File, WorktreeChangeKind::Git] {
+            let domain = serde_json::to_value(WorktreeChangedEvent {
+                working_directory: "/repo".into(),
+                changed_path: "/repo/src/a.ts".into(),
+                kind,
+            })
+            .expect("domain serializes");
+            let dto: WorktreeChangedDto =
+                serde_json::from_value(domain.clone()).expect("dto reads domain JSON");
+            assert_eq!(serde_json::to_value(&dto).unwrap(), domain, "{kind:?}");
+        }
+    }
 }

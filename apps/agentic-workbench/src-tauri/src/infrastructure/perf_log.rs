@@ -48,12 +48,6 @@ pub async fn log_async_command<T>(
     result
 }
 
-pub fn log_watcher(name: &str, extra: &str) {
-    if perf_log_enabled() {
-        eprintln!("perf kind=watcher name={name} {extra}");
-    }
-}
-
 /// blocking 작업(git 프로세스, WalkDir 등)을 Tauri async runtime의 blocking
 /// thread pool에서 실행한다. 동기 command가 main thread를 점유해 IPC 전체를
 /// 직렬화하던 문제를 해소한다(specs/007 research R1). invoke 도착→실행 시작

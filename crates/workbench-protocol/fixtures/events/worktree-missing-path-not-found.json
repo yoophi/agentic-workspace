@@ -1,0 +1,15 @@
+{
+  "name": "worktree-missing-path-not-found",
+  "subscribe": [
+    {
+      "streamId": "worktree:{{tmp}}/missing",
+      "afterSequence": 0
+    }
+  ],
+  "expect": {
+    "fault": {
+      "code": "notFound",
+      "message": "Cannot watch missing worktree path: {{tmp}}/missing"
+    }
+  }
+}

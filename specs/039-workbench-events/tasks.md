@@ -139,16 +139,16 @@ description: "Task list for implementing the Workbench event stream (stage 2a)"
 
 ### Tests for User Story 3 ⚠️ (구현 전 작성, 실패 확인)
 
-- [ ] T036 [P] [US3] `crates/workbench-core/tests/worktree_stream.rs`(신규): 임시 git 저장소 구독 → 0.5초 안 파일 3개 변경 → 알림 1회(SC-005); 구독자 0→1→2→1→0에서 감시 시작 1회·중지 1회(hub 관측 hook `watcher_count()` test-hooks); 경로 표기 차이(끝 `/`·심볼릭 링크)가 같은 스트림; 없는 경로 → `notFound` 오늘 문구
-- [ ] T037 [P] [US3] fixture `crates/workbench-protocol/fixtures/events/worktree-notification-debounced.json`, `worktree-two-subscribers.json`, `worktree-missing-path-not-found.json`, `worktree-cursor-ignored.json`(알림용은 cursor 무시)
+- [X] T036 [P] [US3] `crates/workbench-core/tests/worktree_stream.rs`(신규): 임시 git 저장소 구독 → 0.5초 안 파일 3개 변경 → 알림 1회(SC-005); 구독자 0→1→2→1→0에서 감시 시작 1회·중지 1회(hub 관측 hook `watcher_count()` test-hooks); 경로 표기 차이(끝 `/`·심볼릭 링크)가 같은 스트림; 없는 경로 → `notFound` 오늘 문구
+- [X] T037 [P] [US3] fixture `crates/workbench-protocol/fixtures/events/worktree-notification-debounced.json`, `worktree-two-subscribers.json`, `worktree-missing-path-not-found.json`, `worktree-cursor-ignored.json`(알림용은 cursor 무시)
 
 ### Implementation for User Story 3
 
 - [X] T038 [US3] 이동: AW `infrastructure/fs_worktree_watcher.rs` → `crates/workbench-core/src/infrastructure/fs/worktree_watcher.rs`(`perf_log` → core `infrastructure::perf`, `WORKSPACE_EXCLUDED_DIRS` core 값 사용, 기존 단위 테스트 이동). `fs/mod.rs` 등록
-- [ ] T039 [US3] hub worktree kind: 구독 시 `canonicalize`(실패 → `notFound` 오늘 문구), `watchers` 참조 수 증가·첫 구독이면 `watch_worktree(canonical, publish_notification)` 시작, 구독 drop에서 감소·0이면 handle drop. `publish_notification(worktree:<canonical>, "worktree.changed.v1", body)`는 journal 없음. T036·T037 통과 (depends T019, T038)
-- [ ] T040 [P] [US3] `crates/workbench-protocol/src/events/worktree.rs`: `WorktreeChangedDto {workingDirectory, changedPath, kind: file|git}` + core wire parity(`WorktreeChangedEvent` ↔ DTO)
-- [ ] T041 [US3] AW `inbound/tauri_commands.rs`: `start_worktree_watcher`가 blocking pool에서 `runtime.events(desktop, [worktree:<wd>])` → tauri async task로 스트림 소비, 이벤트 본문 `workingDirectory`를 호출자 문자열로 바꿔 `emit_to(label, WORKTREE_CHANGED_EVENT)`. `WorktreeWatcherState.handles: HashMap<label, JoinHandle>`(교체 시 abort), `stop_for_window`는 abort. fault는 message 문자열로. AW에서 `notify` 의존 제거(`Cargo.toml`) (depends T039)
-- [ ] T042 [US3] `cargo test -p workbench-core -p agentic-workbench`, 프론트 worktree 코드 diff 0 확인. 커밋(`feat(workbench-core): serve worktree change notifications as a shared subscription stream (039 US3)`)
+- [X] T039 [US3] hub worktree kind: 구독 시 `canonicalize`(실패 → `notFound` 오늘 문구), `watchers` 참조 수 증가·첫 구독이면 `watch_worktree(canonical, publish_notification)` 시작, 구독 drop에서 감소·0이면 handle drop. `publish_notification(worktree:<canonical>, "worktree.changed.v1", body)`는 journal 없음. T036·T037 통과 (depends T019, T038)
+- [X] T040 [P] [US3] `crates/workbench-protocol/src/events/worktree.rs`: `WorktreeChangedDto {workingDirectory, changedPath, kind: file|git}` + core wire parity(`WorktreeChangedEvent` ↔ DTO)
+- [X] T041 [US3] AW `inbound/tauri_commands.rs`: `start_worktree_watcher`가 blocking pool에서 `runtime.events(desktop, [worktree:<wd>])` → tauri async task로 스트림 소비, 이벤트 본문 `workingDirectory`를 호출자 문자열로 바꿔 `emit_to(label, WORKTREE_CHANGED_EVENT)`. `WorktreeWatcherState.handles: HashMap<label, JoinHandle>`(교체 시 abort), `stop_for_window`는 abort. fault는 message 문자열로. AW에서 `notify` 의존 제거(`Cargo.toml`) (depends T039)
+- [X] T042 [US3] `cargo test -p workbench-core -p agentic-workbench`, 프론트 worktree 코드 diff 0 확인. 커밋(`feat(workbench-core): serve worktree change notifications as a shared subscription stream (039 US3)`)
 
 **Checkpoint**: quickstart §3 3·4 수동 확인 가능.
 

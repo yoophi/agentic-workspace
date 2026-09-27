@@ -1,0 +1,36 @@
+{
+  "name": "worktree-notification-debounced",
+  "subscribe": [
+    {
+      "streamId": "worktree:{{tmp}}",
+      "afterSequence": 0
+    }
+  ],
+  "after": [
+    {
+      "write": "{{tmp}}/a.txt",
+      "content": "a"
+    },
+    {
+      "write": "{{tmp}}/b.txt",
+      "content": "b"
+    },
+    {
+      "write": "{{tmp}}/c.txt",
+      "content": "c"
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "sequence": 1,
+          "schema": "worktree.changed.v1",
+          "body": {
+            "kind": "file"
+          }
+        }
+      }
+    ]
+  }
+}

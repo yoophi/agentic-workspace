@@ -338,7 +338,8 @@ pub async fn run_ws(fixture: &EventFixture) -> (Outcome, Context) {
 pub fn check(label: &str, fixture: &EventFixture, outcome: &Outcome, ctx: &Context) {
     let mut expected_fault = fixture.expect.fault.clone();
     match (outcome, expected_fault.take()) {
-        (Outcome::Fault(fault), Some(expected)) => {
+        (Outcome::Fault(fault), Some(mut expected)) => {
+            substitute_value(&mut expected, ctx);
             let actual = serde_json::to_value(fault).unwrap();
             subset(label, &expected, &actual);
         }
@@ -400,7 +401,11 @@ fn subset(label: &str, expected: &Value, actual: &Value) {
 /// 두 경로 비교용: 시도·경로마다 다른 값(eventId·occurredAt·epoch·실제 임시 경로)을 지운다.
 pub fn comparable(outcome: &Outcome, ctx: &Context) -> Value {
     match outcome {
-        Outcome::Fault(fault) => json!({"fault": {"code": fault.code, "message": fault.message}}),
+        Outcome::Fault(fault) => {
+            let mut message = Value::String(fault.message.clone());
+            strip(&mut message, ctx);
+            json!({"fault": {"code": fault.code, "message": message}})
+        }
         Outcome::Items { items, .. } => {
             let mut items = Value::Array(items.clone());
             strip(&mut items, ctx);

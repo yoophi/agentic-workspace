@@ -1,0 +1,29 @@
+{
+  "name": "worktree-cursor-ignored",
+  "subscribe": [
+    {
+      "streamId": "worktree:{{tmp}}",
+      "afterSequence": 99,
+      "epoch": "previous-epoch"
+    }
+  ],
+  "after": [
+    {
+      "write": "{{tmp}}/a.txt",
+      "content": "a"
+    }
+  ],
+  "expect": {
+    "items": [
+      {
+        "event": {
+          "sequence": 1,
+          "schema": "worktree.changed.v1",
+          "body": {
+            "kind": "file"
+          }
+        }
+      }
+    ]
+  }
+}
