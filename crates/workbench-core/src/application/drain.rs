@@ -79,8 +79,9 @@ pub fn drain_class(operation: OperationId) -> DrainClass {
         | OperationId::RunRespondPermission
         | OperationId::RunSetPermissionMode
         | OperationId::ServerStop => DrainClass::Control,
-        OperationId::OrchestrationAssignChildTask
-        | OperationId::RunSendPrompt => DrainClass::Continuation,
+        OperationId::OrchestrationAssignChildTask | OperationId::RunSendPrompt => {
+            DrainClass::Continuation
+        }
         OperationId::AgentRunSettingsSave
         | OperationId::BenchOpen
         | OperationId::ExchangeSend

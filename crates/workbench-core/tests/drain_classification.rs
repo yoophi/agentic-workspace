@@ -19,7 +19,10 @@ fn table() -> HashMap<String, (String, String)> {
         }
         let op = cells[1].trim_matches('`').to_owned();
         let previous = rows.insert(op.clone(), (cells[2].to_owned(), cells[3].to_owned()));
-        assert!(previous.is_none(), "{op}: appears twice in the contract table");
+        assert!(
+            previous.is_none(),
+            "{op}: appears twice in the contract table"
+        );
     }
     rows
 }
@@ -36,7 +39,11 @@ fn letter(class: DrainClass) -> &'static str {
 #[test]
 fn every_operation_has_exactly_one_row_matching_the_code() {
     let rows = table();
-    assert_eq!(rows.len(), OperationId::ALL.len(), "table rows vs operations");
+    assert_eq!(
+        rows.len(),
+        OperationId::ALL.len(),
+        "table rows vs operations"
+    );
     for id in OperationId::ALL {
         let (kind, class) = rows
             .get(id.as_str())
@@ -46,7 +53,11 @@ fn every_operation_has_exactly_one_row_matching_the_code() {
             OperationKind::Command => "command",
         };
         assert_eq!(kind, spec_kind, "{id}: kind column");
-        assert_eq!(class, letter(drain_class(id)), "{id}: class column vs drain_class");
+        assert_eq!(
+            class,
+            letter(drain_class(id)),
+            "{id}: class column vs drain_class"
+        );
         if spec_for(id).kind == OperationKind::Query {
             assert_eq!(drain_class(id), DrainClass::Query, "{id}: queries are Q");
         }
