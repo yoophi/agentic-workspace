@@ -5657,6 +5657,7 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tokio-tungstenite",
  "uuid",
  "workbench-core",
  "workbench-protocol",
