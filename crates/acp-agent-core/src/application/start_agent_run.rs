@@ -43,6 +43,25 @@ where
         L: SessionLauncher<Session = R::Session>,
         S: RunEventSink,
     {
+        self.execute_gated(launcher, sink, request, owner_window_label, None)
+            .await
+    }
+
+    /// `execute`와 같되, `start_gate`가 있으면 spawn한 task가 그 신호를 받을 때까지 launcher를 부르지 않는다(준비와 실행
+    /// 허용의 분리, workbench 044 R14 시작 장벽). 돌아올 때 run은 registry에 있고 취소할 수 있다. 신호를 보내지 않고
+    /// sender를 drop하면 launcher를 부르지 않고 run을 끝낸다.
+    pub async fn execute_gated<L, S>(
+        self,
+        launcher: L,
+        sink: S,
+        request: AgentRunRequest,
+        owner_window_label: Option<String>,
+        start_gate: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> Result<AgentRun, StartAgentRunError>
+    where
+        L: SessionLauncher<Session = R::Session>,
+        S: RunEventSink,
+    {
         let run = build_run(&request);
         self.registry
             .reserve_run(run.id.clone(), owner_window_label)
@@ -54,6 +73,13 @@ where
         let sink_for_task = sink.clone();
 
         let handle = tokio::spawn(async move {
+            if let Some(gate) = start_gate {
+                if gate.await.is_err() {
+                    // 실행 허용 없이 장벽이 닫혔다: launcher를 부르지 않는다.
+                    registry.finish_run(&run_id).await;
+                    return;
+                }
+            }
             let launched = match launcher
                 .launch(request, run_id.clone(), sink_for_task.clone())
                 .await
@@ -253,6 +279,7 @@ mod tests {
         completed: Arc<AtomicUsize>,
         done: Arc<Notify>,
         fail_launch: bool,
+        launched: Arc<AtomicUsize>,
     }
 
     impl FakeLauncher {
@@ -262,6 +289,7 @@ mod tests {
                 completed: counters.1.clone(),
                 done: counters.2.clone(),
                 fail_launch: false,
+                launched: Arc::new(AtomicUsize::new(0)),
             }
         }
         fn failing(done: Arc<Notify>) -> Self {
@@ -270,6 +298,7 @@ mod tests {
                 completed: Arc::new(AtomicUsize::new(0)),
                 done,
                 fail_launch: true,
+                launched: Arc::new(AtomicUsize::new(0)),
             }
         }
     }
@@ -286,6 +315,7 @@ mod tests {
         where
             S: RunEventSink,
         {
+            self.launched.fetch_add(1, Ordering::SeqCst);
             if self.fail_launch {
                 self.done.notify_one();
                 return Err(anyhow!("launch failed"));
@@ -364,6 +394,66 @@ mod tests {
         let state = registry.inner.lock().await;
         assert_eq!(state.reserved, vec!["run-1".to_string()]);
         assert_eq!(state.finished, vec!["run-1".to_string()]);
+    }
+
+    /// 044 R14 시작 장벽: `start_gate`가 열리기 전에는 launcher를 부르지 않고, 열리면 오늘과 같이 실행한다.
+    #[tokio::test]
+    async fn a_gated_start_launches_only_after_the_gate_opens() {
+        let registry = FakeRegistry::default();
+        let c = counters();
+        let launcher = FakeLauncher::success(&c);
+        let launched = launcher.launched.clone();
+        let (open, gate) = tokio::sync::oneshot::channel();
+
+        let run = StartAgentRunUseCase::new(registry.clone())
+            .execute_gated(
+                launcher,
+                CollectingSink::default(),
+                make_request(),
+                None,
+                Some(gate),
+            )
+            .await
+            .expect("prepare succeeds");
+        // 준비가 끝났다: run은 registry에 예약·attach되어 취소할 수 있고, launcher는 아직 불리지 않았다.
+        assert!(registry.inner.lock().await.handles.contains_key(&run.id));
+        assert_eq!(launched.load(Ordering::SeqCst), 0);
+
+        open.send(()).expect("task awaits the gate");
+        c.2.notified().await;
+        let handle = registry.inner.lock().await.handles.remove(&run.id).unwrap();
+        handle.await.expect("task finishes");
+        assert_eq!(launched.load(Ordering::SeqCst), 1);
+        assert_eq!(c.1.load(Ordering::SeqCst), 1);
+    }
+
+    /// 장벽이 닫힌 채 drop되면 launcher를 부르지 않고 run을 끝낸다(취소된 기동, R14 표 5').
+    #[tokio::test]
+    async fn a_dropped_start_gate_never_launches_and_finishes_the_run() {
+        let registry = FakeRegistry::default();
+        let c = counters();
+        let launcher = FakeLauncher::success(&c);
+        let launched = launcher.launched.clone();
+        let (open, gate) = tokio::sync::oneshot::channel::<()>();
+
+        let run = StartAgentRunUseCase::new(registry.clone())
+            .execute_gated(
+                launcher,
+                CollectingSink::default(),
+                make_request(),
+                None,
+                Some(gate),
+            )
+            .await
+            .expect("prepare succeeds");
+        drop(open);
+        let handle = registry.inner.lock().await.handles.remove(&run.id).unwrap();
+        handle.await.expect("task finishes");
+        assert_eq!(launched.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            registry.inner.lock().await.finished,
+            vec!["run-1".to_string()]
+        );
     }
 
     #[tokio::test]
