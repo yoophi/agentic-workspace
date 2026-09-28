@@ -300,7 +300,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | T1 | medium(core-src) | 바인딩 커밋 직후 결과 수신 전에 복구가 돌면, 자리를 보유 없는 실행 중 자리로 바꿔 abort 뒤 `release_hold`가 자리를 못 지운다(capacity 1이면 영구 대기) | `fb91db9`·`7836952`: `reconcile_preserving(active, ready, launching)`. 이전 자리의 시도별 보유를 옮기고, 이 프로세스에서 기동 중·되돌리는 중인 task는 성공 인계(`transfer`) 전에 실행 중으로 확정하지 않는다. 보유가 있으면 자리를 남긴다. R14 복구 시점 표 | `child_assign_atomic.rs`: 바인딩 커밋 직후 복구 → abort(자리 반납, 새 과제가 자리를 얻음), 예약 커밋 직후 복구 → abort·성공, 저장되지 않은 되돌리기 중 복구(보유 유지 → 재시도 저장 → 재배정 기동). 동작 red 4 → green 23, 변이 m1·m2·m3 red |
 | T2 | medium(crates-rest) | 인증 전 응답의 chunk 길이 `ffffffffffffffff`가 `size + 2` overflow panic(release에서는 잘못된 슬라이스 panic)을 일으킨다 | `d204599`·`2c324c5`: chunk·`content-length`를 검사한 산술로만 다룬다(`checked_add`·`get`). 상한 초과 선언은 본문 전에 곧바로 거절한다. 16진이 아닌 값, 충돌하는 `content-length`, CRLF 누락, 1KiB 넘는 줄, 짧은 본문은 오류로 끝낸다. chunked 끝 검사는 증분 스캐너로 선형이다(OCR 9차 Low 해결) | `untrusted_framing.rs` 10개(시험 안 `TcpListener`, 별도 스레드 + 상한 30초 join으로 panic을 단정 실패로 드러냄): 동작 red 8(`usize::MAX`·`MAX-1`은 실제 overflow panic) → green, 변이 a·b·c red, release 빌드 시험 10 passed. 비UTF8 상태 줄·확장자 붙은 정상 chunk 시험은 수정 전에도 통과해 회귀 방지용이다(증거 아님) |
 | T3 | medium(apps) | Full restart 취소 대기 중 turn이 끝났는데 취소가 unknown·fault로 끝나면, 호출 전 응답 대기 true를 되살려 자동 전송이 막힌다(교환 미전달, wait-stop 미완료) | `0fa1a5a`·`fd95a36`: 취소 진행은 `cancelsInFlight`로 따로 센다(대기 중에는 취소 중인 run에 대기열을 보내지 않음). 응답 대기는 lifecycle만 정하고 바꿀 때마다 순번을 올린다. Full restart는 응답 대기를 건드리지 않는다. 자동 전송·직접 전송·Cancel & send 실패는 그 사이 lifecycle이 안 바뀌었을 때만 되돌린다 | 패널 vitest: 옛 패널 red 4 → green 48, 변이 a·b red. **실제 host + 실제 AgentRunPanel itest**: 취소 응답 보류 → turn 끝 → `x-2` 도착·확인 → 전송 없음 → wait-stop(`pendingExchanges=2`) → unknown 해제 → `x-1`·`x-2` 각 1회 전달 → 정지. 옛 패널 red, 변이 a는 지적한 wait-stop 미완료를 재현, 변이 b red |
-| T4 | medium(docs) | `close-run.sh`가 클릭 명령 실패 코드를 버리고, 앱 생존·남은 창을 기록만 해 (a)(b1)에서 Settings까지 닫히는 회귀도 통과시킬 수 있다 | `54a208d`: 닫기 동작 종료 코드 보존(실패 = 무효 6). `window_verdict`: (a)(b1)(b2)는 앱 생존 + 남은 창이 정확히 `Settings`, (f)는 앱 종료. 어긋나면 9 | 자기 시험이 닫기 동작부터 스크립트 끝까지를 그대로 떼어 모의 입력(sx·키 입력 모의)으로 돌린다. 옛 스크립트 red 9 → green 59 → 변이 2건 red(클릭 실패 판정·창 상태 판정으로 분리). 과거 원자료 재판정: (a)(b1) 14개 통과, (f) 5개 통과, **(b2) 7개는 앱 전체 종료로 9** — 기존 "(b2) 미해결" 기록과 같다(app-smoke.md) |
+| T4 | medium(docs) | `close-run.sh`가 클릭 명령 실패 코드를 버리고, 앱 생존·남은 창을 기록만 해 (a)(b1)에서 Settings까지 닫히는 회귀도 통과시킬 수 있다 | `54a208d`: 닫기 동작 종료 코드 보존(실패 = 무효 6). `window_verdict`: (a)(b1)은 앱 생존 + 남은 창이 정확히 `Settings`, (f)는 앱 종료. 어긋나면 9. (b2 기대를 `Settings`로 둔 것은 **틀렸다** — 11차 S5에서 정정) | 자기 시험이 닫기 동작부터 스크립트 끝까지를 그대로 떼어 모의 입력(sx·키 입력 모의)으로 돌린다. 옛 스크립트 red 9 → green 59 → 변이 2건 red(클릭 실패 판정·창 상태 판정으로 분리). 과거 원자료 재판정: (a)(b1) 14개 통과, (f) 5개 통과, **(b2) 7개는 앱 전체 종료로 9** — 기존 "(b2) 미해결" 기록과 같다(app-smoke.md) |
 
 - 한계:
   - T1: 복구가 기동 중 목록을 읽은 직후 새로 시작한 시도는 목록에 없지만, 보유가 있으면 자리를 보존한다.
@@ -312,6 +312,30 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 - **OCR 10차 재리뷰**(`b849283..656fea1`): High·Medium 없음.
   - 확인: `reconcile_preserving`은 이전 자리의 보유를 옮기고, 기동 중 task를 실행 중으로 확정하지 않으며, 보유가 있으면 자리를 남기고 대기열에 넣지 않는다(단위 시험 2 + 순서 시험 4). 패널은 취소 진행(`cancelsInFlight`)을 응답 대기와 분리하고 lifecycle 순번으로 되돌리기를 판정한다. 틀 해석은 검사한 산술만 쓴다.
   - Low(보고만): 기동 중 목록에 있으나 이전 자리가 없는 task는 보유·실행 중 표시가 없는 자리로 남는다(기동 중이면 보유가 있어야 하므로 실제로는 생기지 않을 것으로 본다).
+
+### 11차: 같은 HEAD `827cc84`(트리 `2671ae6`) 네 파티션 리뷰
+
+- 파티션: core-src 31 / crates 나머지 78 / apps·packages·루트 66 / specs·docs 228. 합 403 = 전체, 누락 0(`--no-renames`). 네 검토 커밋 모두 트리 `2671ae6`이다. 검토 뒤 브랜치로 돌아왔다(status 0).
+- **네 파티션 모두 needs-attention**이었다. Medium 5건.
+- 담당·조율은 9·10차와 같다.
+  - core·apps fork가 **API rate limit(429)으로 중간 종료**됐다. 메인이 잠금 비어 있음, 표지 0, 실행 중 프로세스 없음을 확인하고, 두 fork를 각자의 맥락 그대로 다시 이어 가게 했다(새 fork로 중복 시작하지 않음).
+  - host `red-1`은 읽기 속도 때문에 결함을 재현하지 못해 비증거다(오류 문구 차이만).
+  - host `green-1`, apps `panel-red-1`(환경: 전역 vitest)·`itest-dev-1`(시험 순서 결함)도 비증거다.
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| S1 | medium(core-src) | 복구가 task를 Ready로 읽은 뒤 scheduler 적용 전에 그 기동이 bind·transfer를 끝내면, 보유 없는 실행 중 자리를 버려 살아 있는 run이 용량에서 사라진다 | `e8a2518`·`1a2efdf`: scheduler가 task마다 변경 세대를 남긴다(보유 획득·놓기, transfer, release, 대기열, 승격). `recover`는 스냅샷 읽기 **전** 세대를 받아 `reconcile_since`에 넘긴다. 그보다 늦게 바뀐 task는 지금 자리·대기 상태를 그대로 쓴다 | `child_assign_atomic.rs`: 스냅샷 `Ready` 사이 기동 성공·transfer → 복구 적용(실행 중 자리 유지, 한도 1), 스냅샷 `Running` 사이 release → 복구(자리 되살아나지 않음). 새 지점 `RecoverBeforeSchedulerApply`. compile red → 동작 red 4 → green 27. 변이 m2(스냅샷이 덮음)·m3(세대를 스냅샷 뒤에 읽음) red |
+| S2 | medium(core-src) | `launch_existing_task`·`launch_task_for_ui`가 SlotHold를 쥔 채 작업 영역을 읽는 동안(기동 guard 전) 취소되면 유령 보유가 영구히 남는다(복구도 보존) | 같은 커밋: `SlotHold`를 RAII로 바꿨다(`transfer`·`release_hold` 없이 버려지면 drop이 자기 보유를 놓음, 두 번 놓지 않음). 모든 `acquire_hold` 지점이 같은 타입을 거친다 | 배정과 UI 기동을 각각 `BeforeAssignSnapshot`에서 abort → 복구 → 보유 0, 새 과제가 자리를 얻음. 변이 m1(drop 놓기 제거) red |
+| S3 | medium(crates-rest) | 쓰기 대기 상한을 한 번 잡고 `write_all`을 불러, 큰 요청을 천천히 읽는 끝점이면 부분 쓰기마다 같은 상한이 반복돼 요청 전체 deadline을 넘는다 | `c828572`: `write_message`가 부분 쓰기마다 `remaining(deadline)`으로 상한을 다시 잡는다(0바이트 = 닫힘, `WouldBlock`·`TimedOut` = 시간 초과). 연결·쓰기·읽기가 한 deadline을 공유한다 | `slow_request_writes.rs`: `call_by`로 8MiB 입력, 끝점은 10ms마다 4KiB, 호출자 deadline 1초. `red-2` 동작 red(19.9초) → green(core 미커밋 0) → 변이 red(18.2초). 시험 자체 상한 30초 |
+| S4 | medium(apps) | 교환 삭제의 discard 응답을 기다리는 동안 Full restart가 run을 바꾼 뒤 discard가 실패하면, 옛 항목을 새 run 대기열에 되살린다(서버 거절 → 자동 전송이 선두에 반복 재삽입 → 뒤 prompt 막힘) | `6e9be39`·`062cbbb`: 대기열 교환 항목에 `exchangeRunId`를 둔다. discard 실패 복원은 같은 run이 활성일 때만, 자동 전송 실패 재삽입은 notApplied·unknown이고 같은 run일 때만 한다. 서버가 거절했거나 run이 바뀐 교환은 오류만 보이고 버리며, 다른 run에 묶인 교환은 보내지 않고 뺀다 | 패널 vitest: 옛 패널 동작 red 3 → green 223(agent-run), 변이 a(항상 되돌림)·b(항상 재삽입) red. **실제 host + 실제 AgentRunPanel itest**: discard 보류 → Full restart·새 run → discard notApplied → 새 대기열에 옛 교환 없음 → 후속 prompt 새 run에 1회 → `pendingExchanges=0` → wait-stop 정지. 옛 패널 red, 변이 a red |
+| S5 | medium(docs) | b2 판정이 실제 닫기 대상과 반대였다(Cmd+W는 앞의 Settings에 가는데 "Settings만 남음"을 성공으로 봄 → 배경 메인 창만 닫히는 오동작이 통과할 수 있음) | `2eff197`: 경로별 기대를 나눴다. (a)(b1)(f)는 메인 창을 닫으므로 run 제거·토큰 401, (b2)는 Settings를 닫으므로 남은 창 `Agentic Workbench`·run 유지·토큰 200. 10차 T4 설명도 정정했다 | 자기 시험 66개: 정상 b2(Settings만 닫힘 → 0), 배경 메인 창만 닫힘(9), run 제거(7), 토큰 401(8). 옛 스크립트 red 7 → green → 변이 2건 red. 과거 b2 7개 실행은 모두 앱 전체 종료라 정정된 기대로도 9이다. **b2는 미해결**이다(app-smoke.md) |
+
+- 한계:
+  - S1: 세대를 읽은 뒤·스냅샷 전 사이에 바뀐 task도 늦게 바뀐 것으로 보아 지금 상태를 쓴다(결과 같음).
+  - S3: 읽기 속도는 시험 안 sleep으로 흉내 냈다. 결함이 드러나는지는 끝점 속도에 달렸다. 요청 쪽 크기 상한은 두지 않았다.
+  - S4: 활성 run 없이 들어온 교환은 묶인 run이 없다(기존). 일반 prompt의 재삽입은 제한이 없다(영구 거절이면 반복될 수 있음). 실패는 화면 호출 클라이언트에서 주입했다.
+  - 실제 앱 스모크는 7–11차 수정 뒤 돌리지 않았다.
+- 11차 수정으로 코드가 바뀌었으므로 T052는 gate-14 전까지 다시 미완료로 둔다.
 
 ### 최종 HEAD 재검토
 
