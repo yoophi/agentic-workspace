@@ -1153,3 +1153,191 @@ async fn an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery()
     let launched = format!("launch:{run_id}");
     h.engine.wait_applied(|label| label == launched, WAIT).await;
 }
+
+/// 실패 정리(`fail`) 경로로 저장되지 않은 되돌리기 하나를 남긴다: 엔진 준비 실패 → 되돌리기 커밋 실패. task는 `Ready`이고
+/// 노드 예약(`Starting`)은 죽은 run을 가리킨다.
+async fn leave_an_unstored_rollback(h: &BenchHarness, bench: &str, task_id: &str) -> String {
+    let orchestration = h.rt.runtime.orchestration();
+    orchestration.fail_next_reverts(1);
+    h.engine.fail_next_start.store(true, Ordering::SeqCst);
+    let failed = orchestration.launch_task_for_ui(bench, task_id).await;
+    assert!(failed.is_err(), "the launch failed: {failed:?}");
+    assert_eq!(
+        orchestration.pending_revert_tasks(),
+        vec![task_id.to_owned()]
+    );
+    let stored = session(h, bench).await;
+    assert_eq!(task(&stored, task_id)["status"], "ready");
+    node_of(&stored, task_id)["currentRunId"]
+        .as_str()
+        .expect("the reservation is still stored")
+        .to_owned()
+}
+
+/// Codex r9 (a): 되돌리기 **재시도가 진행 중인 동안**에도 정리는 활동 작업이다. 재시도가 저장소 커밋 직전에 멈춘 사이의
+/// `default`·`wait` 정지는 멈추지 않고, 그 재시도가 다시 저장에 실패해도 활동으로 남으며, 저장된 뒤에야 wait가 멈춘다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rollback_retry_in_flight_stays_active_work_until_it_is_stored() {
+    use workbench_core::application::{server_control::StopOutcome, work_gate::GateState};
+    use workbench_protocol::operations::server::StopModeDto;
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let orchestration = Arc::clone(h.rt.runtime.orchestration());
+    let control = Arc::clone(h.rt.runtime.server_control());
+    leave_an_unstored_rollback(&h, &bench, &task_id).await;
+    // 작업대를 닫아 coordinator run과 그 밖의 활동을 없앤다 — 남은 활동은 이 정리뿐이다(작업 영역 id로 정리한다).
+    h.rt.runtime.close_all_benches().await;
+
+    // 재시도 1: 커밋 직전에 멈춘다. 그 사이의 정지 판정은 정리를 활동으로 본다.
+    orchestration.fail_next_reverts(1);
+    let mut store = pause_store_at(&h, StorePoint::RevertBeforeCommit);
+    let retry = {
+        let orchestration = Arc::clone(&orchestration);
+        tokio::spawn(async move { orchestration.retry_pending_reverts().await })
+    };
+    store.wait_for(StorePoint::RevertBeforeCommit).await;
+    assert_eq!(
+        orchestration.pending_revert_tasks(),
+        vec![task_id.clone()],
+        "a retry in flight is still visible"
+    );
+    match control.request_stop(StopModeDto::Default).await {
+        StopOutcome::Blocked(active) => assert!(
+            active.orchestration_tasks.is_some_and(|count| count >= 1),
+            "the cleanup in flight is active work: {active:?}"
+        ),
+        other => panic!("a rollback retry in flight must block the default stop: {other:?}"),
+    }
+    let waited = control.request_stop(StopModeDto::Wait).await;
+    assert!(
+        matches!(waited, StopOutcome::Draining),
+        "wait drains while the retry is in flight: {waited:?}"
+    );
+    // 재시도가 다시 저장에 실패한다: 정리는 목록에 남고(다시 시도), wait는 멈추지 않는다.
+    store.release.send(()).unwrap();
+    tokio::time::timeout(WAIT, retry)
+        .await
+        .expect("the retry returns")
+        .expect("the retry task");
+    assert_eq!(orchestration.pending_revert_tasks(), vec![task_id.clone()]);
+    orchestration.set_store_probe(None);
+    orchestration.fail_next_reverts(1);
+    assert!(
+        !control.tick(Duration::from_secs(600)).await,
+        "the failed retry keeps the wait stop from finishing"
+    );
+    assert_ne!(h.rt.runtime.work_gate().state(), GateState::Stopping);
+    assert_eq!(orchestration.pending_revert_tasks(), vec![task_id.clone()]);
+    // 저장소가 회복된다: 다음 바퀴의 재시도가 정리를 끝내고 wait가 멈춘다.
+    let mut stopped = false;
+    for _ in 0..3 {
+        if control.tick(Duration::from_secs(600)).await {
+            stopped = true;
+            break;
+        }
+    }
+    assert!(stopped, "the wait stop finishes once the cleanup is stored");
+    assert!(orchestration.pending_revert_tasks().is_empty());
+    assert_eq!(orchestration.scheduler().active_count().unwrap(), 0);
+    let _ = baseline;
+}
+
+/// Codex r9 (b): 되돌리기 재시도 future가 저장소 커밋 중에 abort돼도 정리 책임은 사라지지 않는다 — 커밋이 끝나면 단일
+/// 비행 자리와 scheduler 보유를 정리하고, 재배정이 실제 run을 기동한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_a_rollback_retry_mid_commit_still_finishes_the_cleanup() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let orchestration = Arc::clone(h.rt.runtime.orchestration());
+    leave_an_unstored_rollback(&h, &bench, &task_id).await;
+    let mut store = pause_store_at(&h, StorePoint::RevertBeforeCommit);
+    let retry = {
+        let orchestration = Arc::clone(&orchestration);
+        tokio::spawn(async move { orchestration.retry_pending_reverts().await })
+    };
+    store.wait_for(StorePoint::RevertBeforeCommit).await;
+    retry.abort();
+    assert!(retry.await.unwrap_err().is_cancelled());
+    assert_eq!(
+        orchestration.pending_revert_tasks(),
+        vec![task_id.clone()],
+        "the aborted retry still owns the cleanup"
+    );
+    store.release.send(()).unwrap();
+    orchestration.set_store_probe(None);
+    eventually("the aborted retry's commit settles the cleanup", || async {
+        orchestration.pending_revert_tasks().is_empty()
+    })
+    .await;
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "aborted retry").await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "aborted retry").await;
+}
+
+/// Codex r9 (c): 저장되지 않은 되돌리기가 남은 채 작업대를 닫으면(작업 영역의 작업대 묶임이 풀린다) 재시도는 작업대 id가
+/// 아니라 작업 영역 id로 정리를 끝낸다. 저장소가 회복되면 목록·보유가 비고, 정지가 막히지 않으며, 같은 작업 영역을 새
+/// 작업대로 다시 열어 재배정하면 실제 run이 기동한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unstored_rollback_survives_a_bench_close_and_finishes_by_workspace() {
+    let (h, bench, task_id, _baseline) = ready_task_with_baseline().await;
+    let orchestration = Arc::clone(h.rt.runtime.orchestration());
+    let doomed = leave_an_unstored_rollback(&h, &bench, &task_id).await;
+    let workspace_id = session(&h, &bench).await["id"].as_str().unwrap().to_owned();
+    orchestration.fail_next_reverts(1_000);
+    h.rt.runtime.close_all_benches().await;
+    let control = Arc::clone(h.rt.runtime.server_control());
+    assert!(!control.tick(Duration::from_secs(600)).await);
+    assert_eq!(
+        orchestration.pending_revert_tasks(),
+        vec![task_id.clone()],
+        "while the store fails the cleanup stays (observable)"
+    );
+    orchestration.fail_next_reverts(0);
+    assert!(!control.tick(Duration::from_secs(600)).await);
+    assert!(
+        orchestration.pending_revert_tasks().is_empty(),
+        "the retry finished the cleanup of a closed bench by workspace id"
+    );
+    assert_eq!(
+        orchestration.scheduler().active_count().unwrap(),
+        0,
+        "the rolling-back hold is released"
+    );
+    let derived = control.derive().await;
+    assert_eq!(derived.pending_launch_reverts, 0, "{derived:?}");
+    assert_eq!(
+        derived.active_total(),
+        0,
+        "nothing left blocks a normal stop: {derived:?}"
+    );
+    // 같은 작업 영역을 새 작업대로 다시 열어 재배정한다(같은 저장소, 새 런타임).
+    let h = Arc::try_unwrap(h).ok().expect("sole harness owner");
+    let h = h.restart_runtime(
+        |adapters| adapters.orchestration.max_concurrent_children = 1,
+        RunScript::default(),
+    );
+    let bench = h.open().await;
+    h.call(
+        &desktop(),
+        OperationId::OrchestrationBootstrap,
+        json!({ "benchId": bench, "worktreePath": h.dir, "resumeWorkspaceId": workspace_id }),
+    )
+    .await
+    .unwrap();
+    let resumed = session(&h, &bench).await;
+    assert!(
+        node_of(&resumed, &task_id)["currentRunId"].is_null(),
+        "the stale reservation of {doomed} is gone: {resumed}"
+    );
+    assert_eq!(task(&resumed, &task_id)["status"], "ready");
+    let orchestration = h.rt.runtime.orchestration();
+    orchestration
+        .launch_task_for_ui(&bench, &task_id)
+        .await
+        .expect("the task launches again");
+    let relaunched = session(&h, &bench).await;
+    let run_id = node_of(&relaunched, &task_id)["currentRunId"]
+        .as_str()
+        .expect("a new run")
+        .to_owned();
+    assert_ne!(run_id, doomed);
+    let launched = format!("launch:{run_id}");
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
+}

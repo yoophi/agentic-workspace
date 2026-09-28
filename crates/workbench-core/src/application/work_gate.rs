@@ -527,6 +527,12 @@ impl WorkGate {
         true
     }
 
+    /// 파생 활동이 바뀌었다(G 아래 세대 올림, Codex r9): 관문 밖 상태(저장되지 않은 기동 되돌리기의 재시도 시작·끝 등)가
+    /// 바뀌었으니 그 전에 읽은 세대로 진행 중인 정지 판정은 전이하지 않는다.
+    pub fn note_activity_change(&self) {
+        self.lock().generation += 1;
+    }
+
     /// 활동 세대(예약 해제와 상태 전이 — 비우기 시작·유휴 비우기 취소 — 마다 증가). [`WorkGate::try_stop_at`]과 짝.
     pub fn activity_generation(&self) -> u64 {
         self.lock().generation

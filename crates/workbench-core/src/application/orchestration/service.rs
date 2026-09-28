@@ -852,16 +852,25 @@ where
     /// 비우고 `Idle`로, 그 run 때문에 실행 중(`Running`·`InputRequired`)이 된 task는 다시 배정할 수 있는 `Ready`로 돌린다
     /// (run 없는 실행 중 task를 남기지 않는다). 종료·실패·막힘 상태는 그대로 둔다(그 run이 이미 결과를 냈다 — 종료 또는
     /// 재시도로 다시 배정). 그 사이 다른 run이 노드에 들어왔으면 아무것도 바꾸지 않는다.
+    ///
+    /// 작업 영역은 작업대가 아니라 **작업 영역 id**로 찾는다(Codex r9): 저장되지 않은 되돌리기가 남은 채 작업대가 닫히면
+    /// 작업대 묶임이 풀리므로(`release_bench`) 작업대 id로는 다시 찾을 수 없다. 되돌리기는 노드가 이 기동의 run을 가리킬
+    /// 때만 바꾸므로(조건부) 작업대 범위 확인 없이도 다른 기동을 건드리지 않는다. 작업 영역이 없으면(삭제) 되돌릴 것이 없다.
     pub fn revert_child_launch(
         &self,
-        bench_id: &str,
+        workspace_id: &str,
         task_id: &str,
         node_id: &str,
         run_id: &str,
     ) -> Result<(), OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_bench_mut(sessions, bench_id)?;
+        let Some(session) = sessions
+            .iter_mut()
+            .find(|session| session.id == workspace_id)
+        else {
+            return Ok(());
+        };
         let Some(node) = session
             .nodes
             .iter_mut()

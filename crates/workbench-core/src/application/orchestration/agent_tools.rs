@@ -874,6 +874,7 @@ impl OrchestrationRuntime {
         let mut cleanup = LaunchCleanup {
             runtime: Arc::clone(self),
             bench: bench.to_owned(),
+            workspace_id: snapshot.id.clone(),
             node_id: node.id.clone(),
             task_id: task.id.clone(),
             planned_run_id: planned_run_id.clone(),
@@ -1097,6 +1098,8 @@ enum Pending {
 struct LaunchCleanup {
     runtime: Arc<OrchestrationRuntime>,
     bench: String,
+    /// 되돌리기는 작업 영역 id로 한다(작업대가 닫혀도 끝낼 수 있게, Codex r9).
+    workspace_id: String,
     node_id: String,
     task_id: String,
     planned_run_id: String,
@@ -1138,6 +1141,7 @@ impl LaunchCleanup {
         let handle = tokio::spawn(rollback(
             Arc::clone(&self.runtime),
             self.bench.clone(),
+            self.workspace_id.clone(),
             self.task_id.clone(),
             self.node_id.clone(),
             self.planned_run_id.clone(),
@@ -1154,6 +1158,7 @@ impl LaunchCleanup {
             &self.runtime,
             UndoTarget {
                 bench: self.bench.clone(),
+                workspace_id: self.workspace_id.clone(),
                 node_id: self.node_id.clone(),
                 task_id: self.task_id.clone(),
                 planned_run_id: self.planned_run_id.clone(),
@@ -1170,6 +1175,7 @@ impl LaunchCleanup {
 /// 되돌린 기동의 식별.
 struct UndoTarget {
     bench: String,
+    workspace_id: String,
     node_id: String,
     task_id: String,
     planned_run_id: String,
@@ -1201,12 +1207,14 @@ fn finish_undo(
                 &target.task_id,
                 PendingRevert {
                     bench: target.bench,
+                    workspace_id: target.workspace_id,
                     node_id: target.node_id,
                     planned_run_id: target.planned_run_id,
                     token: target.token,
                     hold,
                     attempts: 1,
                     last_error: error,
+                    in_flight: false,
                 },
             );
             true
@@ -1219,6 +1227,7 @@ fn finish_undo(
 async fn rollback(
     runtime: Arc<OrchestrationRuntime>,
     bench: String,
+    workspace_id: String,
     task_id: String,
     node_id: String,
     planned_run_id: String,
@@ -1249,7 +1258,7 @@ async fn rollback(
                     "injected rollback store failure",
                 ));
             }
-            service.revert_child_launch(&bench, &task_id, &node_id, &planned_run_id)
+            service.revert_child_launch(&workspace_id, &task_id, &node_id, &planned_run_id)
         })
         .await
         .map_err(|error| error.text())
@@ -1282,6 +1291,7 @@ impl Drop for LaunchCleanup {
         let runtime = Arc::clone(&self.runtime);
         let target = UndoTarget {
             bench: self.bench.clone(),
+            workspace_id: self.workspace_id.clone(),
             node_id: self.node_id.clone(),
             task_id: self.task_id.clone(),
             planned_run_id: self.planned_run_id.clone(),
@@ -1293,6 +1303,7 @@ impl Drop for LaunchCleanup {
                 rollback(
                     Arc::clone(&runtime),
                     target.bench.clone(),
+                    target.workspace_id.clone(),
                     target.task_id.clone(),
                     target.node_id.clone(),
                     target.planned_run_id.clone(),

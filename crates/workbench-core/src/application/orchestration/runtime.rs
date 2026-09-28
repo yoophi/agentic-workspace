@@ -209,14 +209,23 @@ pub struct OrchestrationRuntime {
 }
 
 /// 저장소 되돌리기가 실패해 다시 시도할 기동 정리(Codex r8). 엔진 run 취소는 이미 끝났고 task·노드 되돌리기만 남았다.
+///
+/// 수명(Codex r9, research R14): 등록([`OrchestrationRuntime::defer_revert`]) → 재시도 진행 중(`in_flight`, 목록에 **남은
+/// 채** 활동으로 보인다) → 저장됨(목록에서 빼고 단일 비행 자리·보유를 놓음) 또는 다시 실패(`in_flight` 해제, 다음 재시도).
+/// 재시도는 호출 future와 따로 도는 소유 task가 끝까지 맡는다(호출 future가 취소돼도 결과를 반영한다). 작업 영역 id로
+/// 정리하므로 작업대가 닫혀도 끝낼 수 있다. 목록은 메모리라 프로세스가 끝나면 재시작 복구(`reconcile_session_runtime`의
+/// 예약 노드 되돌리기)가 맡는다.
 pub(crate) struct PendingRevert {
     pub(crate) bench: String,
+    pub(crate) workspace_id: String,
     pub(crate) node_id: String,
     pub(crate) planned_run_id: String,
     pub(crate) token: u64,
     pub(crate) hold: Option<super::scheduler::SlotHold>,
     pub(crate) attempts: u32,
     pub(crate) last_error: String,
+    /// 재시도 하나가 진행 중이다(같은 정리의 동시 재시도를 하나로 묶는다).
+    pub(crate) in_flight: bool,
 }
 
 impl OrchestrationRuntime {
@@ -346,6 +355,7 @@ impl OrchestrationRuntime {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(task_id.to_owned(), revert);
+        self.work_gate().note_activity_change();
     }
 
     /// 되돌리기가 저장되지 않은 기동 task(관측·정지 판정).
@@ -369,48 +379,86 @@ impl OrchestrationRuntime {
         }
     }
 
+    /// 넘겨받은 되돌리기 하나를 다시 시도한다. 항목은 목록에 **남긴 채** 진행 중으로 표시하고(정지 판정이 활동으로 본다),
+    /// 저장소 커밋과 그 결과 반영은 호출 future와 따로 도는 소유 task가 끝까지 한다 — 이 future가 취소돼도 커밋 결과로
+    /// 항목을 지우거나(자리·보유 정리) 다시 기다리게 한다. 같은 정리의 재시도가 이미 진행 중이면 그것을 기다리지 않고 돌아온다.
     pub(crate) async fn retry_pending_revert(self: &Arc<Self>, task_id: &str) {
-        // 꺼내서 시도한다(같은 task의 동시 재시도를 하나로).
-        let Some(mut revert) = self
-            .pending_reverts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .remove(task_id)
-        else {
+        let claimed = {
+            let mut pending = self
+                .pending_reverts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match pending.get_mut(task_id) {
+                Some(revert) if !revert.in_flight => {
+                    revert.in_flight = true;
+                    Some((
+                        revert.workspace_id.clone(),
+                        revert.node_id.clone(),
+                        revert.planned_run_id.clone(),
+                    ))
+                }
+                _ => None,
+            }
+        };
+        let Some((workspace, node, run)) = claimed else {
             return;
         };
-        let (bench, task, node, run) = (
-            revert.bench.clone(),
-            task_id.to_owned(),
-            revert.node_id.clone(),
-            revert.planned_run_id.clone(),
-        );
+        self.work_gate().note_activity_change();
         let runtime = Arc::clone(self);
-        let stored = self
-            .blocking(move |service| {
-                if runtime.take_revert_fault() {
-                    return Err(OrchestrationError::new(
-                        crate::domain::agent_orchestration::OrchestrationErrorCode::WorkerUnavailable,
-                        "injected rollback store failure",
-                    ));
-                }
-                service.revert_child_launch(&bench, &task, &node, &run)
-            })
-            .await;
-        match stored {
-            Ok(()) => {
-                self.forget_launching(&revert.planned_run_id);
-                self.end_task_launch(task_id, revert.token);
-                if let Some(hold) = revert.hold.take() {
-                    let _ = self.scheduler.release_hold(hold);
+        let task = task_id.to_owned();
+        let owner = tokio::spawn(async move {
+            let (faults, probe, t) = (Arc::clone(&runtime), runtime.store_probe(), task.clone());
+            let stored = runtime
+                .blocking(move |service| {
+                    if let Some(probe) = &probe {
+                        probe(StorePoint::RevertBeforeCommit);
+                    }
+                    if faults.take_revert_fault() {
+                        return Err(OrchestrationError::new(
+                            crate::domain::agent_orchestration::OrchestrationErrorCode::WorkerUnavailable,
+                            "injected rollback store failure",
+                        ));
+                    }
+                    service.revert_child_launch(&workspace, &t, &node, &run)
+                })
+                .await;
+            runtime.settle_pending_revert(&task, stored);
+        });
+        let _ = owner.await;
+    }
+
+    /// 재시도 결과 반영(소유 task가 부른다): 저장됐으면 항목을 빼고 단일 비행 자리·보유를 놓는다. 아니면 진행 중 표시를 풀고
+    /// 시도 수·오류를 남긴다(다음 재시도).
+    fn settle_pending_revert(&self, task_id: &str, stored: OrchestrationResult<()>) {
+        let settled = {
+            let mut pending = self
+                .pending_reverts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            match stored {
+                Ok(()) => pending.remove(task_id),
+                Err(error) => {
+                    if let Some(revert) = pending.get_mut(task_id) {
+                        revert.in_flight = false;
+                        revert.attempts += 1;
+                        revert.last_error = error.text();
+                        eprintln!(
+                            "[workbench] child launch rollback for task {task_id} (run {}) could not be stored after {} attempt(s): {}; it stays rolling back and is retried",
+                            revert.planned_run_id, revert.attempts, revert.last_error
+                        );
+                    }
+                    None
                 }
             }
-            Err(error) => {
-                revert.attempts += 1;
-                revert.last_error = error.text();
-                self.defer_revert(task_id, revert);
+        };
+        if let Some(mut revert) = settled {
+            self.forget_launching(&revert.planned_run_id);
+            self.end_task_launch(task_id, revert.token);
+            if let Some(hold) = revert.hold.take() {
+                let _ = self.scheduler.release_hold(hold);
             }
         }
+        self.work_gate().note_activity_change();
     }
 
     /// 진행 중인(되돌리는 중이 아닌) 기동의 예정 run id.
