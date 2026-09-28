@@ -40,8 +40,17 @@ fi
 osascript -e "tell application id \"$BID\" to activate" >/dev/null 2>&1; sleep 1
 MAIN=$(sx 'get name of front window')
 log "main-window=$MAIN"
+invalid_stop() {
+  # 전역 키를 보내지 않고 이 시도를 무효로 끝낸다. 정리는 이 앱(번들 id)과 기록한 신원의 pid만.
+  log "key-not-sent: $1 (attempt invalid)"
+  osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1; for i in $(seq 1 20); do kill -0 "$APID" 2>/dev/null || break; sleep 0.5; done
+  kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
+  kill_exact "$R/kills.txt" "$SPID"
+  exit 6
+}
 if [ "$CLOSE" != f ]; then
-  osascript -e 'tell application "System Events" to keystroke "," using command down' >/dev/null 2>&1; sleep 3
+  send_key_to "$APID" "$BID" "," || invalid_stop "Cmd+, : the target app is not frontmost"
+  sleep 3
 fi
 log "windows-before-close=$(sx 'get name of every window')"
 case "$CLOSE" in
@@ -50,7 +59,7 @@ case "$CLOSE" in
       log "front=$(sx 'get name of front window')"
       log "action: $(sx 'click menu item "Close Window" of menu "Window" of menu bar 1')" ;;
   b2) log "front=$(sx 'get name of front window')"
-      osascript -e 'tell application "System Events" to keystroke "w" using command down' >/dev/null 2>&1 ;;
+      send_key_to "$APID" "$BID" "w" || invalid_stop "Cmd+W : the target app is not frontmost" ;;
 esac
 sleep 3
 ALIVE=$(kill -0 "$APID" 2>/dev/null && echo yes || echo no)

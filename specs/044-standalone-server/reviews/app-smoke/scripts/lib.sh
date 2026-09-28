@@ -56,3 +56,27 @@ kill_exact() {
     kill "$p" 2>/dev/null
   done
 }
+
+# 앞 프로세스가 정확히 그 pid인가(전역 키 입력은 앞 프로세스로 간다).
+front_is() {
+  [ "$(osascript -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null)" = "$1" ]
+}
+
+# 대상 앱을 앞으로 가져오고 앞 프로세스가 그 pid가 될 때까지 조건 대기(상한 10초). 성공하면 0.
+wait_front() {
+  local apid=$1 bid=$2 i
+  for i in $(seq 1 40); do
+    osascript -e "tell application id \"$bid\" to activate" >/dev/null 2>&1
+    front_is "$apid" && return 0
+    sleep 0.25
+  done
+  return 1
+}
+
+# 전역 키 입력: 앞 프로세스가 그 pid임을 두 번(대기 뒤·보내기 직전) 확인한 뒤에만 보낸다. 아니면 보내지 않고 1.
+send_key_to() {
+  local apid=$1 bid=$2 key=$3
+  wait_front "$apid" "$bid" || return 1
+  front_is "$apid" || return 1
+  osascript -e "tell application \"System Events\" to keystroke \"$key\" using command down" >/dev/null 2>&1
+}

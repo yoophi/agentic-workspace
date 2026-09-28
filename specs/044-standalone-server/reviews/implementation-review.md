@@ -74,7 +74,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 ### 정지 계약 변경: 재시도 알림 상한 (O7, Codex 검토 대상)
 
-- 재시도를 **기다리는** 재시도 가능 실패 알림은 `attemptCount < 3`일 때만 활동이다. 그 뒤에는 `stalledNotifications`로 보고만 한다. `pending`·`dispatching`(진행 중 시도)은 횟수와 무관하게 활동이다.
+- (최초 결정, OCR 2차 R1로 대체됨) 재시도를 **기다리는** 재시도 가능 실패 알림은 `attemptCount < 3`일 때만 활동이었다. **현재 조건은 `deliveryFailureCount < 3`(실제 전달 실패 수)이고, 마지막 실패가 바쁨 거절이면 횟수와 무관하게 활동이다**(아래 R1). 그 뒤에는 `stalledNotifications`로 보고만 한다. `pending`·`dispatching`(진행 중 시도)은 횟수와 무관하게 활동이다.
 - 알림은 `failed`·재시도 가능으로 저장된 채 남는다. 시도 수는 "전달됨"이 아니다. 서빙 중 배경 재시도는 계속된다.
 - 증명: 주입 실패 → 재시도 → 상한 전 정지 막음 → 상한 뒤 정지 + `stalledNotifications`. 상한 뒤 진행 중 시도는 정지를 막는다. 같은 runtime에서 coordinator가 회복되면 전달된다.
 - **한계**:
