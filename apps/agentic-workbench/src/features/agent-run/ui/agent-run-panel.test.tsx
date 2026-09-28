@@ -898,6 +898,59 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     expect(panel.container.textContent).not.toContain("Second peer request");
   });
 
+  // Codex r10(apps medium): 취소의 답을 기다리는 동안 그 run의 turn이 끝났다(`promptCompleted`). 취소 진행은 turn 응답 대기와
+  // 다른 상태다: 기다리는 동안에는 취소 중인 run에 대기열을 보내지 않고, 취소가 끝나지 않았으면(결과 모름·거절·미전송) 호출 전
+  // 응답 대기 값으로 되돌리지 않는다 — 쉬는 run에 대기한 교환이 이어 가기 표지로 전달된다.
+  it.each([
+    ["unknown", MESSAGE_RESULT_UNKNOWN],
+    ["refused by the server", "cancel refused by the server"],
+  ])(
+    "a turn that ended while a full restart's cancel was pending sends the queued exchange once the cancel is %s",
+    async (_kind, error) => {
+      const { panel, runId } = await busyRunWithAQueuedExchange();
+      await rejectASteer(panel);
+
+      const gate = deferred();
+      cancelGate = gate.promise;
+      cancelOutcome = error;
+      await panel.clickButton("Full restart");
+      await waitForAgentRunPanel(() => cancelRequests === 1);
+      await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+      expect(deliveriesOf("x-7"), "nothing is sent into a run whose cancel is pending").toEqual([]);
+      await act(async () => {
+        gate.release();
+      });
+      await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+      await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 1);
+      expect(deliveriesOf("x-7")[0]).toMatchObject({ runId, prompt: "Handle the peer request" });
+      expect(invocationsFor("start_agent_run"), "no replacement run").toHaveLength(1);
+      expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([]);
+    },
+  );
+
+  it.each([
+    ["unknown", MESSAGE_RESULT_UNKNOWN],
+    ["notApplied", MESSAGE_NOT_APPLIED],
+  ])("a turn that ended while a cancel was pending sends the queued exchange only after the cancel is %s", async (_kind, error) => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+
+    const gate = deferred();
+    cancelGate = gate.promise;
+    cancelOutcome = error;
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => cancelRequests === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    expect(deliveriesOf("x-7"), "nothing is sent into a run whose cancel is pending").toEqual([]);
+    await act(async () => {
+      gate.release();
+    });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+    await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 1);
+    expect(deliveriesOf("x-7")[0]).toMatchObject({ runId, prompt: "Handle the peer request" });
+  });
+
   // Codex r9(apps medium): 결과를 몰랐던(실제로는 적용되지 않은) 재시작 뒤 다시 누른 재시작은 앞 보류를 대체한다. 그 취소의 끝
   // 이벤트가 성공 답보다 먼저 와도 대체 run은 정확히 하나다.
   it("a retried full restart replaces the held one: the cancel end before the success reply starts exactly one run", async () => {

@@ -439,6 +439,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   );
   const [isRunning, setIsRunning] = useState(existingIsRunning);
   const [isAwaitingPromptResponse, setIsAwaitingPromptResponse] = useState(false);
+  /** 답을 기다리는 취소 호출 수(Codex r10). turn 응답 대기(`isAwaitingPromptResponse`, run lifecycle이 정한다)와 다른 상태다:
+   *  취소 중인 run에는 대기열을 보내지 않지만, 취소가 끝나지 않았다고 응답 대기 값을 호출 전으로 되돌리지 않는다. */
+  const [cancelsInFlight, setCancelsInFlight] = useState(0);
+  /** run lifecycle이 응답 대기를 바꾼 횟수(Codex r10): 호출 실패 때 되돌리기는 그 사이 lifecycle이 바꾸지 않았을 때만 한다. */
+  const promptLifecycleSeqRef = useRef(0);
   const [isPreparingRun, setIsPreparingRun] = useState(false);
   const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
     type: "unknown",
@@ -939,7 +944,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           setAgentThreadStatus(nextThreadStatus);
         }
         if (nextThreadStatus?.type === "idle") {
-          setIsAwaitingPromptResponse(false);
+          setAwaitingFromLifecycle(false);
         }
         return;
       }
@@ -969,7 +974,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
       if (timelineEvent.type === "error") {
         lastClearedQueueRef.current = { runId: envelope.runId, queue: queuedPromptsRef.current };
-        setIsAwaitingPromptResponse(false);
+        setAwaitingFromLifecycle(false);
         setQueuedPrompts([]);
         setDirectPrompt(null);
         setIsRunning(false);
@@ -1009,10 +1014,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
               }).items,
             );
           }
-          setIsAwaitingPromptResponse(true);
+          setAwaitingFromLifecycle(true);
         }
         if (timelineEvent.status === "promptCompleted") {
-          setIsAwaitingPromptResponse(false);
+          setAwaitingFromLifecycle(false);
         }
         if (timelineEvent.status === "steerAccepted") {
           const [accepted] = pendingSteersRef.current;
@@ -1021,7 +1026,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
             pendingSteersRef.current = next;
             setPendingSteers(next);
           }
-          setIsAwaitingPromptResponse(false);
+          setAwaitingFromLifecycle(false);
         }
         if (timelineEvent.status === "steerRejected") {
           const [rejected] = pendingSteersRef.current;
@@ -1037,11 +1042,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
             setPendingSteers(result.pendingSteers);
             setRejectedSteers(result.rejectedSteers);
           }
-          setIsAwaitingPromptResponse(false);
+          setAwaitingFromLifecycle(false);
         }
         if (["completed", "cancelled"].includes(timelineEvent.status)) {
           lastClearedQueueRef.current = { runId: envelope.runId, queue: queuedPromptsRef.current };
-          setIsAwaitingPromptResponse(false);
+          setAwaitingFromLifecycle(false);
           setQueuedPrompts([]);
           setPendingSteers([]);
           setRejectedSteers([]);
@@ -1081,6 +1086,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       !activeRunId ||
       !isRunning ||
       isAwaitingPromptResponse ||
+      cancelsInFlight > 0 ||
       !shouldAutoDispatchQueuedPromptWithSteers({ queue: queuedPrompts, pendingSteers })
     ) {
       return;
@@ -1088,6 +1094,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
     const nextPrompt = queuedPrompts[0];
     const previousDirectPrompt = directPrompt;
+    const lifecycleSeq = promptLifecycleSeqRef.current;
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
     setDirectPrompt(nextPrompt.text);
@@ -1109,11 +1116,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           removeUserMessage(currentItems, activeRunId, nextPrompt.text),
         );
         setDirectPrompt(previousDirectPrompt);
-        setIsAwaitingPromptResponse(false);
+        restoreAwaitingIfUnchanged(lifecycleSeq, false);
         setError(String(caughtError));
       });
   }, [
     activeRunId,
+    cancelsInFlight,
     directPrompt,
     isAwaitingPromptResponse,
     isRunning,
@@ -1912,6 +1920,29 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
+  /** run lifecycle이 정한 응답 대기(Codex r10): 이벤트 처리기만 부른다. */
+  function setAwaitingFromLifecycle(value: boolean) {
+    promptLifecycleSeqRef.current += 1;
+    setIsAwaitingPromptResponse(value);
+  }
+
+  /** 이 조작이 바꾼 응답 대기를 되돌린다 — 그 사이 run lifecycle이 바꿨으면(turn이 끝남·시작함) 최신 값을 둔다(Codex r10). */
+  function restoreAwaitingIfUnchanged(sinceSeq: number, value: boolean) {
+    if (promptLifecycleSeqRef.current === sinceSeq) {
+      setIsAwaitingPromptResponse(value);
+    }
+  }
+
+  /** 취소 호출 하나(Codex r10): 답을 받을 때까지 취소 진행으로 센다 — 자동 전송이 취소 중인 run에 보내지 않는다. */
+  async function trackCancel<T>(call: () => Promise<T>): Promise<T> {
+    setCancelsInFlight((count) => count + 1);
+    try {
+      return await call();
+    } finally {
+      setCancelsInFlight((count) => count - 1);
+    }
+  }
+
   /** 재시작 의도를 그 시도 id로 한 번만 소비한다(Codex r9). 대체됐거나 이미 소비됐으면 false. */
   function claimRestart(attemptId: number) {
     if (restartIntentRef.current?.attemptId !== attemptId) {
@@ -1941,7 +1972,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     unsettledRestartRef.current = null;
     const runIdToCancel = activeRunId;
     try {
-      await cancelAgentRun(runIdToCancel);
+      await trackCancel(() => cancelAgentRun(runIdToCancel));
     } catch (caughtError) {
       setError(String(caughtError));
       // 취소가 서버에 닿았는지 모른다(Codex r8): 보내지 않았거나(notApplied) 답을 못 받았다(unknown). run은 살아 있을 수
@@ -2069,6 +2100,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
     setError(null);
     setPrompt(defaultPrompt);
+    const lifecycleSeq = promptLifecycleSeqRef.current;
     setIsAwaitingPromptResponse(true);
     setDirectPrompt(nextPrompt);
     setItems((currentItems) => addUserMessage(currentItems, runId, nextPrompt));
@@ -2080,7 +2112,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setPrompt(nextPrompt);
       setItems((currentItems) => removeUserMessage(currentItems, runId, nextPrompt));
       setDirectPrompt(previousDirectPrompt);
-      setIsAwaitingPromptResponse(false);
+      restoreAwaitingIfUnchanged(lifecycleSeq, false);
       setError(String(caughtError));
     }
   }
@@ -2221,6 +2253,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     rejectedSteersRef.current = nextRejected;
     setRejectedSteers(nextRejected);
     setError(null);
+    const lifecycleSeq = promptLifecycleSeqRef.current;
     setIsAwaitingPromptResponse(true);
     setDirectPrompt(nextGoal);
     setItems((currentItems) =>
@@ -2233,12 +2266,15 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     } catch (caughtError) {
       rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
       setRejectedSteers(rejectedSteersRef.current);
-      setDirectPrompt(originalPrompt);
+      if (promptLifecycleSeqRef.current === lifecycleSeq) {
+        // 그 사이 run lifecycle이 바꾸지 않았을 때만 이 조작이 바꾼 것을 되돌린다(Codex r10).
+        setDirectPrompt(originalPrompt);
+      }
       setItems((currentItems) =>
         removeUserMessage(currentItems, targetRunId, steerInput.text),
       );
       setError(String(caughtError));
-      setIsAwaitingPromptResponse(false);
+      restoreAwaitingIfUnchanged(lifecycleSeq, false);
     }
   }
 
@@ -2259,9 +2295,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     rejectedSteersRef.current = nextRejected;
     setRejectedSteers(nextRejected);
     setError(null);
-    // 취소가 끝나지 않으면 run은 그대로다: 그때 되돌릴 응답 대기 상태(진행 중 turn이면 자동 전송이 대기열을 보내지 않는다).
-    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
-    setIsAwaitingPromptResponse(true);
+    // 취소를 기다리는 동안은 취소 진행(`trackCancel`)이 자동 전송을 막는다. 응답 대기는 건드리지 않는다 — run lifecycle이
+    // 정하는 값이라, 기다리는 동안 turn이 끝나면(`promptCompleted`) 그 최신 값이 남아야 한다(Codex r10).
 
     // 취소가 끝난 뒤: 버린 교환을 서버에서도 끝내고 새 run을 시작한다 — 이 시도의 의도가 아직 살아 있을 때 한 번만. 대기열은
     // 호출 전 스냅샷이 아니라 취소한 run의 지금 대기열이다(기다리는 동안 들어온 항목 포함, Codex r9). 교환 항목은 취소한 run이
@@ -2293,7 +2328,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
 
     try {
-      await cancelAgentRun(runIdToCancel);
+      await trackCancel(() => cancelAgentRun(runIdToCancel));
     } catch (caughtError) {
       // 취소가 적용되지 않았거나(서버가 거절, 보내지 않음) 결과를 모른다(Codex r8): 원래 run이 살아 있을 수 있으므로 지금은
       // 새 run을 시작하지 않고 거절된 steer를 되돌린다. 대기열은 건드리지 않는다 — 재시작은 호출 전에 아무것도 빼지 않았고,
@@ -2323,7 +2358,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         // run은 이미 끝났다(끝 이벤트가 패널을 정리했다): 대기열을 되살리지 않는다.
         return;
       }
-      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
       if (unsettled === "unknown") {
         unsettledRestartRef.current = {
           attemptId,

@@ -436,6 +436,32 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
   });
 
+  // Codex r10(apps medium): 재시작 취소의 답을 붙잡은 사이 run의 turn이 끝난다(서버가 `promptCompleted`를 낸다). 취소가 적용되지
+  // 않고 결과를 모름으로 끝나면 패널은 호출 전 응답 대기 값으로 되돌리지 않는다 — 쉬는 run에 대기한 교환을 보내고, 그 뒤 도착해
+  // 확인된 교환도 보내며, wait-stop이 끝난다.
+  it("a turn that ended while a full restart's cancel was pending does not block delivery after an unknown result", async () => {
+    const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
+    const hold = s.holdNextCancel("unknownNotApplied");
+    await press("Full restart");
+    await hold.held;
+    await s.finishTurn();
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(0), { timeout: 15_000, interval: 20 });
+    expect(s.exchangeSendsOf("x-1"), "nothing is sent into the run while its cancel is pending").toEqual([]);
+    await act(async () => {
+      hold.release();
+    });
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false, 15_000);
+
+    await s.sendExchange("x-2", "second peer message");
+    await s.beginWaitStop();
+    await s.stopped();
+    expect(s.cancelsReachingServer, "the injected cancel never reached the server").toEqual([]);
+    expect(s.exchangeSendsOf("x-1"), "the queued exchange was delivered once").toHaveLength(1);
+    expect(s.exchangeSendsOf("x-2"), "the exchange that arrived afterwards was delivered once").toHaveLength(1);
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
+    expect(s.recorded.filter((item) => item.command === "discard_agent_exchange_delivery")).toEqual([]);
+  });
+
   // Codex r9(apps medium): 결과를 몰랐던(적용되지 않은) 재시작 뒤 다시 누른 재시작은 앞 보류를 대체한다. 두 번째 취소는 실제로
   // 적용되고, 그 run의 끝 이벤트가 성공 답보다 먼저 온다. 대체 run은 정확히 하나다(서버의 run 목록으로 확인).
   it("a retried full restart after an unknown one starts exactly one replacement run when the cancel end precedes the reply", async () => {
