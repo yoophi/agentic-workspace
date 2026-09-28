@@ -35,6 +35,27 @@ fn main() {
             let child = child.spawn().expect("spawn env-cleared descendant");
             record_pid(child.id());
         }
+        "keeper-env-clear" => {
+            let executable = env::current_exe().expect("fixture executable");
+            let mut child = Command::new(executable);
+            child.arg("sleep").env_clear();
+            #[cfg(unix)]
+            new_session(&mut child);
+            let child = child.spawn().expect("spawn keeper-owned escaped child");
+            record_pid(child.id());
+            sleep_forever();
+        }
+        "server-keeper-env-clear" => {
+            let executable = env::current_exe().expect("fixture executable");
+            let keeper = Command::new(executable)
+                .arg("keeper-env-clear")
+                .spawn()
+                .expect("spawn keeper fixture");
+            if let Some(path) = env::var_os("AW_045_KEEPER_PID_PATH") {
+                fs::write(path, keeper.id().to_string()).expect("record keeper pid");
+            }
+            sleep_forever();
+        }
         "new-process-group" => {
             #[cfg(unix)]
             // SAFETY: the fixture is single-threaded and changes only its own

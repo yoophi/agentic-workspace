@@ -43,6 +43,29 @@ pub struct EnvironmentProbeEvidence {
     pub parsed_value_matches: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuditTokenSignalEvidence {
+    pub task_for_pid_status: i32,
+    pub task_info_status: Option<i32>,
+    pub signal_result: Option<i32>,
+    pub signal_errno: Option<i32>,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct AuditToken {
+    value: [u32; 8],
+}
+
+#[cfg(target_os = "macos")]
+unsafe extern "C" {
+    fn mach_port_deallocate(
+        task: libc::mach_port_t,
+        name: libc::mach_port_t,
+    ) -> libc::kern_return_t;
+    fn proc_signal_with_audittoken(token: *mut AuditToken, signal: libc::c_int) -> libc::c_int;
+}
+
 pub fn process_start_identity(pid: u32) -> io::Result<ProcessStartIdentity> {
     process_start_identity_impl(pid)
 }
@@ -53,6 +76,18 @@ pub fn process_environment(pid: u32) -> io::Result<BTreeMap<Vec<u8>, Vec<u8>>> {
 
 pub fn probe_environment_marker(pid: u32, key: &[u8], value: &[u8]) -> EnvironmentProbeEvidence {
     probe_environment_marker_impl(pid, key, value)
+}
+
+pub fn probe_identity_safe_signal(pid: u32) -> AuditTokenSignalEvidence {
+    probe_identity_safe_signal_impl(pid)
+}
+
+pub fn current_process_audit_token() -> Result<[u8; 32], i32> {
+    current_process_audit_token_impl()
+}
+
+pub fn signal_audit_token(token: [u8; 32], signal: i32) -> io::Result<()> {
+    signal_audit_token_impl(token, signal)
 }
 
 pub fn terminate_child(child: &mut Child) {
@@ -70,7 +105,7 @@ pub fn capability_report(environment_probe_succeeded: bool) -> UnixCapabilityRep
         env_clear_descendant_trackable: false,
         ordinary_deployment_permissions: environment_probe_succeeded,
         blockers: vec![
-            "macOS exposes PID/start metadata but no ordinary-app reusable process handle for atomic signal delivery",
+            "a cooperative child can hand off an audit token, but an ordinary parent cannot obtain one for an arbitrary discovered descendant",
             "a descendant that clears the launch nonce and reparents cannot be attributed by nonce or parent lineage",
         ],
     }
@@ -254,6 +289,97 @@ fn probe_environment_marker_impl(pid: u32, key: &[u8], value: &[u8]) -> Environm
     }
 }
 
+#[cfg(target_os = "macos")]
+fn probe_identity_safe_signal_impl(pid: u32) -> AuditTokenSignalEvidence {
+    let mut task = 0;
+    #[allow(deprecated)]
+    // SAFETY: task points to writable storage and the PID belongs to the
+    // isolated child. Any returned task port is deallocated below.
+    let task_for_pid_status =
+        unsafe { libc::task_for_pid(libc::mach_task_self_, pid as libc::pid_t, &mut task) };
+    if task_for_pid_status != 0 {
+        return AuditTokenSignalEvidence {
+            task_for_pid_status,
+            task_info_status: None,
+            signal_result: None,
+            signal_errno: None,
+        };
+    }
+
+    let mut token = AuditToken { value: [0; 8] };
+    let mut count = token.value.len() as libc::mach_msg_type_number_t;
+    // SAFETY: token provides the eight natural_t slots required by
+    // TASK_AUDIT_TOKEN (flavor 15).
+    let task_info_status =
+        unsafe { libc::task_info(task, 15, token.value.as_mut_ptr().cast(), &mut count) };
+    let (signal_result, signal_errno) = if task_info_status == 0 {
+        // SAFETY: task_info returned this token for the exact child task.
+        let result = unsafe { proc_signal_with_audittoken(&mut token, libc::SIGTERM) };
+        let errno = if result == -1 {
+            io::Error::last_os_error().raw_os_error()
+        } else {
+            None
+        };
+        (Some(result), errno)
+    } else {
+        (None, None)
+    };
+
+    #[allow(deprecated)]
+    // SAFETY: the returned task port is owned by this process.
+    unsafe {
+        mach_port_deallocate(libc::mach_task_self_, task);
+    }
+    AuditTokenSignalEvidence {
+        task_for_pid_status,
+        task_info_status: Some(task_info_status),
+        signal_result,
+        signal_errno,
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn current_process_audit_token_impl() -> Result<[u8; 32], i32> {
+    let mut token = AuditToken { value: [0; 8] };
+    let mut count = token.value.len() as libc::mach_msg_type_number_t;
+    #[allow(deprecated)]
+    // SAFETY: token has the exact TASK_AUDIT_TOKEN layout and count.
+    let status = unsafe {
+        libc::task_info(
+            libc::mach_task_self_,
+            15,
+            token.value.as_mut_ptr().cast(),
+            &mut count,
+        )
+    };
+    if status != 0 {
+        return Err(status);
+    }
+    let mut bytes = [0_u8; 32];
+    for (index, value) in token.value.into_iter().enumerate() {
+        bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    Ok(bytes)
+}
+
+#[cfg(target_os = "macos")]
+fn signal_audit_token_impl(bytes: [u8; 32], signal: i32) -> io::Result<()> {
+    let mut token = AuditToken { value: [0; 8] };
+    for (index, slot) in token.value.iter_mut().enumerate() {
+        *slot = u32::from_ne_bytes(
+            bytes[index * 4..index * 4 + 4]
+                .try_into()
+                .expect("fixed audit token chunk"),
+        );
+    }
+    // SAFETY: token bytes came from TASK_AUDIT_TOKEN and retain their layout.
+    if unsafe { proc_signal_with_audittoken(&mut token, signal) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn process_start_identity_impl(pid: u32) -> io::Result<ProcessStartIdentity> {
     let stat = std::fs::read_to_string(format!("/proc/{pid}/stat"))?;
@@ -312,6 +438,26 @@ fn probe_environment_marker_impl(pid: u32, key: &[u8], value: &[u8]) -> Environm
             parsed_value_matches: false,
         },
     }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn probe_identity_safe_signal_impl(_pid: u32) -> AuditTokenSignalEvidence {
+    AuditTokenSignalEvidence {
+        task_for_pid_status: libc::ENOTSUP,
+        task_info_status: None,
+        signal_result: None,
+        signal_errno: Some(libc::ENOTSUP),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn current_process_audit_token_impl() -> Result<[u8; 32], i32> {
+    Err(libc::ENOTSUP)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn signal_audit_token_impl(_token: [u8; 32], _signal: i32) -> io::Result<()> {
+    Err(io::Error::from_raw_os_error(libc::ENOTSUP))
 }
 
 #[cfg(target_os = "linux")]

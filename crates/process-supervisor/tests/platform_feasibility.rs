@@ -8,7 +8,8 @@ use std::{
 };
 
 use process_supervisor::platform::unix::feasibility::{
-    capability_report, probe_environment_marker, process_environment, process_start_identity,
+    capability_report, current_process_audit_token, probe_environment_marker,
+    probe_identity_safe_signal, process_environment, process_start_identity, signal_audit_token,
     ProcessStartIdentity,
 };
 
@@ -28,6 +29,25 @@ impl ChildGuard {
             let _ = child.kill();
             let _ = child.wait();
         }
+    }
+
+    fn exited_within(&mut self, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if self
+                .0
+                .as_mut()
+                .expect("live child")
+                .try_wait()
+                .expect("query child")
+                .is_some()
+            {
+                self.0.take();
+                return true;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        false
     }
 }
 
@@ -56,18 +76,34 @@ impl Drop for EscapedPidCleanup {
         let Ok(pid) = text.trim().parse::<u32>() else {
             return;
         };
-        let current_identity = process_start_identity(pid).ok();
-        if self.expected_identity.is_some() && current_identity == self.expected_identity {
-            // SAFETY: this isolated fixture cleanup compares the full recorded
-            // start identity immediately before signal. The comparison still
-            // cannot close the check-to-signal PID-reuse window, so it is not
-            // production containment evidence.
-            unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGKILL);
-            }
+        if let Some(expected_identity) = self.expected_identity {
+            identity_guarded_fixture_kill(pid, expected_identity);
         }
         let _ = fs::remove_file(&self.path);
     }
+}
+
+fn identity_guarded_fixture_kill(pid: u32, expected_identity: ProcessStartIdentity) {
+    let current_identity = process_start_identity(pid).ok();
+    if current_identity == Some(expected_identity) {
+        // SAFETY: this isolated fixture cleanup compares the full recorded
+        // start identity immediately before signal. The comparison still
+        // cannot close the check-to-signal PID-reuse window, so it is not
+        // production containment evidence.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGKILL);
+        }
+    }
+}
+
+fn wait_for_identity_to_disappear(pid: u32, expected_identity: ProcessStartIdentity) -> bool {
+    for _ in 0..200 {
+        if process_start_identity(pid).ok() != Some(expected_identity) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    false
 }
 
 fn wait_for_observation(pid: u32) {
@@ -90,6 +126,30 @@ fn wait_for_fixture_result(path: &std::path::Path) -> bool {
     panic!("fixture did not report its marker state");
 }
 
+fn wait_for_bytes(path: &std::path::Path, expected_len: usize) -> Vec<u8> {
+    for _ in 0..100 {
+        if let Ok(value) = fs::read(path) {
+            if value.len() == expected_len {
+                return value;
+            }
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("fixture did not write {expected_len} bytes");
+}
+
+fn wait_for_pid(path: &std::path::Path) -> u32 {
+    for _ in 0..100 {
+        if let Ok(text) = fs::read_to_string(path) {
+            if let Ok(pid) = text.trim().parse::<u32>() {
+                return pid;
+            }
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    panic!("fixture did not write a PID");
+}
+
 #[test]
 fn fixture_child_confirms_marker_and_waits() {
     if std::env::var_os("AW_045_FIXTURE_CHILD").is_none() {
@@ -98,6 +158,18 @@ fn fixture_child_confirms_marker_and_waits() {
     let result_path = std::env::var_os("AW_045_RESULT_PATH").expect("result path");
     let present = std::env::var_os("AW_045_NONCE").is_some();
     fs::write(result_path, if present { b"1" } else { b"0" }).expect("write marker result");
+    thread::sleep(Duration::from_secs(30));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn fixture_child_exports_own_audit_token_and_waits() {
+    if std::env::var_os("AW_045_AUDIT_CHILD").is_none() {
+        return;
+    }
+    let result_path = std::env::var_os("AW_045_RESULT_PATH").expect("result path");
+    let token = current_process_audit_token().expect("read own audit token");
+    fs::write(result_path, token).expect("write audit token");
     thread::sleep(Duration::from_secs(30));
 }
 
@@ -210,6 +282,93 @@ fn env_clear_and_new_session_escape_removes_raw_and_parsed_nonce() {
 }
 
 #[test]
+fn keeper_only_hard_kill_leaves_an_unattributed_env_clear_descendant() {
+    let marker = format!("aw-045-keeper-{}", std::process::id());
+    let result_path = std::env::temp_dir().join(format!(
+        "aw-045-keeper-child-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+    let mut escaped_cleanup = EscapedPidCleanup {
+        path: result_path.clone(),
+        expected_identity: None,
+    };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_process-supervisor-tree-fixture"));
+    command
+        .arg("keeper-env-clear")
+        .env("AW_045_NONCE", &marker)
+        .env("AW_045_RESULT_PATH", &result_path);
+    let mut keeper = ChildGuard::spawn(&mut command);
+    let child_pid = wait_for_pid(&result_path);
+    wait_for_observation(child_pid);
+    let identity = process_start_identity(child_pid).expect("escaped identity");
+    escaped_cleanup.arm(identity);
+    keeper.cleanup();
+
+    let after_keeper_death = process_start_identity(child_pid).expect("escaped child remains live");
+    let evidence = probe_environment_marker(child_pid, b"AW_045_NONCE", marker.as_bytes());
+    assert_eq!(after_keeper_death, identity);
+    assert!(!evidence.raw_marker_present);
+    println!(
+        "keeper_dead=true escaped_child_live=true nonce_visible={} cleanup_atomic=false",
+        evidence.raw_marker_present
+    );
+}
+
+#[test]
+fn server_and_keeper_hard_kill_leave_the_env_clear_descendant_for_recovery() {
+    let suffix = format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    );
+    let descendant_path = std::env::temp_dir().join(format!("aw-045-combined-child-{suffix}"));
+    let keeper_path = std::env::temp_dir().join(format!("aw-045-combined-keeper-{suffix}"));
+    let mut descendant_cleanup = EscapedPidCleanup {
+        path: descendant_path.clone(),
+        expected_identity: None,
+    };
+    let mut keeper_cleanup = EscapedPidCleanup {
+        path: keeper_path.clone(),
+        expected_identity: None,
+    };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_process-supervisor-tree-fixture"));
+    command
+        .arg("server-keeper-env-clear")
+        .env("AW_045_NONCE", format!("aw-045-combined-{suffix}"))
+        .env("AW_045_RESULT_PATH", &descendant_path)
+        .env("AW_045_KEEPER_PID_PATH", &keeper_path);
+    let mut server = ChildGuard::spawn(&mut command);
+    let keeper_pid = wait_for_pid(&keeper_path);
+    let descendant_pid = wait_for_pid(&descendant_path);
+    wait_for_observation(keeper_pid);
+    wait_for_observation(descendant_pid);
+    let keeper_identity = process_start_identity(keeper_pid).expect("keeper identity");
+    let descendant_identity = process_start_identity(descendant_pid).expect("descendant identity");
+    keeper_cleanup.arm(keeper_identity);
+    descendant_cleanup.arm(descendant_identity);
+
+    server.cleanup();
+    identity_guarded_fixture_kill(keeper_pid, keeper_identity);
+    assert!(
+        wait_for_identity_to_disappear(keeper_pid, keeper_identity),
+        "keeper hard kill must complete before recovery observation"
+    );
+    let after_combined_death = process_start_identity(descendant_pid)
+        .expect("escaped descendant remains for startup recovery");
+    assert_eq!(after_combined_death, descendant_identity);
+    println!(
+        "server_dead=true keeper_dead=true escaped_child_live=true recovery_anchor_required=true cleanup_atomic=false"
+    );
+}
+
+#[test]
 fn target_report_does_not_claim_unproven_containment() {
     let report = capability_report(true);
     println!("{report:#?}");
@@ -218,4 +377,64 @@ fn target_report_does_not_claim_unproven_containment() {
         !report.supports_required_containment(),
         "the spike must not claim readiness before env-clear tracking and atomic signaling are proven"
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn audit_token_signal_api_records_actual_ordinary_process_permission() {
+    let mut command = Command::new("/bin/sleep");
+    command.arg("30");
+    let mut child = ChildGuard::spawn(&mut command);
+    wait_for_observation(child.id());
+    let evidence = probe_identity_safe_signal(child.id());
+    println!(
+        "task_for_pid_status={} task_info_status={:?} signal_result={:?} signal_errno={:?}",
+        evidence.task_for_pid_status,
+        evidence.task_info_status,
+        evidence.signal_result,
+        evidence.signal_errno
+    );
+    if evidence.signal_result == Some(0) {
+        assert!(
+            child.exited_within(Duration::from_secs(2)),
+            "successful audit-token signal must terminate the exact fixture"
+        );
+    } else {
+        assert!(
+            evidence.task_for_pid_status != 0
+                || evidence.task_info_status != Some(0)
+                || evidence.signal_errno.is_some(),
+            "failed signal probe must preserve its failure boundary"
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn cooperative_audit_token_handshake_signals_the_exact_child() {
+    let result_path = std::env::temp_dir().join(format!(
+        "aw-045-audit-token-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+    let mut command = Command::new(std::env::current_exe().expect("test executable"));
+    command
+        .args([
+            "--exact",
+            "fixture_child_exports_own_audit_token_and_waits",
+            "--nocapture",
+        ])
+        .env("AW_045_AUDIT_CHILD", "1")
+        .env("AW_045_RESULT_PATH", &result_path);
+    let mut child = ChildGuard::spawn(&mut command);
+    wait_for_observation(child.id());
+    let token: [u8; 32] = wait_for_bytes(&result_path, 32)
+        .try_into()
+        .expect("fixed audit token length");
+    signal_audit_token(token, libc::SIGTERM).expect("signal exact audit-token process");
+    assert!(child.exited_within(Duration::from_secs(2)));
+    let _ = fs::remove_file(result_path);
 }
