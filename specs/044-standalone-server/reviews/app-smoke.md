@@ -57,11 +57,12 @@
 | (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
 | (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
 
+- **b2 기대값 정정(Codex r11 docs)**: 10차 판정은 b2를 (a)(b1)과 같이 "Settings만 남음"으로 봤는데, 이는 실제 닫기 대상과 반대였다. `close-run.sh`는 b2에서 Settings를 연 뒤 앞에 있는 Settings에 Cmd+W를 보낸다(원자료 `front=Settings`). 그래서 올바른 b2 결과는 Settings만 닫히고, 메인 창(`Agentic Workbench`)·앱·run이 남고, 메인 창 토큰이 200인 것이다. 지금 스크립트는 경로별로 기대를 나눈다: (a)(b1)(f)는 run 제거·토큰 401, (b2)는 run 유지·토큰 200. 창 판정은 (b2)가 남은 창 `Agentic Workbench`다. 과거 b2 7개 실행은 모두 앱 전체가 종료돼(원자료 `app-alive-after-close=no`) 이 기대로도 9이고, b2는 여전히 미해결이다. 자기 시험(66개)에 정상 b2(Settings만 닫힘 → 0), 배경 메인 창만 닫힘(9), run 제거(7), 토큰 401(8)을 넣었다.
 - **닫기 동작·창 상태 재판정(Codex r10 docs)**: 옛 `close-run.sh`는 클릭 명령의 실패 코드를 버리고, 앱 생존·남은 창을 기록만 했다. 그래서 각 실행의 원자료(`action:` 줄, `app-alive-after-close=`, `windows-after-close=`)로만 다시 판정했다.
   - (a)(b1) 14개: 모두 앱이 살아 있고 남은 창은 `Settings` 하나다(대상 창만 닫힘) → 통과.
   - (f) 5개: 모두 앱이 종료됐다 → 통과.
-  - (b2) 7개: 모두 앱 전체가 종료됐다(두 창 모두 닫힘) → **새 판정으로 9(예상 밖 창 상태)**. 이미 적힌 "(b2) 두 창 모두 닫히고 종료, 미해결" 기록과 같다. b2는 통과로 세지 않는다.
-  - 지금 스크립트: 닫기 동작 실패는 무효 6, (a)(b1)(b2)에서 앱 종료나 대상 창 잔존은 9, (f)에서 앱 잔존은 9(`window_verdict`)이고, 이어서 run 잔존 7, 토큰 8(`close_final`)이다. 닫기 동작부터 끝까지를 그대로 떼어 모의 입력으로 돌리는 자기 시험(59개)으로 확인했다.
+  - (b2) 7개: 모두 앱 전체가 종료됐다(두 창 모두 닫힘) → **새 판정으로 9(예상 밖 창 상태)**(11차에 b2 기대를 "메인 창 유지"로 정정한 뒤에도 9). 이미 적힌 "(b2) 두 창 모두 닫히고 종료, 미해결" 기록과 같다. b2는 통과로 세지 않는다.
+  - 지금 스크립트: 닫기 동작 실패는 무효 6, 창 상태가 경로 기대와 다르면 9(`window_verdict`; b2 기대는 11차에 정정), 이어서 run 제거 여부가 경로 기대와 다르면 7, 토큰이 경로 기대와 다르면 8(`close_final`)이다. 닫기 동작부터 끝까지를 그대로 떼어 모의 입력으로 돌리는 자기 시험(59개)으로 확인했다.
 - **run 제거·토큰 판정 재판정(Codex r9 docs)**: 옛 `close-run.sh`는 run 잔존·토큰 200을 기록만 하고 0으로 끝났고, `quit-run.sh`도 TOKEN=1의 토큰 결과를 종료 코드에 넣지 않았다. 그래서 각 실행의 원자료 `meta.txt`의 `run-removed=`와 `token-after-close=`/`token-after-quit=`로만 다시 판정했다.
   - 창 닫기 실행 21개(`t046-*`): 모두 `run-removed=yes`. 토큰을 확인한 실행은 모두 `401 unauthenticated`다.
   - quit TOKEN 실행(`t045-*-busytok-*`): 유효 경로 (d)(e)는 모두 401, (g) SIGTERM 대조는 200(기대값). (c) Cmd+Q 실행은 모두 `path-exercised=no`(무효, 이미 기록)이고, 그 200은 판정 대상이 아니다.

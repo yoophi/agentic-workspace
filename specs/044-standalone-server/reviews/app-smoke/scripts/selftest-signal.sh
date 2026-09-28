@@ -91,7 +91,7 @@ CR="$(dirname "$0")/close-run.sh"; CTAIL="$T/close-run-tail.sh"; sed -n '/^ok=no
 check "close tail extracted" "$(head -1 "$CTAIL")" "ok=no"
 close_run() { # <MOCK_RUN_LISTED true|false> <SCEN quit|close-token> <MOCK_TOKEN>
   ( R="$T/close-$1-$2-$3"; mkdir -p "$R"; : > "$R/meta.txt"; : > "$R/app.log"; log() { echo "$*" | tee -a "$R/meta.txt"; }
-    APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=$2; WINRC=0; export MOCK_RUN_LISTED=$1 MOCK_TOKEN=$3; PATH="$T/mockbin:$PATH"
+    APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=$2; WINRC=0; CLOSE=a; export MOCK_RUN_LISTED=$1 MOCK_TOKEN=$3; PATH="$T/mockbin:$PATH"
     . "$CTAIL" )
 }
 out=$(close_run false close-token 401); rc=$?; check "close ok: exit code" "$rc" 0; check "close ok: result" "$(echo "$out" | grep -c '^close-result=ok')" 1
@@ -106,12 +106,12 @@ check "close-run exits with the final result" "$(grep -c '^exit "$FINAL"$' "$CR"
 ATAIL="$T/close-run-action.sh"; sed -n '/^log "windows-before-close=/,$p' "$CR" > "$ATAIL"
 check "close action tail extracted" "$(head -1 "$ATAIL" | grep -c '^log "windows-before-close=')" 1
 sleep 300 & LIVE=$!
-close_action() { # <path> <MOCK_SX_RC> <alive yes|no> <MOCK_WINDOWS>
-  ( R="$T/action-$1-$2-$3-${4// /_}"; mkdir -p "$R"; : > "$R/meta.txt"; : > "$R/app.log"; log() { echo "$*" | tee -a "$R/meta.txt"; }
+close_action() { # <path> <MOCK_SX_RC> <alive yes|no> <MOCK_WINDOWS> [<MOCK_RUN_LISTED> <SCEN> <MOCK_TOKEN>]
+  ( R="$T/action-$1-$2-$3-${4// /_}-${5:-false}-${6:-quit}-${7:-401}"; mkdir -p "$R"; : > "$R/meta.txt"; : > "$R/app.log"; log() { echo "$*" | tee -a "$R/meta.txt"; }
     sx() { case "$1" in *"every window"*) echo "$MOCK_WINDOWS" ;; *) echo "mock"; return "$MOCK_SX_RC" ;; esac; }
     send_key_to() { return 0; }; invalid_stop() { echo "invalid-stop: $1"; exit 6; }
-    [ "$3" = yes ] && APID=$LIVE || APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=quit; CLOSE=$1; MAIN="Agentic Workbench"; BID=x
-    export MOCK_SX_RC=$2 MOCK_WINDOWS=$4 MOCK_RUN_LISTED=false; PATH="$T/mockbin:$PATH"
+    [ "$3" = yes ] && APID=$LIVE || APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=${6:-quit}; CLOSE=$1; MAIN="Agentic Workbench"; BID=x
+    export MOCK_SX_RC=$2 MOCK_WINDOWS=$4 MOCK_RUN_LISTED=${5:-false} MOCK_TOKEN=${7:-401}; PATH="$T/mockbin:$PATH"
     . "$ATAIL" )
 }
 out=$(close_action a 0 yes Settings); rc=$?; check "close a ok: exit code" "$rc" 0
@@ -120,11 +120,19 @@ check "close a click failed: result" "$(echo "$out" | grep -c '^window-result=ac
 out=$(close_action a 0 no ""); rc=$?; check "close a whole app exited: exit code" "$rc" 9
 out=$(close_action b1 0 yes "Settings, Agentic Workbench"); rc=$?; check "close b1 target window left: exit code" "$rc" 9
 out=$(close_action b1 0 yes Settings); rc=$?; check "close b1 ok: exit code" "$rc" 0
-out=$(close_action b2 0 no ""); rc=$?; check "close b2 whole app exited (known b2 risk): exit code" "$rc" 9
+out=$(close_action b2 0 no "" true); rc=$?; check "close b2 whole app exited (known b2 risk): exit code" "$rc" 9
+# b2(Codex r11 docs): 앞의 Settings만 닫히고 메인 창·run·토큰이 남아야 통과. 배경의 메인 창만 닫히는 오동작은 실패.
+out=$(close_action b2 0 yes "Agentic Workbench" true close-token 200); rc=$?; check "close b2 only Settings closed: exit code" "$rc" 0
+check "close b2 only Settings closed: result" "$(echo "$out" | grep -c '^close-result=ok')" 1
+out=$(close_action b2 0 yes Settings false close-token 401); rc=$?; check "close b2 background main window closed instead: exit code" "$rc" 9
+out=$(close_action b2 0 yes "Agentic Workbench" false close-token 200); rc=$?; check "close b2 run removed unexpectedly: exit code" "$rc" 7
+check "close b2 run removed unexpectedly: result" "$(echo "$out" | grep -c '^close-result=run-removed-unexpectedly')" 1
+out=$(close_action b2 0 yes "Agentic Workbench" true close-token 401); rc=$?; check "close b2 main token revoked unexpectedly: exit code" "$rc" 8
+out=$(close_action a 0 yes Settings false close-token 401); rc=$?; check "close a with token 401: exit code" "$rc" 0
 out=$(close_action f 0 no ""); rc=$?; check "close f ok: exit code" "$rc" 0
 out=$(close_action f 1 no ""); rc=$?; check "close f click failed: exit code" "$rc" 6
 out=$(close_action f 0 yes Settings); rc=$?; check "close f app still running: exit code" "$rc" 9
-check "close-run passes the window verdict to the final result" "$(grep -c 'close_final "$ok" "$TOKRC" "$WINRC"' "$CR")" 1
+check "close-run passes the window verdict and the path expectation to the final result" "$(grep -c 'close_final "$ok" "$TOKRC" "$WINRC" "$WANT_REMOVED"' "$CR")" 1
 check "close-run keeps the click exit code" "$(grep -c 'ACTRC=\$?' "$CR")" 2
 kill "$LIVE" 2>/dev/null
 # 정리: 이 시험이 띄운 B·C만(신원을 바르게 다시 기록한 뒤) 끝낸다.
