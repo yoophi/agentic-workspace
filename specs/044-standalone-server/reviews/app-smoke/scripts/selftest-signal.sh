@@ -49,15 +49,23 @@ check "quit-run has no unconditional yes" "$(grep -c 'log "path-exercised=yes"' 
 TAIL="$T/quit-run-tail.sh"; sed -n '/^gone=no$/,$p' "$QR" > "$TAIL"
 check "tail extracted from quit-run" "$(head -1 "$TAIL")" "gone=no"
 mkdir -p "$T/mockbin" "$T/data/workbench/server"; : > "$T/data/workbench/server/server.log"
-cat > "$T/mockbin/python3" <<'MOCK'
+REALPY=$(command -v python3)
+cat > "$T/mockbin/python3" <<MOCK
 #!/bin/bash
-case "$1" in *owner-check.py) echo '{"mock":true}'; exit "${MOCK_OC:-0}" ;; *) echo '{"busyRuns": 0}' ;; esac
+# 모의 명령: 스모크 도우미 스크립트만 가짜로, 인라인 python(-c)은 실제 python으로.
+case "\$1" in
+  -c) exec "$REALPY" "\$@" ;;
+  *owner-check.py) echo '{"mock":true}'; exit "\${MOCK_OC:-0}" ;;
+  *bench-check.py) echo "{\"runListed\": \${MOCK_RUN_LISTED:-false}}" ;;
+  *token-check.py) [ "\${MOCK_TOKEN:-401}" = error ] && exit 1; echo "{\"status\": \${MOCK_TOKEN:-401}}" ;;
+  *) echo '{"busyRuns": 0}' ;;
+esac
 MOCK
 chmod +x "$T/mockbin/python3"
-tail_run() { # <SENT> <MOCK_OC> — 앱 pid는 이미 사라진 D(소멸), 서버 명령줄은 불일치라 서버 신호 없음
-  ( R="$T/tail-$1-$2"; mkdir -p "$R"; : > "$R/meta.txt"; log() { echo "$*" | tee -a "$R/meta.txt"; }
-    APID=$D; SPID=$D; SCMD=none; SRV_EXE=/nonexistent; DATA="$T/data"; RUN=r1; QUIT=g; SENT=$1; TOKEN=; BUSY=
-    SERVER_LINES_BEFORE=0; export MOCK_OC=$2; PATH="$T/mockbin:$PATH"
+tail_run() { # <SENT> <MOCK_OC> [<QUIT> <TOKEN 1|''> <MOCK_TOKEN>] — 앱 pid는 이미 사라진 D(소멸), 서버 신호 없음
+  ( R="$T/tail-$1-$2-${3:-g}-${4:-x}-${5:-x}"; mkdir -p "$R"; : > "$R/meta.txt"; log() { echo "$*" | tee -a "$R/meta.txt"; }
+    APID=$D; SPID=$D; SCMD=none; SRV_EXE=/nonexistent; DATA="$T/data"; RUN=r1; QUIT=${3:-g}; SENT=$1; TOKEN=${4:-}; BUSY=
+    SERVER_LINES_BEFORE=0; export MOCK_OC=$2 MOCK_TOKEN=${5:-401}; PATH="$T/mockbin:$PATH"
     . "$TAIL" )
 }
 out=$(tail_run yes 1); rc=$?
@@ -70,6 +78,29 @@ out=$(tail_run no 0); rc=$?
 check "invalid path + owner-check ok: exit code" "$rc" 5
 out=$(tail_run no 1); rc=$?
 check "invalid path + owner-check failure: exit code stays 5" "$rc" 5
+# 6) quit-run TOKEN=1(Codex r9 docs): 정상 종료(c)는 401이어야, SIGTERM(g) 대조는 200이 기대값. 어긋나거나 검사 오류면 8.
+out=$(tail_run yes 0 c 1 401); rc=$?; check "quit c token 401: exit code" "$rc" 0
+out=$(tail_run yes 0 c 1 200); rc=$?; check "quit c token still 200: exit code" "$rc" 8
+check "quit c token still 200: result line" "$(echo "$out" | grep -c '^smoke-result=token-check-failed')" 1
+out=$(tail_run yes 0 c 1 error); rc=$?; check "quit c token check error: exit code" "$rc" 8
+out=$(tail_run yes 0 g 1 200); rc=$?; check "quit g token 200 (contrast): exit code" "$rc" 0
+out=$(tail_run yes 0 g 1 401); rc=$?; check "quit g token 401 unexpected: exit code" "$rc" 8
+out=$(tail_run no 0 c 1 200); rc=$?; check "invalid path wins over token: exit code" "$rc" 5
+# 7) close-run.sh의 판정 구간(`ok=no`부터 끝)을 그대로 떼어 모의 입력으로 돌린다: run 잔존 7, 토큰 200·검사 오류 8, 통과 0.
+CR="$(dirname "$0")/close-run.sh"; CTAIL="$T/close-run-tail.sh"; sed -n '/^ok=no$/,$p' "$CR" > "$CTAIL"
+check "close tail extracted" "$(head -1 "$CTAIL")" "ok=no"
+close_run() { # <MOCK_RUN_LISTED true|false> <SCEN quit|close-token> <MOCK_TOKEN>
+  ( R="$T/close-$1-$2-$3"; mkdir -p "$R"; : > "$R/meta.txt"; : > "$R/app.log"; log() { echo "$*" | tee -a "$R/meta.txt"; }
+    APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=$2; export MOCK_RUN_LISTED=$1 MOCK_TOKEN=$3; PATH="$T/mockbin:$PATH"
+    . "$CTAIL" )
+}
+out=$(close_run false close-token 401); rc=$?; check "close ok: exit code" "$rc" 0; check "close ok: result" "$(echo "$out" | grep -c '^close-result=ok')" 1
+out=$(close_run false close-token 200); rc=$?; check "close token not revoked: exit code" "$rc" 8
+out=$(close_run false close-token error); rc=$?; check "close token check error: exit code" "$rc" 8
+out=$(close_run true quit 401); rc=$?; check "close run left: exit code" "$rc" 7
+check "close run left: result" "$(echo "$out" | grep -c '^close-result=run-not-removed')" 1
+out=$(close_run false quit 200); rc=$?; check "close without token scenario: exit code" "$rc" 0
+check "close-run exits with the final result" "$(grep -c '^exit "$FINAL"$' "$CR")" 1
 # 정리: 이 시험이 띄운 B·C만(신원을 바르게 다시 기록한 뒤) 끝낸다.
 remember "$T" "$B" "$C"; kill_exact "$T/kills.txt" "$B" "$C"; sleep 0.3
 check "cleanup" "$( (kill -0 $B 2>/dev/null || kill -0 $C 2>/dev/null) && echo alive || echo gone)" gone

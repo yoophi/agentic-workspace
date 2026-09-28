@@ -57,6 +57,10 @@
 | (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
 | (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
 
+- **run 제거·토큰 판정 재판정(Codex r9 docs)**: 옛 `close-run.sh`는 run 잔존·토큰 200을 기록만 하고 0으로 끝났고, `quit-run.sh`도 TOKEN=1의 토큰 결과를 종료 코드에 넣지 않았다. 그래서 각 실행의 원자료 `meta.txt`의 `run-removed=`와 `token-after-close=`/`token-after-quit=`로만 다시 판정했다.
+  - 창 닫기 실행 21개(`t046-*`): 모두 `run-removed=yes`. 토큰을 확인한 실행은 모두 `401 unauthenticated`다.
+  - quit TOKEN 실행(`t045-*-busytok-*`): 유효 경로 (d)(e)는 모두 401, (g) SIGTERM 대조는 200(기대값). (c) Cmd+Q 실행은 모두 `path-exercised=no`(무효, 이미 기록)이고, 그 200은 판정 대상이 아니다.
+  - 지금 스크립트: `close-run.sh`는 run 잔존이면 7, 토큰 미폐기·검사 오류면 8, 통과하면 0으로 끝난다(`close_final`). `quit-run.sh`는 정상 종료(c·d·e)에 401, (g)에 200을 요구하고, 어긋나면 8로 끝난다(`token_verdict`, `smoke_final`). 두 스크립트의 판정 구간을 그대로 떼어 모의 입력으로 돌리는 자기 시험(46개)으로 확인했다.
 - **owner-check 종료 코드 재판정(Codex r8 docs)**: 옛 `quit-run.sh`는 owner-check 실패를 기록만 하고 최종 종료 코드에 넣지 않았다. 그래서 이 문서의 실행을 스크립트 종료 코드가 아니라 각 실행의 원자료 `meta.txt`의 `owner-check-exit=`로만 다시 판정했다.
   - 이 문서가 인용한 실행 31개(`t045-*`) 모두 `owner-check-exit=0`이다.
   - 경로가 무효인 실행(`path-exercised=no` 또는 `app-gone=no`: `t045-{dev,rel}-c-busytok-2`, `t045-rel-c-busytok-3`, `t045-rel-d-busy-1`)은 owner-check와 관계없이 이미 무효로 기록돼 있다.

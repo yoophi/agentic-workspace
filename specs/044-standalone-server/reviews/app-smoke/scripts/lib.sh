@@ -105,8 +105,30 @@ quit_verdict() {
 # quit 스모크 최종 결과: <경로 판정 종료 코드> <owner-check 종료 코드>. 경로 무효(0 아님)면 그 코드(5), 경로는 유효한데 run 지속
 # 확인이 실패하면 6, 둘 다 통과하면 0. 한 줄 `smoke-result=`을 적는다.
 smoke_final() {
-  local verdict=$1 oc=$2
+  local verdict=$1 oc=$2 tok=${3:-skip}
   if [ "$verdict" != 0 ]; then echo "smoke-result=invalid-path (exit $verdict)"; return "$verdict"; fi
   if [ "$oc" != 0 ]; then echo "smoke-result=owner-check-failed (owner-check exit $oc; exit 6)"; return 6; fi
+  if [ "$tok" != skip ] && [ "$tok" != 0 ]; then echo "smoke-result=token-check-failed (exit 8)"; return 8; fi
   echo "smoke-result=ok"; return 0
+}
+
+# 토큰 검사 판정(Codex r9 docs): <기대 상태> <token-check.py 출력>. 출력의 `status`가 기대와 같으면 0, 다르거나 검사 오류(출력
+# 없음·해석 불가)면 8. 한 줄 `token-result=`을 적는다. 토큰 값은 출력에 없다(token-check.py가 상태 코드만 낸다).
+token_verdict() {
+  local want=$1 got
+  got=$(printf '%s' "$2" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("status", "error"))
+except Exception: print("error")' 2>/dev/null)
+  [ -n "$got" ] || got=error
+  if [ "$got" = "$want" ]; then echo "token-result=ok (status $got, expected $want)"; return 0; fi
+  echo "token-result=failed (status $got, expected $want)"; return 8
+}
+
+# 창 닫기 스모크 최종 결과(Codex r9 docs): <run 제거 yes|no> <토큰 판정 코드|skip>. run이 대기 상한 뒤에도 남으면 7, 토큰이
+# 폐기되지 않았거나 검사 오류면 8, 둘 다 통과하면 0. 한 줄 `close-result=`을 적는다.
+close_final() {
+  local removed=$1 tok=${2:-skip}
+  if [ "$removed" != yes ]; then echo "close-result=run-not-removed (exit 7)"; return 7; fi
+  if [ "$tok" != skip ] && [ "$tok" != 0 ]; then echo "close-result=token-not-revoked (exit 8)"; return 8; fi
+  echo "close-result=ok"; return 0
 }

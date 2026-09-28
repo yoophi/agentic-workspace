@@ -106,7 +106,14 @@ log "quit-action-sent=$SENT"
 quit_verdict "$SENT" "$gone" "$QUIT" | tee -a "$R/meta.txt"; VERDICT=${PIPESTATUS[0]}
 [ "$gone" != yes ] && { log "app still running after quit path; stopping exact pid"; kill_exact "$R/kills.txt" "$APID"; }
 log "server-alive-after-quit=$(kill -0 "$SPID" 2>/dev/null && echo yes || echo no)"
-[ "${TOKEN:-}" = 1 ] && log "token-after-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
+# TOKEN=1: 정상 종료(c·d·e)는 앱이 창을 폐기하므로 토큰 401이어야 한다. SIGTERM(g)은 앱 처리가 없는 대조라 200이 기대값이다
+# (TTL로만 거둔다 — 계약). 기대와 다르거나 검사 오류면 8(Codex r9 docs).
+TOKRC=skip
+if [ "${TOKEN:-}" = 1 ]; then
+  TOK=$(python3 "$SMOKE/token-check.py" "$R/secret.json"); log "token-after-quit=$TOK"
+  [ "$QUIT" = g ] && WANT=200 || WANT=401
+  token_verdict "$WANT" "$TOK" | tee -a "$R/meta.txt"; TOKRC=${PIPESTATUS[0]}
+fi
 python3 "$SMOKE/status.py" "$DATA" > "$R/status-after-quit.json" 2>&1; log "status-after-quit=$(cat "$R/status-after-quit.json")"
 tail -n +"$((SERVER_LINES_BEFORE+1))" "$DATA/workbench/server/server.log" > "$R/server-after-quit.log"
 if [ "${BUSY:-}" = 1 ]; then
@@ -125,5 +132,5 @@ for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "server-stopped=$(kill -0 "$SPID" 2>/dev/null && echo no || echo yes)"
 # 최종 결과(Codex r8 docs): 경로 무효는 정리를 모두 마친 뒤에도 5, 유효한 종료 뒤 run 지속 확인(owner-check) 실패는 6, 둘 다
 # 통과해야 0.
-smoke_final "$VERDICT" "$OC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
+smoke_final "$VERDICT" "$OC" "$TOKRC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
 exit "$FINAL"

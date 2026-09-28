@@ -71,10 +71,18 @@ for i in $(seq 1 40); do
 done
 log "after: $out"
 log "run-removed=$ok"
-[ "$SCEN" = close-token ] && log "token-after-close=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
+# 판정 결과는 정리 전에 보존하고 정리 뒤 종료 코드로 돌려준다(Codex r9 docs): 창 닫기는 그 창 토큰을 폐기해야 한다(401).
+TOKRC=skip
+if [ "$SCEN" = close-token ]; then
+  TOK=$(python3 "$SMOKE/token-check.py" "$R/secret.json"); log "token-after-close=$TOK"
+  token_verdict 401 "$TOK" | tee -a "$R/meta.txt"; TOKRC=${PIPESTATUS[0]}
+fi
 grep -o 'operation="desktop.retireWindow"[^\n]*' "$DATA/workbench/server/server.log" > "$R/retire.log"; log "retireWindow-calls=$(wc -l < "$R/retire.log" | tr -d ' ')"
 grep -n "retire" "$R/app.log" | head -5 >> "$R/meta.txt"
 # 정리: 앱·서버 모두 기록한 신원(pid·시작 시각·명령줄)이 같은 이 실행의 pid만 끝낸다(번들 id quit 없음).
 kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
 kill_exact "$R/kills.txt" "$SPID"; for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "cleanup: app=$(kill -0 "$APID" 2>/dev/null && echo alive || echo gone) server=$(kill -0 "$SPID" 2>/dev/null && echo alive || echo gone)"
+# 최종 결과: run이 남으면 7, 토큰 미폐기·검사 오류면 8(정리를 모두 마친 뒤에도 비정상 종료).
+close_final "$ok" "$TOKRC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
+exit "$FINAL"
