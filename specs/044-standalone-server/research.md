@@ -281,6 +281,16 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 
   시험(r9): `a_rollback_retry_in_flight_stays_active_work_until_it_is_stored`(재시도가 커밋 직전에 멈춘 사이 `default` 거절·`wait` 비우기 유지 → 재시도 저장 실패 → 계속 활동·wait 안 멈춤 → 회복 뒤 정지), `aborting_a_rollback_retry_mid_commit_still_finishes_the_cleanup`(재시도 future abort → 정리 책임 유지 → 자리·보유 정리·재배정 기동), `an_unstored_rollback_survives_a_bench_close_and_finishes_by_workspace`(저장 실패 → 작업대 닫기 → 회복 → 목록·보유 해제·파생 활동 0 → 같은 작업 영역 재개·재배정 기동).
 
+  Codex r10 수정(복구와 기동 수명의 교차): 작업 영역 복구(`recover`)는 scheduler 자리를 다시 짓되 **진행 중 기동 시도의 보유를 보존**한다(`reconcile_preserving`). 이 프로세스에서 기동 중이거나 되돌리는 중(저장되지 않은 되돌리기 포함)인 task는 저장소에 `Running`으로 보여도 성공 인계(`transfer`) 전이라 실행 중으로 확정하지 않는다. 저장소가 실행 중으로 보지 않아도 보유가 있는 자리는 남기고 대기열에 넣지 않는다. 그래서 복구 뒤 그 시도가 abort돼 정리하면 자리가 비고(누수 없음), 성공하면 그 run이 자리를 쥔다(한도 초과 없음).
+
+  | 복구 시점 | 복구 전 | 복구 뒤 자리 | 이어서 |
+  |---|---|---|---|
+  | 바인딩 커밋 직후·결과 전 | 보유 1, task `Running` | 보유 1, 실행 중 아님 | abort → 정리가 보유를 놓아 자리 비움 |
+  | 노드 예약 커밋 직후 | 보유 1, task `Ready` | 보유 1(대기열에 넣지 않음) | abort → 자리 비움 / 성공 → `transfer`로 실행 중 |
+  | 저장되지 않은 되돌리기 | 보유 1, 되돌리는 중 | 보유 1 | 재시도 저장 → 자리 비움 |
+
+  시험(r10): `a_recovery_between_the_bind_commit_and_an_abort_does_not_leak_the_slot`, `a_recovery_between_the_reservation_and_an_abort_keeps_the_hold_then_frees_the_slot`, `a_recovery_crossing_a_successful_launch_keeps_the_concurrency_limit`, `a_recovery_during_an_unstored_rollback_keeps_its_hold_until_the_retry_finishes`, scheduler 단위 시험 2. 한계: 복구가 기동 중 task 목록을 읽은 뒤·scheduler 잠금 전에 새로 시작한 시도는 보유가 있으면 "보유 있는 자리" 규칙으로 보존된다(목록에 없어도 자리는 남음). 그 시도가 저장소에 이미 `Running`으로 커밋한 뒤라면 실행 중으로 확정될 수 있으나, 그 경우 이미 자기 run 기동이 끝난 직후라 `transfer`와 같은 결과다.
+
   시험(r8): `a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot`(A 바인딩 커밋 뒤 abort, B가 보유를 얻고 작업 영역 읽기 전 `BeforeAssignSnapshot`에서 멈춤 → A 정리 끝 → B 재개: B 보유만 남고 실제 run 기동, 동시 한도 1 유지), `a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds`(되돌리기 커밋 오류 주입), `an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery`(실패 정리 + 커밋 오류 → 작업대 닫기·같은 저장소로 재조립 → `recover` → 새 run 기동).
 
   시험(`child_assign_atomic.rs`, 결정적 저장소·기동·엔진 취소 지점): 바인딩 커밋 직전·직후 abort, 실패 정리의 엔진 취소 대기·예약 해제 대기 중 abort, 되돌리기 중 새 배정. 각 시험은 노드 run 해제·task 상태 일치·관문 예약 0·scheduler 자리 반납·실행 중 task 0(정지 판정)과, 재배정(취소된 task면 새 과제)이 실제 run을 기동함을 확인한다.
