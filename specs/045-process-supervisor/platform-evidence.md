@@ -63,6 +63,8 @@ cargo test -p process-supervisor --test platform_feasibility -- --nocapture
 
 `windows_job_feasibility.rs`의 bool invariant test는 Job API 실행 증거가 아니다. Windows evidence는 suspended `CreateProcessW`, assign-before-resume, breakaway denial, kill-on-close, Job accounting와 wait를 실제 Windows job에서 실행한 뒤에만 기록한다.
 
+현재 branch에는 `045-process-supervisor` push에서 macOS/Linux/Windows actual-target job을 실행하는 feasibility matrix가 있다. 로컬 cross-target strict Clippy는 Linux와 Windows 모두 exit 0이지만 실행 증거로 세지 않는다. Linux의 cgroup probe는 unified hierarchy, `cgroup.kill`, 현재 cgroup 아래 directory 생성 권한만 관측하며, directory 생성 성공만으로 env-clear descendant containment를 입증하지 않는다. 실제 run ID/HEAD/test 수/exit code는 branch CI가 끝난 뒤 이 표에 기록한다.
+
 ## 다음 feasibility 작업
 
 1. macOS `proc_terminate`, Mach task/audit-token 계열 API가 ordinary signed app 권한에서 identity-safe signal 또는 descendant tracking을 제공하는지 격리 확인한다.

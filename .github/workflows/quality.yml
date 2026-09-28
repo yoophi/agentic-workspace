@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - 045-process-supervisor
 
 permissions:
   contents: read
@@ -14,6 +15,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  process-supervisor-feasibility:
+    name: ProcessSupervisor feasibility (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - name: Compile with strict Clippy
+        run: cargo clippy -p process-supervisor --all-targets -- -D warnings
+
+      - name: Run actual target feasibility
+        run: cargo test -p process-supervisor --all-targets -- --nocapture
+
   validate:
     runs-on: macos-15
     timeout-minutes: 45

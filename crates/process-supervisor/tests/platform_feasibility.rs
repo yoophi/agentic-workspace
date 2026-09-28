@@ -8,10 +8,15 @@ use std::{
 };
 
 use process_supervisor::platform::unix::feasibility::{
-    capability_report, current_process_audit_token, probe_environment_marker,
-    probe_identity_safe_signal, process_environment, process_start_identity, signal_audit_token,
+    capability_report, probe_environment_marker, process_environment, process_start_identity,
     ProcessStartIdentity,
 };
+#[cfg(target_os = "macos")]
+use process_supervisor::platform::unix::feasibility::{
+    current_process_audit_token, probe_identity_safe_signal, signal_audit_token,
+};
+#[cfg(target_os = "linux")]
+use process_supervisor::platform::unix::feasibility::{probe_cgroup_v2_delegation, LinuxPidFd};
 
 struct ChildGuard(Option<Child>);
 
@@ -126,6 +131,7 @@ fn wait_for_fixture_result(path: &std::path::Path) -> bool {
     panic!("fixture did not report its marker state");
 }
 
+#[cfg(target_os = "macos")]
 fn wait_for_bytes(path: &std::path::Path, expected_len: usize) -> Vec<u8> {
     for _ in 0..100 {
         if let Ok(value) = fs::read(path) {
@@ -376,6 +382,35 @@ fn target_report_does_not_claim_unproven_containment() {
     assert!(
         !report.supports_required_containment(),
         "the spike must not claim readiness before env-clear tracking and atomic signaling are proven"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pidfd_signal_terminates_the_exact_opened_process() {
+    let mut command = Command::new("/bin/sleep");
+    command.arg("30");
+    let mut child = ChildGuard::spawn(&mut command);
+    let identity = process_start_identity(child.id()).expect("record child identity");
+    let pidfd = LinuxPidFd::open(child.id()).expect("open pidfd for exact child");
+    pidfd.signal(libc::SIGTERM).expect("signal through pidfd");
+    assert!(child.exited_within(Duration::from_secs(2)));
+    assert_ne!(process_start_identity(identity.pid).ok(), Some(identity));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn cgroup_v2_delegation_is_measured_without_claiming_descendant_containment() {
+    let evidence = probe_cgroup_v2_delegation();
+    println!("{evidence:#?}");
+    assert!(
+        !evidence.child_cgroup_creatable || evidence.unified_hierarchy,
+        "a writable probe directory must belong to the unified hierarchy"
+    );
+    let report = capability_report(true);
+    assert!(
+        !report.supports_required_containment(),
+        "directory writability alone does not prove env-clear descendant containment"
     );
 }
 

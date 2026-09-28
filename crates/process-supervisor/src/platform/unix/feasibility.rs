@@ -3,6 +3,9 @@
 
 use std::{collections::BTreeMap, io, process::Child};
 
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+
 /// Evidence gathered from the running target. A `false` capability is a design
 /// blocker, not a reason to weaken the process-tree contract.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -49,6 +52,89 @@ pub struct AuditTokenSignalEvidence {
     pub task_info_status: Option<i32>,
     pub signal_result: Option<i32>,
     pub signal_errno: Option<i32>,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+pub struct LinuxPidFd(OwnedFd);
+
+#[cfg(target_os = "linux")]
+impl LinuxPidFd {
+    pub fn open(pid: u32) -> io::Result<Self> {
+        // SAFETY: pidfd_open has no pointer arguments. A successful descriptor
+        // is immediately transferred to OwnedFd.
+        let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
+        if descriptor < 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            // SAFETY: descriptor is newly returned and uniquely owned.
+            Ok(Self(unsafe { OwnedFd::from_raw_fd(descriptor) }))
+        }
+    }
+
+    pub fn signal(&self, signal: i32) -> io::Result<()> {
+        // SAFETY: the owned pidfd remains open and siginfo is intentionally null.
+        let result = unsafe {
+            libc::syscall(
+                libc::SYS_pidfd_send_signal,
+                self.0.as_raw_fd(),
+                signal,
+                std::ptr::null::<libc::siginfo_t>(),
+                0,
+            )
+        };
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CgroupV2DelegationEvidence {
+    pub unified_hierarchy: bool,
+    pub current_path: Option<String>,
+    pub cgroup_kill_available: bool,
+    pub child_cgroup_creatable: bool,
+    pub create_errno: Option<i32>,
+}
+
+#[cfg(target_os = "linux")]
+pub fn probe_cgroup_v2_delegation() -> CgroupV2DelegationEvidence {
+    let current_path = std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|contents| {
+            contents
+                .lines()
+                .find_map(|line| line.strip_prefix("0::").map(str::to_owned))
+        });
+    let Some(relative) = current_path.clone() else {
+        return CgroupV2DelegationEvidence {
+            unified_hierarchy: false,
+            current_path: None,
+            cgroup_kill_available: false,
+            child_cgroup_creatable: false,
+            create_errno: None,
+        };
+    };
+    let current = std::path::Path::new("/sys/fs/cgroup").join(relative.trim_start_matches('/'));
+    let probe = current.join(format!("aw-045-probe-{}", std::process::id()));
+    let create = std::fs::create_dir(&probe);
+    let child_cgroup_creatable = create.is_ok();
+    let create_errno = create.as_ref().err().and_then(io::Error::raw_os_error);
+    let cgroup_kill_available = current.join("cgroup.kill").exists();
+    if child_cgroup_creatable {
+        let _ = std::fs::remove_dir(&probe);
+    }
+    CgroupV2DelegationEvidence {
+        unified_hierarchy: current.join("cgroup.controllers").exists(),
+        current_path: Some(relative),
+        cgroup_kill_available,
+        child_cgroup_creatable,
+        create_errno,
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -114,7 +200,7 @@ pub fn capability_report(environment_probe_succeeded: bool) -> UnixCapabilityRep
 #[cfg(target_os = "linux")]
 #[must_use]
 pub fn capability_report(environment_probe_succeeded: bool) -> UnixCapabilityReport {
-    let pidfd_available = pidfd_open(std::process::id()).is_ok();
+    let pidfd_available = LinuxPidFd::open(std::process::id()).is_ok();
     UnixCapabilityReport {
         target: "linux",
         same_uid_environment_readable: environment_probe_succeeded,
@@ -458,20 +544,6 @@ fn current_process_audit_token_impl() -> Result<[u8; 32], i32> {
 #[cfg(not(target_os = "macos"))]
 fn signal_audit_token_impl(_token: [u8; 32], _signal: i32) -> io::Result<()> {
     Err(io::Error::from_raw_os_error(libc::ENOTSUP))
-}
-
-#[cfg(target_os = "linux")]
-fn pidfd_open(pid: u32) -> io::Result<libc::c_int> {
-    // SAFETY: pidfd_open has no pointer arguments. The returned descriptor is
-    // closed below on success.
-    let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
-    if descriptor < 0 {
-        Err(io::Error::last_os_error())
-    } else {
-        // SAFETY: descriptor was returned by pidfd_open and is owned here.
-        unsafe { libc::close(descriptor) };
-        Ok(descriptor)
-    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]

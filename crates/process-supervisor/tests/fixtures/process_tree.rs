@@ -56,6 +56,7 @@ fn main() {
             }
             sleep_forever();
         }
+        "windows-job-probe" => windows_job_probe(),
         "new-process-group" => {
             #[cfg(unix)]
             // SAFETY: the fixture is single-threaded and changes only its own
@@ -153,6 +154,43 @@ fn sleep_forever() -> ! {
     loop {
         thread::sleep(Duration::from_secs(60));
     }
+}
+
+#[cfg(windows)]
+#[allow(clippy::zombie_processes)]
+fn windows_job_probe() -> ! {
+    use std::os::windows::process::CommandExt;
+    use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
+
+    let result_path = env::args().nth(2).expect("result path argument");
+    let executable = env::current_exe().expect("fixture executable");
+    let contained_descendant = Command::new(&executable)
+        .arg("sleep")
+        .spawn()
+        .expect("spawn contained descendant");
+    let descendant_pid = contained_descendant.id();
+    let breakaway = Command::new(executable)
+        .arg("sleep")
+        .creation_flags(CREATE_BREAKAWAY_FROM_JOB)
+        .spawn();
+    let outcome = match breakaway {
+        Ok(mut child) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            format!("spawned:0:{descendant_pid}")
+        }
+        Err(error) => format!(
+            "denied:{}:{descendant_pid}",
+            error.raw_os_error().unwrap_or_default()
+        ),
+    };
+    fs::write(result_path, outcome).expect("write breakaway result");
+    sleep_forever();
+}
+
+#[cfg(not(windows))]
+fn windows_job_probe() -> ! {
+    panic!("Windows Job fixture is Windows-only");
 }
 
 #[cfg(unix)]
