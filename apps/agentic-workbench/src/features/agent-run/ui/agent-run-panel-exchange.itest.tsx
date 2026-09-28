@@ -44,6 +44,11 @@ afterEach(async () => {
 });
 
 type Recorded = { command: string; args: Record<string, unknown> };
+type SendPromptHttpAttempt = {
+  input: unknown;
+  idempotencyKey: string | undefined;
+  outcome: { kind: string; replayed?: boolean };
+};
 
 function queuedPromptButton(position: number, action: "제거" | "즉시 전송") {
   return document.querySelector<HTMLButtonElement>(`button[aria-label='${position}번 대기 prompt ${action}']`);
@@ -81,6 +86,7 @@ async function scenario({
   const ownerConnection = await connectTo(target, "owner");
   cleanup.push(() => ownerConnection.close());
   const client = createWorkbenchClient({ connection: windowConnection });
+  const sendPromptHttpAttempts: SendPromptHttpAttempt[] = [];
   let nextCancel: CancelInjection | HeldCancel | undefined;
   const cancelsReachingServer: unknown[] = [];
   /** Codex r11: 다음 전달 포기 한 번을 문이 열릴 때까지 붙잡고, 보내지 않은 채 "보내지 않음"(notApplied)으로 끝낸다. */
@@ -98,6 +104,7 @@ async function scenario({
         const held = nextSend;
         nextSend = undefined;
         const applied = await client.call(operation, input, options);
+        sendPromptHttpAttempts.push({ input: structuredClone(input), idempotencyKey: options?.idempotencyKey, outcome: applied });
         expect(applied.kind, "the injected delivery really reached the server").toBe("ok");
         held.held();
         await held.gate;
@@ -141,7 +148,11 @@ async function scenario({
       if (operation === ("run.cancel" as OperationId)) {
         cancelsReachingServer.push(input);
       }
-      return client.call(operation, input, options);
+      const outcome = await client.call(operation, input, options);
+      if (operation === ("run.sendPrompt" as OperationId)) {
+        sendPromptHttpAttempts.push({ input: structuredClone(input), idempotencyKey: options?.idempotencyKey, outcome });
+      }
+      return outcome;
     },
   };
   const ownerClient = createWorkbenchClient({ connection: ownerConnection });
@@ -364,6 +375,7 @@ async function scenario({
     respondPermission,
     beginWaitStop,
     requestWaitStop,
+    sendPromptHttpAttempts,
   };
 }
 
@@ -618,31 +630,47 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     expect(s.exchangeSends()).toEqual([]);
   });
 
-  // Codex r12(apps medium): 교환 전달이 서버에 적용돼 그 turn(`promptSent`→`promptCompleted`)까지 패널이 관측한 뒤에야 호출이
-  // 답을 잃은 것(unknown)으로 끝난다. 같은 키로 다시 보내면 서버는 저장된 결과만 재생해 새 turn 이벤트가 없어 응답 대기가 영영
-  // 풀리지 않는다 — 뒤에 확인된 교환이 전달되지 않고 wait-stop이 끝나지 않는다. 패널은 관측한 turn으로 적용을 알고 다시 보내지 않는다.
-  it("an exchange delivery applied on the server whose reply was lost after its turn was seen is not replayed; the next exchange is delivered and the server stops", async () => {
+  // r12의 늦은 unknown 순서 + r13 stable-key 계약: 적용된 교환의 promptCompleted를 패널이 먼저 처리한 뒤 HTTP 응답을 잃어도
+  // 같은 key·payload로 다시 보낸다. 서버의 replayed=true가 결과를 확정하고 실제 host turn은 한 번뿐이다. 같은 run의 unrelated
+  // promptSent는 적용 판정에 쓰지 않는다.
+  it("retries an unknown exchange with the same stable key; replay metadata confirms one host turn and the next exchange drains", async () => {
     const s = await scenario({ drainFirst: false });
     const send = s.holdNextSendApplied("x-1");
     await s.finishTurn();
     await send.held;
-    // 적용된 전달의 turn이 서버에서 끝났고, 패널이 그 lifecycle을 받았다.
+    // x-1의 실제 turn completion을 패널이 받은 뒤에야 첫 HTTP 호출을 unknown으로 끝낸다(초기 turn + x-1 = 2).
     await vi.waitFor(
-      () =>
-        expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptCompleted`).length).toBeGreaterThanOrEqual(2),
+      () => expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptCompleted`)).toHaveLength(2),
       { timeout: 15_000, interval: 20 },
     );
-    expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptSent`).length).toBeGreaterThanOrEqual(2);
-    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(0), { timeout: 15_000, interval: 20 });
     await act(async () => {
       send.release();
     });
+    await vi.waitFor(() => expect(s.sendPromptHttpAttempts.filter((attempt) => attempt.idempotencyKey?.includes("x-1"))).toHaveLength(2), {
+      timeout: 15_000,
+      interval: 20,
+    });
+    const x1Attempts = s.sendPromptHttpAttempts.filter((attempt) => attempt.idempotencyKey?.includes("x-1"));
+    expect(x1Attempts[0].idempotencyKey).toBe(x1Attempts[1].idempotencyKey);
+    expect(x1Attempts[0].input).toEqual(x1Attempts[1].input);
+    expect(x1Attempts.map((attempt) => attempt.outcome.kind)).toEqual(["ok", "ok"]);
+    expect(x1Attempts[0].outcome.replayed ?? false).toBe(false);
+    expect(x1Attempts[1].outcome.replayed).toBe(true);
+    await vi.waitFor(
+      () => {
+        expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptSent`)).toHaveLength(2);
+        expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptCompleted`)).toHaveLength(2);
+      },
+      { timeout: 15_000, interval: 20 },
+    );
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(0), { timeout: 15_000, interval: 20 });
 
     await s.sendExchange("x-2", "second peer message");
+    await vi.waitFor(async () => expect((await s.status()).activeWork.pendingExchanges).toBe(0), { timeout: 15_000, interval: 20 });
     // 전달이 빨리 끝나면 정지 요청이 곧바로 `stopping`일 수 있다(활동 0) — 어느 쪽이든 서버가 멈춰야 한다.
     await s.requestWaitStop();
     await s.stopped();
-    expect(s.exchangeSendsOf("x-1"), "the applied delivery was not replayed").toHaveLength(1);
+    expect(s.exchangeSendsOf("x-1"), "the UI made one stable-key retry after the lost reply").toHaveLength(2);
     expect(s.exchangeSendsOf("x-2"), "the next exchange was delivered once").toHaveLength(1);
     expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
   });
