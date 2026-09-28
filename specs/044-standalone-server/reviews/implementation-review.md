@@ -419,6 +419,24 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 - verdict: **needs-attention, Medium 1건**. `agentic-workbench-server status`가 `server.status` 전에 신규 연결용 `verify()`를 호출해 `/health/ready`가 503인 정상 `drainingWait` 서버의 query까지 실패했다. 계약은 draining 중에도 `server.status` 조회를 허용한다.
 - 반영·검증: CLI만 동일 인스턴스 신원·protocol/storage를 확인하는 `verify_instance()`를 사용하도록 바꾸고, 실제 process 시험에서 busy turn → `stop --wait` → `drainingWait` 중 `status` CLI 종료 코드 0과 상태 payload를 확인했다. targeted 결과는 **1 passed, 0 failed, filtered 16, 종료 코드 0**이다. 이 수정 뒤 HEAD에서 Codex adversarial `--wait` 4/4를 실행하며, 그 전까지 T053은 미완료다.
 
+### 최종 Codex adversarial 재리뷰 (`--wait` 4/4)
+
+- 대상은 OCR 지적 수정까지 포함한 `9cc221c`(tree `522a0ad58007d161eb9d7da5b95838cdfd3f013b`)다. `cb0bd4c..9cc221c`의 실제 451개를 core-src 33 / crates-rest 82 / apps·packages·root 59 / specs·docs 277로 나눴다. 합집합 451, 중복 0이며 `.specify/feature.json`은 3번에 포함했다. 합성 head 네 개는 모두 이 tree와 같고, 각 리뷰가 끝난 뒤에만 다음 동일 tree head로 checkout했으며 4/4 뒤 원 브랜치로 복귀했다.
+- refs: `044-final-base1..head1` = `a1fc81e..1b91bdd`, 2 = `1060646..0a1ee4a`, 3 = `2fcf34c..d54bdc3`, 4 = `08e5acf..4bfd689`. 첫 1/4 시도 `review-mul6m379-snpcq3`는 checkout 전 전체 diff를 읽다가 `spawnSync git ENOBUFS`로 리뷰 시작 전에 실패했으므로 결과에서 제외했다.
+- 유효 job과 순서: 1/4 `review-mul6mm4m-3o75al`, 2/4 `review-mul6q4ea-w4yu0t`, 3/4 `review-mul6swsp-yt4iu0`, 4/4 `review-mul6ur4e-vcs1ew`. 모두 `completed`·`needs-attention`; High 4, Medium 3, 합계 7건이다. 원 result JSON과 scope 목록은 `/private/tmp/aw-044-final-rereview/`에 보존한다.
+
+| # | 등급 | 유효성·지적 | 반영(`2b6df4b`) | 실제 통과한 회귀시험 |
+|---|---|---|---|---|
+| F1 | High | **유효** — public recover의 command reconciliation과 notification recovery가 살아 있는 `Dispatching{attemptId}`를 되돌려 중복 전달 가능 | command reconciliation에서 notification 상태 변경 제거, runtime recover는 reservation-aware `reclaim_orphaned` 사용 | public recover를 결과 저장 직전에 호출해 attempt id·전달 1회 유지; notification suite **8/8**, filtered 0, rc 0 |
+| F2 | Medium | **유효** — exchange consume 뒤 queue 등록 await 중 future 취소 시 completion이 drop되어 실패 기록 없음 | callback 소유권이 detached queue로 넘어가기 전까지 Drop이 실패를 기록하는 guard; 기본 동기 엔진도 callback을 정확히 한 번 완료 | queue 등록 전 취소는 consumed 유지+failed 기록, 정상 완료는 guard 해제; exchange suite **11/11**, filtered 0, rc 0 |
+| F3 | High | **유효** — `stop --wait`로 draining 진입 뒤 strict ready 검사가 `stop --force` 승격을 차단 | stop preflight를 신원·호환 확인 `verify_instance`로 변경 | 실제 process에서 busy wait-stop → draining → force → 두 CLI·서버 정상 종료; process suite **18/18**, filtered 0, rc 0 |
+| F4 | High | **유효** — unknown 직접 전송의 offline/notApplied 재시도가 원 key를 지워 reconnect 뒤 중복 가능 | notApplied는 앞 unknown marker/key를 유지하고 success/replayed 또는 확정 종료에서만 해소 | unknown → offline notApplied → reconnect 세 요청의 key 동일 |
+| F5 | High | **유효** — old-run pending HTTP completion이 cancel·replacement 뒤 새 draft/marker를 덮을 수 있음 | direct send completion의 모든 UI mutation을 active run + operation generation으로 제한 | old pending → cancel 확인 → replacement/new draft → old unknown 순서에서 draft 유지·새 전송 가능 |
+| F6 | Medium | **유효** — desktop 계약이 폐기된 same-run `promptSent` 적용 추정을 유지 | stable key + `replayed=true`만 확정 근거, unrelated lifecycle 배제, notApplied key 유지로 계약 교체 | 같은 run의 더 새 direct operation 뒤 이전 completion을 무시하는 경우 포함 패널 파일 **63/63**, rc 0; typecheck rc 0 |
+| F7 | Medium | **유효** — gate-20 뒤 CLI 변경이 있는데 T052가 `c4c8e0b`를 최종 tree 전체 gate로 표시 | T052를 미완료로 되돌리고 gate-20·앱 16건은 `c4c8e0b` 출처 증거로 보존 | 최종 수정 tree의 8단계 gate 대기 |
+
+7건은 모두 유효로 판정해 반영했지만, 위 표는 targeted 검증이다. T052·T053은 `2b6df4b` 이후 정본 기록까지 포함한 최종 tree의 전체 gate와 필요한 앱 회귀 범위를 확인하기 전까지 미완료다.
+
 #### 수정 중 전체 suite에서 발견한 회귀
 
 - `cargo test -p agentic-workbench --lib` 첫 실행은 123 passed / 2 failed였다. 실패는 C11 retire 시험이 아니라 `a_lost_token_response_from_a_draining_server_keeps_the_connection`, `a_lost_token_response_during_a_wait_stop_still_delivers_the_exchange_and_stops`였다.
