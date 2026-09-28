@@ -53,18 +53,23 @@ if [ "$CLOSE" != f ]; then
   sleep 3
 fi
 log "windows-before-close=$(sx 'get name of every window')"
+# 닫기 동작의 종료 코드를 보존한다(Codex r10 docs): 실패하면 이 경로를 실행하지 못한 무효 시도다.
+ACTRC=0
 case "$CLOSE" in
-  a|f) log "action: $(sx "click (first button of window \"$MAIN\" whose subrole is \"AXCloseButton\")")" ;;
+  a|f) ACT=$(sx "click (first button of window \"$MAIN\" whose subrole is \"AXCloseButton\")"); ACTRC=$?; log "action: $ACT (exit $ACTRC)" ;;
   b1) sx "perform action \"AXRaise\" of window \"$MAIN\"" >/dev/null; sleep 1
       log "front=$(sx 'get name of front window')"
-      log "action: $(sx 'click menu item "Close Window" of menu "Window" of menu bar 1')" ;;
+      ACT=$(sx 'click menu item "Close Window" of menu "Window" of menu bar 1'); ACTRC=$?; log "action: $ACT (exit $ACTRC)" ;;
   b2) log "front=$(sx 'get name of front window')"
       send_key_to "$APID" "$BID" "w" || invalid_stop "Cmd+W : the target app is not frontmost" ;;
 esac
 sleep 3
 ALIVE=$(kill -0 "$APID" 2>/dev/null && echo yes || echo no)
 log "app-alive-after-close=$ALIVE"
-[ "$ALIVE" = yes ] && log "windows-after-close=$(sx 'get name of every window')"
+WINDOWS=""
+[ "$ALIVE" = yes ] && { WINDOWS=$(sx 'get name of every window'); log "windows-after-close=$WINDOWS"; }
+# 창 상태 판정: (a)(b1)(b2)는 대상 창만 닫혀 앱과 Settings가 남아야 하고, (f)는 마지막 창이라 앱이 끝나야 한다.
+window_verdict "$CLOSE" "$ACTRC" "$ALIVE" "$WINDOWS" | tee -a "$R/meta.txt"; WINRC=${PIPESTATUS[0]}
 ok=no
 for i in $(seq 1 40); do
   out=$(python3 "$SMOKE/bench-check.py" "$DATA" "$RUN"); case "$out" in *'"runListed": false'*) ok=yes; break ;; esac; sleep 0.5
@@ -84,5 +89,5 @@ kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
 kill_exact "$R/kills.txt" "$SPID"; for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "cleanup: app=$(kill -0 "$APID" 2>/dev/null && echo alive || echo gone) server=$(kill -0 "$SPID" 2>/dev/null && echo alive || echo gone)"
 # 최종 결과: run이 남으면 7, 토큰 미폐기·검사 오류면 8(정리를 모두 마친 뒤에도 비정상 종료).
-close_final "$ok" "$TOKRC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
+close_final "$ok" "$TOKRC" "$WINRC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
 exit "$FINAL"

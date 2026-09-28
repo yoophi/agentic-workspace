@@ -127,8 +127,24 @@ except Exception: print("error")' 2>/dev/null)
 # 창 닫기 스모크 최종 결과(Codex r9 docs): <run 제거 yes|no> <토큰 판정 코드|skip>. run이 대기 상한 뒤에도 남으면 7, 토큰이
 # 폐기되지 않았거나 검사 오류면 8, 둘 다 통과하면 0. 한 줄 `close-result=`을 적는다.
 close_final() {
-  local removed=$1 tok=${2:-skip}
+  local removed=$1 tok=${2:-skip} win=${3:-0}
+  if [ "$win" = 6 ]; then echo "close-result=invalid-attempt (the close action failed; exit 6)"; return 6; fi
+  if [ "$win" != 0 ]; then echo "close-result=unexpected-window-state (exit 9)"; return 9; fi
   if [ "$removed" != yes ]; then echo "close-result=run-not-removed (exit 7)"; return 7; fi
   if [ "$tok" != skip ] && [ "$tok" != 0 ]; then echo "close-result=token-not-revoked (exit 8)"; return 8; fi
   echo "close-result=ok"; return 0
+}
+
+# 창 닫기 경로의 창 상태 판정(Codex r10 docs): <경로 a|b1|b2|f> <닫기 동작 종료 코드> <앱 생존 yes|no> <남은 창 목록>.
+# 동작 실패는 무효(6). (a)(b1)(b2)는 앱이 살아 있고 남은 창이 정확히 "Settings"여야 하고(대상 창만 닫힘), (f)는 앱이 끝나야
+# 한다. 어긋나면 9. 한 줄 `window-result=`을 적는다.
+window_verdict() {
+  local path=$1 act=$2 alive=$3 windows=$4
+  if [ "$act" != 0 ]; then echo "window-result=action-failed (exit $act; attempt invalid)"; return 6; fi
+  case "$path" in
+    f) if [ "$alive" = no ]; then echo "window-result=ok (last window closed, app exited)"; return 0; fi
+       echo "window-result=unexpected (app still running after closing the last window)"; return 9 ;;
+    *) if [ "$alive" = yes ] && [ "$windows" = Settings ]; then echo "window-result=ok (target window closed, Settings kept)"; return 0; fi
+       echo "window-result=unexpected (app alive=$alive, windows=[$windows]; expected only Settings to remain)"; return 9 ;;
+  esac
 }
