@@ -67,6 +67,10 @@ impl DerivedWork {
     }
 }
 
+/// 시험: 정지 판정의 파생 뒤·G 아래 판정 전에 한 번 부르는 probe(Codex r6 — 그 사이 임대 획득 재현).
+pub type StopProbe =
+    Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
+
 /// 정지 요청 결과.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StopOutcome {
@@ -95,6 +99,7 @@ pub struct ServerControl {
     idle: Mutex<Idle>,
     /// `stopping`에 들어가면 `true`. host의 감시 루프·serve가 기다린다.
     stopped: tokio::sync::watch::Sender<bool>,
+    stop_probe: Mutex<Option<StopProbe>>,
 }
 
 impl ServerControl {
@@ -115,6 +120,28 @@ impl ServerControl {
             orchestration,
             idle: Mutex::new(Idle::default()),
             stopped: tokio::sync::watch::Sender::new(false),
+            stop_probe: Mutex::default(),
+        }
+    }
+
+    /// 시험: 다음 정지 판정 한 번의 파생 뒤·판정 전 지점에 probe를 건다(한 번 쓰고 비운다).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_stop_probe(&self, probe: Option<StopProbe>) {
+        *self
+            .stop_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    /// 파생 뒤·G 아래 판정 전 지점(시험 probe, 운영에서는 비어 있다).
+    async fn stop_probe_point(&self) {
+        let probe = self
+            .stop_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
+        if let Some(probe) = probe {
+            probe().await;
         }
     }
 
@@ -163,9 +190,10 @@ impl ServerControl {
         self.stopped.send_replace(true);
     }
 
-    /// 임대 획득: 유휴 비우기면 서빙으로 돌아간다(wait 비우기·정지는 돌아가지 않는다). 유휴 시계를 되돌린다.
+    /// 임대 획득: 유휴 비우기면 서빙으로 돌아간다(wait 비우기·정지는 돌아가지 않는다). `stopping`이 아니면 어느 상태든 활동
+    /// 세대를 올려 임대 없이 파생한 진행 중 정지 판정을 무효로 한다(Codex r6 high). 유휴 시계를 되돌린다.
     pub fn lease_acquired(&self) {
-        self.work_gate.resume_serving();
+        self.work_gate.note_lease_acquired();
         self.lock_idle().since = None;
     }
 
@@ -340,6 +368,7 @@ impl ServerControl {
         }
         let idle = self.work_gate.state() == GateState::Draining(DrainMode::Idle);
         let derived = self.derive().await;
+        self.stop_probe_point().await;
         // 유휴 비우기의 판정은 관문 잠금 아래에서 임대도 본다(OCR 3차 M1): 임대가 들어간 뒤 서빙 복귀 전의 판정이 그 임대를
         // 무시하고 멈추지 않게. 넣기가 이 판정보다 늦으면 handler가 `stopping`을 보고 임대를 되돌린다.
         let leases = &self.leases;
@@ -374,13 +403,17 @@ impl ServerControl {
                 }
                 let generation = self.work_gate.activity_generation();
                 let derived = self.derive().await;
+                self.stop_probe_point().await;
                 let active = self.active_work(&derived);
-                if active.blocks_stop()
-                    || !self
-                        .work_gate
-                        .try_stop_at(generation, || derived.active_total())
+                if active.blocks_stop() {
+                    return StopOutcome::Blocked(active);
+                }
+                if !self
+                    .work_gate
+                    .try_stop_at(generation, || derived.active_total())
                 {
-                    return StopOutcome::Blocked(self.active_work(&derived));
+                    // 파생 뒤 세대가 바뀌었다(예약 해제·상태 전이·임대 획득): 쓴 파생 값이 낡았으므로 다시 파생해 보고한다.
+                    return StopOutcome::Blocked(self.active_work(&self.derive().await));
                 }
                 self.mark_stopped();
                 StopOutcome::Stopping

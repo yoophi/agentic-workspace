@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use crate::{
     application::orchestration::{
         command_service::DeliverTaskCommandRequest,
-        runtime::{LaunchPoint, OrchestrationFailure, OrchestrationRuntime},
+        runtime::{LaunchPoint, OrchestrationFailure, OrchestrationRuntime, ReservePoint},
         scheduler::LeaseOutcome,
         service::{
             ChildRunReservation, CreateChildTaskRequest, ReportTaskRequest, TaskActionRequest,
@@ -823,25 +823,54 @@ impl OrchestrationRuntime {
             planned_run_id: planned_run_id.clone(),
             token,
             state: CleanupState::Reserving,
+            reserving: None,
         };
         // 엔진을 부르기 전에 예정 run을 노드의 현재 run으로 예약한다(비교 후 변경) — 첫 턴 보고가 현재 run의 보고로
         // 반영된다. 다른 배정이 먼저 예약했으면 그 run을 돌려준다.
-        let reservation = {
+        // Codex r6 medium: 예약은 blocking 작업이라 이 future가 await 중에 drop돼도 끝까지 커밋한다. 그래서 예약을 이
+        // future와 따로 도는 소유 task로 돌리고 그 handle을 guard가 쥔다: 완료를 여기서 받으면 guard 상태를 같은 poll에서
+        // 옮기고, 받기 전에 drop되면 guard가 handle을 넘겨받아 커밋을 기다린 뒤 되돌린다(조건부 해제 + scheduler 반납).
+        cleanup.reserving = Some({
             let (b, t, n, r) = (
                 bench.to_owned(),
                 task.id.clone(),
                 node.id.clone(),
                 planned_run_id.clone(),
             );
-            self.blocking(move |service| service.reserve_child_run(&b, &t, &n, &r))
-                .await
+            let runtime = Arc::clone(self);
+            let probe = self.reserve_probe();
+            tokio::spawn(async move {
+                runtime
+                    .blocking(move |service| {
+                        if let Some(probe) = &probe {
+                            probe(ReservePoint::BeforeCommit);
+                        }
+                        let reserved = service.reserve_child_run(&b, &t, &n, &r);
+                        if let Some(probe) = &probe {
+                            probe(ReservePoint::AfterCommit);
+                        }
+                        reserved
+                    })
+                    .await
+            })
+        });
+        let joined = match cleanup.reserving.as_mut() {
+            Some(handle) => handle.await,
+            None => unreachable!("the reservation task was just spawned"),
         };
-        match reservation {
-            Ok(ChildRunReservation::Reserved) => cleanup.state = CleanupState::Reserved,
-            Ok(ChildRunReservation::Existing(run_id)) => {
+        cleanup.reserving = None;
+        match joined {
+            Ok(Ok(ChildRunReservation::Reserved)) => cleanup.state = CleanupState::Reserved,
+            Ok(Ok(ChildRunReservation::Existing(run_id))) => {
                 return Ok(StartWorkerOutcome::Started { run_id })
             }
-            Err(error) => return Err(error.into()),
+            Ok(Err(error)) => return Err(error.into()),
+            Err(error) => {
+                // 예약 task가 끝나지 못했다(panic 등): 커밋 여부를 모르니 조건부로 되돌린다(예정 run id일 때만 푼다).
+                cleanup.state = CleanupState::Reserved;
+                cleanup.fail().await;
+                return Err(OrchestrationFailure::Plain(error.to_string()).into());
+            }
         }
         self.remember_launching(&planned_run_id, &snapshot.id, &node.id, &task.id);
         self.launch_probe(LaunchPoint::BeforePrepare).await;
@@ -936,7 +965,7 @@ fn cancelled_launch() -> StartWorkerOutcome {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CleanupState {
-    /// 저장소 예약 전(되돌릴 것 없음).
+    /// 저장소 예약 중(소유 task가 커밋할 수 있다 — drop되면 그 결과를 기다려 되돌린다).
     Reserving,
     /// 저장소 예약 뒤·엔진 준비 전.
     Reserved,
@@ -956,6 +985,12 @@ struct LaunchCleanup {
     planned_run_id: String,
     token: u64,
     state: CleanupState,
+    /// 진행 중인 저장소 예약 task(`Reserving` 동안만). 완료를 받기 전에 drop되면 Drop이 넘겨받는다.
+    reserving: Option<
+        tokio::task::JoinHandle<
+            crate::application::orchestration::runtime::OrchestrationResult<ChildRunReservation>,
+        >,
+    >,
 }
 
 impl LaunchCleanup {
@@ -1004,7 +1039,42 @@ impl Drop for LaunchCleanup {
     fn drop(&mut self) {
         self.runtime.end_task_launch(&self.task_id, self.token);
         self.runtime.forget_launching(&self.planned_run_id);
-        if self.state == CleanupState::Done || self.state == CleanupState::Reserving {
+        if self.state == CleanupState::Reserving {
+            // 예약 await 중에 drop됐다(Codex r6 medium): 예약 task는 끝까지 커밋하므로 그 결과를 기다려, 이 기동이 예약했으면
+            // 되돌리고(조건부 해제) scheduler 자리를 반납한다. 다른 배정의 run(`Existing`)이면 그 배정이 자리를 쓴다.
+            let Some(reserving) = self.reserving.take() else {
+                return;
+            };
+            let Ok(handle) = tokio::runtime::Handle::try_current() else {
+                return;
+            };
+            let (runtime, bench, node_id, task_id, planned_run_id) = (
+                Arc::clone(&self.runtime),
+                self.bench.clone(),
+                self.node_id.clone(),
+                self.task_id.clone(),
+                self.planned_run_id.clone(),
+            );
+            handle.spawn(async move {
+                match reserving.await {
+                    Ok(Ok(ChildRunReservation::Existing(_))) => return,
+                    Ok(Ok(ChildRunReservation::Reserved)) | Err(_) => {
+                        rollback(
+                            Arc::clone(&runtime),
+                            bench,
+                            node_id,
+                            planned_run_id,
+                            CleanupState::Reserved,
+                        )
+                        .await;
+                    }
+                    Ok(Err(_)) => {}
+                }
+                let _ = runtime.scheduler().release(&task_id);
+            });
+            return;
+        }
+        if self.state == CleanupState::Done {
             return;
         }
         // future가 끝나지 않고 drop됐다(abort). 장벽 sender는 이미 닫혀 실행은 없다. 나머지는 뒤에서 되돌린다.

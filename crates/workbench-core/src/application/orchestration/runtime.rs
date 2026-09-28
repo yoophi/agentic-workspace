@@ -119,6 +119,18 @@ pub enum LaunchPoint {
     AfterOpen,
 }
 
+/// 자식 run 저장소 예약(`reserve_child_run`, blocking 스레드) 전후 지점(Codex r6 medium 재현).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReservePoint {
+    /// 저장소 예약(RMW 커밋) 직전.
+    BeforeCommit,
+    /// 저장소 예약이 끝난 뒤.
+    AfterCommit,
+}
+
+/// blocking 스레드에서 동기로 불린다(await 없음).
+pub type ReserveProbe = std::sync::Arc<dyn Fn(ReservePoint) + Send + Sync>;
+
 pub type LaunchProbe = std::sync::Arc<
     dyn Fn(LaunchPoint) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
         + Send
@@ -137,6 +149,7 @@ pub struct OrchestrationRuntime {
     /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
     launching: std::sync::Mutex<std::collections::HashMap<String, (String, String, String)>>,
     launch_probe: std::sync::Mutex<Option<LaunchProbe>>,
+    reserve_probe: std::sync::Mutex<Option<ReserveProbe>>,
     dispatch_probe: std::sync::Mutex<Option<super::notification_dispatcher::DispatchProbe>>,
     /// 마지막으로 띄운 알림 전달 한 바퀴(시험이 abort한다).
     last_notification_pass: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
@@ -169,6 +182,7 @@ impl OrchestrationRuntime {
             guards,
             launching: std::sync::Mutex::default(),
             launch_probe: std::sync::Mutex::default(),
+            reserve_probe: std::sync::Mutex::default(),
             dispatch_probe: std::sync::Mutex::default(),
             last_notification_pass: std::sync::Mutex::default(),
             notification_retries: std::sync::Mutex::default(),
@@ -241,6 +255,22 @@ impl OrchestrationRuntime {
             .launch_probe
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    /// 시험: 자식 run 저장소 예약 전후 지점 probe를 건다.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_reserve_probe(&self, probe: Option<ReserveProbe>) {
+        *self
+            .reserve_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
+    }
+
+    pub(crate) fn reserve_probe(&self) -> Option<ReserveProbe> {
+        self.reserve_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// 시험: 알림 전달 한 바퀴의 지점 probe를 건다.

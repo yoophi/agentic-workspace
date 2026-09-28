@@ -253,6 +253,7 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
   3. G 밖: `Registered`면 `start_gate`를 연다(launcher 실행). `Cancelled`면 registry에서 그 run을 취소한다. `start_gate`가 닫힌 채 drop되면 task는 launcher를 부르지 않고 끝난다.
 - 선형화 지점은 2의 G 아래 전이다. 그 앞에서 온 취소는 `Pending→Cancelled`(실행 0), 그 뒤에서 온 취소는 registry의 실제 run을 취소한다.
 - 시험(각각 결정적 gate): registry 예약 전 취소, spawn 뒤·attach 전 취소, attach 뒤·전이 전 취소, 전이 뒤·gate 열기 전 취소, 각 지점의 future abort. 모두 "취소가 성공이면 launcher·prompt 실행 0"과 "예약 해제 누락 0"을 단정한다.
+- 저장소 예약 중 abort(Codex r6 medium): `reserve_child_run`은 blocking 작업이라 배정 future가 그 await 중에 drop돼도 커밋한다. 예약은 배정 future와 따로 도는 소유 task로 돌리고, 완료를 받기 전에 drop되면 guard가 그 결과를 기다려 이 기동이 예약했으면 조건부로 되돌리고(노드의 현재 run이 예정 run id일 때만 해제) scheduler 자리를 반납한다. 시험: 커밋 직전 gate에서 abort → 커밋 완료 → 예정 run id 해제·자리 반납 → 재배정이 실제 run을 기동.
 
 ### 알림 전달 예약 (Codex 재검토 3 F2)
 
@@ -374,7 +375,8 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
     - 상태 전이(비우기 시작·유휴 비우기 취소)도 활동 세대를 바꾼다. 그래서 전이 전에 시작한 판정은 거절된다.
     - 비우기 정지 판정은 판정 시작 때 이미 서빙이면 멈추지 않는다.
     - 증거: 관문 수준의 끼어들기 시험(세대 읽기 → 서빙 복귀 → 판정)과 ServerControl 수준 시험(임대 뒤 판정). `derive` 도중의 실제 thread 끼어들기를 강제하는 시험은 아니다.
-    - 임대 획득 순서(OCR 2차): 서빙 복귀 → 임대 넣기 → 서빙 복귀 → 이미 `stopping`이면 임대를 되돌리고 `unavailable`. 넣기 전에 읽은 세대로 진행 중인 판정은 두 번째 복귀의 세대 올림으로 거절되고, 멈추는 서버는 임대를 내주지 않는다. 시험은 `stopping` 서버가 임대를 거절하고 남기지 않음(입구 거절 경로)이다. 입구 통과와 넣기 사이 창은 결정적으로 강제하지 못한다.
+    - 임대 획득은 서빙·유휴·wait 어느 상태든(`stopping` 제외) G 아래에서 활동 세대를 올린다(Codex r6 high). 미소비 교환은 데스크톱 임대가 있어야 활동이므로, 임대 없이 파생한 default·wait 판정이 임대를 넣은 뒤 멈추면 안 된다. 시험: 판정의 파생 뒤·판정 전 probe에서 실제 `lease.acquire` → default는 `conflict`, wait는 `drainingWait`이고 교환이 전달될 때까지 활동으로 센다.
+    - 임대 획득 순서(OCR 2차): 서빙 복귀(세대 올림) → 임대 넣기 → 서빙 복귀(세대 올림) → 이미 `stopping`이면 임대를 되돌리고 `unavailable`. 넣기 전에 읽은 세대로 진행 중인 판정은 두 번째 복귀의 세대 올림으로 거절되고, 멈추는 서버는 임대를 내주지 않는다. 시험은 `stopping` 서버가 임대를 거절하고 남기지 않음(입구 거절 경로)이다. 입구 통과와 넣기 사이 창은 결정적으로 강제하지 못한다.
 - **Rationale**: 앱이 강제로 죽으면 임대를 풀 수 없다. TTL로 결국 거둔다(FR-021).
 
 ## R10. 정지 요청

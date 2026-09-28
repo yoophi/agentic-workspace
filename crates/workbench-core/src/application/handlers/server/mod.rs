@@ -259,9 +259,10 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
                 let control = Arc::clone(&c);
                 async move {
                     let leases = control.leases();
-                    // 유휴 비우기 중이면 서빙으로 돌아간다(R9). wait 비우기는 돌아가지 않는다. OCR 2차: 넣기 **전과 뒤** 모두
-                    // 서빙 복귀(세대 올림)를 한다 — 넣기 전에 읽은 세대로 진행 중인 정지 판정이 넣은 임대를 건너뛰지 못하고,
-                    // 넣은 뒤 이미 `stopping`이면 임대를 되돌리고 거절한다(멈추는 서버의 임대를 내주지 않는다).
+                    // 유휴 비우기 중이면 서빙으로 돌아간다(R9). wait 비우기는 돌아가지 않는다. OCR 2차·Codex r6: 넣기 **전과
+                    // 뒤** 모두 G 아래에서 세대를 올린다(서빙·유휴·wait 어느 상태든, `stopping` 제외) — 넣기 전에 읽은 세대로
+                    // 진행 중인 정지 판정(default·wait·유휴)이 넣은 임대를 건너뛰지 못하고, 넣은 뒤 이미 `stopping`이면 임대를
+                    // 되돌리고 거절한다(멈추는 서버의 임대를 내주지 않는다).
                     control.lease_acquired();
                     let lease_id = leases.acquire(input.client_kind, input.client_id);
                     control.lease_acquired();

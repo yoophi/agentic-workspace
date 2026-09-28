@@ -376,6 +376,122 @@ async fn an_unconsumed_exchange_with_a_desktop_lease_blocks_until_it_is_delivere
     }
 }
 
+// --- Codex r6 high: 파생과 판정 사이의 임대 획득은 낡은 정지 판정을 무효로 한다 ---
+//
+// 정지 판정은 세대를 읽고 → 파생하고(임대가 없어 미소비 교환은 활동이 아님) → G 아래에서 판정한다. 그 사이에 데스크톱 임대가
+// 들어오면 교환이 활동이 되므로(전달할 사람이 생김), 낡은 파생 값으로 멈추면 안 된다. 판정 지점 probe로 파생 뒤·판정 전에
+// 멈춘 채 실제 `lease.acquire`를 부른다(시간 지연 없음).
+
+use workbench_core::application::server_control::StopProbe;
+
+/// 정지 판정의 파생 뒤·판정 전에 한 번 멈추고, 그 사이 실제 연산으로 데스크톱 임대를 얻는다. 정지 결과를 돌려준다.
+async fn stop_with_a_lease_acquired_between_derive_and_decision(
+    h: &BenchHarness,
+    mode: &str,
+) -> Result<Value, WorkbenchFault> {
+    let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
+    let (resume_tx, resume_rx) = tokio::sync::oneshot::channel::<()>();
+    let slot = std::sync::Mutex::new(Some((reached_tx, resume_rx)));
+    let probe: StopProbe = std::sync::Arc::new(move || {
+        let taken = slot.lock().unwrap().take();
+        Box::pin(async move {
+            if let Some((reached, resume)) = taken {
+                let _ = reached.send(());
+                let _ = resume.await;
+            }
+        })
+    });
+    h.rt.runtime.server_control().set_stop_probe(Some(probe));
+    let (stopped, ()) = tokio::join!(stop(h, mode), async {
+        reached_rx
+            .await
+            .expect("the stop decision reached the probe");
+        let before = status(h).await;
+        assert_eq!(
+            before["activeWork"]["pendingExchanges"], 0,
+            "derived without a lease: {before}"
+        );
+        owner(
+            h,
+            OperationId::LeaseAcquire,
+            json!({"clientKind": "desktop", "clientId": "app"}),
+        )
+        .await
+        .expect("the lease is granted while serving or draining");
+        resume_tx.send(()).unwrap();
+    });
+    h.rt.runtime.server_control().set_stop_probe(None);
+    stopped
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lease_acquired_after_derive_invalidates_a_stale_default_stop() {
+    let h = BenchHarness::new(RunScript::default());
+    let bench = accepted_exchange(&h).await;
+    let refused = stop_with_a_lease_acquired_between_derive_and_decision(&h, "default").await;
+    let fault = refused.expect_err("a stale default decision must not stop");
+    assert_eq!(fault.code, FaultCode::Conflict, "{fault:?}");
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Serving);
+    let now = status(&h).await;
+    assert_eq!(
+        now["activeWork"]["pendingExchanges"], 1,
+        "the desktop can deliver it now: {now}"
+    );
+    assert_eq!(
+        stop(&h, "default").await.unwrap_err().code,
+        FaultCode::Conflict
+    );
+    h.keyed(
+        OperationId::RunSendPrompt,
+        "exchange-delivery:q1",
+        json!({"benchId": bench, "runId": "r2", "prompt": "hello peer",
+        "continuation": {"exchangeRequestId": "q1"}}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        status(&h).await["activeWork"]["pendingExchanges"],
+        0,
+        "delivered"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lease_acquired_after_derive_invalidates_a_stale_wait_stop() {
+    let h = BenchHarness::new(RunScript::default());
+    let bench = accepted_exchange(&h).await;
+    let draining = stop_with_a_lease_acquired_between_derive_and_decision(&h, "wait")
+        .await
+        .unwrap();
+    assert_eq!(
+        draining["state"], "drainingWait",
+        "a stale wait decision must not stop: {draining}"
+    );
+    let control = h.rt.runtime.server_control();
+    let now = status(&h).await;
+    assert_eq!(now["activeWork"]["pendingExchanges"], 1, "{now}");
+    assert!(
+        !control.tick(Duration::ZERO).await,
+        "the desktop can still deliver it"
+    );
+    h.keyed(
+        OperationId::RunSendPrompt,
+        "exchange-delivery:q1",
+        json!({"benchId": bench, "runId": "r2", "prompt": "hello peer",
+        "continuation": {"exchangeRequestId": "q1"}}),
+    )
+    .await
+    .unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while !control.tick(Duration::ZERO).await {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never stopped after the delivery"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 // 044 메인 세션 검토(사용자 검토 반영): 비우기 전에 만든 준비(Ready) task는 coordinator agent만 `assignChildTask`(K)로
 // 배정한다(coordinator 역할의 agent 도구 — 소유자·데스크톱·CLI는 부를 수 없다). coordinator는 turn 안에서만 배정하고,
 // turn은 바쁜 실행이나 미전달 알림으로만 생긴다(비우는 중 사용자 prompt는 N). 그래서 준비 task는 **coordinator가 살아

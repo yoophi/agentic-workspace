@@ -94,6 +94,7 @@ stateDiagram-v2
 ```
 
 - `force`와 `SIGTERM`은 `stopping` 전에 `close_all_benches`를 한다.
+- 임대 획득은 `stopping`이 아닌 어느 상태에서든 활동 세대를 올린다(Codex r6). 그 전에 파생을 시작한 `default`·`wait`·유휴 정지 판정은 거절되고 다시 판정한다(임대가 생기면 미소비 교환이 활동이 된다). `stopping`이면 임대를 거절한다.
 - handshake와 `server.status`의 `state`에 현재 상태를 싣는다. 준비 상태 = `serving`.
 
 ## 6. 오류

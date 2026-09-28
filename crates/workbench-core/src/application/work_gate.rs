@@ -495,6 +495,24 @@ impl WorkGate {
         }
     }
 
+    /// 임대 획득(G 아래, Codex r6 high): `stopping`이 아니면 어느 상태에서든 세대를 바꾼다 — 임대가 없다고 보고 파생한
+    /// 정지 판정(데스크톱 임대가 있어야 미소비 교환이 활동이다)이 임대를 넣은 뒤 멈추지 못하게. 유휴 비우기는 서빙으로
+    /// 되돌린다([`WorkGate::resume_serving`]). `wait` 비우기는 그대로 둔다. `stopping`이면 false(임대를 거절한다).
+    pub fn note_lease_acquired(&self) -> bool {
+        let mut inner = self.lock();
+        match inner.state() {
+            GateState::Stopping => false,
+            state => {
+                if state == GateState::Draining(DrainMode::Idle) {
+                    inner.state = Some(GateState::Serving);
+                    inner.drain_started_at = None;
+                }
+                inner.generation += 1;
+                true
+            }
+        }
+    }
+
     /// 정지 판정(G 아래): 예약 0이고 `derived_active()`(파생 활동 수)가 0이면 `stopping`으로 전이하고 true.
     /// `derived_active`는 G를 쥔 채 불린다 — 그 안에서 WorkGate를 다시 부르면 안 된다.
     pub fn try_stop(&self, derived_active: impl FnOnce() -> u64) -> bool {

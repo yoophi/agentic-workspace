@@ -19,7 +19,9 @@ use std::{
 use serde_json::{json, Value};
 use support::{scripted_run_engine::RunScript, BenchHarness};
 use tokio::sync::{mpsc, Semaphore};
-use workbench_core::application::orchestration::runtime::{LaunchPoint, LaunchProbe};
+use workbench_core::application::orchestration::runtime::{
+    LaunchPoint, LaunchProbe, ReservePoint, ReserveProbe,
+};
 use workbench_protocol::{AuthenticatedPrincipal, OperationId, WorkbenchFault};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -481,6 +483,82 @@ async fn aborting_the_assign_at_each_start_barrier_point_leaks_nothing() {
         );
         drop(pause);
     }
+}
+
+/// Codex r6 medium: 저장소 예약(`reserve_child_run`)은 blocking 작업이라 배정 future가 그 await 중에 abort돼도 끝까지
+/// 커밋한다. 커밋 직전에 blocking 작업을 붙잡고 → 배정 future를 abort하고 → 커밋을 끝내게 한 뒤: 예정 run id가 노드에서
+/// 풀리고 scheduler 자리가 반납돼, 다시 배정하면 실제 run이 기동한다(`alreadyAssigned`로 영원히 막히지 않는다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_assign_while_the_store_reservation_commits_rolls_it_back() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let (reached_tx, mut reached) = mpsc::unbounded_channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let probe: ReserveProbe = Arc::new(move |point| {
+        let _ = reached_tx.send(point);
+        if point == ReservePoint::BeforeCommit {
+            // blocking 스레드에서 불린다: 시험이 abort를 마칠 때까지 커밋을 붙잡는다.
+            let _ = release_rx.lock().unwrap().recv();
+        }
+    });
+    h.rt.runtime.orchestration().set_reserve_probe(Some(probe));
+    let assigning = {
+        let (h, bench, task_id) = (Arc::clone(&h), bench.clone(), task_id.clone());
+        tokio::spawn(async move {
+            h.rt.runtime
+                .orchestration()
+                .launch_task_for_ui(&bench, &task_id)
+                .await
+        })
+    };
+    assert_eq!(
+        tokio::time::timeout(WAIT, reached.recv()).await.unwrap(),
+        Some(ReservePoint::BeforeCommit)
+    );
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    release_tx.send(()).unwrap();
+    assert_eq!(
+        tokio::time::timeout(WAIT, reached.recv()).await.unwrap(),
+        Some(ReservePoint::AfterCommit),
+        "the reservation committed after the abort"
+    );
+    h.rt.runtime.orchestration().set_reserve_probe(None);
+    eventually("the planned run id is released from the node", || async {
+        node_of(&session(&h, &bench).await, &task_id)["currentRunId"].is_null()
+    })
+    .await;
+    let scheduler_free = || async {
+        h.rt.runtime
+            .orchestration()
+            .scheduler()
+            .active_count()
+            .unwrap()
+            == 0
+    };
+    eventually("the scheduler slot is returned", scheduler_free).await;
+    assert_eq!(child_executions(&h, baseline), Vec::<String>::new());
+    let current = session(&h, &bench).await;
+    assert_eq!(task(&current, &task_id)["status"], "ready");
+
+    let assigned = assign(&h, &task_id, "reassign").await.unwrap();
+    assert!(
+        assigned.get("alreadyAssigned").is_none(),
+        "a leaked reservation blocks reassignment: {assigned}"
+    );
+    assert_eq!(assigned["executionStatus"], "active", "{assigned}");
+    let run_id = assigned["runId"].as_str().unwrap().to_owned();
+    assert_eq!(
+        node_of(&session(&h, &bench).await, &task_id)["currentRunId"],
+        run_id.as_str()
+    );
+    assert!(
+        child_executions(&h, baseline)
+            .iter()
+            .any(|label| label.starts_with("launch:")),
+        "a real child run started: {:?}",
+        child_executions(&h, baseline)
+    );
 }
 
 /// 등록(바인딩) 뒤 취소는 실제 run을 취소한다.
