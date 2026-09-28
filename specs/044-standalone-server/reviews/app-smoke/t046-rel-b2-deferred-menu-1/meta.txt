@@ -1,0 +1,17 @@
+app-pid=8149 close-path=b2
+probe-status=done
+run-id=quit-5c26b18e server-pid=8169
+server-verified=yes
+before: {"result": "ok", "runListed": true, "benchCount": 1, "leases": 1}
+secret-mode=0o600 probe-tokenBeforeClose=200
+token-before-close={"status": 200}
+main-window=Agentic Workbench
+windows-before-close=Settings, Agentic Workbench
+front=Settings
+app-alive-after-close=no
+after: {"result": "ok", "runListed": false, "benchCount": 0, "leases": 0}
+run-removed=yes
+token-after-close={"status": 401, "code": "unauthenticated"}
+retireWindow-calls=2
+2:[workbench] exit: flushing 1 window retirement(s) and releasing the lease
+cleanup: app=gone server=gone
