@@ -1,0 +1,23 @@
+app-pid=70285 close-path=b1
+probe-status=done
+run-id=quit-ffc90bae server-pid=70304
+server-verified=yes
+before: {"result": "ok", "runListed": true, "benchCount": 1, "leases": 1}
+secret-mode=0o600 probe-tokenBeforeClose=200
+token-before-close={"status": 200}
+main-window=Agentic Workbench
+windows-before-close=Settings, Agentic Workbench
+front=Agentic Workbench
+action: menu item Close Window of menu File of menu bar item File of menu bar 1 of application process agentic-workbench (exit 0)
+app-alive-after-close=yes
+windows-after-close=Settings
+window-result=ok (main window closed, Settings kept)
+run-check[1]=absent
+after: {"result": "ok", "runListed": false, "benchCount": 0, "leases": 1}
+run-removed=yes
+expect: run-removed=yes token=401
+token-after-close={"status": 401, "code": "unauthenticated"}
+token-result=ok (status 401, expected 401)
+retireWindow-calls=1
+cleanup: app=gone server=gone
+close-result=ok

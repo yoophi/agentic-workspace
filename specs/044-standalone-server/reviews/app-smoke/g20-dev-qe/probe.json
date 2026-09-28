@@ -1,0 +1,18 @@
+{
+  "origin": "http://localhost:1420",
+  "scenario": "quit-busy-token",
+  "steps": {
+    "completedBeforeQuit": false,
+    "startEcho": "ok",
+    "capturedEvents": 8,
+    "lastSequence": 8,
+    "tokenBeforeClose": 200
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-52d0bac3",
+  "benchId": "9af34961-2e4f-4569-bfa4-8f7501239c2e",
+  "phase": "ready-to-quit-busy-token",
+  "result": "ok"
+}

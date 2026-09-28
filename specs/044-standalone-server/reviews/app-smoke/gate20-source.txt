@@ -1,0 +1,11 @@
+commit=c4c8e0bfd73bbea833ff9683fc449e3a8997ab01
+tree=4426dfd2cf41f8048448b4c11e9008d52588b8a0
+probe-build-env=VITE_AW_DEBUG_PROBE=1
+release-id=com.yoophi.agentic-workbench.smoke044g20r
+release-product=AW Gate20 Rel
+release-app-sha256=d5ae13b346814d4a7a8fa3cdd7cf59fe776adbead263aa2d16326db69d6fe15c
+release-server-sha256=4953570ca4d43101b217dfacb6cb58f45b8b3912d6267876a97c7a96db092c18
+dev-id=com.yoophi.agentic-workbench.smoke044g20d
+dev-product=AW Gate20 Dev
+dev-app-sha256=d96b7a16eee8bd24058cdb885154efd9199bac39f90bf5c024cec56876d3df194
+dev-server-sha256=4953570ca4d43101b217dfacb6cb58f45b8b3912d6267876a97c7a96db092c18

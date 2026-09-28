@@ -2,7 +2,7 @@
 
 2026-09-28, macOS Apple Silicon. 모든 실행은 **외부 서버 모드**(`AW_WORKBENCH_MODE` 없음)다. 앱 로그 `[workbench] mode: external`, 접근 기록은 서버 로그(`<data>/workbench/server/server.log`)에만 있고 앱 로그의 in-process `[workbench-http]` 줄은 0이다.
 
-- 사용자 설치본과 데이터를 나누려고 별도 identifier를 썼다: T036 개발 `…smoke044x`·배포 `…smoke044xr`, 종료·창 닫기 번들 배포 `…smoke044qr`(`AW Quit 044.app`)·개발 `…smoke044qd`(`AW QuitDev 044.app`).
+- 사용자 설치본과 데이터를 나누려고 별도 identifier를 썼다. 최종 Gate20은 배포 `…smoke044g20r`(`AW Gate20 Rel.app`)·개발 `…smoke044g20d`(`AW Gate20 Dev.app`)다. 앞선 T036·종료 시험의 identifier는 아래 과거 기록에 남긴다.
 - 결과 파일은 `app-smoke/<실행>/`(probe·owner-check 보고, 실행 메타)다. 토큰·표 문자열은 없다. 복사 전에 모든 비밀 파일의 토큰 값이 이 파일들에 없음을 확인했다. 경로는 `<scratchpad>`·`~`로 줄였다.
 - 종료는 각 실행이 띄운 **정확한 PID**만 했다(서버는 `server.json`의 pid + 명령줄의 실행 파일·데이터 디렉터리 확인 뒤). 삭제 명령은 쓰지 않았고, 실행마다 새 디렉터리 이름을 썼다. 사용자 설치본 프로세스는 건드리지 않았다.
 - 가짜 agent: `fake_acp_permission_agent.py --echo`.
@@ -17,6 +17,39 @@
 | 개발 번들(T045·T046) | 같은 번들, `build.frontendDist = http://localhost:1420`, vite 따로 실행 | `http://localhost:1420` | 위와 같음 |
 
 종료 경로 (c)(d)(e)는 번들 id가 있어야 자동화된다(Dock 항목, `tell application id … to quit`). 그래서 T045·T046은 두 출처 모두 번들로 실행했다. 개발 출처는 WebView가 개발 서버를 읽는 번들이다.
+
+## r13 최종 앱 재실행 — Gate20 (`c4c8e0b`)
+
+- 코드 출처: commit `c4c8e0bfd73bbea833ff9683fc449e3a8997ab01`, tree `4426dfd2cf41f8048448b4c11e9008d52588b8a0`.
+- `VITE_AW_DEBUG_PROBE=1`로 새 번들을 만들었다. 배포 app SHA-256 `d5ae13b3…6fe15c`, 개발 app `d96b7a16…df194`, 두 번들의 server `4953570c…092c18`. 전체 값은 `app-smoke/gate20-source.txt`에 있다.
+- 실행 직전마다 화면 잠금이 아님을 확인했다. 키 경로는 대상 PID가 frontmost인지 재확인했고, b2는 front window가 `Settings`인지 연속 두 번 확인한 경우에만 Cmd+W를 보냈다.
+- `g19-rel-b2`의 첫 시도는 상대 bundle 경로 때문에 PID를 찾지 못해 키 미전송, `g19-rel-b2-2`는 probe 빌드 환경 누락으로 키 미전송이라 무효다. Gate19에서 front window 확인을 강화한 `g19-rel-b2-4`까지도 두 창 종료·retire 2회를 재현해 제품 결함을 확정했다. 이를 근거로 macOS predefined close를 focused Tauri window 하나만 닫는 custom 메뉴로 교체했다.
+
+### T045 / SC-001
+
+모든 경로는 `BUSY=1 TOKEN=1`이다. 앱 종료 전 turn을 gate로 붙잡고, 앱 PID 소멸 뒤 `busyRuns=1`과 새 prompt 없는 live 출력·완료를 owner로 관측한 뒤 취소했다.
+
+| 경로 | 배포 | 개발 | 창 토큰 |
+|---|---|---|---|
+| (c) Cmd+Q | `g20-rel-qc` 0 | `g20-dev-qc` 0 | 종료 뒤 401 |
+| (d) Dock Quit | `g20-rel-qd` 0 | `g20-dev-qd` 0 | 종료 뒤 401 |
+| (e) AppleScript quit | `g20-rel-qe` 0 | `g20-dev-qe` 0 | 종료 뒤 401 |
+| (g) 검증된 PID SIGTERM 대조 | `g20-rel-qg` 0 | `g20-dev-qg` 0 | 앱 처리 없음, 계약대로 200 |
+
+8개 실행 모두 `path-exercised=yes`, `owner-check-exit=0`, `smoke-result=ok`였다. 따라서 T045와 SC-001은 충족한다.
+
+### T046 / SC-006
+
+| 경로 | 기대 | 배포 | 개발 |
+|---|---|---|---|
+| (a) main 빨간 버튼 | Settings만 남음, run 제거, 토큰 401 | `g20-rel-a` 0 | `g20-dev-a` 0 |
+| (b1) File > Close Window | Settings만 남음, run 제거, 토큰 401 | `g20-rel-b1` 0 | `g20-dev-b1` 0 |
+| (b2) Settings 앞 Cmd+W | main·run 유지, 토큰 200, Settings retire 1회 | `g20-rel-b2` 0 | `g20-dev-b2` 0 |
+| (f) 마지막 창 빨간 버튼 | 앱 종료, run 제거, 토큰 401 | `g20-rel-f` 0 | `g20-dev-f` 0 |
+
+b2 두 출처 모두 `windows-after-close=Agentic Workbench`, `run-removed=no`, 토큰 200, `retireWindow-calls=1`이다. 나머지는 대상 main 작업대와 토큰만 폐기했다. T045의 정상 앱 종료에서는 작업대·run을 닫지 않았다. 따라서 T046과 SC-006은 충족한다.
+
+아래 내용은 Gate20 전의 조사·재판정 기록이다. 미검증 또는 미해결이라는 표현은 당시 상태이며, 위 최종 표가 현재 판정이다.
 
 ## T036 — 043 스모크, 외부 서버 모드 (SC-010)
 
@@ -153,7 +186,7 @@ OCR 2차 수정이 종료 폐기 경로(연결을 잃은 뒤에도 종료 폐기
 | 경로 | 앱 | run·작업대 | 같은 창 토큰 닫기 전 → 뒤 | 배포 | 개발 |
 |---|---|---|---|---|---|
 | (a) 빨간 버튼(main, Settings 남음) | 살아 있음, Settings만 남음 | 제거(작업대 0) | 200 → 401 `unauthenticated` | ok | ok |
-| (b1) 메뉴 `Window > Close Window`(main 앞) | 살아 있음, Settings만 남음 | 제거 | 200 → 401 | ok | ok |
+| (b1) 메뉴 `File > Close Window`(main 앞) | 살아 있음, Settings만 남음 | 제거 | 200 → 401 | ok | ok |
 | (f) 마지막 창 빨간 버튼 | 종료 | 제거 | 200 → 401 | ok | ok |
 | (b2) Cmd+W 키 입력(System Events, Settings 앞) | **두 창 모두 닫히고 종료** | 제거 | 200 → 401 | 관측대로 재현 | 관측대로 재현 |
 
@@ -198,6 +231,5 @@ OCR 구현 리뷰 수정(임대 갱신 실패 유지·재획득, 창 작업대 �
 
 - (h) 로그아웃·재시동 종료: 관측 불가·미검증.
 - Windows·Linux: 미검증.
-- (b2) 사람이 누른 Cmd+W: 미확인 위험.
 - OS 프로세스 재시작 뒤 보류 task 재배정: host 재조립 수준만 검증했다(`implementation-evidence.md` 대기 task 정책 변경).
 - 서명·notarization된 배포 번들의 externalBin 서버: (f) 미완료. 스모크는 번들 안에 실행 파일을 복사해 대신했다.

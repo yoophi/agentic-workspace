@@ -1,0 +1,17 @@
+app-pid=80599 quit-path=g
+probe-status=done
+run-id=quit-0fef4e70 server-pid=80621
+server-verified=yes
+token-before-quit={"status": 200}
+app-gone=yes
+quit-action-sent=yes
+path-exercised=yes
+server-alive-after-quit=yes
+token-after-quit={"status": 200}
+token-result=ok (status 200, expected 200)
+status-after-quit={"result": "ok", "state": "serving", "leases": 1, "busyRuns": 1}
+busy-after-quit=yes
+gate-exists-before-observe=no
+owner-check-exit=0
+server-stopped=yes
+smoke-result=ok

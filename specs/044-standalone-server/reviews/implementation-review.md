@@ -6,7 +6,7 @@
 
 | 기준 | 044에서 완료(근거) | 후속 미완료 |
 |---|---|---|
-| (a) 종료 뒤 지속 | **미완료(SC-001)** — 과거 개발·배포 스모크는 있으나 현재 fail-closed 판정 규칙과 최종 코드 tree에서 모든 종료 경로를 다시 실행하지 않았다. 최종 앱 스모크 전에는 완료로 세지 않는다 | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
+| (a) 종료 뒤 지속 | **044 범위 완료(SC-001)** — `c4c8e0b` Gate20 개발·배포 번들에서 c/d/e/g 모두 진행 중 turn의 종료 뒤 출력·완료·취소와 정상 종료 토큰 폐기를 실제 실행 | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
 | (b) 독립 composition root | `crates/workbench-host` 조립 + `apps/agentic-workbench-server`, MCP·launch decorator의 Tauri 결합 제거, 네이티브 삽입 전달 제거 | — |
 | (c) 단일 writer·생명주기 | 잠금·안내 파일·identify HMAC·ensure·시작 복구·서빙→비우기→정지·임대·유휴·정지 세 방식, 프로세스 시험(동시 10회, kill -9 복구, 권한), 연결 실패 화면(T047) | — |
 | (d) 프로세스 트리 가두기 | 서버 종료 때 자식 정리는 오늘 수준 유지 | 공통 감독자, 플랫폼별 트리 가두기, 강제 종료 뒤 잔여 자식 회수 |
@@ -16,11 +16,10 @@
 추가 후속 미완료·미검증(완료로 세지 않음):
 
 - 관측 불가 종료 경로(로그아웃·재시동), Windows·Linux의 종료·창 이벤트 순서와 모든 스모크.
-- (b2) 자동화한 Cmd+W 한 번이 두 창을 닫는 원인, 그리고 사람이 누른 Cmd+W의 동작.
 - OS 프로세스 재시작 뒤 보류 task 재배정(host 재조립 수준만 검증).
 - embedded 모드와 compat command 제거(8단계).
 
-현재 044 차단 항목: **SC-006/T046 미완료**. 자동화한 Cmd+W 한 번이 Settings뿐 아니라 main 창과 그 run까지 닫는 실제 개발·배포 스모크 실패가 남아 있다. 원인을 수정하고 두 창 회귀 시험 및 최종 앱 스모크를 통과하기 전에는 044를 merge하지 않는다.
+SC-006/T046 차단은 해결했다. Gate19에서 PID와 front Settings를 두 번 확인한 뒤에도 두 창 종료를 재현해 제품 결함으로 확정했고, predefined close를 focused Tauri window 하나만 닫는 custom 메뉴로 바꿨다. `c4c8e0b` Gate20 개발·배포의 a/b1/b2/f가 모두 통과했다.
 
 ## 구현 리뷰 범위 (T053)
 
@@ -29,7 +28,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 1. **대기 task 정책 변경**(구현 중 변경, research R7): 대기 task는 coordinator run이 살아 있고 바쁘거나 그에게 미전달 알림이 있을 때만 활동 작업이다. 그 밖은 `deferredTasks`로 보고만 한다. 증거와 한계는 `implementation-evidence.md`("대기 task 정책 변경과 실제 K 경로")에 있다.
 2. **scheduler 복구 수정**(041부터 있던 결함): 복구가 대기열에 넣은 Ready task도 자리가 비면 `acquire`가 시작한다.
 3. **관찰 → 수정(O1)**: MCP 도구로 받은 `draining` 거절이 `structuredContent.code = "internalError"`로 나가던 것을 fault 코드 그대로 싣게 고쳤다.
-4. **Cmd+W (b2)** 위험(원인 가설 둘 기각, 미해결, 사람 키 입력 미검증)과 **플랫폼 미검증**(위 목록).
+4. **Cmd+W (b2)** Gate19 재현, focused-window custom close 수정, Gate20 개발·배포 통과와 **플랫폼 미검증**(위 목록).
 5. **재시도 알림 상한(O7)**: 진행 중 시도의 예약이 정지를 막는지, 성공할 수 있는 알림이 손실되지 않는지, 재시작 뒤 자동 재전달이 아니라 `superseded` + `collectReports` 보존인 한계가 타당한지.
 6. 그 밖 044 전체: 단일 writer, identify, 소유자 우회 범위, 창 토큰 tombstone, 비우기 분류와 작업 관문, 종료 판정(`window_close_intent`), #207 tombstone, 앱 스모크 증거 범위.
 
@@ -59,8 +58,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | gate-17 | `1a48e0c` | fmt 0, clippy 0 뒤 cargo workspace에서 `workbench-core --test orchestration_agent`의 `first_turn_result_and_input_request_update_the_task_and_notify` 1건 실패. 통합 process의 **실제 종료 코드 101**(tool 결과)이며, `set -e` 때문에 `status.txt`에는 cargo 종료 코드가 누락됐다. 후속 단계는 실행되지 않아 무효 |
 | gate-18 | `c952011` | fmt·clippy·cargo workspace·check-types·pnpm test·build·client integration은 모두 0. AW integration은 `agent-run-panel-exchange.itest.tsx`의 stale 1회 HTTP assertion 1건 실패로 **실제 종료 코드 1**; `status.txt`에 실패 단계까지 모두 기록됐고 후속 단계 없음. 무효 |
 | **gate-19** | **`89ebe49`** | **전부 0**: fmt, clippy `-D warnings`, cargo 1015 passed/0 failed/7 ignored/94 targets/filtered 0, check-types, pnpm test, build, workbench-client integration 7/7, AW integration 14/14. 원 로그·각 단계 종료 코드는 `/private/tmp/aw-044-final-gate-19/`. 뒤의 C14 실제 앱 수정 전 코드이므로 최종 ship 근거는 아님 |
+| **gate-20** | **`c4c8e0b`** | **전부 0**(C14 수정과 Gate20 실제 앱 smoke 코드): fmt, clippy `-D warnings`, cargo 1016 passed/0 failed/7 ignored/94 targets/filtered 0, check-types, pnpm test, build, workbench-client integration 7/7, AW integration 14/14. 원 로그·각 단계 종료 코드는 `/private/tmp/aw-044-final-gate-20/` |
 
-- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-13은 Codex 11차 수정 전 코드다. gate-15는 중단돼 무효다. **최신 유효 게이트는 gate-16(`8fcb8cb`)이다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-13은 Codex 11차 수정 전 코드다. gate-15·17·18은 실패 또는 중단돼 무효다. **최신 유효 게이트는 gate-20(`c4c8e0b`)이다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -403,13 +403,13 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | C11 | High | **유효** — retire 1회 실패 뒤 local mapping·재시도 정보 유실 | server client lifecycle call/idempotency, retire 시험 | (a) 서버 적용·응답 유실 후 같은 키 replay 1/1, (b) **최초 요청이 서버 미도달** 후 mapping 보존·같은 검증 instance 재시도 1/1; 둘 다 bench 종료·tombstone·pending 0 | 실제 앱 창 폐기 smoke |
 | C12 | High | **유효** — 같은 run의 unrelated `promptSent`로 unknown 송신 오판 | panel, HTTP transport, client/protocol `replayed`, UI 시험 | 패널 60/60: 늦은 이벤트 전 편집 초안 보존, unrelated same-run·old-run 이벤트 격리, 같은 stable key 재시도/Cancel 복구 | 최종 frontend gate·실제 앱 prompt smoke |
 | C13 | Medium | **유효** — `status` CLI가 `server.status`를 호출하지 않음 | server CLI, process 시험 | status가 실제 status payload를 출력 1/1 | process 전체 suite |
-| C14 | High | **유효, 최신 앱에서 재현** — Cmd+W Settings 한 번이 main/run까지 닫음 | 단일 custom Close Window가 focused Tauri window 하나만 닫도록 변경(`src-tauri/lib.rs`); b2 runner는 재활성화 없이 PID+front window `Settings`를 두 번 확인 | gate-19 release 번들의 강화 전·후 runner 모두 앱 종료·run 제거·토큰 401·retire 2회로 실패해 제품 결함 확정. custom menu 단위 1/1·clippy 통과 | **수정 커밋의 development·release 실제 앱 b2 및 전체 close/quit smoke 필수** |
-| C15 | High | **유효** — gate-16은 최종 tree 이전이라 ship 근거 아님 | `tasks.md`, 이 문서 | 해당 없음 | final tree에서 `CARGO_INCREMENTAL=0` 전체 gate |
-| C16 | Medium | **유효** — T045/SC-001 등 완료 표지가 실제 smoke보다 앞섬 | `spec.md`, `tasks.md`, app-smoke 문서 | 완료 표지를 미완료로 되돌림 | T045/T046/SC-001/SC-006/T052는 실제 앱 smoke·최종 gate 뒤에만 완료 |
+| C14 | High | **유효·해결** — Cmd+W Settings 한 번이 main/run까지 닫음 | 단일 custom Close Window가 focused Tauri window 하나만 닫도록 변경(`src-tauri/lib.rs`); b2 runner는 재활성화 없이 PID+front window `Settings`를 두 번 확인 | Gate19 강화 runner에서도 앱 종료·retire 2회로 제품 결함 확정. `c4c8e0b` Gate20 개발·배포 b2: Settings만 닫힘, main/run 유지, 토큰 200, retire 1회. a/b1/f 포함 8/8 close smoke 통과 | 없음 |
+| C15 | High | **유효·해결** — gate-16은 최종 tree 이전이라 ship 근거 아님 | `tasks.md`, 이 문서 | Gate20 `c4c8e0b` 전체 8단계 0 | 없음 |
+| C16 | Medium | **유효·해결** — T045/SC-001 등 완료 표지가 실제 smoke보다 앞섬 | `spec.md`, `tasks.md`, app-smoke 문서 | Gate20 개발·배포 T045/T046 실제 smoke와 gate-20 뒤에만 완료 표시 | 없음 |
 | C17 | Medium | **유효** — FR-014가 구현과 다른 server-side incarnation 등록을 요구 | `spec.md`, research/contract | desktop 생성 incarnation + server token/tombstone 계약으로 정합화 | 최종 문서 교차검사 |
 | C18 | Medium | **유효** — 계약이 공개 `server:read` scope를 누락 | lifecycle contract, plan, data-model, spec | `server.status` 요구 scope와 owner 할당을 문서화 | 최종 문서 교차검사 |
 
-현재 결론은 **18건 모두 유효**다. C14–C16은 검증이 끝나지 않았고, 나머지도 표의 targeted 통과를 최종 전체 gate로 대체하지 않는다. 특히 owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다.
+현재 결론은 **18건 모두 유효했고 반영·검증을 마쳤다.** targeted 결과만으로 끝내지 않고 최종 코드 `c4c8e0b`에서 gate-20과 Gate20 개발·배포 앱 smoke를 통과했다. owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다. 이는 044 범위의 완료이며 5단계 전체 로드맵 완료를 뜻하지 않는다.
 
 #### 수정 중 전체 suite에서 발견한 회귀
 
