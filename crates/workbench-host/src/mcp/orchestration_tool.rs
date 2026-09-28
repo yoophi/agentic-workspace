@@ -160,21 +160,36 @@ pub async fn handle_tool(
         .await
     {
         Ok(reply) => tool_success(reply.output().cloned().unwrap_or(Value::Null)),
-        Err(fault) => match fault
-            .details
-            .as_ref()
-            .and_then(|details| details.get("toolError"))
-        {
-            Some(error) => tool_error(
-                error["code"].as_str().unwrap_or("internalError").to_owned(),
-                error["message"]
-                    .as_str()
-                    .unwrap_or(&fault.message)
-                    .to_owned(),
-                error["retryable"].as_bool().unwrap_or(fault.retryable),
-            ),
-            None => tool_error("internalError", fault.message.clone(), fault.retryable),
-        },
+        Err(fault) => fault_tool_error(&fault),
+    }
+}
+
+/// fault → 도구 오류. handler가 만든 도구 오류(`details.toolError`)는 그 코드를 쓰고, 입구 판정 fault(비우기 `draining`,
+/// 정지 `unavailable` 등)는 fault 코드를 그대로 싣는다(044 OCR 구현 리뷰 — `internalError`로 뭉개면 agent가 "비우는 중,
+/// 다시 시도 가능"과 버그를 구별하지 못한다). 내부 오류만 오늘의 `internalError` 이름을 쓴다.
+fn fault_tool_error(fault: &workbench_protocol::WorkbenchFault) -> Value {
+    let fallback = fault_code_name(fault.code);
+    match fault
+        .details
+        .as_ref()
+        .and_then(|details| details.get("toolError"))
+    {
+        Some(error) => tool_error(
+            error["code"].as_str().unwrap_or(fallback).to_owned(),
+            error["message"]
+                .as_str()
+                .unwrap_or(&fault.message)
+                .to_owned(),
+            error["retryable"].as_bool().unwrap_or(fault.retryable),
+        ),
+        None => tool_error(fallback, fault.message.clone(), fault.retryable),
+    }
+}
+
+fn fault_code_name(code: workbench_protocol::FaultCode) -> &'static str {
+    match code {
+        workbench_protocol::FaultCode::Internal => "internalError",
+        other => other.as_str(),
     }
 }
 
@@ -341,6 +356,37 @@ pub fn tool_error(code: impl Into<String>, message: impl Into<String>, retryable
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn fault(code: workbench_protocol::FaultCode) -> workbench_protocol::WorkbenchFault {
+        workbench_protocol::WorkbenchFault::new(
+            code,
+            workbench_protocol::RequestId::random(),
+            "message",
+        )
+    }
+
+    #[test]
+    fn entry_faults_keep_their_code_and_internal_keeps_the_tool_name() {
+        use workbench_protocol::FaultCode;
+        for (code, expected) in [
+            (FaultCode::Draining, "draining"),
+            (FaultCode::Unavailable, "unavailable"),
+            (FaultCode::Forbidden, "forbidden"),
+            (FaultCode::Internal, "internalError"),
+        ] {
+            let fault = fault(code);
+            let error = fault_tool_error(&fault);
+            assert_eq!(error["structuredContent"]["code"], expected, "{code:?}");
+            assert_eq!(error["structuredContent"]["retryable"], fault.retryable);
+        }
+        let mut with_tool_error = fault(FaultCode::Conflict);
+        with_tool_error.details =
+            Some(json!({ "toolError": { "code": "taskNotReady", "message": "m" } }));
+        assert_eq!(
+            fault_tool_error(&with_tool_error)["structuredContent"]["code"],
+            "taskNotReady"
+        );
+    }
 
     #[test]
     fn exposes_role_specific_tool_sets() {

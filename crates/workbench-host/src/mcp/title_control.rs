@@ -48,5 +48,9 @@ pub enum TitleChangeFailureCode {
     InvalidTitle,
     WindowUnavailable,
     UnsupportedTool,
+    /// 서버가 비우는 중이라 새 요청을 받지 않는다(다시 시도 가능, 044).
+    Draining,
+    /// 서버가 정지 중이다(044).
+    Unavailable,
     InternalError,
 }

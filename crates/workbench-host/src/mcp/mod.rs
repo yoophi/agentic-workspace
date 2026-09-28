@@ -378,7 +378,34 @@ fn title_failure_code(fault: &workbench_protocol::WorkbenchFault) -> TitleChange
         Some("invalidTitle") => TitleChangeFailureCode::InvalidTitle,
         Some("unknownRun") => TitleChangeFailureCode::UnknownRun,
         Some("unauthorized") => TitleChangeFailureCode::Unauthorized,
-        _ => TitleChangeFailureCode::InternalError,
+        _ => match fault.code {
+            // 입구 판정 fault는 제 뜻을 지킨다(044 OCR 구현 리뷰).
+            workbench_protocol::FaultCode::Draining => TitleChangeFailureCode::Draining,
+            workbench_protocol::FaultCode::Unavailable => TitleChangeFailureCode::Unavailable,
+            _ => TitleChangeFailureCode::InternalError,
+        },
+    }
+}
+
+#[cfg(test)]
+mod title_fault_tests {
+    use super::{TitleChangeFailureCode, title_failure_code};
+    use workbench_protocol::{FaultCode, RequestId, WorkbenchFault};
+
+    #[test]
+    fn a_drained_title_request_reports_draining_not_internal() {
+        let code = |fault_code| {
+            title_failure_code(&WorkbenchFault::new(fault_code, RequestId::random(), "m"))
+        };
+        assert_eq!(code(FaultCode::Draining), TitleChangeFailureCode::Draining);
+        assert_eq!(
+            code(FaultCode::Unavailable),
+            TitleChangeFailureCode::Unavailable
+        );
+        assert_eq!(
+            code(FaultCode::Internal),
+            TitleChangeFailureCode::InternalError
+        );
     }
 }
 
