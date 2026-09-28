@@ -39,17 +39,43 @@ pub struct PublicationRecord {
 pub struct PublicationEvent {
     pub event_id: String,
     pub attempt_id: String,
-    pub event_kind: String,
+    pub kind: PublicationKind,
     pub payload: Value,
     pub created_at: String,
     pub delivered_at: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicationKind {
+    Accepted,
+    Started,
+}
+
+impl PublicationKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Started => "started",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "accepted" => Some(Self::Accepted),
+            "started" => Some(Self::Started),
+            _ => None,
+        }
+    }
+
+    pub fn event_id(self, attempt_id: &str) -> String {
+        format!("{attempt_id}:{}", self.as_str())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PublishRequest {
     pub attempt_id: String,
-    pub event_id: String,
-    pub event_kind: String,
+    pub kind: PublicationKind,
     pub result: Value,
     pub payload: Value,
 }

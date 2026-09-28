@@ -8,8 +8,8 @@ use workbench_core::{
     ports::{
         operation_ledger::OperationLedger,
         process_publication_store::{
-            ProcessPublicationStore, PublicationState, PublicationStoreError, PublishOutcome,
-            PublishRequest, ReserveOutcome, WithdrawOutcome,
+            ProcessPublicationStore, PublicationKind, PublicationState, PublicationStoreError,
+            PublishOutcome, PublishRequest, ReserveOutcome, WithdrawOutcome,
         },
     },
 };
@@ -26,11 +26,24 @@ fn store() -> (tempfile::TempDir, SqliteOperationLedger) {
 fn request(attempt: &str) -> PublishRequest {
     PublishRequest {
         attempt_id: attempt.into(),
-        event_id: format!("{attempt}:started"),
-        event_kind: "started".into(),
+        kind: PublicationKind::Started,
         result: json!({"runId": "run-1"}),
         payload: json!({"runId": "run-1", "status": "started"}),
     }
+}
+
+#[test]
+fn publication_kind_derives_the_durable_event_identity() {
+    let (_dir, store) = store();
+    store.reserve("attempt-accepted").unwrap();
+    let mut accepted = request("attempt-accepted");
+    accepted.kind = PublicationKind::Accepted;
+    store.publish(&accepted).unwrap();
+
+    let events = store.pending_events(10).unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].kind, PublicationKind::Accepted);
+    assert_eq!(events[0].event_id, "attempt-accepted:accepted");
 }
 
 #[test]

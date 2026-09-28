@@ -18,9 +18,9 @@ use crate::{
         OperationLedger, ReconcileSummary,
     },
     ports::process_publication_store::{
-        ProcessPublicationStore, PublicationEvent, PublicationRecord, PublicationState,
-        PublicationStoreError, PublicationStoreResult, PublishOutcome, PublishRequest,
-        ReserveOutcome, WithdrawOutcome,
+        ProcessPublicationStore, PublicationEvent, PublicationKind, PublicationRecord,
+        PublicationState, PublicationStoreError, PublicationStoreResult, PublishOutcome,
+        PublishRequest, ReserveOutcome, WithdrawOutcome,
     },
 };
 
@@ -128,10 +128,11 @@ CREATE TABLE IF NOT EXISTS process_publication (
 CREATE TABLE IF NOT EXISTS process_publication_outbox (
   event_id      TEXT PRIMARY KEY,
   attempt_id    TEXT NOT NULL UNIQUE REFERENCES process_publication(attempt_id) ON DELETE CASCADE,
-  event_kind    TEXT NOT NULL,
+  event_kind    TEXT NOT NULL CHECK (event_kind IN ('accepted','started')),
   payload_json  TEXT NOT NULL,
   created_at    TEXT NOT NULL,
-  delivered_at  TEXT
+  delivered_at  TEXT,
+  CHECK (event_id = attempt_id || ':' || event_kind)
 );
 CREATE INDEX IF NOT EXISTS process_publication_outbox_pending
   ON process_publication_outbox (created_at) WHERE delivered_at IS NULL;
@@ -684,6 +685,7 @@ impl ProcessPublicationStore for SqliteOperationLedger {
 
     fn publish(&self, request: &PublishRequest) -> PublicationStoreResult<PublishOutcome> {
         let now = now_rfc3339();
+        let event_id = request.kind.event_id(&request.attempt_id);
         let mut conn = self
             .connection
             .lock()
@@ -713,8 +715,8 @@ impl ProcessPublicationStore for SqliteOperationLedger {
             let payload: serde_json::Value = serde_json::from_str(&stored.2)
                 .map_err(|error| PublicationStoreError::Storage(error.to_string()))?;
             if record.result.as_ref() != Some(&request.result)
-                || stored.0 != request.event_id
-                || stored.1 != request.event_kind
+                || stored.0 != event_id
+                || stored.1 != request.kind.as_str()
                 || payload != request.payload
             {
                 return Err(PublicationStoreError::ReplayMismatch(
@@ -738,9 +740,9 @@ impl ProcessPublicationStore for SqliteOperationLedger {
              (event_id, attempt_id, event_kind, payload_json, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                request.event_id,
+                event_id,
                 request.attempt_id,
-                request.event_kind,
+                request.kind.as_str(),
                 request.payload.to_string(),
                 now
             ],
@@ -825,10 +827,17 @@ impl ProcessPublicationStore for SqliteOperationLedger {
         let rows = statement
             .query_map(params![limit as i64], |row| {
                 let payload: String = row.get(3)?;
+                let kind: String = row.get(2)?;
                 Ok(PublicationEvent {
                     event_id: row.get(0)?,
                     attempt_id: row.get(1)?,
-                    event_kind: row.get(2)?,
+                    kind: PublicationKind::parse(&kind).ok_or_else(|| {
+                        rusqlite::Error::InvalidColumnType(
+                            2,
+                            "event_kind".into(),
+                            rusqlite::types::Type::Text,
+                        )
+                    })?,
                     payload: serde_json::from_str(&payload).map_err(|error| {
                         rusqlite::Error::FromSqlConversionFailure(
                             3,
@@ -1171,14 +1180,96 @@ mod tests {
     }
 
     #[test]
+    fn v3_schema_rejects_invalid_kind_and_event_id_without_changing_publication() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        let ledger = SqliteOperationLedger::open(&paths).unwrap();
+        ledger.migrate().unwrap();
+        ledger.reserve("invalid-event-attempt").unwrap();
+
+        for (event_id, event_kind) in [
+            ("invalid-event-attempt:typo", "typo"),
+            ("independent-id", "started"),
+        ] {
+            let error = ledger
+                .with_connection(|conn| {
+                    conn.execute(
+                        "INSERT INTO process_publication_outbox
+                         (event_id, attempt_id, event_kind, payload_json, created_at)
+                         VALUES (?1, ?2, ?3, '{}', ?4)",
+                        params![event_id, "invalid-event-attempt", event_kind, now_rfc3339()],
+                    )
+                    .map(|_| ())
+                    .map_err(storage)
+                })
+                .unwrap_err();
+            assert!(matches!(error, LedgerError::Storage(_)));
+        }
+
+        let record = ProcessPublicationStore::find_publication(&ledger, "invalid-event-attempt")
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, PublicationState::Pending);
+        assert_eq!(record.result, None);
+        assert!(ledger.pending_events(10).unwrap().is_empty());
+    }
+
+    #[test]
+    fn event_collision_rolls_back_publication_and_preserves_existing_outbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        let ledger = SqliteOperationLedger::open(&paths).unwrap();
+        ledger.migrate().unwrap();
+        ledger.reserve("collision-attempt").unwrap();
+        ledger
+            .with_connection(|conn| {
+                conn.execute(
+                    "INSERT INTO process_publication_outbox
+                     (event_id, attempt_id, event_kind, payload_json, created_at)
+                     VALUES (?1, ?2, 'started', ?3, ?4)",
+                    params![
+                        "collision-attempt:started",
+                        "collision-attempt",
+                        json!({"existing": true}).to_string(),
+                        now_rfc3339()
+                    ],
+                )
+                .map(|_| ())
+                .map_err(storage)
+            })
+            .unwrap();
+
+        let request = PublishRequest {
+            attempt_id: "collision-attempt".into(),
+            kind: PublicationKind::Started,
+            result: json!({"runId": "must-not-commit"}),
+            payload: json!({"existing": false}),
+        };
+        assert!(matches!(
+            ledger.publish(&request),
+            Err(PublicationStoreError::Storage(_))
+        ));
+
+        let record = ProcessPublicationStore::find_publication(&ledger, "collision-attempt")
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.state, PublicationState::Pending);
+        assert_eq!(record.result, None);
+        let events = ledger.pending_events(10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].payload, json!({"existing": true}));
+    }
+
+    #[test]
     fn ambiguous_after_commit_is_recovered_as_replay_after_file_reopen() {
         let dir = tempfile::tempdir().unwrap();
         let paths = DataPaths::new(dir.path());
         paths.ensure_dirs().unwrap();
         let request = PublishRequest {
             attempt_id: "ambiguous-attempt".into(),
-            event_id: "ambiguous-attempt:started".into(),
-            event_kind: "started".into(),
+            kind: PublicationKind::Started,
             result: json!({"runId": "run-ambiguous"}),
             payload: json!({"runId": "run-ambiguous", "status": "started"}),
         };
@@ -1216,8 +1307,7 @@ mod tests {
         paths.ensure_dirs().unwrap();
         let request = PublishRequest {
             attempt_id: "rollback-attempt".into(),
-            event_id: "rollback-attempt:started".into(),
-            event_kind: "started".into(),
+            kind: PublicationKind::Started,
             result: json!({"runId": "run-rollback"}),
             payload: json!({"runId": "run-rollback"}),
         };

@@ -123,3 +123,16 @@ foundation 구현 검증은 다음처럼 구분한다.
 |---|---|---|---|
 | OI1 | High | 유효 | restart/retry의 `reserve → publish` 흐름이 기존 attempt에서 `DuplicateAttempt`로 막히지 않도록 `ReserveOutcome::Existing(record)`을 반환하고, Published result를 읽은 뒤 동일 publish가 replay되는 회귀시험 추가 |
 | OI2 | Medium | 유효 | 현재 v3는 attempt당 logical publication 하나와 delivery ack만 저장한다고 data model을 정정하고, WS `stream_sequence`와 실제 reconnect/process-restart projection은 T020 경계로 명시 |
+
+## OCR 반영 후 Codex adversarial 구현 리뷰
+
+- job: `review-mulbyrp5-m9aj4c`
+- reviewed range: `9672bb7c340d62db851149818026b0fff9e6b2ec..b2b53aaab6a0ccd29b9e086f8470290e1a91ac74`
+- 실제 범위: Rust 6개 + Markdown 5개 = 11/11
+- verdict: `needs-attention` (Medium 1)
+
+| ID | Severity | 판정 | 반영 |
+|---|---|---|---|
+| CI1 | Medium | 유효 | arbitrary `event_kind`/`event_id`를 제거하고 `PublicationKind::{Accepted,Started}` 폐쇄 enum을 도입했다. event id는 attempt+kind에서 내부 생성하며 SQLite는 kind 허용값과 derived event-id 식을 모두 `CHECK`한다. raw invalid kind/ID와 기존 event 충돌이 publication을 Pending/result 없음으로 유지하고 outbox를 새로 쓰거나 바꾸지 않는 회귀시험을 추가했다. 기존 result/payload replay mismatch는 유지했다. |
+
+Codex 반영 targeted 검증은 publication integration 7/7, SQLite ledger unit 14/14, strict Clippy exit 0, diff check exit 0이다. T016 containment/production migration과 T020 실제 reconnect/process-restart projection은 계속 미완료다.
