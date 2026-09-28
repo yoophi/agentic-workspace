@@ -1,7 +1,8 @@
 # 044 앱 스모크 공용 함수. 삭제 명령 없음. 종료는 이 실행이 띄운 정확한 PID만.
 set -u
 WT=/Users/yoophi/project/worktrees/044-standalone-server
-SMOKE=<scratchpad>/044/smoke
+# 스모크 작업 디렉터리(실행 결과·빌드한 도우미). 저장소 사본은 환경 변수로 받는다(세션 scratchpad 경로를 커밋하지 않음).
+SMOKE=${AW_SMOKE_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}
 SERVER_BIN="$WT/target/debug/agentic-workbench-server"
 
 need() { [ -n "${1:-}" ] || { echo "empty variable: $2" >&2; exit 9; }; }
@@ -42,19 +43,21 @@ remember() {
 }
 
 # 정확한 PID만 TERM으로 끝낸다(신호 직전에 신원을 다시 확인). 기록이 없거나, 이미 없거나, 신원이 바뀌었으면 보내지 않는다.
+# 모든 pid에 신호를 보냈으면 0, 하나라도 건너뛰었으면 1.
 kill_exact() {
   local log=$1; shift
-  local dir p now
+  local dir p now rc=0
   dir=$(dirname "$log")
   for p in "$@"; do
     need "$p" pid
-    if [ ! -s "$dir/pids/$p" ]; then echo "skip $p: identity was not recorded" >> "$log"; continue; fi
+    if [ ! -s "$dir/pids/$p" ]; then echo "skip $p: identity was not recorded" >> "$log"; rc=1; continue; fi
     now=$(proc_identity "$p")
-    if [ -z "$now" ]; then echo "skip $p: already gone" >> "$log"; continue; fi
-    if [ "$now" != "$(cat "$dir/pids/$p")" ]; then echo "skip $p: identity changed (pid reused?)" >> "$log"; continue; fi
+    if [ -z "$now" ]; then echo "skip $p: already gone" >> "$log"; rc=1; continue; fi
+    if [ "$now" != "$(cat "$dir/pids/$p")" ]; then echo "skip $p: identity changed (pid reused?)" >> "$log"; rc=1; continue; fi
     echo "kill $p: $(echo "$now" | cut -c1-200)" >> "$log"
-    kill "$p" 2>/dev/null
+    kill "$p" 2>/dev/null || rc=1
   done
+  return $rc
 }
 
 # 앞 프로세스가 정확히 그 pid인가(전역 키 입력은 앞 프로세스로 간다).

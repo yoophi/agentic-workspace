@@ -92,7 +92,8 @@ case "$QUIT" in
      else
        log "applescript-quit-not-sent: the bundle id does not map to exactly this app (attempt invalid)"
      fi ;;
-  g) kill -TERM "$APID" ;;
+  g) # SIGTERM도 기록한 신원(시작 시각·명령줄)이 같을 때만 보낸다. 대상이 사라졌거나 신원이 다르면 보내지 않고 무효.
+     if ! kill_exact "$R/kills.txt" "$APID"; then log "sigterm-not-sent: the target identity is gone or changed (attempt invalid)"; fi ;;
   *) log "unknown path"; exit 4 ;;
 esac
 gone=no
