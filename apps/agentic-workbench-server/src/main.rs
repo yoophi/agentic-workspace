@@ -11,7 +11,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use workbench_host::lifecycle::{
-    client::verify,
+    client::{server_status, verify},
     descriptor::read_descriptor,
     ensure::{EnsureOptions, ensure, server_executable},
     lock::server_dir,
@@ -74,18 +74,22 @@ fn main() {
         }
         "status" => match read_descriptor(&server_dir(&data_dir)) {
             Ok(Some(descriptor)) => match verify(&descriptor) {
-                Ok(verified) => {
-                    println!(
-                        "{}",
-                        serde_json::json!({
-                            "instanceId": verified.instance_id,
-                            "serverEpoch": verified.server_epoch,
-                            "baseUrl": verified.base_url,
-                            "pid": descriptor.pid,
-                        })
-                    );
-                    0
-                }
+                Ok(verified) => match server_status(&descriptor) {
+                    Ok(mut status) => {
+                        if let Some(object) = status.as_object_mut() {
+                            object.insert("instanceId".into(), verified.instance_id.into());
+                            object.insert("serverEpoch".into(), verified.server_epoch.into());
+                            object.insert("baseUrl".into(), verified.base_url.into());
+                            object.insert("pid".into(), descriptor.pid.into());
+                        }
+                        println!("{status}");
+                        0
+                    }
+                    Err(error) => {
+                        eprintln!("[workbench-server] {error}");
+                        1
+                    }
+                },
                 Err(error) => {
                     eprintln!("[workbench-server] {error}");
                     1

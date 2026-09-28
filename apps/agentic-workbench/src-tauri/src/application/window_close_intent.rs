@@ -130,19 +130,4 @@ mod tests {
             CloseDecision::KeepBench
         );
     }
-
-    /// (b2) 관측: 자동 Cmd+W 키 입력은 두 창에 모두 `CloseRequested`를 냈다(원인 미확인). 판정 규칙은 두 창 모두
-    /// 사용자 닫기로 본다 — 관측을 그대로 고정하고 위험 목록에 둔다(research R8).
-    #[test]
-    fn the_observed_double_close_from_a_cmd_w_keystroke_closes_both_benches() {
-        let mut intent = WindowCloseIntent::new();
-        intent.close_requested("settings", "s1");
-        intent.close_requested("main", "m1");
-        assert_eq!(
-            intent.destroyed("settings", "s1"),
-            CloseDecision::CloseBench
-        );
-        assert_eq!(intent.destroyed("main", "m1"), CloseDecision::CloseBench);
-        intent.quitting();
-    }
 }

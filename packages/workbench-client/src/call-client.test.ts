@@ -96,6 +96,20 @@ describe("createWorkbenchClient.call", () => {
     expect(connection.lost).toBe(0);
   });
 
+  it("exposes when a successful command reply came from the idempotency store", async () => {
+    const connection = fakeConnection();
+    const { fetchImpl } = recordingFetch(() =>
+      json(200, { kind: "complete", output: null, replayed: true }),
+    );
+    const client = createWorkbenchClient({ connection, fetch: fetchImpl });
+    expect(await client.call("project.delete", { id: "p1" })).toEqual({
+      kind: "ok",
+      output: null,
+      revision: undefined,
+      replayed: true,
+    });
+  });
+
   it("retries a lost command once with the same idempotency key in the same epoch", async () => {
     const connection = fakeConnection();
     const { sent, fetchImpl } = recordingFetch((_item, index) => {

@@ -81,6 +81,7 @@ export function createHttpTransport(options: HttpTransportOptions): Transport {
     );
     switch (outcome.kind) {
       case "ok":
+        invokeOptions.onReply?.({ replayed: outcome.replayed === true });
         observe(args, outcome.output);
         return spec.output ? spec.output(outcome.output, { windowLabel, args }) : outcome.output;
       case "fault":

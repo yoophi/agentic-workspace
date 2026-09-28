@@ -3,6 +3,8 @@
 export interface InvokeOptions {
   /** 사용자 조작 하나에 묶인 멱등성 키(예: `exchange-delivery:<requestId>`). 호환 경로는 무시한다. */
   idempotencyKey?: string;
+  /** 같은 epoch command의 저장된 성공을 재생한 응답인지 관찰한다. compat 경로에는 이 메타데이터가 없다. */
+  onReply?: (reply: { replayed: boolean }) => void;
 }
 
 /** 이벤트 수신자. 네트워크 경로는 Promise를 settle까지 기다려 반영 완료로 친다(research R7). */

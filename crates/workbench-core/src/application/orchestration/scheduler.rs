@@ -91,6 +91,8 @@ struct Slot {
     holds: HashSet<u64>,
     /// 기동이 성공해 실행 중인 task의 자리(보유가 없어도 남는다 — task 끝에서 `release`가 비운다).
     running: bool,
+    /// task는 끝났지만 준비한 worker를 가진 기동 보유가 아직 정리 중이다. 보유가 모두 빠질 때까지 용량만 지킨다.
+    terminal_cleanup: bool,
 }
 
 #[derive(Default)]
@@ -227,6 +229,23 @@ impl OrchestrationScheduler {
                 owner: Some((Arc::clone(&self.state), self.capacity)),
             })
         };
+        if state
+            .active
+            .get(task_id)
+            .is_some_and(|slot| slot.terminal_cleanup)
+        {
+            if !state.queued.iter().any(|queued| queued == task_id) {
+                state.queued.push_back(task_id.into());
+                state.touch(task_id);
+            }
+            let position = state
+                .queued
+                .iter()
+                .position(|queued| queued == task_id)
+                .unwrap_or_default()
+                + 1;
+            return Ok(HoldOutcome::Queued { position });
+        }
         if state.active.contains_key(task_id) {
             return Ok(acquired(&mut state));
         }
@@ -268,11 +287,21 @@ impl OrchestrationScheduler {
     pub fn transfer(&self, mut hold: SlotHold) {
         hold.owner = None;
         if let Ok(mut state) = self.lock() {
+            let mut terminal_drained = false;
             if let Some(slot) = state.active.get_mut(&hold.task_id) {
                 if slot.holds.remove(&hold.id) {
-                    slot.running = true;
-                    state.touch(&hold.task_id);
+                    if slot.terminal_cleanup {
+                        terminal_drained = slot.holds.is_empty();
+                    } else {
+                        slot.running = true;
+                        state.touch(&hold.task_id);
+                    }
                 }
+            }
+            if terminal_drained {
+                state.active.remove(&hold.task_id);
+                state.touch(&hold.task_id);
+                let _ = state.promote(self.capacity);
             }
         }
     }
@@ -287,6 +316,16 @@ impl OrchestrationScheduler {
 
     pub fn release(&self, task_id: &str) -> Result<Option<String>, OrchestrationError> {
         let mut state = self.lock()?;
+        if let Some(slot) = state.active.get_mut(task_id) {
+            if !slot.holds.is_empty() {
+                // 첫 child turn이 bind보다 먼저 terminal 보고를 할 수 있다. 기동 보유가 준비한 worker를 정리할 때까지
+                // 자리를 유지해, 아직 살아 있는 worker와 다음 task가 한도 밖에서 겹치지 않게 한다.
+                slot.running = false;
+                slot.terminal_cleanup = true;
+                state.touch(task_id);
+                return Ok(None);
+            }
+        }
         state.active.remove(task_id);
         state.queued.retain(|queued| queued != task_id);
         state.touch(task_id);
@@ -545,19 +584,29 @@ mod tests {
         );
     }
 
-    /// Codex r12 (medium): 옛 기동 A의 보유가 task 끝(`release`)으로 이미 사라진 뒤 같은 task의 새 시도 B가 새 자리를 얻었다.
-    /// A가 뒤늦게 인계(`transfer`)해도 B의 자리를 실행 중으로 굳히지 않는다 — B가 끝나 보유를 놓으면 자리가 빈다.
+    /// terminal 보고 뒤 남은 기동 보유는 용량을 지키되 새 시도를 받지 않는다. 정리가 끝나 새 시도가 보유를 얻은 뒤에도
+    /// 옛 기동 id의 늦은 인계가 새 자리를 실행 중으로 굳히지 않는다.
     #[test]
     fn a_stale_transfer_does_not_pin_a_newer_attempt_slot() {
         let scheduler = OrchestrationScheduler::new(1);
         let HoldOutcome::Acquired(old) = scheduler.acquire_hold("task-a").unwrap() else {
             panic!("old attempt acquires")
         };
+        let old_id = old.id;
         scheduler.release("task-a").unwrap();
+        assert_eq!(
+            scheduler.acquire_hold("task-a").unwrap(),
+            HoldOutcome::Queued { position: 1 }
+        );
+        assert_eq!(scheduler.release_hold(old), Some("task-a".into()));
         let HoldOutcome::Acquired(new) = scheduler.acquire_hold("task-a").unwrap() else {
-            panic!("new attempt acquires")
+            panic!("new attempt acquires after old cleanup")
         };
-        scheduler.transfer(old);
+        scheduler.transfer(SlotHold {
+            task_id: "task-a".into(),
+            id: old_id,
+            owner: Some((Arc::clone(&scheduler.state), scheduler.capacity)),
+        });
         assert_eq!(scheduler.hold_count("task-a"), 1, "the new hold stays");
         assert_eq!(scheduler.release_hold(new), None);
         assert_eq!(
@@ -714,18 +763,29 @@ mod tests {
         assert_eq!(scheduler.active_count().unwrap(), 1);
     }
 
-    /// 보유를 놓은 뒤 task 끝의 `release`가 다시 얻은 새 시도의 보유를 옛 보유가 지우지 못한다.
+    /// terminal 정리가 옛 보유를 놓은 뒤 같은 task의 새 시도가 얻은 보유를, 옛 id의 늦은 정리가 지우지 못한다.
     #[test]
     fn a_stale_hold_after_a_full_release_does_not_touch_a_new_attempt() {
         let scheduler = OrchestrationScheduler::new(1);
         let HoldOutcome::Acquired(old) = scheduler.acquire_hold("task-a").unwrap() else {
             panic!()
         };
+        let old_id = old.id;
         scheduler.release("task-a").unwrap();
+        assert_eq!(
+            scheduler.acquire_hold("task-a").unwrap(),
+            HoldOutcome::Queued { position: 1 }
+        );
+        assert_eq!(scheduler.release_hold(old), Some("task-a".into()));
         let HoldOutcome::Acquired(new) = scheduler.acquire_hold("task-a").unwrap() else {
             panic!()
         };
-        assert_eq!(scheduler.release_hold(old), None);
+        let stale = SlotHold {
+            task_id: "task-a".into(),
+            id: old_id,
+            owner: Some((Arc::clone(&scheduler.state), scheduler.capacity)),
+        };
+        assert_eq!(scheduler.release_hold(stale), None);
         assert_eq!(
             scheduler.hold_count("task-a"),
             1,

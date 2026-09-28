@@ -51,6 +51,7 @@ impl Descriptor {
     pub fn for_endpoint(
         mode: &str,
         identity: &OwnerIdentity,
+        owner_token: &str,
         server_epoch: &str,
         base_url: &str,
         server_version: &str,
@@ -65,13 +66,13 @@ impl Descriptor {
             server_version: server_version.to_owned(),
             protocol_versions: vec![workbench_protocol::PROTOCOL_VERSION],
             storage_schema_version: workbench_core::infrastructure::sqlite_ledger::SCHEMA_VERSION,
-            owner_token: identity.token().to_owned(),
+            owner_token: owner_token.to_owned(),
             started_at: chrono::Utc::now().to_rfc3339(),
         }
     }
 
     /// 시험용: 신원과 끝점만 채운 안내.
-    pub fn for_test(identity: &OwnerIdentity, base_url: &str) -> Self {
+    pub fn for_test(identity: &OwnerIdentity, owner_token: &str, base_url: &str) -> Self {
         Self {
             format_version: FORMAT_VERSION,
             mode: "server".into(),
@@ -82,7 +83,7 @@ impl Descriptor {
             server_version: "test".into(),
             protocol_versions: vec![workbench_protocol::PROTOCOL_VERSION],
             storage_schema_version: workbench_core::infrastructure::sqlite_ledger::SCHEMA_VERSION,
-            owner_token: identity.token().to_owned(),
+            owner_token: owner_token.to_owned(),
             started_at: "1970-01-01T00:00:00Z".into(),
         }
     }
@@ -155,8 +156,12 @@ mod tests {
     #[test]
     fn descriptors_are_written_owner_only_and_removed_only_by_their_instance() {
         let dir = tempfile::tempdir().unwrap();
-        let identity = OwnerIdentity::generate();
-        let descriptor = Descriptor::for_test(&identity, "http://127.0.0.1:1");
+        let generated = OwnerIdentity::generate();
+        let descriptor = Descriptor::for_test(
+            generated.identity(),
+            generated.token(),
+            "http://127.0.0.1:1",
+        );
         write_descriptor(dir.path(), &descriptor).unwrap();
         let mode = fs::metadata(descriptor_path(dir.path()))
             .unwrap()
@@ -172,10 +177,10 @@ mod tests {
             !descriptor
                 .public_json()
                 .to_string()
-                .contains(identity.token())
+                .contains(generated.token())
         );
         assert!(!remove_descriptor_if(dir.path(), "other").unwrap());
-        assert!(remove_descriptor_if(dir.path(), identity.instance_id()).unwrap());
+        assert!(remove_descriptor_if(dir.path(), generated.identity().instance_id()).unwrap());
         assert_eq!(read_descriptor(dir.path()).unwrap(), None);
         let leftovers: Vec<_> = fs::read_dir(dir.path()).unwrap().collect();
         assert!(leftovers.is_empty(), "no temp files left behind");

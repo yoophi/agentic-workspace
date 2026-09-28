@@ -8,7 +8,7 @@
 mod support;
 
 use serde_json::{json, Value};
-use support::{scripted_run_engine::RunScript, BenchHarness};
+use support::{command_request, scripted_run_engine::RunScript, BenchHarness};
 use workbench_protocol::{
     AuthenticatedPrincipal, FaultCode, OperationId, StreamCursor, Subscription, Workbench,
     WorkbenchFault,
@@ -253,6 +253,25 @@ async fn leases_are_acquired_renewed_and_released_by_the_owner() {
         .expect("lease.release twice");
     assert_eq!(again["released"], false);
     assert_eq!(h.rt.runtime.server_control().leases().count(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_lease_acquire_response_replays_the_original_lease() {
+    let h = BenchHarness::new(RunScript::default());
+    let call = || {
+        h.rt.runtime.call(
+            AuthenticatedPrincipal::owner(),
+            command_request(
+                OperationId::LeaseAcquire,
+                "same-lease-command",
+                json!({ "clientKind": "desktop", "clientId": "app-retry" }),
+            ),
+        )
+    };
+    let first = call().await.unwrap().output().cloned().unwrap();
+    let replay = call().await.unwrap().output().cloned().unwrap();
+    assert_eq!(replay, first);
+    assert_eq!(h.rt.runtime.server_control().leases().count(), 1);
 }
 
 /// T026 응답 모양 고정(T041에서 갱신): 모든 필드를 파생한다 — `notYetDerived`는 빈 배열이고, 파생 수는 `null`이 아니라

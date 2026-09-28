@@ -152,6 +152,141 @@ async fn concurrent_deliveries_of_one_exchange_have_a_single_effect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rejection_cannot_overtake_a_delivery_that_already_consumed_the_exchange() {
+    let h = Arc::new(BenchHarness::new(RunScript::default()));
+    let bench = prepare(&h).await;
+    send_exchange(&h, &bench, EXCHANGE, "send").await;
+    let before = prompts(&h);
+    let queue_gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *h.engine.queue_gate.lock().unwrap() = Some(Arc::clone(&queue_gate));
+    let entered = Arc::clone(&h.engine.queue_entered);
+    let delivery_h = Arc::clone(&h);
+    let delivery_bench = bench.clone();
+    let delivery = tokio::spawn(async move {
+        deliver(
+            &delivery_h,
+            KEY,
+            delivery_input(&delivery_bench, "r2", "hello peer", EXCHANGE),
+        )
+        .await
+    });
+    entered.notified().await;
+
+    let rejection = h
+        .call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::ExchangeAcknowledge,
+            json!({"benchId": bench, "request": {
+                "requestId": EXCHANGE, "targetPanelId": "extra", "outcome": "rejected", "reason": null}}),
+        )
+        .await
+        .expect_err("delivery won the atomic consume-versus-reject race");
+    assert_eq!(
+        (rejection.code, rejection.outcome),
+        (FaultCode::Conflict, Outcome::NotApplied)
+    );
+
+    queue_gate.add_permits(1);
+    delivery
+        .await
+        .unwrap()
+        .expect("the winning delivery completes");
+    assert!(h.rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE));
+    assert_eq!(prompts(&h), before + 1, "the exchange prompt runs once");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn rejection_completed_after_the_delivery_snapshot_still_wins() {
+    let h = Arc::new(BenchHarness::new(RunScript::default()));
+    let bench = prepare(&h).await;
+    send_exchange(&h, &bench, EXCHANGE, "send").await;
+    let before = prompts(&h);
+    let snapshot = Arc::new(std::sync::Barrier::new(2));
+    let resume = Arc::new(std::sync::Barrier::new(2));
+    *h.rt
+        .runtime
+        .benches()
+        .exchange_delivery_snapshot_probe
+        .lock()
+        .unwrap() = Some(Arc::new({
+        let snapshot = Arc::clone(&snapshot);
+        let resume = Arc::clone(&resume);
+        move || {
+            snapshot.wait();
+            resume.wait();
+        }
+    }));
+    let delivery_h = Arc::clone(&h);
+    let delivery_bench = bench.clone();
+    let delivery = tokio::spawn(async move {
+        deliver(
+            &delivery_h,
+            KEY,
+            delivery_input(&delivery_bench, "r2", "stale accepted snapshot", EXCHANGE),
+        )
+        .await
+    });
+    tokio::task::spawn_blocking({
+        let snapshot = Arc::clone(&snapshot);
+        move || snapshot.wait()
+    })
+    .await
+    .unwrap();
+
+    acknowledge(&h, &bench, EXCHANGE, "rejected").await;
+    tokio::task::spawn_blocking(move || resume.wait())
+        .await
+        .unwrap();
+    let refused = delivery
+        .await
+        .unwrap()
+        .expect_err("the committed rejection defeats the stale Accepted snapshot");
+    assert_eq!(refused.code, FaultCode::PreconditionFailed, "{refused:?}");
+    assert_eq!(prompts(&h), before, "the rejected prompt never runs");
+    assert!(
+        !h.rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE),
+        "rejection is not disguised as delivery consumption"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_rejection_store_failure_releases_its_claim_without_consuming() {
+    let h = BenchHarness::new(RunScript::default());
+    let bench = prepare(&h).await;
+    send_exchange(&h, &bench, EXCHANGE, "send").await;
+    *h.rt
+        .runtime
+        .benches()
+        .exchange_rejection_store_probe
+        .lock()
+        .unwrap() = Some(Arc::new(|| Err("injected rejection store failure".into())));
+    let failed = h
+        .call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::ExchangeAcknowledge,
+            json!({"benchId": bench, "request": {
+                "requestId": EXCHANGE, "targetPanelId": "extra", "outcome": "rejected", "reason": null}}),
+        )
+        .await
+        .expect_err("the injected store failure is reported");
+    assert_eq!(failed.code, FaultCode::Internal, "{failed:?}");
+    *h.rt
+        .runtime
+        .benches()
+        .exchange_rejection_store_probe
+        .lock()
+        .unwrap() = None;
+    assert!(!h.rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE));
+    deliver(
+        &h,
+        KEY,
+        delivery_input(&bench, "r2", "delivery after failed rejection", EXCHANGE),
+    )
+    .await
+    .expect("the failed rejection claim was released");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_same_key_deliveries_with_different_prompts_have_a_single_effect() {
     let h = Arc::new(BenchHarness::new(RunScript::default()));
     let bench = prepare(&h).await;
@@ -342,7 +477,7 @@ fn agent_command(log: &std::path::Path, end_turn_gate: &std::path::Path) -> Stri
     let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/support/agents/fake_acp_permission_agent.py");
     format!(
-        "python3 {} --log {} --end-turn-gate {}",
+        "python3 {} --log {} --end-turn-gate {} --rpc-error-text 'failing exchange'",
         script.display(),
         log.display(),
         end_turn_gate.display()
@@ -489,13 +624,17 @@ async fn a_delivery_arriving_while_another_prompt_holds_the_turn_is_delivered_af
     wait_received(&log, "internal notification").await;
 
     // 그 turn이 진행 중인 동안 교환 전달이 온다.
-    rt_call(
-        &rt,
-        OperationId::RunSendPrompt,
-        KEY,
-        delivery_input(&bench, "r2", "peer exchange body", EXCHANGE),
+    tokio::time::timeout(
+        Duration::from_secs(1),
+        rt_call(
+            &rt,
+            OperationId::RunSendPrompt,
+            KEY,
+            delivery_input(&bench, "r2", "peer exchange body", EXCHANGE),
+        ),
     )
-    .await;
+    .await
+    .expect("HTTP/core call returns after queue registration, before either long turn finishes");
     assert!(rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE));
     assert!(
         rt.runtime.work_gate().busy_run_count("r2") >= 1,
@@ -523,4 +662,64 @@ async fn a_delivery_arriving_while_another_prompt_holds_the_turn_is_delivered_af
         "the delivery follows the turn that held the run: {lines:?}"
     );
     wait_idle(&rt, "r2").await;
+
+    // production ACP queue가 등록 뒤 비동기로 실패해도 소비는 한 번이고 실패 표지는 남는다. 같은 키 재시도는 성공 응답을
+    // 재생해 agent에 두 번 보내지 않으며, 다음 교환은 정상 전송된다.
+    for (request_id, message) in [
+        ("q-fail", "failing exchange"),
+        ("q-next", "following exchange"),
+    ] {
+        rt_call(
+            &rt,
+            OperationId::ExchangeSend,
+            &uuid_key(),
+            json!({"benchId": bench, "request": {
+                "requestId": request_id, "sourcePanelId": "main", "sourceRunId": "r1",
+                "targetPanelId": "extra", "targetRunId": "r2",
+                "message": message, "delivery": "send"}}),
+        )
+        .await;
+    }
+    let fail_key = "exchange-delivery:q-fail";
+    let fail_input = delivery_input(&bench, "r2", "failing exchange", "q-fail");
+    rt_call(
+        &rt,
+        OperationId::RunSendPrompt,
+        fail_key,
+        fail_input.clone(),
+    )
+    .await;
+    for _ in 0..750 {
+        if rt
+            .runtime
+            .work_gate()
+            .failed_deliveries()
+            .contains(&format!("{bench}/q-fail"))
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        rt.runtime.work_gate().failed_deliveries(),
+        vec![format!("{bench}/q-fail")]
+    );
+    wait_idle(&rt, "r2").await;
+    rt_call(&rt, OperationId::RunSendPrompt, fail_key, fail_input).await;
+    rt_call(
+        &rt,
+        OperationId::RunSendPrompt,
+        "exchange-delivery:q-next",
+        delivery_input(&bench, "r2", "following exchange", "q-next"),
+    )
+    .await;
+    let lines = wait_finished(&log, "following exchange").await;
+    assert_eq!(prompt_ids_with(&lines, "failing exchange").len(), 1);
+    assert_eq!(prompt_ids_with(&lines, "following exchange").len(), 1);
+    wait_idle(&rt, "r2").await;
+    rt.runtime.work_gate().begin_drain(DrainMode::Wait);
+    assert!(
+        rt.runtime.work_gate().try_stop(|| 0),
+        "the failed and following deliveries leave no reservation that blocks wait-stop"
+    );
 }

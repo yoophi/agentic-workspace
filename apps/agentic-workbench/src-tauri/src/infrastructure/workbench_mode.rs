@@ -4,7 +4,10 @@
 //! - `embedded`(`AW_WORKBENCH_MODE=embedded`, 개발·시험): 043 경로(앱 안 런타임 + HTTP + 호환 command). 같은 데이터
 //!   디렉터리의 `owner.lock`을 잡고 안내 파일(`mode: embedded`)을 쓴다 — 외부 서버와 동시에 쓰지 못한다. 8단계에서 지운다.
 
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use workbench_host::lifecycle::{
     descriptor::{Descriptor, remove_descriptor_if, write_descriptor},
@@ -47,6 +50,7 @@ pub struct EmbeddedOwnership {
     _lock: HeldLock,
     server_dir: PathBuf,
     identity: OwnerIdentity,
+    owner_token: Mutex<Option<String>>,
 }
 
 impl EmbeddedOwnership {
@@ -62,10 +66,12 @@ impl EmbeddedOwnership {
                     data_dir.display()
                 )
             })?;
+        let (identity, owner_token) = OwnerIdentity::generate().into_parts();
         Ok(Self {
             _lock: lock,
             server_dir,
-            identity: OwnerIdentity::generate(),
+            identity,
+            owner_token: Mutex::new(Some(owner_token)),
         })
     }
 
@@ -79,10 +85,28 @@ impl EmbeddedOwnership {
         base_url: &str,
         version: &str,
     ) -> std::io::Result<()> {
-        write_descriptor(
+        let mut owner_token = self
+            .owner_token
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let token = owner_token
+            .as_deref()
+            .ok_or_else(|| std::io::Error::other("embedded descriptor was already published"))?;
+        let result = write_descriptor(
             &self.server_dir,
-            &Descriptor::for_endpoint("embedded", &self.identity, server_epoch, base_url, version),
-        )
+            &Descriptor::for_endpoint(
+                "embedded",
+                &self.identity,
+                token,
+                server_epoch,
+                base_url,
+                version,
+            ),
+        );
+        if result.is_ok() {
+            *owner_token = None;
+        }
+        result
     }
 
     pub fn withdraw(&self) {

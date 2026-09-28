@@ -70,6 +70,34 @@ pub fn verify_by(
     descriptor: &Descriptor,
     deadline: Option<Instant>,
 ) -> Result<Verified, VerifyError> {
+    let verified = verify_instance_by(descriptor, deadline)?;
+    let token = descriptor.owner_token.as_str();
+    let (status, ready) = request_by(
+        &descriptor.base_url,
+        "GET",
+        "/health/ready",
+        None,
+        Some(token),
+        None,
+        deadline,
+    )
+    .map_err(VerifyError::Unreachable)?;
+    if status != 200 || ready["ready"].as_bool() != Some(true) {
+        return Err(VerifyError::NotReady(format!("ready answered {status}")));
+    }
+    Ok(verified)
+}
+
+/// 동일 인스턴스의 신원과 protocol/storage 호환성만 확인한다. draining 중인 기존 연결의 재시도처럼 새 작업 readiness를
+/// 요구하면 안 되는 liveness 판정에 쓴다. 신원 증명 전에는 bearer를 보내지 않는 순서는 [`verify`]와 같다.
+pub fn verify_instance(descriptor: &Descriptor) -> Result<Verified, VerifyError> {
+    verify_instance_by(descriptor, None)
+}
+
+fn verify_instance_by(
+    descriptor: &Descriptor,
+    deadline: Option<Instant>,
+) -> Result<Verified, VerifyError> {
     let identity = descriptor.identity();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let (status, body) = request_by(
@@ -126,19 +154,6 @@ pub fn verify_by(
         )));
     }
 
-    let (status, ready) = request_by(
-        &descriptor.base_url,
-        "GET",
-        "/health/ready",
-        None,
-        Some(token),
-        None,
-        deadline,
-    )
-    .map_err(VerifyError::Unreachable)?;
-    if status != 200 || ready["ready"].as_bool() != Some(true) {
-        return Err(VerifyError::NotReady(format!("ready answered {status}")));
-    }
     Ok(Verified {
         instance_id: descriptor.instance_id.clone(),
         server_epoch: handshake["serverEpoch"]
@@ -176,6 +191,19 @@ pub fn require_serving_by(
             other.unwrap_or("unknown").to_owned(),
         )),
     }
+}
+
+/// 신원·호환 확인을 통과한 안내의 실제 `server.status` 출력.
+pub fn server_status(descriptor: &Descriptor) -> Result<Value, VerifyError> {
+    super::calls::call(
+        &descriptor.base_url,
+        &descriptor.owner_token,
+        None,
+        "server.status",
+        json!({}),
+        false,
+    )
+    .map_err(|error| VerifyError::Unreachable(error.to_string()))
 }
 
 /// 루프백 JSON 요청. `(status, body)`. body가 JSON이 아니면 `Null`.

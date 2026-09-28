@@ -609,12 +609,28 @@ async fn prebound_main_start_can_be_retried_after_an_engine_failure() {
         .unwrap();
     let limited = start_main(&h, &a, "main-r").await.unwrap_err();
     assert_eq!(limited.code, FaultCode::RateLimited);
+    assert!(
+        h.desktop
+            .revoked
+            .lock()
+            .unwrap()
+            .contains(&"main-r".to_owned()),
+        "a capability issued before a failed launch is revoked"
+    );
     assert_eq!(
         h.rt.runtime.events_hub().run_owner("main-r").as_deref(),
         Some(a.as_str())
     );
     h.engine
         .finish("filler", &h.rt.runtime.benches().run_sink(&a));
+    assert!(
+        h.desktop
+            .revoked
+            .lock()
+            .unwrap()
+            .contains(&"filler".to_owned()),
+        "a terminal run capability is revoked without waiting for bench close"
+    );
     start_main(&h, &a, "main-r").await.unwrap();
 }
 

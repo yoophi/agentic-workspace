@@ -151,7 +151,7 @@ impl EpochIdempotency {
             let table = scopes.get(&call.scope);
             match table.and_then(|table| table.entries.get(&key)) {
                 Some(Entry::Result { fingerprint, reply }) if *fingerprint == print => {
-                    Some(Ok(reply.clone()))
+                    Some(Ok(reply.clone().mark_replayed()))
                 }
                 Some(Entry::Summary { fingerprint }) if *fingerprint == print => {
                     Some(Err(WorkbenchFault::conflict(

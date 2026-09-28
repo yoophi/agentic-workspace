@@ -43,6 +43,26 @@ pub fn call(
     call_by(base_url, bearer, origin, operation, input, command, None)
 }
 
+/// 재시도할 command를 호출자가 만든 같은 멱등성 키로 보낸다.
+pub fn call_with_idempotency_key(
+    base_url: &str,
+    bearer: &str,
+    origin: Option<&str>,
+    operation: &str,
+    input: Value,
+    idempotency_key: &str,
+) -> Result<Value, CallError> {
+    call_envelope_by(
+        base_url,
+        bearer,
+        origin,
+        operation,
+        input,
+        Some(idempotency_key),
+        None,
+    )
+}
+
 /// [`call`]과 같되 요청이 `deadline`(있으면) 전에 끝난다(요청 자체 상한 `REQUEST_TIMEOUT`과 더 이른 쪽).
 pub fn call_by(
     base_url: &str,
@@ -53,14 +73,35 @@ pub fn call_by(
     command: bool,
     deadline: Option<Instant>,
 ) -> Result<Value, CallError> {
+    let idempotency_key = command.then(|| format!("idem_{}", uuid::Uuid::new_v4().simple()));
+    call_envelope_by(
+        base_url,
+        bearer,
+        origin,
+        operation,
+        input,
+        idempotency_key.as_deref(),
+        deadline,
+    )
+}
+
+fn call_envelope_by(
+    base_url: &str,
+    bearer: &str,
+    origin: Option<&str>,
+    operation: &str,
+    input: Value,
+    idempotency_key: Option<&str>,
+    deadline: Option<Instant>,
+) -> Result<Value, CallError> {
     let mut envelope = json!({
         "protocolVersion": workbench_protocol::PROTOCOL_VERSION,
         "operation": operation,
         "requestId": format!("req_{}", uuid::Uuid::new_v4().simple()),
         "input": input,
     });
-    if command {
-        envelope["idempotencyKey"] = json!(format!("idem_{}", uuid::Uuid::new_v4().simple()));
+    if let Some(idempotency_key) = idempotency_key {
+        envelope["idempotencyKey"] = json!(idempotency_key);
     }
     let (status, body) = request_by(
         base_url,

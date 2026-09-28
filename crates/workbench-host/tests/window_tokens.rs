@@ -46,7 +46,7 @@ impl Server {
             "test",
             runtime.handle().clone(),
         );
-        options.owner = Some(identity.clone());
+        options.owner = Some(identity.identity().clone());
         let host = assemble(options).expect("assembly");
         let base_url = host.http.as_ref().expect("http").base_url().to_owned();
         Self {

@@ -9,7 +9,10 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 use serde_json::json;
 use support::{scripted_run_engine::RunScript, BenchHarness};
@@ -21,6 +24,8 @@ use workbench_protocol::{
 /// 토큰 저장이 없는 시험용 host(폐기 수만 센다). 폐기의 작업대 쪽 효과만 본다.
 struct CountingHost;
 
+static ISSUED_TOKENS: AtomicUsize = AtomicUsize::new(0);
+
 impl ServerHost for CountingHost {
     fn instance_id(&self) -> Option<String> {
         None
@@ -30,7 +35,11 @@ impl ServerHost for CountingHost {
         _principal: AuthenticatedPrincipal,
         _origin: &str,
     ) -> Result<WindowToken, WindowTokenError> {
-        Err(WindowTokenError::OriginNotAllowed)
+        let n = ISSUED_TOKENS.fetch_add(1, Ordering::SeqCst) + 1;
+        Ok(WindowToken {
+            token: format!("token-{n}"),
+            expires_at: "2099-01-01T00:00:00Z".into(),
+        })
     }
     fn retire_window(&self, _subject: &PrincipalSubject) -> u64 {
         0
@@ -38,6 +47,28 @@ impl ServerHost for CountingHost {
     fn accepted_calls(&self) -> u64 {
         0
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lost_window_token_response_replays_without_issuing_another_bearer() {
+    use support::command_request;
+
+    let h = harness();
+    let before = ISSUED_TOKENS.load(Ordering::SeqCst);
+    let call = || {
+        h.rt.runtime.call(
+            AuthenticatedPrincipal::owner(),
+            command_request(
+                OperationId::DesktopIssueWindowToken,
+                "same-window-token-command",
+                json!({ "label": "retry", "incarnation": "i1", "origin": "tauri://localhost" }),
+            ),
+        )
+    };
+    let first = call().await.unwrap().output().cloned().unwrap();
+    let replay = call().await.unwrap().output().cloned().unwrap();
+    assert_eq!(replay, first);
+    assert_eq!(ISSUED_TOKENS.load(Ordering::SeqCst), before + 1);
 }
 
 fn harness() -> BenchHarness {

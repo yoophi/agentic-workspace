@@ -131,7 +131,6 @@ import {
   createRunStartQueuedPrompt,
   acceptPendingSteer,
   initialPromptHistoryState,
-  hasUserMessage,
   isOverrideCommandFailure,
   isPromptHistoryNavigationBoundary,
   moveQueuedPrompt as reorderQueuedPrompt,
@@ -147,7 +146,6 @@ import {
   resolveSelectedProfileId,
   resetPromptHistoryCursor,
   shouldAutoDispatchQueuedPromptWithSteers,
-  unsettledDispatchWasApplied,
   updateQueuedPrompt,
 } from "@/features/agent-run/model/run-panel-state";
 import type {
@@ -446,14 +444,13 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const [cancelsInFlight, setCancelsInFlight] = useState(0);
   /** run lifecycle이 응답 대기를 바꾼 횟수(Codex r10): 호출 실패 때 되돌리기는 그 사이 lifecycle이 바꾸지 않았을 때만 한다. */
   const promptLifecycleSeqRef = useRef(0);
-  /** run별로 관측한 `promptSent` 수(Codex r12): 결과를 모르는(unknown) 전송이 실제로 적용됐는지를 그 뒤의 turn 시작으로 판단한다. */
-  const promptSentCountsRef = useRef(new Map<string, number>());
-  /** unknown이 먼저 돌아온 직접 prompt(OCR r12): 늦은 `promptSent`가 오면 복원했던 입력을 다시 보내게 두지 않고 transcript를
-   *  적용 상태로 맞춘다. 직접 prompt에는 멱등 키가 없으므로 자동 재전송하지 않는다. */
+  /** lifecycle이 말하는 현재 전역 turn 대기 상태. 멱등 응답 재생 뒤에는 새 lifecycle이 없으므로 이 값을 복원한다. */
+  const lifecycleAwaitingRef = useRef(false);
+  /** 결과를 모르는 직접 prompt. 같은 run/text를 다시 보낼 때만 같은 키로 재시도하며, 다른 turn lifecycle로 성공을 추정하지 않는다. */
   const unsettledDirectPromptRef = useRef<{
     runId: string;
     text: string;
-    promptSentBefore: number;
+    idempotencyKey: string;
   } | null>(null);
   const [isPreparingRun, setIsPreparingRun] = useState(false);
   const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
@@ -1003,24 +1000,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       if (timelineEvent.type === "lifecycle") {
         if (timelineEvent.status === "promptSent") {
           activePromptSentRef.current = true;
-          const promptSentCount = (promptSentCountsRef.current.get(envelope.runId) ?? 0) + 1;
-          promptSentCountsRef.current.set(envelope.runId, promptSentCount);
-          const unsettledDirectPrompt = unsettledDirectPromptRef.current;
-          if (
-            unsettledDirectPrompt?.runId === envelope.runId &&
-            promptSentCount > unsettledDirectPrompt.promptSentBefore
-          ) {
-            unsettledDirectPromptRef.current = null;
-            setPrompt((current) => (current === unsettledDirectPrompt.text ? defaultPrompt : current));
-            setDirectPrompt(unsettledDirectPrompt.text);
-            setItems((currentItems) =>
-              hasUserMessage(currentItems, envelope.runId, unsettledDirectPrompt.text)
-                ? currentItems
-                : addUserMessage(currentItems, envelope.runId, unsettledDirectPrompt.text),
-            );
-            recordPromptHistory(unsettledDirectPrompt.text);
-            setError(null);
-          }
           if (unsettledRestartRef.current?.runId === envelope.runId) {
             // 새 turn을 받았다: run은 살아 있고 취소는 적용되지 않았다 — 재시작을 잇지 않는다(의도도 버린다).
             const dropped = unsettledRestartRef.current;
@@ -1134,18 +1113,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setQueuedPrompts((current) => current.filter((item) => item.id !== nextPrompt.id));
       return;
     }
-    if (unsettledDispatchWasApplied(nextPrompt, promptSentCount)) {
-      // 결과를 몰랐던 앞 전송이 그 뒤 관측된 turn으로 적용됐다(Codex r12): 다시 보내지 않는다 — 같은 키 재전송은 저장된 결과만
-      // 재생해 새 turn 이벤트가 없어 응답 대기가 풀리지 않는다. 대화에는 보낸 prompt로 남긴다.
-      setQueuedPrompts((current) => current.filter((item) => item.id !== nextPrompt.id));
-      setItems((currentItems) => addUserMessage(currentItems, activeRunId, nextPrompt.text));
-      recordPromptHistory(nextPrompt.text);
-      return;
-    }
     const previousDirectPrompt = directPrompt;
     const lifecycleSeq = promptLifecycleSeqRef.current;
     const dispatchRunId = activeRunId;
-    const promptSentBefore = promptSentCount(activeRunId);
+    let replayed = false;
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
     setDirectPrompt(nextPrompt.text);
@@ -1155,39 +1126,31 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     void sendPromptToRun(
       activeRunId,
       nextPrompt.text,
-      nextPrompt.idempotencyKey ? { idempotencyKey: nextPrompt.idempotencyKey } : undefined,
+      nextPrompt.idempotencyKey
+        ? {
+            idempotencyKey: nextPrompt.idempotencyKey,
+            onReply: (reply) => {
+              replayed = reply.replayed;
+            },
+          }
+        : undefined,
       nextPrompt.exchangeRequestId ? exchangeContinuation(nextPrompt.exchangeRequestId) : undefined,
     )
       .then(() => {
+        if (replayed) {
+          restoreAwaitingIfUnchanged(lifecycleSeq, lifecycleAwaitingRef.current);
+        }
         recordPromptHistory(nextPrompt.text);
       })
       .catch((caughtError) => {
         const unsettled = unsettledCall(caughtError);
-        if (unsettled === "unknown" && promptSentCount(dispatchRunId) > promptSentBefore) {
-          // 결과는 몰랐지만 그 사이 이 run의 turn 시작을 봤다(Codex r12): 전송이 적용됐다 — 다시 넣지 않고, 대화·응답 대기는
-          // lifecycle이 정한 대로 둔다.
-          recordPromptHistory(nextPrompt.text);
-          return;
-        }
         // 교환 항목은 그 run에 묶인다(Codex r11): 서버가 거절했거나(서버의 답인 오류 — 다시 보내도 같다) 그 사이 run이 바뀌었으면
         // 대기열에 다시 넣지 않는다(선두에서 계속 거절돼 뒤 prompt를 막는다). 서버에 닿지 않았거나 결과를 모르는 전달만 다시 넣는다.
         const requeue =
           !nextPrompt.exchangeRequestId ||
           (unsettled !== null && activeRunIdRef.current === dispatchRunId);
         if (requeue) {
-          // 결과를 모르면 앞 전송의 기준을 남긴다(Codex r12): 다시 보내기 전에 그 turn이 관측되면 적용된 것으로 본다. 여러 번
-          // 실패해도 처음 전송의 기준을 쓴다.
-          const retried: QueuedPrompt =
-            unsettled === "unknown"
-              ? {
-                  ...nextPrompt,
-                  unsettledDispatch: nextPrompt.unsettledDispatch ?? {
-                    runId: dispatchRunId,
-                    promptSentBefore,
-                  },
-                }
-              : nextPrompt;
-          setQueuedPrompts((current) => [retried, ...current]);
+          setQueuedPrompts((current) => [nextPrompt, ...current]);
         }
         setItems((currentItems) =>
           removeUserMessage(currentItems, activeRunId, nextPrompt.text),
@@ -1523,6 +1486,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       (sessionMode === "new" || selectedSessionId),
   );
   const canQueuePrompt = Boolean(activeRunId && isRunning && prompt.trim());
+  const canRetryUnsettledDirect = Boolean(
+    unsettledDirectPromptRef.current?.runId === activeRunId &&
+      unsettledDirectPromptRef.current.text === prompt.trim(),
+  );
   const canSteerPrompt = Boolean(
     activeRunId && isRunning && directPrompt?.trim() && prompt.trim(),
   );
@@ -1542,7 +1509,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   );
   const canSendPrompt = shouldQueueSendPrompt || shouldSendDirectPrompt
     ? canQueuePrompt
-    : canSteerPrompt;
+    : canRetryUnsettledDirect || canSteerPrompt;
   const canCancel = Boolean(activeRunId && isRunning);
   const isRunConfigurationLocked = isRunning || isPreparingRun;
 
@@ -1773,7 +1740,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           id: crypto.randomUUID(),
           text: nextPrompt,
           source,
-          idempotencyKey,
+          idempotencyKey: idempotencyKey ?? `prompt-send:${crypto.randomUUID()}`,
           exchangeRequestId,
           exchangeRunId: exchangeRequestId ? (activeRunIdRef.current ?? undefined) : undefined,
         }),
@@ -2007,13 +1974,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }
 
   /** run lifecycle이 정한 응답 대기(Codex r10): 이벤트 처리기만 부른다. */
-  /** 그 run에서 관측한 `promptSent` 수(Codex r12). */
-  function promptSentCount(runId: string) {
-    return promptSentCountsRef.current.get(runId) ?? 0;
-  }
-
   function setAwaitingFromLifecycle(value: boolean) {
     promptLifecycleSeqRef.current += 1;
+    lifecycleAwaitingRef.current = value;
     setIsAwaitingPromptResponse(value);
   }
 
@@ -2174,7 +2137,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }
 
   function sendPrompt() {
-    if (unsettledDirectPromptRef.current !== null) {
+    const unsettled = unsettledDirectPromptRef.current;
+    if (unsettled !== null) {
+      if (unsettled.runId === activeRunIdRef.current && unsettled.text === prompt.trim()) {
+        void sendDirectPrompt();
+      }
       return;
     }
     if (activeRunIdRef.current && !activePromptSentRef.current) {
@@ -2204,24 +2171,35 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setError(null);
     setPrompt(defaultPrompt);
     const lifecycleSeq = promptLifecycleSeqRef.current;
-    const promptSentBefore = promptSentCount(runId);
+    const unsettled = unsettledDirectPromptRef.current;
+    const idempotencyKey =
+      unsettled?.runId === runId && unsettled.text === nextPrompt
+        ? unsettled.idempotencyKey
+        : `prompt-send:${crypto.randomUUID()}`;
+    let replayed = false;
     setIsAwaitingPromptResponse(true);
     setDirectPrompt(nextPrompt);
     setItems((currentItems) => addUserMessage(currentItems, runId, nextPrompt));
 
     try {
-      await sendPromptToRun(runId, nextPrompt);
+      await sendPromptToRun(runId, nextPrompt, {
+        idempotencyKey,
+        onReply: (reply) => {
+          replayed = reply.replayed;
+        },
+      });
+      if (unsettledDirectPromptRef.current?.idempotencyKey === idempotencyKey) {
+        unsettledDirectPromptRef.current = null;
+      }
+      if (replayed) {
+        restoreAwaitingIfUnchanged(lifecycleSeq, lifecycleAwaitingRef.current);
+      }
       recordPromptHistory(nextPrompt);
     } catch (caughtError) {
       if (unsettledCall(caughtError) === "unknown") {
-        if (promptSentCount(runId) > promptSentBefore) {
-          // 결과는 몰랐지만 그 사이 이 run의 turn 시작을 봤다(Codex r12): 적용됐다 — 입력창에 되돌려 다시 보내게 하지 않는다.
-          recordPromptHistory(nextPrompt);
-          return;
-        }
-        // unknown이 먼저 돌아와도 늦은 turn을 놓치지 않는다(OCR r12). 일단 입력은 복원해 사용자가 결과를 알 수 있게 하되,
-        // 같은 run의 다음 promptSent가 오면 listener가 적용 상태로 맞춘다. 직접 prompt는 자동 재전송하지 않는다.
-        unsettledDirectPromptRef.current = { runId, text: nextPrompt, promptSentBefore };
+        unsettledDirectPromptRef.current = { runId, text: nextPrompt, idempotencyKey };
+      } else if (unsettledDirectPromptRef.current?.idempotencyKey === idempotencyKey) {
+        unsettledDirectPromptRef.current = null;
       }
       setPrompt(nextPrompt);
       setItems((currentItems) => removeUserMessage(currentItems, runId, nextPrompt));

@@ -51,7 +51,7 @@ impl Server {
         let identity = OwnerIdentity::generate();
         let mut options =
             HostOptions::new(data_dir.clone(), adapters, "test", runtime.handle().clone());
-        options.owner = Some(identity.clone());
+        options.owner = Some(identity.identity().clone());
         let host = assemble(options).expect("assembly");
         // `serve`와 같은 안내 파일을 쓴다 — 소유자 클라이언트는 이 파일만 보고 서버를 찾는다.
         let server_dir = ensure_server_dir(&std::fs::canonicalize(&data_dir).unwrap()).unwrap();
@@ -60,6 +60,7 @@ impl Server {
             &Descriptor::for_endpoint(
                 "server",
                 &identity,
+                identity.token(),
                 host.runtime.epoch(),
                 host.http.as_ref().unwrap().base_url(),
                 "test",

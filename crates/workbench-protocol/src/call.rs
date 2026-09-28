@@ -612,6 +612,8 @@ pub enum CallReply {
         output: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         revision: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replayed: bool,
     },
     #[serde(rename_all = "camelCase")]
     Accepted {
@@ -623,7 +625,18 @@ pub enum CallReply {
 
 impl CallReply {
     pub fn complete(output: serde_json::Value, revision: Option<u64>) -> Self {
-        CallReply::Complete { output, revision }
+        CallReply::Complete {
+            output,
+            revision,
+            replayed: false,
+        }
+    }
+
+    pub fn mark_replayed(mut self) -> Self {
+        if let CallReply::Complete { replayed, .. } = &mut self {
+            *replayed = true;
+        }
+        self
     }
 
     pub fn output(&self) -> Option<&serde_json::Value> {

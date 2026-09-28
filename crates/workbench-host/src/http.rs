@@ -23,6 +23,7 @@ use workbench_server::{
     tickets::EventTicketStore,
 };
 
+use workbench_core::application::work_gate::GateState;
 use workbench_core::ports::server_host::{ServerHost, WindowToken, WindowTokenError};
 
 use crate::{
@@ -164,12 +165,14 @@ pub struct HttpAssembly {
     /// 독립 서버의 소유자 신원(044 R5·R6): 소유자 자격 증명 resolver, 인스턴스 식별자, `/v1/system/identify` 증명.
     /// embedded·시험 조립은 `None`.
     pub owner: Option<OwnerIdentity>,
+    pub control: Option<Arc<workbench_core::application::server_control::ServerControl>>,
 }
 
 /// 소유자 신원을 더한 서버 정보(인스턴스 식별자·신원 증명).
 struct HostServerInfo {
     base: AwServerInfo,
     owner: Option<OwnerIdentity>,
+    control: Option<Arc<workbench_core::application::server_control::ServerControl>>,
 }
 
 impl ServerInfo for HostServerInfo {
@@ -181,6 +184,17 @@ impl ServerInfo for HostServerInfo {
     }
     fn storage_schema_version(&self) -> i64 {
         self.base.storage_schema_version()
+    }
+    fn state(&self) -> String {
+        let Some(control) = &self.control else {
+            return "serving".to_owned();
+        };
+        match control.work_gate().state() {
+            GateState::Serving => "serving",
+            GateState::Draining(_) => "draining",
+            GateState::Stopping => "stopping",
+        }
+        .to_owned()
     }
     fn instance_id(&self) -> Option<String> {
         self.owner
@@ -220,6 +234,7 @@ impl WorkbenchHttpState {
             server_info: Arc::new(HostServerInfo {
                 base: assembly.server_info,
                 owner: assembly.owner,
+                control: assembly.control,
             }),
             origins: origin_policy(),
             access_log: Arc::new(StderrAccessLog),
@@ -558,6 +573,7 @@ mod tests {
                 },
                 drain_warn_after: Duration::from_millis(20),
                 owner: None,
+                control: None,
             },
             &tokio::runtime::Handle::current(),
         )
@@ -706,6 +722,7 @@ mod tests {
                     },
                     drain_warn_after: Duration::from_millis(20),
                     owner: None,
+                    control: None,
                 },
                 &tokio::runtime::Handle::current(),
             )

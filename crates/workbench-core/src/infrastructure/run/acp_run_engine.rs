@@ -38,7 +38,7 @@ use crate::{
     infrastructure::{
         fs::acp_session_store::JsonAcpSessionStore, run::workbench_run_sink::WorkbenchRunSink,
     },
-    ports::run_engine::{RunEngine, RunEngineError, RunErrorKind},
+    ports::run_engine::{QueuePromptCompletion, RunEngine, RunEngineError, RunErrorKind},
 };
 
 pub struct AcpRunEngine {
@@ -204,6 +204,17 @@ impl RunEngine for AcpRunEngine {
         prompt: String,
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError> {
+        self.queue_prompt_with_completion(run_id, prompt, sink, Box::new(|_| {}))
+            .await
+    }
+
+    async fn queue_prompt_with_completion(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+        completion: QueuePromptCompletion,
+    ) -> Result<(), RunEngineError> {
         let session = self
             .registry
             .active_session(run_id)
@@ -215,7 +226,12 @@ impl RunEngine for AcpRunEngine {
         tokio::spawn(async move {
             // 대기열 차례를 기다리는 동안도 바쁘다(현재 turn 뒤 차례로 보냄).
             let _guard = guard;
-            if let Err(error) = session.queue_prompt(sink.clone(), message).await {
+            let result = session
+                .queue_prompt(sink.clone(), message)
+                .await
+                .map(|_| ())
+                .map_err(|error| RunEngineError::new(RunErrorKind::Internal, error.to_string()));
+            if let Err(error) = &result {
                 sink.emit(
                     &run_id,
                     RunEvent::Error {
@@ -223,6 +239,7 @@ impl RunEngine for AcpRunEngine {
                     },
                 );
             }
+            completion(result);
         });
         Ok(())
     }

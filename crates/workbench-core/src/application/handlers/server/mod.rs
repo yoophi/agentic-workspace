@@ -185,8 +185,8 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
         epoch_handler(
             OperationId::DesktopIssueWindowToken,
             services,
-            // 토큰 비밀을 멱등 기록에 남기지 않는다.
-            |_: &DesktopIssueWindowTokenInput| Scope::None,
+            // owner 세대 메모리 안에서만 결과를 재생한다. 응답 유실 재시도가 새 bearer를 만들지 않는다.
+            |_: &DesktopIssueWindowTokenInput| Scope::Open,
             move |_, ctx, input: DesktopIssueWindowTokenInput| {
                 let control = Arc::clone(&c);
                 async move {
@@ -218,7 +218,8 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
         epoch_handler(
             OperationId::DesktopRetireWindow,
             services,
-            |_: &DesktopRetireWindowInput| Scope::None,
+            // 창 로컬 대응을 먼저 지운 뒤 응답을 잃어도 같은 owner key로 원래 폐기 결과를 회수한다.
+            |_: &DesktopRetireWindowInput| Scope::Open,
             move |_, ctx, input: DesktopRetireWindowInput| {
                 let control = Arc::clone(&c);
                 async move {
@@ -256,7 +257,8 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
         epoch_handler(
             OperationId::LeaseAcquire,
             services,
-            |_: &LeaseAcquireInput| Scope::None,
+            // 같은 owner command 재시도는 원래 lease를 돌려줘 유휴 정지를 늦추는 도달 불가능 lease를 만들지 않는다.
+            |_: &LeaseAcquireInput| Scope::Open,
             move |_, ctx, input: LeaseAcquireInput| {
                 let control = Arc::clone(&c);
                 async move {

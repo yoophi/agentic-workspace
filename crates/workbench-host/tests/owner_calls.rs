@@ -27,7 +27,7 @@ fn owner_and_window_calls_round_trip_through_the_http_adapter() {
         "test",
         runtime.handle().clone(),
     );
-    options.owner = Some(identity.clone());
+    options.owner = Some(identity.identity().clone());
     let host = assemble(options).expect("assembly");
     let base = host.http.as_ref().unwrap().base_url().to_owned();
 

@@ -5,10 +5,10 @@ use std::sync::Arc;
 
 use workbench_protocol::{
     operations::exchange::{
-        AgentExchangeDto, AgentPanelEndpointDto, AgentPeersDto, AgentWorkspaceSyncResponseDto,
-        ExchangeAcknowledgeInput, ExchangeDiscardDeliveryInput, ExchangeGetForRunInput,
-        ExchangeListInput, ExchangeListPeersInput, ExchangeSendFromRunInput, ExchangeSendInput,
-        ExchangeSyncWorkspaceInput,
+        AgentExchangeDto, AgentExchangeStatusDto, AgentPanelEndpointDto, AgentPeersDto,
+        AgentWorkspaceSyncResponseDto, ExchangeAcknowledgeInput, ExchangeDiscardDeliveryInput,
+        ExchangeGetForRunInput, ExchangeListInput, ExchangeListPeersInput,
+        ExchangeSendFromRunInput, ExchangeSendInput, ExchangeSyncWorkspaceInput,
     },
     AuthenticatedPrincipal, FaultCode, OperationId, RequestId, WorkbenchFault,
 };
@@ -21,11 +21,15 @@ use crate::{
         run_dto::convert,
         run_service::MESSAGE_EXCHANGE_NOT_FOUND,
     },
-    domain::agent_exchange::{AgentExchange, AgentExchangeError, AgentWorkspaceSyncRequest},
+    domain::agent_exchange::{
+        AgentExchange, AgentExchangeAckRequest, AgentExchangeError, AgentWorkspaceSyncRequest,
+    },
 };
 
 pub const MESSAGE_RUN_MISMATCH: &str =
     "The requested run does not match the authenticated capability.";
+pub const MESSAGE_EXCHANGE_DELIVERY_STARTED: &str =
+    "The exchange delivery already started and can no longer be rejected.";
 
 /// 도메인 오류 → fault. `message`는 도메인 문구, 코드는 `details.exchangeCode`(compat이 오늘 JSON을 다시 만든다).
 pub fn exchange_fault(request_id: &RequestId, error: AgentExchangeError) -> WorkbenchFault {
@@ -133,6 +137,69 @@ pub fn register(registry: &mut Registry, services: &Arc<BenchServices>) {
             |input: &ExchangeAcknowledgeInput| Scope::Bench(input.bench_id.clone()),
             |services, ctx, input: ExchangeAcknowledgeInput| async move {
                 let bench = services.resolve(&ctx.request_id, &ctx.principal, &input.bench_id)?;
+                // Rejected/failed/cancelled 확인과 전달 소비는 같은 work-gate 잠금에서 승자를 정한다. delivery가 먼저 소비했으면
+                // 뒤늦은 거절이 Accepted를 Rejected로 바꿔 이미 시작한 prompt와 모순되지 않게 거절한다.
+                if input.request.outcome != AgentExchangeStatusDto::Delivered {
+                    let current = services
+                        .exchange_service()
+                        .list_exchanges(&bench.id)
+                        .await
+                        .into_iter()
+                        .find(|exchange| exchange.request_id == input.request.request_id)
+                        .ok_or_else(|| {
+                            WorkbenchFault::new(
+                                FaultCode::NotFound,
+                                ctx.request_id.clone(),
+                                MESSAGE_EXCHANGE_NOT_FOUND,
+                            )
+                        })?;
+                    let requested: AgentExchangeAckRequest = convert(&input.request);
+                    let requested = requested.outcome;
+                    if current.status != requested {
+                        if current.target.panel_id != input.request.target_panel_id {
+                            return Err(WorkbenchFault::new(
+                                FaultCode::NotFound,
+                                ctx.request_id.clone(),
+                                "Acknowledgement target does not match the exchange.",
+                            ));
+                        }
+                        let rejection_claim = match services.work_gate() {
+                            Some(gate) => Some(
+                                gate.begin_exchange_rejection(&bench.id, &input.request.request_id)
+                                    .ok_or_else(|| {
+                                        WorkbenchFault::conflict(
+                                            ctx.request_id.clone(),
+                                            MESSAGE_EXCHANGE_DELIVERY_STARTED,
+                                            workbench_protocol::Outcome::NotApplied,
+                                        )
+                                    })?,
+                            ),
+                            None => None,
+                        };
+                        #[cfg(feature = "test-hooks")]
+                        {
+                            let probe = services
+                                .exchange_rejection_store_probe
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .clone();
+                            if let Some(probe) = probe {
+                                probe().map_err(|message| {
+                                    WorkbenchFault::internal(ctx.request_id.clone(), message)
+                                })?;
+                            }
+                        }
+                        let exchange = services
+                            .exchange_service()
+                            .acknowledge(&bench.id, convert(&input.request))
+                            .await
+                            .map_err(|error| exchange_fault(&ctx.request_id, error))?;
+                        if let Some(rejection_claim) = rejection_claim {
+                            rejection_claim.commit();
+                        }
+                        return Ok(exchange_json(&exchange));
+                    }
+                }
                 let exchange = services
                     .exchange_service()
                     .acknowledge(&bench.id, convert(&input.request))

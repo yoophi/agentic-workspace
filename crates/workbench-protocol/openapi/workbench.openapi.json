@@ -1307,6 +1307,9 @@
                 "format": "int64",
                 "minimum": 0
               },
+              "replayed": {
+                "type": "boolean"
+              },
               "kind": {
                 "type": "string",
                 "enum": [

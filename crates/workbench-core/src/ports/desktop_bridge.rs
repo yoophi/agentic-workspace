@@ -3,6 +3,7 @@
 
 use acp_agent_core::domain::run::AgentRunRequest;
 use serde_json::Value;
+use std::sync::Arc;
 
 /// 작업대로 보낼 발행 결과. payload는 창이 오늘 받는 모양(공유 봉투의 상위 집합)이다.
 #[derive(Debug, Clone, PartialEq)]
@@ -74,4 +75,94 @@ pub trait RunLaunchDecorator: Send + Sync {
     /// 041: 재시도·재배정으로 교체된 자식 run, 교대로 물러난 coordinator run의 MCP 토큰을 폐기한다(토큰 수명
     /// 관리일 뿐 권한 근거는 아니다 — 역할은 서버 상태로 판정한다).
     fn revoke_run(&self, _run_id: &str) {}
+}
+
+/// `decorate`가 발급한 run 자격을 엔진 기동 확정 전의 오류·future 취소에서 회수한다. 성공한 run은 terminal 경로가 회수한다.
+pub struct PendingLaunchRevocation {
+    decorator: Arc<dyn RunLaunchDecorator>,
+    run_id: String,
+    armed: bool,
+}
+
+impl PendingLaunchRevocation {
+    pub fn armed(decorator: Arc<dyn RunLaunchDecorator>, run_id: impl Into<String>) -> Self {
+        Self {
+            decorator,
+            run_id: run_id.into(),
+            armed: true,
+        }
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingLaunchRevocation {
+    fn drop(&mut self) {
+        if self.armed {
+            self.decorator.revoke_run(&self.run_id);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+
+    use super::*;
+
+    struct IssuingDecorator {
+        issued: AtomicUsize,
+        revoked: AtomicUsize,
+    }
+
+    impl RunLaunchDecorator for IssuingDecorator {
+        fn decorate(
+            &self,
+            _request: &mut AgentRunRequest,
+            _context: &LaunchContext,
+        ) -> Result<(), String> {
+            self.issued.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn revoke_run(&self, _run_id: &str) {
+            self.revoked.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_credential_issuance_rolls_the_pending_launch_back() {
+        let recorder = Arc::new(IssuingDecorator {
+            issued: AtomicUsize::new(0),
+            revoked: AtomicUsize::new(0),
+        });
+        let decorator: Arc<dyn RunLaunchDecorator> = recorder.clone();
+        let task = tokio::spawn(async move {
+            let mut request: AgentRunRequest = serde_json::from_value(serde_json::json!({
+                "goal": "g",
+                "agentId": "codex",
+                "runId": "run-cancelled"
+            }))
+            .unwrap();
+            let context = LaunchContext {
+                bench_id: "bench".into(),
+                panel_id: None,
+                run_id: "run-cancelled".into(),
+                orchestration: None,
+            };
+            decorator.decorate(&mut request, &context).unwrap();
+            let _rollback = PendingLaunchRevocation::armed(decorator, context.run_id);
+            std::future::pending::<()>().await;
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(recorder.issued.load(Ordering::SeqCst), 1);
+        task.abort();
+        let _ = task.await;
+        assert_eq!(recorder.revoked.load(Ordering::SeqCst), 1);
+    }
 }

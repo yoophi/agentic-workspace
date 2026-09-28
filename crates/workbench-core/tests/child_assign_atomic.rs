@@ -1366,6 +1366,75 @@ async fn assert_capacity_is_free(h: &BenchHarness, key: &str) {
     );
 }
 
+/// Codex r13(core high): start gate 직후 child가 결과를 보고 scheduler release가 bind보다 먼저 온다. 준비한 worker가 아직
+/// 살아 있는 동안 자리를 비워 다음 worker를 띄우면 한도 1을 넘는다. 기동 hold가 정리를 끝낼 때까지 자리를 유지하고,
+/// terminal task의 늦은 bind를 거절해 그 worker를 취소한 뒤 다음 task가 실행된다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_terminal_report_before_bind_keeps_capacity_until_the_prepared_worker_is_cancelled() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut pause = pause_at(&h, LaunchPoint::AfterOpen);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    tokio::time::timeout(WAIT, pause.reached.recv())
+        .await
+        .expect("launch reached the open start gate");
+    let opening = session(&h, &bench).await;
+    let child_run = node_of(&opening, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the reserved run is visible before bind")
+        .to_owned();
+
+    tool(
+        &h,
+        &child_run,
+        OperationId::OrchestrationReportResult,
+        json!({"requestId": "result-before-bind", "summary": "finished immediately"}),
+    )
+    .await
+    .expect("the reserved child run may report its first result");
+    let reported = session(&h, &bench).await;
+    assert_eq!(
+        task(&reported, &task_id)["status"],
+        "completed",
+        "{reported}"
+    );
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the live prepared worker still occupies the only scheduler slot"
+    );
+    let extra = create_extra(&h, "extra-before-bind-cleanup").await;
+    assert_eq!(
+        extra["queued"], true,
+        "a second worker cannot exceed capacity"
+    );
+
+    pause.release.add_permits(1);
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    let assignment = tokio::time::timeout(WAIT, assigning)
+        .await
+        .expect("terminal launch cleanup finishes")
+        .unwrap();
+    assert!(
+        assignment.is_err(),
+        "terminal bind is rejected: {assignment:?}"
+    );
+    eventually("the prepared terminal worker is cancelled", || async {
+        h.engine.run_count() == baseline.runs
+    })
+    .await;
+    let extra_task = extra["taskId"].as_str().unwrap();
+    let started = assign(&h, extra_task, "assign-after-terminal-cleanup")
+        .await
+        .expect("the promoted next task can use the released slot");
+    assert_eq!(started["executionStatus"], "active", "{started}");
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "exactly the replacement worker owns capacity"
+    );
+}
+
 /// Codex r10 (medium): 바인딩 커밋 **직후**·결과 수신 전에 복구가 돌면 task는 `Running`, run은 살아 있다. 복구가 그 자리를
 /// 실행 중 자리로 확정하면서 진행 중 기동 A의 보유를 지우면, 이어서 A가 abort돼 정리해도 자리가 남는다(한도 1이면 실행
 /// 중 자식이 없는데 다른 task가 계속 대기). 복구는 진행 중 기동의 보유를 보존하고 성공 인계 전에는 실행 중으로 확정하지

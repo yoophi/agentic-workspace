@@ -265,6 +265,14 @@ impl RunTerminalHook for ChainedTerminalHook {
     }
 }
 
+struct RevokeRunOnTerminal(Arc<dyn RunLaunchDecorator>);
+
+impl RunTerminalHook for RevokeRunOnTerminal {
+    fn on_terminal(&self, run_id: &str) {
+        self.0.revoke_run(run_id);
+    }
+}
+
 impl WorkbenchRuntime {
     pub fn bootstrap(paths: DataPaths) -> Result<Arc<Self>, BootstrapError> {
         Self::bootstrap_with(paths, RuntimeAdapters::production())
@@ -305,13 +313,14 @@ impl WorkbenchRuntime {
         engine.attach_work_gate(work_gate.clone());
         // orchestration(041): run 종료 hook은 core가 소유한다(worktree 감시). AW가 넘긴 hook이 있으면 뒤에 잇는다.
         let orchestration_hook = Arc::new(OrchestrationTerminalHook::new());
-        let terminal_hook: Arc<dyn RunTerminalHook> = match adapters.terminal_hook.clone() {
-            Some(extra) => Arc::new(ChainedTerminalHook(vec![
-                orchestration_hook.clone() as Arc<dyn RunTerminalHook>,
-                extra,
-            ])),
-            None => orchestration_hook.clone(),
-        };
+        let mut terminal_hooks = vec![orchestration_hook.clone() as Arc<dyn RunTerminalHook>];
+        if let Some(decorator) = adapters.launch_decorator.clone() {
+            terminal_hooks.push(Arc::new(RevokeRunOnTerminal(decorator)));
+        }
+        if let Some(extra) = adapters.terminal_hook.clone() {
+            terminal_hooks.push(extra);
+        }
+        let terminal_hook: Arc<dyn RunTerminalHook> = Arc::new(ChainedTerminalHook(terminal_hooks));
         let benches = Arc::new(BenchServices::new(
             Arc::new(InMemoryBenchRegistry::new(adapters.bench_limits)),
             engine,
@@ -708,6 +717,12 @@ impl Workbench for WorkbenchRuntime {
         principal: AuthenticatedPrincipal,
         request: Subscription,
     ) -> Result<EventStream, WorkbenchFault> {
+        // 호출과 같은 폐기 경계: 인증 뒤 retire가 먼저 선형화됐으면 새 구독을 만들지 않는다.
+        if self.benches.registry.is_retired(&principal.subject) {
+            return Err(WorkbenchFault::unauthenticated(
+                RequestId::new("events").unwrap(),
+            ));
+        }
         self.authorize_bench_streams(&principal, &request)?;
         self.events.subscribe(&principal, request)
     }
@@ -828,6 +843,25 @@ mod tests {
             (FaultCode::NotFound, MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND)
         );
         assert!(!runtime.epoch().is_empty());
+    }
+
+    #[tokio::test]
+    async fn events_reject_a_window_retired_after_authentication() {
+        let (_dir, runtime) = runtime();
+        let principal = AuthenticatedPrincipal::desktop();
+        runtime.benches.registry.retire_subject(&principal.subject);
+
+        let fault = runtime
+            .events(
+                principal,
+                Subscription {
+                    cursors: Vec::new(),
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(fault.code, FaultCode::Unauthenticated);
+        assert_eq!(runtime.events_hub().subscription_count(), 0);
     }
 
     #[tokio::test]

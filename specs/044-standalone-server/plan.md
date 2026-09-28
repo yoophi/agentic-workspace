@@ -117,7 +117,7 @@ specs/044-standalone-server/
 ```text
 crates/workbench-protocol/src/
 ├── call.rs, operations/{server,lease,desktop}.rs   # 새 operation 8개, run.sendPrompt continuation
-└── principal.rs                                    # PrincipalKind::Owner, Scope server:admin
+└── principal.rs                                    # PrincipalKind::Owner, Scope server:read/server:admin
 crates/workbench-core/src/application/
 ├── drain.rs (신규)          # DrainClass, drain_class, ActiveWork, 입구 판정
 ├── epoch_idempotency.rs     # closed_benches tombstone (#207)

@@ -137,6 +137,8 @@ pub struct GateActiveWork {
 pub enum DeliveryRefused {
     /// 이미 전달 prompt가 소비된 교환(교환마다 1회).
     AlreadyConsumed,
+    /// 같은 교환의 거절 확인이 먼저 원자적 claim을 얻었다.
+    RejectionClaimed,
     /// 서버가 정지 중이다.
     Stopping,
     /// 교환의 작업대가 이미 닫혔다(닫기보다 늦게 도착한 전달, OCR 4차 M1).
@@ -173,6 +175,10 @@ struct Inner {
     /// 교환 전달 prompt 소비(교환마다 1회, K). 키는 (작업대, 요청 id)다 — 요청 id는 호출자가 정해 작업대마다 겹칠 수 있고,
     /// 교환 저장소도 같은 키로 구별한다(Codex r5).
     consumed_exchanges: HashSet<ExchangeKey>,
+    /// 저장소의 거절 상태 전이를 await하는 동안 delivery consume을 막는 짧은 claim.
+    rejecting_exchanges: HashSet<ExchangeKey>,
+    /// 저장까지 끝난 거절. 오래된 Accepted snapshot이 뒤늦게 delivery claim을 얻지 못하게 한다.
+    rejected_exchanges: HashSet<ExchangeKey>,
     /// 교환 기록을 거둔 닫힌 작업대(OCR 4차 M1): 닫기보다 늦게 도착한 전달이 기록을 되살리지 않게 한다. 작업대 id는 재사용되지
     /// 않는다.
     closed_exchange_benches: HashSet<String>,
@@ -242,6 +248,31 @@ pub struct WorkGate {
 pub struct Reservation {
     gate: Arc<WorkGate>,
     id: u64,
+}
+
+/// 거절 상태 저장이 끝나거나 future가 취소될 때 claim을 놓는다. 소비 표시는 만들지 않는다.
+#[must_use = "an exchange rejection claim is released when dropped"]
+pub struct ExchangeRejectionClaim {
+    gate: Arc<WorkGate>,
+    key: Option<ExchangeKey>,
+}
+
+impl ExchangeRejectionClaim {
+    /// 저장소의 거절 전이가 성공했다. 진행 claim을 지속 tombstone으로 바꾼다.
+    pub fn commit(mut self) {
+        let Some(key) = self.key.take() else { return };
+        let mut inner = self.gate.lock();
+        inner.rejecting_exchanges.remove(&key);
+        inner.rejected_exchanges.insert(key);
+    }
+}
+
+impl Drop for ExchangeRejectionClaim {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            self.gate.lock().rejecting_exchanges.remove(&key);
+        }
+    }
 }
 
 impl std::fmt::Debug for Reservation {
@@ -581,16 +612,37 @@ impl WorkGate {
         if inner.closed_exchange_benches.contains(bench_id) {
             return Err(DeliveryRefused::BenchClosed);
         }
-        if !inner
-            .consumed_exchanges
-            .insert(exchange_key(bench_id, request_id))
-        {
+        let key = exchange_key(bench_id, request_id);
+        if inner.rejecting_exchanges.contains(&key) || inner.rejected_exchanges.contains(&key) {
+            return Err(DeliveryRefused::RejectionClaimed);
+        }
+        if !inner.consumed_exchanges.insert(key) {
             return Err(DeliveryRefused::AlreadyConsumed);
         }
         let id = inner.insert(ReservationKind::Deliver, Some(run.to_owned()));
         Ok(Reservation {
             gate: Arc::clone(self),
             id,
+        })
+    }
+
+    /// 거절 확인과 delivery consume 중 하나만 먼저 시작한다. claim은 상태 저장 await를 걸쳐 살고 drop으로 반드시 풀린다.
+    pub fn begin_exchange_rejection(
+        self: &Arc<Self>,
+        bench_id: &str,
+        request_id: &str,
+    ) -> Option<ExchangeRejectionClaim> {
+        let mut inner = self.lock();
+        let key = exchange_key(bench_id, request_id);
+        if inner.closed_exchange_benches.contains(bench_id)
+            || inner.consumed_exchanges.contains(&key)
+            || !inner.rejecting_exchanges.insert(key.clone())
+        {
+            return None;
+        }
+        Some(ExchangeRejectionClaim {
+            gate: Arc::clone(self),
+            key: Some(key),
         })
     }
 
@@ -648,6 +700,12 @@ impl WorkGate {
             .retain(|(bench, _)| bench != bench_id);
         inner
             .failed_deliveries
+            .retain(|(bench, _)| bench != bench_id);
+        inner
+            .rejecting_exchanges
+            .retain(|(bench, _)| bench != bench_id);
+        inner
+            .rejected_exchanges
             .retain(|(bench, _)| bench != bench_id);
     }
 }
@@ -713,5 +771,28 @@ mod tests {
         gate.begin_drain(DrainMode::Idle);
         assert_eq!(gate.state(), GateState::Draining(DrainMode::Wait));
         assert!(!gate.resume_serving());
+    }
+
+    #[tokio::test]
+    async fn cancelling_a_rejection_claim_releases_it_without_marking_consumed() {
+        let gate = WorkGate::new();
+        let task = tokio::spawn({
+            let gate = Arc::clone(&gate);
+            async move {
+                let _claim = gate
+                    .begin_exchange_rejection("bench", "exchange")
+                    .expect("claim");
+                std::future::pending::<()>().await;
+            }
+        });
+        tokio::task::yield_now().await;
+        task.abort();
+        let _ = task.await;
+        assert!(!gate.exchange_consumed("bench", "exchange"));
+        assert!(
+            gate.begin_exchange_delivery("bench", "exchange", "run")
+                .is_ok(),
+            "future cancellation releases the rejection claim"
+        );
     }
 }

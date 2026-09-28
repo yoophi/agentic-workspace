@@ -46,7 +46,7 @@ research R4–R6·R9·R10.
 
 1. `startup.lock` 배타 잠금(상한 20초, 넘으면 실패).
 2. `server.json`이 있으면:
-   - **먼저 `POST /v1/system/identify {nonce}`(인증 없음)로 신원을 확인한다.** 응답 `{instanceId, proof}`의 `proof`를 안내 파일의 `ownerToken`으로 검증한다(`proof = hex(HMAC-SHA256(key = ownerToken 문자열의 UTF-8 바이트, msg = nonce + "\n" + instanceId))`, 소문자 hex. 고정 벡터: ownerToken `00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff`, nonce `3f2c9a1e7b6d4c5a8e9f0a1b2c3d4e5f`, instanceId `6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b` → `f3d76425402ffeadb5458e75f4fec90cbfc0195e7cd233436f6950eae939cf64`, 시험 `identity::tests::identify_proof_matches_the_contract_vector`). 틀리면 그 끝점에 자격 증명을 보내지 않고 "확인 실패"로 3단계로 간다.
+   - **먼저 `POST /v1/system/identify {nonce}`(인증 없음)로 신원을 확인한다.** 응답 `{instanceId, proof}`의 `proof`를 안내 파일의 `ownerToken`으로 검증한다(`proof = hex(HMAC-SHA256(key = SHA256(ownerToken 문자열의 UTF-8 바이트), msg = nonce + "\n" + instanceId))`, 소문자 hex. 서버는 안내 파일을 쓴 뒤 원문 bearer를 버리고 이 digest만 보관한다. 고정 벡터: ownerToken `00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff`, nonce `3f2c9a1e7b6d4c5a8e9f0a1b2c3d4e5f`, instanceId `6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b` → `ec5b0b7d634e793e9ee94819c6219a3bd9df033afd49cb30d302f6076f6ab079`, 시험 `identity::tests::identify_proof_matches_the_contract_vector`). 틀리면 그 끝점에 자격 증명을 보내지 않고 "확인 실패"로 3단계로 간다.
    - handshake로 `instanceId`가 일치하는지, 프로토콜·저장 형식을 지원하는지 확인한다.
    - 소유자 토큰으로 `server.status`를 불러 인증과 상태를 확인한다.
    - 상태가 `serving`이면 3을 건너뛰고 끝낸다.
@@ -73,7 +73,7 @@ research R4–R6·R9·R10.
 | `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBenches}`. `closeBench`면 그 창 주체가 **연** 작업대를 모두 닫는다(레지스트리의 `opened_by` 조회). 닫기 전에 그 주체를 **폐기로 표시**한다(`closeBench:false`도). 표시 뒤 그 주체의 호출은 런타임 입구에서 `unauthenticated`로 거절되고, 작업대 등록(표시와 같은 잠금 아래의 검사·삽입)도 거절된다. 그래서 폐기 전에 인증된 늦은 요청이 새 작업대를 만들거나 호출을 넣지 못한다(Codex 구현 리뷰) |
 | `bench.list` | query | 모든 주체 | `{}` → `[{benchId, workingDirectory, owner, runs:[{runId, state}]}]`. 소유자는 전부, 그 밖은 자기 작업대만 |
 
-- 새 scope `server:admin`은 소유자만 갖는다.
+- 새 scope `server:read`·`server:admin`은 소유자만 갖는다. `server.status`는 `server:read`, 서버 상태 변경·창 토큰·임대 operation은 `server:admin`을 요구한다.
 - 소유자 주체(`PrincipalKind::Owner`, 주체 `local:owner`)는 작업대 소유 판정을 통과한다: 모든 작업대의 run 조회·구독·취소와 `bench.close`. 우회 지점은 다음 두 곳이며 각각 시험한다(설계 리뷰 D2):
   - 작업대 레지스트리의 `resolve`·`admit`·`close_as`(주체 비교)
   - 이벤트 hub의 스트림 구독 판정(`run:`·`exchange:`·`bench:`·`orchestration:` claim)

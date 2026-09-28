@@ -39,7 +39,7 @@
 
 | kind | 주체 | scope | 작업대 소유 판정 |
 |---|---|---|---|
-| `Owner`(신규) | `local:owner` | 전체 + `server:admin` | 우회 |
+| `Owner`(신규) | `local:owner` | 전체 + `server:read`·`server:admin` | 우회 |
 | `Desktop` 창(043) | `desktop:window:<label>:<incarnation>` | 오늘과 같음 | 자기 것만 |
 | `Agent` | `agent:<runId>` | 오늘과 같음 | 자기 run의 작업대 범위 |
 

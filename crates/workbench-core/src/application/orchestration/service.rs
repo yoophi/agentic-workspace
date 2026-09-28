@@ -914,11 +914,12 @@ where
                     "Assigned orchestration task was not found.",
                 )
             })?;
-        // 044 R14 표 6: 기동 중에 취소된 task에는 run을 묶지 않는다.
-        if task.status == TaskStatus::Cancelled {
+        // 시작 장벽을 연 직후 첫 turn이 결과를 보고할 수 있다. 이미 terminal인 task에 늦게 run을 묶으면 scheduler 자리는
+        // 풀린 채 worker만 살아 남으므로 모든 terminal 상태를 거절해 launch cleanup이 준비한 run을 취소하게 한다.
+        if task.status.is_terminal() {
             return Err(OrchestrationError::new(
                 OrchestrationErrorCode::InvalidTransition,
-                "A cancelled task cannot be bound to a worker run.",
+                "A terminal task cannot be bound to a worker run.",
             ));
         }
         if task.status == TaskStatus::Ready {

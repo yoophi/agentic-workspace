@@ -1,6 +1,7 @@
 //! 소유자 신원(044 research R5·R6): 서버 인스턴스 식별자와 소유자 자격 증명. 자격 증명은 안내 파일(0600)에만 있고,
-//! 서버는 digest로 비교한다. 신원 증명은 `HMAC-SHA256(ownerToken, nonce ‖ "\n" ‖ instanceId)`(hex) — 자격 증명을 아는
-//! 서버만 만들 수 있고, 증명 자체는 자격 증명을 드러내지 않는다.
+//! 서버는 원문 bearer를 안내 파일에 쓴 뒤 버리고 digest만 보관한다. 신원 증명은
+//! `HMAC-SHA256(SHA256(ownerToken), nonce ‖ "\n" ‖ instanceId)`(hex) — 자격 증명을 아는 서버만 만들 수 있고,
+//! 증명 자체는 자격 증명을 드러내지 않는다.
 
 use sha2::{Digest, Sha256};
 use workbench_protocol::AuthenticatedPrincipal;
@@ -9,6 +10,12 @@ use workbench_server::auth::CredentialResolver;
 #[derive(Clone)]
 pub struct OwnerIdentity {
     instance_id: String,
+    token_digest: [u8; 32],
+}
+
+/// 시작 중 안내 파일에 한 번 쓸 원문 bearer와, 런타임에 남길 digest 신원.
+pub struct GeneratedOwnerIdentity {
+    identity: OwnerIdentity,
     token: String,
 }
 
@@ -16,20 +23,46 @@ impl std::fmt::Debug for OwnerIdentity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("OwnerIdentity")
             .field("instance_id", &self.instance_id)
-            .field("token", &"<redacted>")
+            .field("token_digest", &"<redacted>")
             .finish()
+    }
+}
+
+impl GeneratedOwnerIdentity {
+    pub fn identity(&self) -> &OwnerIdentity {
+        &self.identity
+    }
+
+    pub fn token(&self) -> &str {
+        &self.token
+    }
+
+    pub fn into_parts(self) -> (OwnerIdentity, String) {
+        (self.identity, self.token)
+    }
+}
+
+impl std::ops::Deref for GeneratedOwnerIdentity {
+    type Target = OwnerIdentity;
+
+    fn deref(&self) -> &Self::Target {
+        &self.identity
     }
 }
 
 impl OwnerIdentity {
     /// 새 인스턴스 식별자와 32바이트 무작위 자격 증명(uuid v4 두 개의 바이트, hex).
-    pub fn generate() -> Self {
+    pub fn generate() -> GeneratedOwnerIdentity {
         let mut bytes = Vec::with_capacity(32);
         bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
         bytes.extend_from_slice(uuid::Uuid::new_v4().as_bytes());
-        Self {
-            instance_id: uuid::Uuid::new_v4().to_string(),
-            token: hex(&bytes),
+        let token = hex(&bytes);
+        GeneratedOwnerIdentity {
+            identity: Self {
+                instance_id: uuid::Uuid::new_v4().to_string(),
+                token_digest: Sha256::digest(token.as_bytes()).into(),
+            },
+            token,
         }
     }
 
@@ -37,7 +70,7 @@ impl OwnerIdentity {
     pub fn from_parts(instance_id: impl Into<String>, token: impl Into<String>) -> Self {
         Self {
             instance_id: instance_id.into(),
-            token: token.into(),
+            token_digest: Sha256::digest(token.into().as_bytes()).into(),
         }
     }
 
@@ -45,19 +78,15 @@ impl OwnerIdentity {
         &self.instance_id
     }
 
-    pub fn token(&self) -> &str {
-        &self.token
-    }
-
     pub fn proof(&self, nonce: &str, instance_id: &str) -> String {
         hex(&hmac_sha256(
-            self.token.as_bytes(),
+            &self.token_digest,
             format!("{nonce}\n{instance_id}").as_bytes(),
         ))
     }
 
     fn token_digest(&self) -> [u8; 32] {
-        Sha256::digest(self.token.as_bytes()).into()
+        self.token_digest
     }
 }
 
@@ -116,8 +145,8 @@ pub fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    /// 계약 고정 벡터(contracts/server-lifecycle.md §3, Codex 문서 리뷰): 키는 `ownerToken` 문자열(64자 hex)의 UTF-8 바이트,
-    /// 메시지는 `nonce + "\n" + instanceId`, 결과는 소문자 hex. 독립 클라이언트가 이 값으로 구현을 확인한다.
+    /// 계약 고정 벡터(contracts/server-lifecycle.md §3): 키는 `SHA256(ownerToken UTF-8)`이고 메시지는
+    /// `nonce + "\n" + instanceId`, 결과는 소문자 hex. 독립 클라이언트가 이 값으로 구현을 확인한다.
     #[test]
     fn identify_proof_matches_the_contract_vector() {
         let identity = OwnerIdentity::from_parts(
@@ -129,7 +158,7 @@ mod tests {
                 "3f2c9a1e7b6d4c5a8e9f0a1b2c3d4e5f",
                 "6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b"
             ),
-            "f3d76425402ffeadb5458e75f4fec90cbfc0195e7cd233436f6950eae939cf64"
+            "ec5b0b7d634e793e9ee94819c6219a3bd9df033afd49cb30d302f6076f6ab079"
         );
     }
 
@@ -144,14 +173,14 @@ mod tests {
 
     #[test]
     fn only_the_exact_owner_token_without_an_origin_resolves_to_the_owner() {
-        let identity = OwnerIdentity::generate();
-        let resolver = OwnerResolver::new(&identity);
+        let generated = OwnerIdentity::generate();
+        let resolver = OwnerResolver::new(generated.identity());
         assert_eq!(
-            resolver.resolve(identity.token(), None),
+            resolver.resolve(generated.token(), None),
             Some(AuthenticatedPrincipal::owner())
         );
         assert_eq!(
-            resolver.resolve(identity.token(), Some("tauri://localhost")),
+            resolver.resolve(generated.token(), Some("tauri://localhost")),
             None
         );
         assert_eq!(resolver.resolve("forged", None), None);
@@ -159,7 +188,8 @@ mod tests {
 
     #[test]
     fn the_proof_depends_on_the_token_nonce_and_instance() {
-        let a = OwnerIdentity::generate();
+        let generated = OwnerIdentity::generate();
+        let a = generated.identity();
         let b = OwnerIdentity::from_parts(a.instance_id(), "other");
         assert_eq!(a.proof("n", a.instance_id()), a.proof("n", a.instance_id()));
         assert_ne!(a.proof("n", a.instance_id()), b.proof("n", a.instance_id()));

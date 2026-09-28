@@ -163,6 +163,18 @@ async fn close_completes_even_if_the_caller_is_cancelled() {
     }
     caller.abort();
     let _ = caller.await;
+    assert_eq!(
+        rt.runtime.work_gate().active_work().accepted_calls,
+        1,
+        "the detached cleanup owns a call reservation after its caller disappears"
+    );
+    rt.runtime
+        .work_gate()
+        .begin_drain(workbench_core::application::work_gate::DrainMode::Wait);
+    assert!(
+        !rt.runtime.work_gate().try_stop(|| 0),
+        "wait-stop cannot overtake detached bench cleanup"
+    );
     drop(held);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
@@ -173,6 +185,11 @@ async fn close_completes_even_if_the_caller_is_cancelled() {
         );
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    assert_eq!(rt.runtime.work_gate().active_work().accepted_calls, 0);
+    assert!(
+        rt.runtime.work_gate().try_stop(|| 0),
+        "wait-stop succeeds after cleanup finishes"
+    );
     // 다음 닫기는 이미 끝난 작업대를 모른다(대기 없이 `closed: false`).
     let again = rt
         .runtime

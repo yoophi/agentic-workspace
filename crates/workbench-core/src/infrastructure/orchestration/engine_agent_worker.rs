@@ -22,7 +22,7 @@ use crate::{
             WorkerCommandOutcome,
         },
         coordinator_notification::{CoordinatorNotificationPort, CoordinatorNotificationReceipt},
-        desktop_bridge::{LaunchContext, OrchestrationLaunchRole},
+        desktop_bridge::{LaunchContext, OrchestrationLaunchRole, PendingLaunchRevocation},
     },
 };
 
@@ -63,6 +63,7 @@ impl EngineAgentWorker {
             .benches
             .admit(&RequestId::random(), None, &assignment.bench_id)
             .map_err(|_| MESSAGE_OWNER_UNAVAILABLE.to_owned())?;
+        let mut launch_revocation = None;
         if let Some(decorator) = &self.benches.launch_decorator {
             decorator.decorate(
                 &mut request,
@@ -77,6 +78,10 @@ impl EngineAgentWorker {
                     }),
                 },
             )?;
+            launch_revocation = Some(PendingLaunchRevocation::armed(
+                Arc::clone(decorator),
+                assignment.planned_run_id.clone(),
+            ));
         }
         if !self
             .benches
@@ -104,6 +109,9 @@ impl EngineAgentWorker {
                 return Err(error.message);
             }
         };
+        if let Some(revocation) = &mut launch_revocation {
+            revocation.disarm();
+        }
         drop(admission);
         Ok(run.id)
     }

@@ -45,6 +45,9 @@ pub type BenchCloseHook = Arc<
     dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
 >;
 
+#[cfg(feature = "test-hooks")]
+pub type ExchangeRejectionStoreProbe = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
 pub struct BenchServices {
     pub registry: Arc<InMemoryBenchRegistry>,
     pub engine: Arc<dyn RunEngine>,
@@ -61,6 +64,12 @@ pub struct BenchServices {
     /// 시험 전용: `bench.open`이 런타임 입구를 지난 뒤 작업대 등록 **직전**에 부른다(등록 경합 시험이 여기서 붙잡는다).
     #[cfg(feature = "test-hooks")]
     pub open_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// 시험 전용: delivery가 exchange snapshot을 검증한 뒤 gate claim 직전에 멈춘다.
+    #[cfg(feature = "test-hooks")]
+    pub exchange_delivery_snapshot_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// 시험 전용: rejection claim 뒤 저장 직전에 결정적 저장 실패를 주입한다.
+    #[cfg(feature = "test-hooks")]
+    pub exchange_rejection_store_probe: Mutex<Option<ExchangeRejectionStoreProbe>>,
 }
 
 /// 소유자 주체(044)는 작업대 소유 판정을 우회한다.
@@ -114,6 +123,10 @@ impl BenchServices {
             work_gate: OnceLock::new(),
             #[cfg(feature = "test-hooks")]
             open_probe: Mutex::default(),
+            #[cfg(feature = "test-hooks")]
+            exchange_delivery_snapshot_probe: Mutex::default(),
+            #[cfg(feature = "test-hooks")]
+            exchange_rejection_store_probe: Mutex::default(),
         }
     }
 
@@ -315,11 +328,20 @@ impl BenchServices {
             }
             CloseStart::Started(ticket) => ticket,
         };
+        // 요청 future가 끊겨도 detached cleanup이 끝날 때까지 wait/idle stop이 0 work를 보지 않게 C-call 예약을 넘긴다.
+        // 바깥 bench.close 호출의 예약이 아직 살아 있어 stopping으로 바뀔 수 없으므로 이 continuation 예약은 성립한다.
+        let cleanup_reservation = self
+            .work_gate
+            .get()
+            .and_then(|gate| gate.admit(false, true).ok());
         let services = Arc::clone(self);
         let bench_id = bench_id.to_owned();
-        tokio::spawn(async move { services.finish_close(ticket, &bench_id).await })
-            .await
-            .map_err(|error| WorkbenchFault::internal(request_id.clone(), error.to_string()))
+        tokio::spawn(async move {
+            let _cleanup_reservation = cleanup_reservation;
+            services.finish_close(ticket, &bench_id).await
+        })
+        .await
+        .map_err(|error| WorkbenchFault::internal(request_id.clone(), error.to_string()))
     }
 
     async fn finish_close(&self, ticket: CloseTicket, bench_id: &str) -> BenchCloseOutput {

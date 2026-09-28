@@ -7,6 +7,7 @@
 
 use std::{
     io::Write,
+    os::unix::fs::{OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -48,7 +49,12 @@ impl Log {
             std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
+                .mode(0o600)
                 .open(path)
+                .and_then(|file| {
+                    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+                    Ok(file)
+                })
                 .map_err(|error| {
                     eprintln!(
                         "[workbench-server] cannot open log {}: {error}",
@@ -105,7 +111,8 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
-    let identity = OwnerIdentity::generate();
+    let generated = OwnerIdentity::generate();
+    let (identity, owner_token) = generated.into_parts();
     let mut host_options = HostOptions::new(
         data_dir.clone(),
         RuntimeAdapters::production(),
@@ -137,6 +144,7 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
     let descriptor = Descriptor::for_endpoint(
         "server",
         &identity,
+        &owner_token,
         host.runtime.epoch(),
         http.base_url(),
         &options.server_version,
@@ -147,9 +155,13 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
         StopSignals::install()?
     };
     write_descriptor(&server_dir, &descriptor)?;
+    let ready_base_url = descriptor.base_url.clone();
+    let ready_instance_id = descriptor.instance_id.clone();
+    drop(descriptor);
+    drop(owner_token);
     log.line(format!(
         "ready: {}",
-        serde_json::json!({ "baseUrl": descriptor.base_url, "instanceId": descriptor.instance_id })
+        serde_json::json!({ "baseUrl": ready_base_url, "instanceId": ready_instance_id })
     ));
 
     let control = Arc::clone(host.runtime.server_control());

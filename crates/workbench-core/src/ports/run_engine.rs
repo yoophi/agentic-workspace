@@ -109,6 +109,18 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError>;
 
+    /// `queue_prompt`와 같은 조기 등록 계약이지만, production의 detached 실행 결과를 소유자에게 돌려준다. 동기 엔진은
+    /// `queue_prompt` 결과 자체가 최종 결과이므로 기본 구현을 쓴다.
+    async fn queue_prompt_with_completion(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+        _completion: QueuePromptCompletion,
+    ) -> Result<(), RunEngineError> {
+        self.queue_prompt(run_id, prompt, sink).await
+    }
+
     /// orchestration(041): 턴이 끝날 때까지 기다린다(coordinator 알림 전달). `queue`면 지금 턴 뒤에 이어 붙인다.
     async fn send_and_wait(
         &self,
@@ -137,3 +149,5 @@ pub trait RunEngine: Send + Sync {
     /// 소유자의 run을 모두 취소하고 취소한 run id를 돌려준다.
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String>;
 }
+/// 비동기 queue 등록 뒤 실제 ACP queue/RPC가 끝났을 때 부르는 관찰자. 등록 호출의 조기 응답 계약은 유지한다.
+pub type QueuePromptCompletion = Box<dyn FnOnce(Result<(), RunEngineError>) + Send + 'static>;

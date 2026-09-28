@@ -4,7 +4,7 @@
 순서가 계약이다(research R5·R6, contracts/server-lifecycle.md §3):
 1. `<data-dir>/workbench/server/server.json`을 읽는다.
 2. 인증 없는 `/v1/system/identify`로 신원 증명을 받아 안내 파일의 `ownerToken`으로 검증한다
-   (`HMAC-SHA256(ownerToken, nonce + "\\n" + instanceId)`, hex). **틀리면 자격 증명을 보내지 않고 끝낸다(종료 코드 2).**
+   (`HMAC-SHA256(SHA256(ownerToken), nonce + "\\n" + instanceId)`, hex). **틀리면 자격 증명을 보내지 않고 끝낸다(종료 코드 2).**
 3. 소유자 토큰으로 handshake(세대) → `bench.list`(run 찾기) → `run.replay`(지난 출력) →
    이벤트 표 + WebSocket 구독(마지막 순번 뒤) → 소유자 `run.sendPrompt` → 그 prompt의 출력이 구독으로 오는지 →
    `run.cancel` → run이 `bench.list`에서 빠지는지.
@@ -88,7 +88,7 @@ def verify_identity(descriptor):
         return False, f"identify answered {status}"
     instance = body.get("instanceId", "")
     expected = hmac.new(
-        descriptor["ownerToken"].encode("utf-8"),
+        hashlib.sha256(descriptor["ownerToken"].encode("utf-8")).digest(),
         f"{nonce}\n{instance}".encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()

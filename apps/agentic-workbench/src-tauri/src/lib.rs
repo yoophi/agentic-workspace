@@ -523,9 +523,6 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         &[
             &PredefinedMenuItem::minimize(app, None)?,
             &PredefinedMenuItem::maximize(app, None)?,
-            #[cfg(target_os = "macos")]
-            &PredefinedMenuItem::separator(app)?,
-            &PredefinedMenuItem::close_window(app, None)?,
         ],
     )?;
     let help_menu = Submenu::with_id_and_items(

@@ -56,7 +56,7 @@ impl Server {
             "test",
             rt.handle().clone(),
         );
-        options.owner = Some(identity.clone());
+        options.owner = Some(identity.identity().clone());
         let host = assemble(options).expect("assembly");
         let control = Arc::clone(host.runtime.server_control());
         rt.spawn(run_until_stopped(

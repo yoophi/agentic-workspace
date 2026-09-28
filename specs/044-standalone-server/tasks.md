@@ -52,7 +52,7 @@
 - [X] T019 [P] [US3] `crates/workbench-host/src/lifecycle/lock.rs`: `owner.lock`·`startup.lock`(표준 파일 잠금), `workbench/server/` 0700 생성
 - [X] T020 [P] [US3] `crates/workbench-host/src/lifecycle/descriptor.rs`: `server.json` 원자적 쓰기(0600 임시 → fsync → rename), 자기 인스턴스일 때만 삭제, 32바이트 소유자 토큰
 - [X] T021 [US3] **신원 증명 시험 먼저** `crates/workbench-host/tests/identify.rs`: 남은 안내 파일의 포트에 가짜 서버를 띄우면 `ensure`가 소유자 토큰을 **보내지 않음**(가짜 서버가 받은 헤더 0건), 올바른 서버는 HMAC 증명 통과. red 기록
-- [X] T022 [US3] `/v1/system/identify`(`crates/workbench-server/src/routes`, 인증 없음, `HMAC-SHA256(ownerToken, nonce ‖ instanceId)`)와 `ServerInfo`에 증명 함수. 소유자 resolver(`crates/workbench-host/src/assembly.rs`, 토큰 digest 비교 → `Owner` 주체). T021 green
+- [X] T022 [US3] `/v1/system/identify`(`crates/workbench-server/src/routes`, 인증 없음, `HMAC-SHA256(SHA256(ownerToken), nonce ‖ instanceId)`)와 `ServerInfo`에 증명 함수. 서버 런타임은 안내 파일 작성 뒤 원문을 버리고 digest만 보관하며, 소유자 resolver(`crates/workbench-host/src/assembly.rs`)도 digest 비교로 `Owner` 주체를 만든다. T021 green
 - [X] T023 [US3] `crates/workbench-host/src/lifecycle/ensure.rs`: 시작 절차(contracts/server-lifecycle.md §3), 실행 파일 spawn은 `process_group(0)`·null stdio·로그 파일
 - [X] T024 [US3] `apps/agentic-workbench-server/src/main.rs`: `serve`·`ensure`·`status`·`stop`(종료 코드 계약), 시작 복구 뒤 준비 → 안내 파일. T018 green 기록
 
@@ -101,8 +101,8 @@
 
 ## Phase 8: 실제 앱 검증 (US1·US2 완료 조건)
 
-- [X] T045 [US1] (Codex 문서 리뷰로 진행 중 turn 지속 스모크 보완 — `app-smoke.md` "진행 중 turn 지속") 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
-- [X] T046 [US2] 창 닫기 대조: 관측한 창 닫기 경로((a)·(b))에서 그 작업대의 run이 취소되고 그 창 토큰이 거절됨(SC-006)
+- [ ] T045 [US1] (Codex 문서 리뷰로 진행 중 turn 지속 스모크 보완 — `app-smoke.md` "진행 중 turn 지속") 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
+- [ ] T046 [US2] 창 닫기 대조: 관측한 창 닫기 경로((a)·(b))에서 그 작업대의 run이 취소되고 그 창 토큰이 거절됨(SC-006)
 - [X] T047 [US2] 서버 실행 파일이 없을 때 앱의 연결 실패 화면과 다시 시도, 서버가 떠 있을 때 새로 띄우지 않음, 서버 없을 때 한 번만 띄움(SC-005)
 - [X] T048 [US1] 관측 불가 경로(예: 로그아웃)와 Windows·Linux, **OS 프로세스 재시작 뒤 보류 task 재배정**(host 재조립 수준만 검증됨, `implementation-evidence.md` 대기 task 정책 변경)을 `specs/044-standalone-server/reviews/app-smoke.md`의 미검증 목록에 적는다(완료로 세지 않음)
 
@@ -113,7 +113,7 @@
 - [X] T049 [P] ADR 두 건: `docs/adr/0009-standalone-server-and-owner-principal.md`, `docs/adr/0010-app-quit-is-not-window-close.md`
 - [X] T050 [P] `docs/workbench-seam.md` "독립 서버(044)" 절, `crates/workbench-core/CONTEXT.md` 용어(서버 인스턴스·소유자 주체·임대·비우기 분류·작업 관문)
 - [X] T051 5단계 완료 기준 추적 표를 `specs/044-standalone-server/reviews/implementation-review.md`에 옮기고, 044 완료 항목과 **후속 미완료**((d) 프로세스 트리 가두기, (e) 백업·복원·단계적 이전, (f) 설치본 포함·서명·공증·버전별 캐시·업데이트 preflight, CLI(6단계), 재부착 화면, 교환 전달 서버 소유, 관측 불가 종료 경로, Windows·Linux)를 구분해 적는다
-- [X] T052 gate-15 중단을 무효로 기록하고 gate-16(`8fcb8cb`)에서 최종 게이트 1회 실행·기록(`implementation-review.md`): fmt, clippy `-D warnings`, `cargo test --workspace --all-targets`(ask-code·hushline 포함), `check-types`, `pnpm test`, `build`, 두 `test:integration` 모두 종료 코드 0
+- [ ] T052 gate-15 중단을 무효로 기록하고, 모든 리뷰 수정과 실제 앱 스모크가 끝난 **최종 코드 tree**에서 전체 게이트를 1회 실행·기록(`implementation-review.md`): fmt, clippy `-D warnings`, `cargo test --workspace --all-targets`(ask-code·hushline 포함), `check-types`, `pnpm test`, `build`, 두 `test:integration` 모두 종료 코드 0. gate-16(`8fcb8cb`)은 OCR12·r13 수정 전 증거라 최종 판정에 쓰지 않는다
 - [ ] T053 OCR 구현 리뷰 → Codex `--wait` 구현 리뷰 → 반영·재검증 기록(`implementation-review.md`) 후 PR
 
 ---

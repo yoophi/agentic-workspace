@@ -69,7 +69,7 @@ fn impostor(instance_id: String) -> (String, Arc<Mutex<Vec<u8>>>) {
 fn an_impostor_on_the_descriptor_port_never_receives_the_owner_token() {
     let identity = OwnerIdentity::generate();
     let (base_url, seen) = impostor(identity.instance_id().to_owned());
-    let descriptor = Descriptor::for_test(&identity, &base_url);
+    let descriptor = Descriptor::for_test(identity.identity(), identity.token(), &base_url);
 
     let error = verify(&descriptor).expect_err("the impostor cannot prove the instance");
     assert!(matches!(error, VerifyError::Identity(_)), "{error:?}");
@@ -101,10 +101,10 @@ fn the_real_server_proves_its_identity_and_accepts_the_owner_token() {
         "test",
         runtime.handle().clone(),
     );
-    options.owner = Some(identity.clone());
+    options.owner = Some(identity.identity().clone());
     let host = assemble(options).expect("assembly");
     let http = host.http.clone().expect("http started");
-    let descriptor = Descriptor::for_test(&identity, http.base_url());
+    let descriptor = Descriptor::for_test(identity.identity(), identity.token(), http.base_url());
 
     let verified = verify(&descriptor).expect("the real server proves its identity");
     assert_eq!(verified.instance_id, identity.instance_id());

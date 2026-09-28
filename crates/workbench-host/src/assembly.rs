@@ -89,6 +89,7 @@ pub fn assemble(options: HostOptions) -> Result<HostAssembly> {
                 },
                 drain_warn_after,
                 owner,
+                control: Some(runtime.server_control().clone()),
             },
             &spawner,
         ),

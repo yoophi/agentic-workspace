@@ -222,6 +222,48 @@ fn server_files_are_owner_only() {
     for file in ["server.json", "owner.lock", "startup.lock"] {
         assert_eq!(mode(server_dir(&data).join(file)), 0o600, "{file}");
     }
+    assert_eq!(
+        mode(server_dir(&data).join("server.log")),
+        0o600,
+        "server.log"
+    );
+}
+
+#[test]
+fn status_prints_the_live_server_state_and_blockers() {
+    let cleanup = Cleanup::default();
+    let dir = tempfile::tempdir().unwrap();
+    let data = fs::canonicalize(dir.path()).unwrap();
+    assert_eq!(ensure(&data).0, 0);
+    let descriptor = read_descriptor(&server_dir(&data)).unwrap().unwrap();
+    cleanup.track_server(descriptor.pid, &data);
+    let output = Command::new(BIN)
+        .args(["status", "--data-dir"])
+        .arg(&data)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    let body: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body["state"], "serving", "{body}");
+    assert!(body["activeWork"].is_object(), "{body}");
+    assert_eq!(body["instanceId"], descriptor.instance_id, "{body}");
+}
+
+#[test]
+fn serve_forces_a_preexisting_custom_log_to_owner_only() {
+    let cleanup = Cleanup::default();
+    let dir = tempfile::tempdir().unwrap();
+    let data = fs::canonicalize(dir.path()).unwrap();
+    let log = data.join("server.log");
+    fs::write(&log, b"old\n").unwrap();
+    fs::set_permissions(&log, fs::Permissions::from_mode(0o666)).unwrap();
+    let (mut child, _descriptor) = start_server(&cleanup, &data, &[]);
+    assert_eq!(
+        fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    assert_eq!(stop_cli(&data, &[]).0, 0);
+    assert_eq!(wait_exit(&mut child, "server with custom log to stop"), 0);
 }
 
 #[test]
@@ -521,6 +563,27 @@ fn new_work_is_refused_while_draining() {
     start_gated_run(&descriptor, &work, &gate);
     let drained = owner(&descriptor, "server.stop", json!({ "mode": "wait" }), true);
     assert_eq!(drained["state"], "drainingWait");
+    let (ready_status, ready) = workbench_host::lifecycle::client::request(
+        &descriptor.base_url,
+        "GET",
+        "/health/ready",
+        None,
+        Some(&descriptor.owner_token),
+    )
+    .unwrap();
+    assert_eq!(ready_status, 503, "{ready}");
+    assert_eq!(ready["ready"], false, "{ready}");
+    assert_eq!(ready["state"], "draining", "{ready}");
+    let (handshake_status, handshake) = workbench_host::lifecycle::client::request(
+        &descriptor.base_url,
+        "POST",
+        "/v1/system/handshake",
+        Some(&json!({ "supportedProtocolVersions": [1] })),
+        Some(&descriptor.owner_token),
+    )
+    .unwrap();
+    assert_eq!(handshake_status, 200, "{handshake}");
+    assert_eq!(handshake["state"], "draining", "{handshake}");
     let refused = call(
         &descriptor.base_url,
         &descriptor.owner_token,

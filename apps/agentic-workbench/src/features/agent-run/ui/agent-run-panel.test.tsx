@@ -22,6 +22,7 @@ import {
   MESSAGE_RESULT_UNKNOWN,
   setTransport,
 } from "@/shared/api/transport";
+import type { InvokeOptions } from "@/shared/api/transport";
 import {
   startCompatSimulatingServer,
   type CompatSimulatingServer,
@@ -644,9 +645,12 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
   let discardOutcome: string | undefined;
   /** Codex r12: 화면이 보낸 `send_prompt_to_run`의 호출 옵션(멱등성 키). */
   let sendOptions: Array<{ args: unknown; options: unknown }> = [];
+  /** HTTP 서버가 적용했지만 응답만 잃은 키. 같은 키의 성공 응답은 replay로 표시한다. */
+  let appliedSendKeys = new Set<string>();
 
   beforeEach(() => {
     sendOptions = [];
+    appliedSendKeys = new Set();
     cancelOutcome = undefined;
     beforeCancelReply = undefined;
     cancelGate = undefined;
@@ -655,7 +659,11 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     discardOutcome = undefined;
     setTransport({
       kind: "http",
-      invoke: async (command, args, options) => {
+      invoke: async <T,>(
+        command: string,
+        args?: Record<string, unknown>,
+        options?: InvokeOptions,
+      ): Promise<T> => {
         if (command === "send_prompt_to_run") {
           sendOptions.push({ args, options });
         }
@@ -667,7 +675,7 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
           await gate;
           if (thrown !== undefined) {
             // 기록은 남긴다(요청은 보냈다).
-            await compatTransport.invoke(command, args, options);
+            await compatTransport.invoke<T>(command, args, options);
             throw thrown;
           }
         }
@@ -685,7 +693,19 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
           await beforeCancelReply?.();
           throw thrown;
         }
-        return compatTransport.invoke(command, args, options);
+        try {
+          const result = await compatTransport.invoke<T>(command, args, options);
+          if (command === "send_prompt_to_run") {
+            const key = options?.idempotencyKey;
+            options?.onReply?.({ replayed: Boolean(key && appliedSendKeys.has(key)) });
+          }
+          return result;
+        } catch (error) {
+          if (command === "send_prompt_to_run" && error === MESSAGE_RESULT_UNKNOWN && options?.idempotencyKey) {
+            appliedSendKeys.add(options.idempotencyKey);
+          }
+          throw error;
+        }
       },
       listen: (event, callback) => compatTransport.listen(event, callback),
     });
@@ -1131,9 +1151,8 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 2);
   });
 
-  // Codex r12(apps medium): 전송이 서버에 적용돼 그 turn(`promptSent`→`promptCompleted`)까지 관측됐는데 호출 결과가 unknown으로
-  // 끝났다. 같은 키로 다시 보내면 서버는 저장된 결과만 재생해 새 lifecycle 이벤트가 없다 — 응답 대기가 영영 풀리지 않아 뒤 항목이
-  // 막힌다. 관측된 turn이 있으면 적용된 것으로 보고 다시 보내지 않는다.
+  // r13: 같은 run의 lifecycle은 특정 호출과 상관관계가 없다. unknown은 같은 멱등 키로 재시도하고, 서버가 저장 응답 재생임을
+  // 명시한 경우에만 새 실행이 아니라고 확정한다.
   function holdNextSend(matches: (args: Record<string, unknown> | undefined) => boolean, outcome: string) {
     const base = invokeMock.getMockImplementation();
     let armed = true;
@@ -1159,7 +1178,7 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     return { sent, release };
   }
 
-  it("an exchange delivery the server applied but answered unknown is not resent once its turn was seen (Codex r12)", async () => {
+  it("retries an unknown exchange with the same key even when another turn was seen", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     const send = holdNextSend(
       (args) => (args as { continuation?: { exchangeRequestId?: string } } | undefined)?.continuation?.exchangeRequestId === "x-7",
@@ -1181,10 +1200,14 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
       externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
     });
     await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
-    expect(deliveriesOf("x-7"), "the applied delivery is not replayed as a new turn").toHaveLength(1);
+    expect(deliveriesOf("x-7"), "the stored result is fetched with one same-key retry").toHaveLength(2);
+    const keys = sendOptions
+      .filter(({ args }) => (args as { continuation?: { exchangeRequestId?: string } }).continuation?.exchangeRequestId === "x-7")
+      .map(({ options }) => (options as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+    expect(keys).toEqual(["exchange-delivery:x-7", "exchange-delivery:x-7"]);
   });
 
-  it("a queued prompt the server applied but answered unknown is not resent once its turn was seen (Codex r12)", async () => {
+  it("retries an unknown ordinary queued prompt with its generated stable key", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     await act(async () => {
       queuedPromptButton(1, "제거")?.click();
@@ -1210,12 +1233,17 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     );
     expect(
       invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Follow-up work"),
-      "the applied prompt is not sent again",
-    ).toHaveLength(1);
+      "the stored result is fetched once",
+    ).toHaveLength(2);
+    const keys = sendOptions
+      .filter(({ args }) => (args as { prompt?: string }).prompt === "Follow-up work")
+      .map(({ options }) => (options as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+    expect(keys[0]).toMatch(/^prompt-send:/);
+    expect(keys[1]).toBe(keys[0]);
     expect(panel.container.textContent, "the applied prompt stays in the transcript").toContain("Follow-up work");
   });
 
-  it("a direct prompt the server applied but answered unknown is not put back into the composer once its turn was seen (Codex r12)", async () => {
+  it("does not let an unrelated same-run lifecycle resolve an unknown direct prompt", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     await act(async () => {
       queuedPromptButton(1, "제거")?.click();
@@ -1235,17 +1263,22 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
       send.release();
     });
 
-    await panel.rerender({
-      externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
-    });
-    await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
-    expect(panel.promptValue(), "the applied prompt is not offered for a duplicate send").not.toBe("Direct work");
+    expect(panel.promptValue(), "an uncorrelated event cannot clear the restored prompt").toBe("Direct work");
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Direct work").length === 2,
+    );
     expect(
       invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Direct work"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
+    const keys = sendOptions
+      .filter(({ args }) => (args as { prompt?: string }).prompt === "Direct work")
+      .map(({ options }) => (options as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+    expect(keys[0]).toMatch(/^prompt-send:/);
+    expect(keys[1]).toBe(keys[0]);
   });
 
-  it("a direct prompt answered unknown before its late turn is removed from the composer when that turn arrives (OCR r12)", async () => {
+  it("keeps an unknown direct prompt until the user explicitly retries the same key", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     await act(async () => {
       queuedPromptButton(1, "제거")?.click();
@@ -1269,14 +1302,15 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
     await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
 
+    expect(panel.promptValue(), "a late uncorrelated lifecycle does not mutate the composer").toBe("Late direct work");
+    await panel.pressPromptKey("Enter");
     await waitForAgentRunPanel(() => panel.promptValue() !== "Late direct work");
-    expect(panel.container.textContent, "the late applied prompt returns to the transcript").toContain("Late direct work");
     expect(
       invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Late direct work"),
-    ).toHaveLength(1);
+    ).toHaveLength(2);
   });
 
-  it("keeps a new draft while reconciling a direct prompt whose late turn follows unknown (OCR r12)", async () => {
+  it("keeps a new draft and blocks it while an earlier direct result is unresolved", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     await act(async () => {
       queuedPromptButton(1, "제거")?.click();
@@ -1302,7 +1336,9 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
 
     expect(panel.promptValue(), "the user-edited draft survives the late lifecycle").toBe("Keep this new draft");
-    expect(panel.container.textContent, "the applied original prompt returns to the transcript").toContain("Late direct work");
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Keep this new draft"),
+    ).toEqual([]);
   });
 
   it("ignores an old run's late direct-prompt turn after a replacement run has started (OCR r12)", async () => {

@@ -54,9 +54,9 @@
 
 - **Decision**:
   - **자격 증명을 보내기 전에 서버 신원부터 확인한다(설계 리뷰 D1)**: 안내 파일이 남아 있고 원래 서버가 죽었다면, 그 포트를 다른 프로세스가 차지하고 있을 수 있다. 확인 없이 소유자 자격 증명을 보내면 그 프로세스에 자격 증명이 새어 나간다.
-    - 인증 없는 `POST /v1/system/identify {nonce}` → `{instanceId, proof}`. `proof`는 `hex(HMAC-SHA256(key = ownerToken 문자열의 UTF-8 바이트, msg = nonce + "\n" + instanceId))`다(고정 벡터는 contracts/server-lifecycle.md §3).
+    - 인증 없는 `POST /v1/system/identify {nonce}` → `{instanceId, proof}`. `proof`는 `hex(HMAC-SHA256(key = SHA256(ownerToken 문자열의 UTF-8 바이트), msg = nonce + "\n" + instanceId))`다. 서버는 안내 파일을 쓴 뒤 원문 bearer를 버리고 digest만 보관한다(고정 벡터는 contracts/server-lifecycle.md §3).
     - 클라이언트는 안내 파일의 `ownerToken`으로 `proof`를 검증한다. 맞을 때만 bearer로 소유자 자격 증명을 보낸다.
-    - 서버는 `ownerToken`을 알기 때문에 증명을 만들 수 있다. 자격 증명 자체는 오가지 않는다.
+    - 서버는 `SHA256(ownerToken)`을 보관하므로 증명을 만들 수 있다. 자격 증명 자체는 identify 요청·응답에 오가지 않는다.
   - 클라이언트 `ensure(data_dir, exe)`:
     1. `startup.lock` 획득(상한 대기, 기본 20초).
     2. `server.json`이 있으면 `identify`로 신원을 증명받은 뒤에만 버전 확인과 **소유자 인증 상태 조회**를 한다. 인스턴스 식별자가 일치하고 준비 상태이면 붙는다.

@@ -305,7 +305,11 @@ fn owner_check_script_sends_no_owner_token_to_an_impostor_endpoint() {
     let identity = OwnerIdentity::generate();
     write_descriptor(
         &server_dir,
-        &Descriptor::for_test(&identity, &format!("http://{address}")),
+        &Descriptor::for_test(
+            identity.identity(),
+            identity.token(),
+            &format!("http://{address}"),
+        ),
     )
     .unwrap();
 

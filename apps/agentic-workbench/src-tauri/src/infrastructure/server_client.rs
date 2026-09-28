@@ -20,8 +20,8 @@ use std::{
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, Notify};
 use workbench_host::lifecycle::{
-    calls::{CallError, call},
-    client::verify,
+    calls::{CallError, call, call_with_idempotency_key},
+    client::{verify, verify_instance},
     descriptor::{Descriptor, descriptor_path, read_descriptor},
     ensure::{EnsureOptions, ensure},
     lock::server_dir,
@@ -132,6 +132,9 @@ pub struct ExternalServer {
     /// 응답만 버리고 전송 오류로 만든다(응답 유실·시간 초과와 같은 모양).
     #[cfg(test)]
     drop_next_response: std::sync::Mutex<Option<&'static str>>,
+    /// 시험 전용: 다음 operation을 서버에 보내기 전에 전송 실패시킨다.
+    #[cfg(test)]
+    fail_next_before_send: std::sync::Mutex<Option<&'static str>>,
 }
 
 impl ExternalServer {
@@ -148,6 +151,8 @@ impl ExternalServer {
             settled: Notify::new(),
             #[cfg(test)]
             drop_next_response: std::sync::Mutex::new(None),
+            #[cfg(test)]
+            fail_next_before_send: std::sync::Mutex::new(None),
         })
     }
 
@@ -301,7 +306,7 @@ impl ExternalServer {
                     if descriptor.instance_id != instance {
                         return false;
                     }
-                    if verify(&descriptor).is_ok() {
+                    if verify_instance(&descriptor).is_ok() {
                         return true;
                     }
                 }
@@ -356,10 +361,68 @@ impl ExternalServer {
         result
     }
 
+    async fn owner_command_with_key(
+        &self,
+        descriptor: &Descriptor,
+        operation: &'static str,
+        input: Value,
+        idempotency_key: String,
+    ) -> Result<Value, CallError> {
+        #[cfg(test)]
+        {
+            let mut fail = self.fail_next_before_send.lock().unwrap();
+            if *fail == Some(operation) {
+                *fail = None;
+                return Err(CallError::Transport(format!(
+                    "injected: the {operation} request did not reach the server"
+                )));
+            }
+        }
+        let base = descriptor.base_url.clone();
+        let token = descriptor.owner_token.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            call_with_idempotency_key(&base, &token, None, operation, input, &idempotency_key)
+        })
+        .await
+        .map_err(|error| CallError::Transport(error.to_string()))?;
+        #[cfg(test)]
+        {
+            let mut drop = self.drop_next_response.lock().unwrap();
+            if *drop == Some(operation) {
+                *drop = None;
+                return Err(CallError::Transport(format!(
+                    "injected: the {operation} response was lost"
+                )));
+            }
+        }
+        result
+    }
+
+    async fn owner_call_with_key_if(
+        &self,
+        descriptor: &Descriptor,
+        operation: &'static str,
+        input: Value,
+        idempotency_key: Option<String>,
+    ) -> Result<Value, CallError> {
+        match idempotency_key {
+            Some(key) => {
+                self.owner_command_with_key(descriptor, operation, input, key)
+                    .await
+            }
+            None => self.owner_call(descriptor, operation, input, false).await,
+        }
+    }
+
     /// 시험 전용: `operation`의 다음 응답 하나를 잃게 한다.
     #[cfg(test)]
     fn drop_next_response_of(&self, operation: &'static str) {
         *self.drop_next_response.lock().unwrap() = Some(operation);
+    }
+
+    #[cfg(test)]
+    fn fail_next_before_send_of(&self, operation: &'static str) {
+        *self.fail_next_before_send.lock().unwrap() = Some(operation);
     }
 
     #[cfg(test)]
@@ -377,8 +440,14 @@ impl ExternalServer {
         command: bool,
     ) -> Result<(Descriptor, Value), String> {
         let descriptor = self.connect().await?;
+        let idempotency_key = command.then(|| format!("desktop_{}", uuid::Uuid::new_v4().simple()));
         match self
-            .owner_call(&descriptor, operation, input.clone(), command)
+            .owner_call_with_key_if(
+                &descriptor,
+                operation,
+                input.clone(),
+                idempotency_key.clone(),
+            )
             .await
         {
             Ok(output) => Ok((descriptor, output)),
@@ -388,7 +457,7 @@ impl ExternalServer {
                 eprintln!(
                     "[workbench-server] {operation} failed on a live instance (retrying once): {error}"
                 );
-                self.owner_call(&descriptor, operation, input, command)
+                self.owner_call_with_key_if(&descriptor, operation, input, idempotency_key.clone())
                     .await
                     .map(|output| (descriptor, output))
                     .map_err(|error| error.to_string())
@@ -396,7 +465,7 @@ impl ExternalServer {
             Err(CallError::Transport(_)) => {
                 self.forget(&descriptor.instance_id).await;
                 let descriptor = self.connect().await?;
-                self.owner_call(&descriptor, operation, input, command)
+                self.owner_call_with_key_if(&descriptor, operation, input, idempotency_key)
                     .await
                     .map(|output| (descriptor, output))
                     .map_err(|error| error.to_string())
@@ -515,14 +584,31 @@ impl ExternalServer {
         incarnation: &str,
         close_bench: bool,
     ) -> Result<Value, String> {
-        self.owner_call(
-            descriptor,
-            "desktop.retireWindow",
-            json!({ "label": label, "incarnation": incarnation, "closeBench": close_bench }),
-            true,
-        )
-        .await
-        .map_err(|error| error.to_string())
+        let input =
+            json!({ "label": label, "incarnation": incarnation, "closeBench": close_bench });
+        let key = format!("retire-window:{label}:{incarnation}:{close_bench}");
+        match self
+            .owner_command_with_key(
+                descriptor,
+                "desktop.retireWindow",
+                input.clone(),
+                key.clone(),
+            )
+            .await
+        {
+            Ok(output) => Ok(output),
+            Err(CallError::Transport(error))
+                if self.instance_is_live(&descriptor.instance_id).await =>
+            {
+                eprintln!(
+                    "[workbench-server] desktop.retireWindow failed on a live instance (retrying same key): {error}"
+                );
+                self.owner_command_with_key(descriptor, "desktop.retireWindow", input, key)
+                    .await
+                    .map_err(|error| error.to_string())
+            }
+            Err(error) => Err(error.to_string()),
+        }
     }
 
     /// 연결을 잃은 뒤 떠 있는 서버에 다시 붙는다(창 폐기용). 서버를 띄우지 않는다: 붙은 적이 없거나 종료 중이면, 또는
@@ -685,11 +771,12 @@ mod tests {
             "test",
             runtime.handle().clone(),
         );
-        options.owner = Some(identity.clone());
+        options.owner = Some(identity.identity().clone());
         let host = assemble(options).unwrap();
         let descriptor = Descriptor::for_endpoint(
             "server",
             &identity,
+            identity.token(),
             host.runtime.epoch(),
             host.http.as_ref().unwrap().base_url(),
             "test",
@@ -778,6 +865,97 @@ mod tests {
                 status["leases"],
                 json!(0),
                 "exit released the lease: {status}"
+            );
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    #[test]
+    fn a_lost_retire_response_is_retried_with_the_same_idempotency_key() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let bench = client
+                .open_bench("session-retry", "i1", ORIGIN, &server.work)
+                .await
+                .unwrap();
+            client.drop_next_response_of("desktop.retireWindow");
+            let replay = client
+                .retire_window("session-retry", "i1", true)
+                .await
+                .expect("same-key retry returns the stored result");
+            assert_eq!(replay["closedBenches"], json!([bench]), "{replay}");
+            assert_eq!(client.pending_retirements(), 0);
+            assert!(
+                client
+                    .issue_window_token("session-retry", "i1", ORIGIN)
+                    .await
+                    .is_err(),
+                "the retired subject stays retired"
+            );
+            let listed = call(
+                &descriptor.base_url,
+                &descriptor.owner_token,
+                None,
+                "bench.list",
+                json!({}),
+                false,
+            )
+            .unwrap();
+            assert!(!listed.to_string().contains(&bench), "{listed}");
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    #[test]
+    fn a_retire_that_did_not_reach_the_server_keeps_its_detached_intent_and_retries_on_the_same_instance()
+     {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let bench = client
+                .open_bench("session-not-applied", "i1", ORIGIN, &server.work)
+                .await
+                .unwrap();
+            client.fail_next_before_send_of("desktop.retireWindow");
+            client.retire_window_detached("session-not-applied".to_owned(), "i1".to_owned(), true);
+            client.release_for_exit(EXIT_FLUSH_LIMIT).await;
+            assert_eq!(client.pending_retirements(), 0);
+            let after = read_descriptor(&server_dir(&server.dir.path().join("data")))
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                after.instance_id, descriptor.instance_id,
+                "retirement retries the already verified instance instead of ensuring a new server"
+            );
+            assert_eq!(after.pid, descriptor.pid);
+            let listed = call(
+                &descriptor.base_url,
+                &descriptor.owner_token,
+                None,
+                "bench.list",
+                json!({}),
+                false,
+            )
+            .unwrap();
+            assert!(
+                !listed.to_string().contains(&bench),
+                "the preserved detached close intent eventually closes its bench: {listed}"
+            );
+            assert!(
+                client
+                    .issue_window_token("session-not-applied", "i1", ORIGIN)
+                    .await
+                    .is_err(),
+                "the retried retirement sets the subject tombstone"
             );
         });
         server.runtime.block_on(server.host.shutdown());

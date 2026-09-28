@@ -37,20 +37,7 @@ export type QueuedPrompt = {
   /** 교환 항목이 속한 run(Codex r11): 대기열에 들어올 때의 활성 run. 교환은 그 run이 대상이라 다른 run의 대기열에 들어가지
    *  않는다(서버가 다른 run으로의 전달을 거절한다). 활성 run 없이 들어온 교환은 비어 있다(묶인 run 없음). */
   exchangeRunId?: string;
-  /** 결과를 모르는(unknown) 앞 전송(Codex r12): 그 전송을 보낸 run과, 보낼 때까지 그 run에서 관측한 `promptSent` 수. 다시
-   *  보내기 전에 그 run의 `promptSent`가 늘었으면 앞 전송이 적용된 것이다 — 같은 키 재전송은 서버가 저장된 결과만 재생해 새 turn
-   *  이벤트가 없으므로 보내지 않는다. */
-  unsettledDispatch?: { runId: string; promptSentBefore: number };
 };
-
-/** 결과를 모르는 앞 전송이 그 뒤 관측된 turn으로 적용됐다고 판단되는가(Codex r12). `promptSentCount`는 run별 관측 수다. */
-export function unsettledDispatchWasApplied(
-  queuedPrompt: QueuedPrompt,
-  promptSentCount: (runId: string) => number,
-): boolean {
-  const dispatch = queuedPrompt.unsettledDispatch;
-  return dispatch !== undefined && promptSentCount(dispatch.runId) > dispatch.promptSentBefore;
-}
 
 export type QueuedPromptSource =
   | "first-run"

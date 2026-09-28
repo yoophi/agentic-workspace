@@ -6,7 +6,7 @@
 
 | 기준 | 044에서 완료(근거) | 후속 미완료 |
 |---|---|---|
-| (a) 종료 뒤 지속 | 앱 종료(Cmd+Q·Dock·AppleScript·SIGTERM) 뒤 앱 PID 소멸 → **진행 중 turn이 서버에서 이어져 새 출력·완료를 낸다**(`busyRuns=1`, 새 prompt 없이 live), 소유자 클라이언트로 같은 run 조회·취소, 개발·배포 출처(`app-smoke.md` T045 "진행 중 turn 지속"). 서버가 시작한 turn·대기열 prompt·orchestration 알림을 끝까지 실행(`wait_stop.rs`) | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
+| (a) 종료 뒤 지속 | **미완료(SC-001)** — 과거 개발·배포 스모크는 있으나 현재 fail-closed 판정 규칙과 최종 코드 tree에서 모든 종료 경로를 다시 실행하지 않았다. 최종 앱 스모크 전에는 완료로 세지 않는다 | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
 | (b) 독립 composition root | `crates/workbench-host` 조립 + `apps/agentic-workbench-server`, MCP·launch decorator의 Tauri 결합 제거, 네이티브 삽입 전달 제거 | — |
 | (c) 단일 writer·생명주기 | 잠금·안내 파일·identify HMAC·ensure·시작 복구·서빙→비우기→정지·임대·유휴·정지 세 방식, 프로세스 시험(동시 10회, kill -9 복구, 권한), 연결 실패 화면(T047) | — |
 | (d) 프로세스 트리 가두기 | 서버 종료 때 자식 정리는 오늘 수준 유지 | 공통 감독자, 플랫폼별 트리 가두기, 강제 종료 뒤 잔여 자식 회수 |
@@ -19,6 +19,8 @@
 - (b2) 자동화한 Cmd+W 한 번이 두 창을 닫는 원인, 그리고 사람이 누른 Cmd+W의 동작.
 - OS 프로세스 재시작 뒤 보류 task 재배정(host 재조립 수준만 검증).
 - embedded 모드와 compat command 제거(8단계).
+
+현재 044 차단 항목: **SC-006/T046 미완료**. 자동화한 Cmd+W 한 번이 Settings뿐 아니라 main 창과 그 run까지 닫는 실제 개발·배포 스모크 실패가 남아 있다. 원인을 수정하고 두 창 회귀 시험 및 최종 앱 스모크를 통과하기 전에는 044를 merge하지 않는다.
 
 ## 구현 리뷰 범위 (T053)
 
@@ -371,9 +373,43 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 #### OCR 12차 (`7ba92ba..fd4776f`)
 
 - `ocr delegate preview --format json`이 17개 변경 파일 중 9개를 reviewable로, 8개를 excluded로 분류했다. reviewable 9개 전부에 `ocr delegate rule`을 적용하고 diff와 호출 경로를 검토했다(9/9, coverage 100%, skipped 0). verdict는 **needs-attention**이다.
-- 최초 지적은 queued exchange와 직접 prompt를 함께 High로 분류했다. queued exchange 부분은 **오탐으로 기각**했다. 기존 시험 `an exchange delivery answered unknown before any turn was seen is retried with the same key`가 unknown 뒤 같은 멱등 키 재시도와 늦은 원래 lifecycle 정리를 이미 검증하며, 이는 계약의 의도된 복구 절차다.
+- 최초 지적은 queued exchange와 직접 prompt를 함께 High로 분류했다. queued exchange의 **같은 키 재시도 계약 자체**는 기존 시험 `an exchange delivery answered unknown before any turn was seen is retried with the same key`로 유효했다. 다만 당시 적용한 run-wide `promptSent` 관측 상관은 r13에서 별도의 유효한 High 결함으로 판정됐다. 최종 구현은 lifecycle 횟수 추정을 제거하고 모든 prompt에 stable idempotency key를 부여하며, HTTP replay 표지로 확정한다.
 - **Medium — 직접 prompt의 unknown 응답 뒤 늦은 `promptSent`를 조정하지 않아 중복 전송 가능**(`agent-run-panel.tsx`): 직접 prompt에는 멱등 키가 없다. HTTP unknown이 먼저 오면 패널은 입력을 복원하고 낙관적 transcript를 제거했지만, 뒤늦은 `promptSent`는 그 상태를 고치지 않았다. 사용자가 복원된 입력을 다시 보내면 같은 prompt가 두 번 적용될 수 있다.
-- **반영**: run·prompt text·전송 전 `promptSent` 수를 unsettled 상태로 남긴다. 같은 run의 늦은 `promptSent`가 오면 사용자가 입력을 바꾸지 않은 경우에만 composer를 비우고 transcript·history를 적용 상태로 복원한다. 그 사이 편집한 새 초안은 보존한다. 미확정 동안에는 다음 prompt·steer를 보내지 않아 다른 turn을 앞 전송의 결과로 오인하지 않는다.
-- **lifecycle이 오지 않는 경우의 복구**: 시간 경과만으로 적용 여부를 추정하거나 직접 prompt를 재전송하지 않는다. `Cancel`은 계속 사용할 수 있다. 취소 결과도 unknown이면 run과 미확정 표지를 유지해 사용자가 다시 취소할 수 있고, 취소가 확정되면 표지를 지운다. 그 뒤 replacement run을 시작하고 prompt를 보낼 수 있다. old run의 늦은 이벤트는 active run ID 검사로 새 run의 composer에 닿지 않는다. run 오류·종료도 표지를 지운다.
-- 회귀 시험 3개는 (1) 적용 → HTTP unknown → 늦은 `promptSent` 조정, (2) 늦은 이벤트 전 새 초안 보존·후속 전송 차단, (3) lifecycle 없음 → Cancel unknown → 재시도 성공 → replacement run 시작·old 이벤트 격리·새 run 전송을 검증한다. 새 시험 red(기존 코드) → green(패널 60/60). 늦은 조정 조건 반전, composer 무조건 비우기, 확정 취소 때 표지 미제거의 세 변이가 각각 해당 시험에서 red였고 복원 뒤 OCR 시험 3/3 green이다.
+- **당시 반영 후 r13에서 교체**: OCR12 직후에는 run·prompt text·전송 전 `promptSent` 수를 unsettled 상태로 남겼고 패널 60/60을 통과했다. 사용자가 늦은 이벤트 전에 편집한 새 초안과 replacement run 격리 시험도 통과했다. 그러나 같은 run의 다른 송신을 구별하지 못하므로 이 방식은 최종 근거가 아니다.
+- **최종 복구 계약**: 직접 prompt도 `prompt-send:<uuid>` stable key를 가진다. unknown이면 같은 원문만 같은 키로 재시도할 수 있고, 편집한 새 초안은 보존하되 중복 위험 때문에 전송하지 않는다. 사용자는 `Cancel`로 복구할 수 있다. 시간 경과나 uncorrelated lifecycle로 적용 여부를 추정하지 않는다. 응답의 `replayed`가 확정 적용을 구별하고, old run의 늦은 이벤트는 새 run composer에 닿지 않는다. 최종 패널 시험 60/60은 r13 표 C12에 기록한다.
 - OCR excluded 8개는 `run-panel-state.test.ts`, `agent-run-panel.test.tsx`, 044 계약·research·review·tasks 문서다. 이 분류를 reviewable coverage에 섞지 않았고, 최종 Codex 네 파티션에는 모두 포함한다.
+
+### Codex r13 네 파티션과 18건 정본
+
+- 순서: OCR12 결과와 반영을 먼저 기록한 뒤, 같은 코드 tree `b87f356`에서 Codex r13을 실행했다. core-src, crates-rest, apps·packages·root, specs·docs의 **4/4 모두 `needs-attention`**이었다. 보고는 High 12건·Medium 6건, 합계 18건이며 문서 파티션 5건을 포함한다.
+- 범위: 임시 ref의 실제 비교는 `refs/review/044-r13-baseN..refs/review/044-r13-headN`이며 파티션별 31 / 78 / 57 / 228개다. 합집합 394개, 중복 0이고 이는 044 전체 구현 baseline `cb0bd4c`(043 stage 4 merge)..`b87f356`의 394개와 정확히 같다. `7ba92ba..b87f356` 직접 delta는 17개이므로 전체 범위 근거로 쓰지 않는다. `.specify/feature.json`은 3번 apps·packages·root 파티션에 포함했다. 네 head의 tree는 모두 `0eaf5835bf3780d64f4d583e2cd9a918832e1f58`로 `b87f356` tree와 같고, 리뷰 중 checkout한 코드 tree를 바꾸지 않았다.
+- 아래의 “통과”는 실제 종료 코드 0과 1개 이상 실행된 시험만 적는다. “반영”은 코드·문서 편집 상태이며 최종 전체 gate나 실제 앱 스모크를 뜻하지 않는다.
+
+| # | 등급 | 유효성·지적 | 반영 파일(요약) | 실제 통과한 회귀시험 | 남은 검증 |
+|---|---|---|---|---|---|
+| C1 | High | **유효** — retire 뒤 window principal이 새 event 구독 가능 | `workbench_runtime.rs` | `events_reject_a_window_retired_after_authentication` 1/1; core lib 260/260(후속 scheduler 시점) | 최종 core/workspace gate |
+| C2 | High | **유효** — ACP 비동기 queue 실패가 handler 성공 뒤 유실 | `run_engine.rs`, `acp_run_engine.rs`, `run_service.rs`, exchange handler·시험 | production `AcpRunEngine` 경로 + fake Python ACP peer 시험: 장시간/queued turn에서 HTTP 호출은 turn 종료 전 반환, 뒤 RPC 실패 기록·같은 키 무중복·다음 교환 소비·wait-stop 해제 1/1 | 최종 exchange 전체 suite |
+| C3 | High | **유효** — reject와 delivery consume 경합, 첫 수정에는 stale Accepted snapshot 경합 잔존 | exchange handler, WorkGate rejection claim·성공 tombstone, test hook, `exchange_delivery_drain.rs` | suite 10/10: delivery 선점, **snapshot 뒤 pause→reject 저장 완료→delivery 재개**, 저장 실패 claim 해제; future abort claim 해제 단위 1/1. rejected는 모두 `exchange_consumed=false` | 최종 workspace gate |
+| C4 | High | **유효** — terminal child가 bind 전에 끝나 scheduler 용량 밖 worker가 생김 | orchestration service·scheduler·engine worker, `child_assign_atomic.rs` | terminal-before-bind 1/1; stale transfer 새 보유 뒤 회귀 1/1; core lib 260/260 | 최종 child integration 전체 suite |
+| C5 | High | **유효** — detached bench cleanup이 drain reservation보다 오래 생존 | `bench_service.rs`, `bench_close_race.rs` | caller 취소 뒤 close 완료·reservation 유지 1/1 | 최종 bench integration 전체 suite |
+| C6 | Medium | **유효** — window token·lease·retire epoch command가 키를 무시 | epoch idempotency, intent-first, server handler, protocol replay | owner epoch replay 3/3; client replay metadata 74/74 | 최종 protocol/core/client gate |
+| C7 | High | **유효** — drain 중 ready=true, handshake 상태 누락 | server info, handshake, health, lifecycle client, process 시험 | `new_work_is_refused_while_draining` 1/1. strict ready와 동일-instance liveness를 분리한 뒤 AW draining 재시도 2/2·AW lib 125/125 | 최종 server/process suite |
+| C8 | High | **유효** — run terminal·launch 실패·발급 직후 취소에서 MCP bearer 잔존 | terminal hook, launch decorator, 두 launch 경로의 `PendingLaunchRevocation`, orchestration 시험 | failed main launch·normal terminal targeted 1/1; **발급 뒤 future 취소 롤백** 1/1 | host/core 전체 suite에서 재확인 |
+| C9 | Medium | **유효** — server host가 all-scope owner bearer 원문을 장기 보관 | `identity.rs`, descriptor/server, embedded ownership, identify client·계약·smoke helper | digest HMAC 고정 벡터 포함 identity 4/4; real/impostor identify 2/2 | host 전체 suite·실제 owner smoke |
+| C10 | Medium | **유효** — custom `--log`가 0600을 강제하지 않음 | lifecycle server log, process 시험 | 기존 permissive custom log를 0600으로 고침 1/1 | default log 포함 process 전체 suite |
+| C11 | High | **유효** — retire 1회 실패 뒤 local mapping·재시도 정보 유실 | server client lifecycle call/idempotency, retire 시험 | (a) 서버 적용·응답 유실 후 같은 키 replay 1/1, (b) **최초 요청이 서버 미도달** 후 mapping 보존·같은 검증 instance 재시도 1/1; 둘 다 bench 종료·tombstone·pending 0 | 실제 앱 창 폐기 smoke |
+| C12 | High | **유효** — 같은 run의 unrelated `promptSent`로 unknown 송신 오판 | panel, HTTP transport, client/protocol `replayed`, UI 시험 | 패널 60/60: 늦은 이벤트 전 편집 초안 보존, unrelated same-run·old-run 이벤트 격리, 같은 stable key 재시도/Cancel 복구 | 최종 frontend gate·실제 앱 prompt smoke |
+| C13 | Medium | **유효** — `status` CLI가 `server.status`를 호출하지 않음 | server CLI, process 시험 | status가 실제 status payload를 출력 1/1 | process 전체 suite |
+| C14 | High | **유효, 미입증** — Cmd+W Settings 한 번이 main/run까지 닫음 | 중복 native Close menu 제거(`src-tauri/lib.rs`), 기존 이중-close 단위 가정 제거 | 코드 반영만 완료 | **development·release 실제 앱 b2 smoke 필수** |
+| C15 | High | **유효** — gate-16은 최종 tree 이전이라 ship 근거 아님 | `tasks.md`, 이 문서 | 해당 없음 | final tree에서 `CARGO_INCREMENTAL=0` 전체 gate |
+| C16 | Medium | **유효** — T045/SC-001 등 완료 표지가 실제 smoke보다 앞섬 | `spec.md`, `tasks.md`, app-smoke 문서 | 완료 표지를 미완료로 되돌림 | T045/T046/SC-001/SC-006/T052는 실제 앱 smoke·최종 gate 뒤에만 완료 |
+| C17 | Medium | **유효** — FR-014가 구현과 다른 server-side incarnation 등록을 요구 | `spec.md`, research/contract | desktop 생성 incarnation + server token/tombstone 계약으로 정합화 | 최종 문서 교차검사 |
+| C18 | Medium | **유효** — 계약이 공개 `server:read` scope를 누락 | lifecycle contract, plan, data-model, spec | `server.status` 요구 scope와 owner 할당을 문서화 | 최종 문서 교차검사 |
+
+현재 결론은 **18건 모두 유효**다. C14–C16은 검증이 끝나지 않았고, 나머지도 표의 targeted 통과를 최종 전체 gate로 대체하지 않는다. 특히 owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다.
+
+#### 수정 중 전체 suite에서 발견한 회귀
+
+- `cargo test -p agentic-workbench --lib` 첫 실행은 123 passed / 2 failed였다. 실패는 C11 retire 시험이 아니라 `a_lost_token_response_from_a_draining_server_keeps_the_connection`, `a_lost_token_response_during_a_wait_stop_still_delivers_the_exchange_and_stops`였다.
+- 원인: C7에서 draining `/health/ready`를 올바르게 503으로 바꾼 뒤, 응답 유실 재시도의 `instance_is_live`도 신규 연결용 strict `verify()`를 써 동일한 살아 있는 draining instance를 죽은 것으로 오판했다. 시험의 server executable은 의도적으로 nonexistent라 잘못된 ensure가 `ENOENT`로 끝났다.
+- 수정: `verify_instance`는 identify proof + handshake의 instance/protocol/storage만 확인하고, 신규 연결용 `verify`는 이어서 ready=true를 요구한다. 기존 연결의 동일-instance 재시도만 전자를 쓴다. 두 실패를 각각 1/1 재실행한 뒤 AW lib 전체 **125/125, filtered 0**을 통과했다. 따라서 개별 retire 통과만을 C11 근거로 삼지 않는다.

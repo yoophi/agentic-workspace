@@ -221,7 +221,7 @@ fn ensure_against_a_dripping_endpoint_times_out_within_its_deadline_and_releases
     let identity = OwnerIdentity::generate();
     write_descriptor(
         &server_dir,
-        &Descriptor::for_test(&identity, &fake_endpoint(drip)),
+        &Descriptor::for_test(identity.identity(), identity.token(), &fake_endpoint(drip)),
     )
     .unwrap();
     let _owner = try_owner_lock(&data).unwrap().expect("owner lock");

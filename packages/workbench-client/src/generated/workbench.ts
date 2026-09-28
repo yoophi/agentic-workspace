@@ -376,6 +376,7 @@ export interface components {
             output: unknown;
             /** Format: int64 */
             revision?: number | null;
+            replayed?: boolean;
             /** @enum {string} */
             kind: "complete";
         } | {

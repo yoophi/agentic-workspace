@@ -277,6 +277,17 @@ pub async fn deliver_exchange(
     ) {
         return Err(precondition(MESSAGE_EXCHANGE_NOT_PENDING));
     }
+    #[cfg(feature = "test-hooks")]
+    {
+        let probe = services
+            .exchange_delivery_snapshot_probe
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(probe) = probe {
+            probe();
+        }
+    }
     let reservation = match &gate {
         Some(gate) => Some(
             gate.begin_exchange_delivery(bench_id, exchange_request_id, run_id)
@@ -286,6 +297,7 @@ pub async fn deliver_exchange(
                         MESSAGE_EXCHANGE_CONSUMED,
                         Outcome::NotApplied,
                     )),
+                    DeliveryRefused::RejectionClaimed => precondition(MESSAGE_EXCHANGE_NOT_PENDING),
                     DeliveryRefused::Stopping => WorkbenchFault::unavailable(
                         request_id.clone(),
                         crate::application::work_gate::MESSAGE_STOPPING,
@@ -299,9 +311,25 @@ pub async fn deliver_exchange(
         ),
         None => None,
     };
+    // HTTP 응답은 queue 등록 뒤 바로 돌려주되, production engine의 detached queue/RPC 실패도 소비 뒤 잃지 않는다.
+    // A-turn 예약은 engine task가 실제 turn 끝까지 쥐고, completion은 실패 표지만 기록한다.
+    let failed_gate = gate.clone();
+    let failed_bench = bench_id.to_owned();
+    let failed_exchange = exchange_request_id.to_owned();
     let result = services
         .engine
-        .queue_prompt(run_id, prompt, services.run_sink(bench_id))
+        .queue_prompt_with_completion(
+            run_id,
+            prompt,
+            services.run_sink(bench_id),
+            Box::new(move |result| {
+                if result.is_err() {
+                    if let Some(gate) = failed_gate {
+                        gate.record_failed_delivery(&failed_bench, &failed_exchange);
+                    }
+                }
+            }),
+        )
         .await;
     if result.is_err() {
         if let Some(gate) = &gate {
