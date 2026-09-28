@@ -148,6 +148,15 @@ pub struct GateClosed;
 
 pub const MESSAGE_STOPPING: &str = "server is stopping";
 
+/// 호출 입구 판정([`WorkGate::admit`])의 거절.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmitRefused {
+    /// 정지 중 — 어떤 호출도 받지 않는다.
+    Stopping,
+    /// 비우는 중 새 작업(N).
+    Draining,
+}
+
 #[derive(Default)]
 struct Inner {
     state: Option<GateState>,
@@ -262,6 +271,30 @@ impl WorkGate {
 
     pub fn is_stopping(&self) -> bool {
         self.state() == GateState::Stopping
+    }
+
+    /// 호출 입구(OCR 구현 리뷰): 정지·비우기 판정과 C-call 예약을 **G 한 번 아래에서** 한다. `new_work`는 비우기 분류
+    /// N, `reserve`는 이 호출이 C-call 예약을 쥐는지다. 받은 호출은 판정 순간부터 예약을 쥐므로, 뒤이은 비우기의 정지
+    /// 판정이 그 호출을 놓치지 않고, 서빙 중 판정을 통과한 새 작업이 비우기 안에서 예약 없이 도는 틈이 없다.
+    pub fn admit(
+        self: &Arc<Self>,
+        new_work: bool,
+        reserve: bool,
+    ) -> Result<Option<Reservation>, AdmitRefused> {
+        let mut inner = self.lock();
+        match inner.state() {
+            GateState::Stopping => return Err(AdmitRefused::Stopping),
+            GateState::Draining(_) if new_work => return Err(AdmitRefused::Draining),
+            _ => {}
+        }
+        if !reserve {
+            return Ok(None);
+        }
+        let id = inner.insert(ReservationKind::Call, None);
+        Ok(Some(Reservation {
+            gate: Arc::clone(self),
+            id,
+        }))
     }
 
     /// 예약을 만든다. `stopping`이면 실패한다.

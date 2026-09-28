@@ -19,7 +19,8 @@ use serde_json::{json, Value};
 use support::{command_request, uuid_key, TestRuntime};
 use workbench_core::application::{
     work_gate::{
-        DrainMode, GateEvent, GateState, LaunchCancel, LaunchState, ReservationKind, WorkGate,
+        AdmitRefused, DrainMode, GateEvent, GateState, LaunchCancel, LaunchState, ReservationKind,
+        WorkGate,
     },
     workbench_runtime::RuntimeAdapters,
 };
@@ -400,4 +401,38 @@ async fn the_runtime_reports_gate_state_and_active_work() {
         rt.runtime.server_state(),
         GateState::Draining(DrainMode::Wait)
     );
+}
+
+/// OCR 구현 리뷰(core 2): 호출 입구는 비우기·정지 판정과 C-call 예약을 **한 잠금 G 아래에서** 한다. 입구 판정과 예약이
+/// 따로면 서빙 중 판정을 통과한 새 작업이 그 뒤 시작한 비우기 안에서 예약·실행된다.
+#[test]
+fn admission_checks_the_drain_and_reserves_the_call_under_one_lock() {
+    let gate = WorkGate::new();
+    // 서빙 중 받은 새 작업은 받는 순간 예약을 쥔다 — 뒤이은 비우기의 정지 판정이 그 호출을 놓치지 않는다.
+    let admitted = gate
+        .admit(true, true)
+        .expect("serving admits new work")
+        .expect("a call reservation");
+    gate.begin_drain(DrainMode::Wait);
+    assert!(
+        !gate.try_stop(|| 0),
+        "an admission made before the drain holds its reservation"
+    );
+    // 비우기 중: 새 작업은 거절(예약 없음), 그 밖은 예약과 함께 받는다.
+    assert_eq!(gate.admit(true, true).err(), Some(AdmitRefused::Draining));
+    assert_eq!(
+        gate.reservation_total(),
+        1,
+        "a refused admission reserves nothing"
+    );
+    let control = gate
+        .admit(false, true)
+        .expect("control passes while draining");
+    assert!(control.is_some());
+    assert!(gate.admit(false, false).expect("query").is_none());
+    drop((admitted, control));
+    assert!(gate.try_stop(|| 0));
+    // 정지 중: 모두 거절.
+    assert_eq!(gate.admit(false, false).err(), Some(AdmitRefused::Stopping));
+    assert_eq!(gate.admit(true, true).err(), Some(AdmitRefused::Stopping));
 }
