@@ -749,6 +749,14 @@ export interface components {
             /** @enum {string} */
             kind: "complete";
             /** @enum {string} */
+            operation: "exchange.discardDelivery";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
             operation: "exchange.list";
             output: components["schemas"]["AgentExchangeDto"][];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
@@ -1674,6 +1682,18 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "exchange.discardDelivery";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeDiscardDeliveryInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "exchange.list";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["ExchangeListInput"];
@@ -2521,6 +2541,14 @@ export interface components {
         ExchangeAcknowledgeInput: {
             benchId: string;
             request: components["schemas"]["AgentExchangeAckRequestDto"];
+        };
+        /**
+         * @description 화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7). 이미 확인(`delivered`)했지만 run에 보내지 않은 교환을 소비된
+         *     것으로 표시해 활동 작업에서 빼고, 이후 같은 교환의 전달은 거절된다. 이미 전달·포기된 교환이면 효과 없이 성공한다.
+         */
+        ExchangeDiscardDeliveryInput: {
+            benchId: string;
+            requestId: string;
         };
         ExchangeGetForRunInput: {
             runId: string;

@@ -2739,6 +2739,36 @@
           },
           {
             "type": "object",
+            "title": "CallReply_exchange_discardDelivery",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "exchange.discardDelivery"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallReply_exchange_list",
             "required": [
               "kind",
@@ -5986,6 +6016,46 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_exchange_discardDelivery",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "exchange.discardDelivery"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ExchangeDiscardDeliveryInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_exchange_list",
             "required": [
               "protocolVersion",
@@ -8974,6 +9044,23 @@
           },
           "request": {
             "$ref": "#/components/schemas/AgentExchangeAckRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExchangeDiscardDeliveryInput": {
+        "type": "object",
+        "description": "화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7). 이미 확인(`delivered`)했지만 run에 보내지 않은 교환을 소비된\n것으로 표시해 활동 작업에서 빼고, 이후 같은 교환의 전달은 거절된다. 이미 전달·포기된 교환이면 효과 없이 성공한다.",
+        "required": [
+          "benchId",
+          "requestId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
           }
         },
         "additionalProperties": false

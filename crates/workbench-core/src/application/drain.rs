@@ -75,6 +75,7 @@ pub fn drain_class(operation: OperationId) -> DrainClass {
         | OperationId::DesktopIssueWindowToken
         | OperationId::DesktopRetireWindow
         | OperationId::ExchangeAcknowledge
+        | OperationId::ExchangeDiscardDelivery
         | OperationId::GoalRecordProgress
         | OperationId::LeaseAcquire
         | OperationId::LeaseRelease

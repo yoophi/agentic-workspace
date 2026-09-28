@@ -73,7 +73,7 @@ const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpe
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 93] = [
+pub const OPERATIONS: [OperationSpec; 94] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -128,6 +128,10 @@ pub const OPERATIONS: [OperationSpec; 93] = [
     epoch_command(OperationId::ExchangeSyncWorkspace, &[Scope::ExchangeWrite]),
     epoch_command(OperationId::ExchangeSend, &[Scope::ExchangeWrite]),
     epoch_command(OperationId::ExchangeAcknowledge, &[Scope::ExchangeWrite]),
+    epoch_command(
+        OperationId::ExchangeDiscardDelivery,
+        &[Scope::ExchangeWrite],
+    ),
     query(OperationId::ExchangeList, &[Scope::ExchangeRead]),
     query(OperationId::ExchangeListPeers, &[Scope::ExchangeRead]),
     epoch_command(OperationId::ExchangeSendFromRun, &[Scope::ExchangeWrite]),
@@ -438,6 +442,10 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::ExchangeAcknowledge => (
             exchange::ExchangeAcknowledgeInput::schema(),
             exchange::AgentExchangeDto::schema(),
+        ),
+        OperationId::ExchangeDiscardDelivery => (
+            exchange::ExchangeDiscardDeliveryInput::schema(),
+            EmptyOutput::schema(),
         ),
         OperationId::ExchangeList => (
             exchange::ExchangeListInput::schema(),

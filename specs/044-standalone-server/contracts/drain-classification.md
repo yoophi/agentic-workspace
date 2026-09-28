@@ -21,6 +21,7 @@
 | `bench.open` | command | N | 새 작업 또는 새 데이터 변경 |
 | `bench.requestTitle` | command | C | 실행 중 agent의 표현 요청(알림 발행만). 새 작업 없음 |
 | `exchange.acknowledge` | command | C | 이미 요청된 교환의 전달 확인(교환 종결) |
+| `exchange.discardDelivery` | command | C | 화면 대기열에서 지운 교환의 전달 포기(확인된 미소비 교환을 끝낸다) |
 | `exchange.getForRun` | query | Q | 조회 |
 | `exchange.list` | query | Q | 조회 |
 | `exchange.listPeers` | query | Q | 조회 |

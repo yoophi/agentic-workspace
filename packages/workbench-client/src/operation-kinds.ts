@@ -17,6 +17,7 @@ export const OPERATION_KINDS: Record<OperationId, OperationKind> = {
   "desktop.issueWindowToken": "command",
   "desktop.retireWindow": "command",
   "exchange.acknowledge": "command",
+  "exchange.discardDelivery": "command",
   "exchange.getForRun": "query",
   "exchange.list": "query",
   "exchange.listPeers": "query",

@@ -46,6 +46,14 @@
             "idempotencyScope": "epoch"
           },
           {
+            "id": "exchange.discardDelivery",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
             "id": "exchange.list",
             "kind": "query",
             "requiredScopes": [

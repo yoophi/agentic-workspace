@@ -613,6 +613,18 @@ impl WorkGate {
         ids
     }
 
+    /// 화면이 대기열에서 지운 교환의 전달 포기(Codex r7): 소비된 것으로 표시해 활동 작업에서 빼고 이후 전달을 막는다.
+    /// 닫힌 작업대의 기록은 만들지 않는다(닫기 뒤 늦은 포기가 기록을 되살리지 않게). 처음 표시했으면 true.
+    pub fn discard_exchange(&self, bench_id: &str, request_id: &str) -> bool {
+        let mut inner = self.lock();
+        if inner.closed_exchange_benches.contains(bench_id) {
+            return false;
+        }
+        inner
+            .consumed_exchanges
+            .insert(exchange_key(bench_id, request_id))
+    }
+
     pub fn exchange_consumed(&self, bench_id: &str, request_id: &str) -> bool {
         self.lock()
             .consumed_exchanges

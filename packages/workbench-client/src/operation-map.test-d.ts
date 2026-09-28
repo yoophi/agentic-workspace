@@ -76,6 +76,7 @@ test("operation ids are exactly the registered operations (037 + 038 + 040 + 044
     | "exchange.syncWorkspace"
     | "exchange.send"
     | "exchange.acknowledge"
+    | "exchange.discardDelivery"
     | "exchange.list"
     | "exchange.listPeers"
     | "exchange.sendFromRun"

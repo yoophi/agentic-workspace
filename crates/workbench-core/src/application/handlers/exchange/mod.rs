@@ -6,7 +6,7 @@ use std::sync::Arc;
 use workbench_protocol::{
     operations::exchange::{
         AgentExchangeDto, AgentPanelEndpointDto, AgentPeersDto, AgentWorkspaceSyncResponseDto,
-        ExchangeAcknowledgeInput, ExchangeGetForRunInput, ExchangeListInput,
+        ExchangeAcknowledgeInput, ExchangeDiscardDeliveryInput, ExchangeGetForRunInput, ExchangeListInput,
         ExchangeListPeersInput, ExchangeSendFromRunInput, ExchangeSendInput,
         ExchangeSyncWorkspaceInput,
     },
@@ -19,6 +19,7 @@ use crate::{
         handlers::epoch::{async_query_handler, epoch_handler, to_json, Scope},
         registry::Registry,
         run_dto::convert,
+        run_service::MESSAGE_EXCHANGE_NOT_FOUND,
     },
     domain::agent_exchange::{AgentExchange, AgentExchangeError, AgentWorkspaceSyncRequest},
 };
@@ -138,6 +139,37 @@ pub fn register(registry: &mut Registry, services: &Arc<BenchServices>) {
                     .await
                     .map_err(|error| exchange_fault(&ctx.request_id, error))?;
                 Ok(exchange_json(&exchange))
+            },
+        ),
+    );
+    registry.register(
+        OperationId::ExchangeDiscardDelivery,
+        epoch_handler(
+            OperationId::ExchangeDiscardDelivery,
+            services,
+            |input: &ExchangeDiscardDeliveryInput| Scope::Bench(input.bench_id.clone()),
+            |services, ctx, input: ExchangeDiscardDeliveryInput| async move {
+                // 화면 대기열에서 지운 교환(Codex r7): 확인했지만 run에 보내지 않은 교환의 전달을 포기한다. 이 작업대의
+                // 교환이어야 한다(요청 id는 작업대마다 겹칠 수 있다).
+                let bench = services.resolve(&ctx.request_id, &ctx.principal, &input.bench_id)?;
+                let known = services
+                    .exchange_service()
+                    .list_exchanges(&bench.id)
+                    .await
+                    .into_iter()
+                    .any(|exchange| exchange.request_id == input.request_id);
+                if !known {
+                    return Err(WorkbenchFault::new(
+                        FaultCode::NotFound,
+                        ctx.request_id.clone(),
+                        MESSAGE_EXCHANGE_NOT_FOUND,
+                    ));
+                }
+                // 이미 전달·포기된 교환이면 효과 없이 성공한다(멱등). 관문이 없는 조립(embedded)에는 셀 활동이 없다.
+                if let Some(gate) = services.work_gate() {
+                    gate.discard_exchange(&bench.id, &input.request_id);
+                }
+                Ok(serde_json::Value::Null)
             },
         ),
     );

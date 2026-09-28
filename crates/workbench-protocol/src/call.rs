@@ -108,6 +108,8 @@ pub enum OperationId {
     ExchangeSend,
     #[serde(rename = "exchange.acknowledge")]
     ExchangeAcknowledge,
+    #[serde(rename = "exchange.discardDelivery")]
+    ExchangeDiscardDelivery,
     #[serde(rename = "exchange.list")]
     ExchangeList,
     #[serde(rename = "exchange.listPeers")]
@@ -208,7 +210,7 @@ pub enum OperationId {
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 93] = [
+    pub const ALL: [OperationId; 94] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -254,6 +256,7 @@ impl OperationId {
         OperationId::ExchangeSyncWorkspace,
         OperationId::ExchangeSend,
         OperationId::ExchangeAcknowledge,
+        OperationId::ExchangeDiscardDelivery,
         OperationId::ExchangeList,
         OperationId::ExchangeListPeers,
         OperationId::ExchangeSendFromRun,
@@ -351,6 +354,7 @@ impl OperationId {
             OperationId::ExchangeSyncWorkspace => "exchange.syncWorkspace",
             OperationId::ExchangeSend => "exchange.send",
             OperationId::ExchangeAcknowledge => "exchange.acknowledge",
+            OperationId::ExchangeDiscardDelivery => "exchange.discardDelivery",
             OperationId::ExchangeList => "exchange.list",
             OperationId::ExchangeListPeers => "exchange.listPeers",
             OperationId::ExchangeSendFromRun => "exchange.sendFromRun",
