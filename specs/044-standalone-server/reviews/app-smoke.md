@@ -57,6 +57,7 @@
 | (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
 | (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
 
+- **(g) 송신 기록 한계(Codex r7 docs)**: 표의 모든 (g) 실행(`t045-*-g-*`)은 신원 확인·송신 결과 기록(`02831fe`·`c0afc54`) 전 스크립트로 돌았다. 앱 PID에 맨 `kill -TERM`을 보냈고 그 종료 코드는 기록하지 않았다(`kills.txt`에는 서버 정리만 있다). 앱은 신호 직전 probe 완료(`probe-status=done`) 상태였다. 따라서 이 실행들의 `path-exercised=yes`는 PID 소멸만 근거이며, 지금 규칙(`quit-action-sent=yes`와 PID 소멸을 모두 요구, 아니면 무효·종료 코드 5)으로 다시 판정한 증거가 아니다. 새 규칙은 모의 자기 시험(`selftest-signal.sh`, 최종 판정·종료 코드 포함 20개)으로만 검증했고, 실제 앱 (g) 재실행은 하지 않았다(후속).
 - 모든 실행: 종료 뒤 `busyRuns=1`. live 순번 `[9, 10]` = 9 `after-gate:<표지>` 출력, 10 완료. 취소 완료.
 - 무효 실행 기록: `t045-rel-d-busy-1`은 Dock 메뉴가 열리기 전에 누름이 가 `Invalid index`가 났다. 앱이 끝나지 않아 스크립트가 정확한 PID에 TERM을 보냈다. 그래서 (d) 증거가 아니다.
   - 이후 스크립트는 메뉴가 열릴 때까지 조건 대기한다(`dock-menu-open`).
