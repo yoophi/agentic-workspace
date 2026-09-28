@@ -175,3 +175,20 @@
 4. live server takeover와 다음 startup을 recovery owner로 설계했지만, keeper hard kill 뒤 durable v3 anchor로 escaped descendant를 실제 안전하게 재획득·정리할 수 있는지 입증되지 않았다.
 
 OCR/Codex 설계 리뷰는 nonce 상속 fixture만으로 전체 containment를 주장하지 않는지 검토해야 한다. 구현 task로 넘어가기 전 platform spike는 env 제거+exec, leader 조기 종료, new session/group, double-fork+reparent, control FD close, server hard kill, keeper hard kill, identity-check/signal 사이 PID-reuse 대조를 실제 macOS/Linux에서 실행해야 한다. public API와 권한 안에서 안전한 identity handle을 확보하지 못하면 해당 target은 fail-closed blocker이며 group kill 성공으로 대체하지 않는다.
+
+## R14. 실제 platform 결과와 배포 경계 재설계
+
+**Decision 상태**: T010은 통과하지 않았다. R3의 ordinary keeper+nonce는 빠른 group cleanup과 협력 child handshake에는 쓸 수 있지만 required containment boundary가 될 수 없다. macOS와 Linux 모두 env-clear+session escape descendant가 nonce inventory에서 사라졌고, keeper/server hard kill 뒤 같은 process identity로 생존했다. Windows Job Object 경로만 actual-target feasibility를 통과했다.
+
+**macOS 후보**: Endpoint Security descendant client를 가진 signed system extension 또는 entitlement-bearing broker가 fork/exec/exit event의 audit identity를 attempt tree에 연결하는 방안을 spike한다. Apple 문서상 descendant client는 전체 descendant subtree를 관측하고 root/TCC는 요구하지 않지만 `com.apple.developer.endpoint-security.client` entitlement가 필요하며 availability metadata는 macOS 27.0+다. 2026-09-28 현재 host macOS 15에서 쓸 수 있는 해법이 아니므로 현재 지원 범위를 충족하는 별도 API/배포 대안이 필요하다. entitlement 승인, release signing/installation, event loss·deadline, broker hard kill, next-start recovery와 audit-token exact signal이 모두 실제 artifact에서 성립해야 채택한다. ordinary app keeper만으로 fallback 성공을 반환하지 않는다.
+
+**Linux 후보**: AW server를 systemd service/scope 또는 D-Bus transient unit으로 시작하고 `Delegate=yes`인 cgroup v2 subtree를 attempt별 containment boundary로 쓴다. kernel 문서상 delegatee가 sub-hierarchy를 만들려면 명시적 delegation이 필요하다. CI runner의 unified hierarchy와 `cgroup.kill`은 존재했지만 현재 unit 아래 mkdir은 `EACCES(13)`였다. supported distro의 설치된 user/system unit에서 assign-before-exec, env-clear/double-fork membership, `cgroup.kill`, `cgroup.events populated=0`, daemon crash와 startup reconcile을 실행해야 한다. direct shell launch에서 delegation을 획득할 수 없으면 명시적 bootstrap 또는 fail-closed UX를 정의한다.
+
+**독립 후속 작업**: publication CAS/outbox, pure lifecycle reducer와 output policy는 OS containment adapter를 호출하지 않는 구조로 분리할 수 있다. 그러나 현재 T010 hard gate는 T011 이후 전체를 막는다. 설계 재리뷰가 gate를 “platform-neutral foundation 허용, production spawn/adopt/consumer migration 금지”로 바꿀 때만 해당 작업을 시작한다. 상위 AW standalone server 전환 범위와 세 target 지원 조건은 유지한다.
+
+**검증 출처(조회일 2026-09-28)**:
+
+- Apple Endpoint Security: <https://developer.apple.com/documentation/EndpointSecurity>
+- Apple descendant client Markdown metadata: <https://developer.apple.com/documentation/endpointsecurity/es_new_descendants_client%28_%3A_%3A%29.md>
+- Linux cgroup v2 delegation: <https://cdn.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html>
+- systemd `Delegate=`: <https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html>

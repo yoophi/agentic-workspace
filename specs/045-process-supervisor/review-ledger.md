@@ -29,3 +29,36 @@ OCR 자동 분류 coverage와 host 수동 설계 coverage를 합쳐서 100%라�
 - Windows: suspended create, Job assign/resume, breakaway denial, server crash kill-on-close를 실제 target에서 검증한다.
 - 어느 target도 문서상 설계나 nonce 상속 fixture만으로 PASS 처리하지 않는다.
 - prerequisite가 실패하면 전체 목표를 즉시 포기하거나 scope를 줄이지 않는다. 실패 target의 API/권한 근거와 대안을 새 설계 리뷰에 올리고 production consumer migration은 보류한다.
+
+## T010 실패와 설계 재검토 입력
+
+고정 증거는 CI run `36429844170`, HEAD `c3e292f91a39d522e38bfb1449c2d28c2d767324`이다. Windows는 명시적 `drop(job)` 시 미리 확보한 direct/descendant process handle의 bounded wait까지 실제 target에서 통과했다. 별도 owner/server hard-kill fixture는 아직 없으므로 Windows 전체 crash 계약 통과로 확대하지 않는다. macOS와 Linux job 자체는 exit 0이지만 required containment 판정은 실패다. macOS는 env-clear+new-session descendant가 nonce inventory에서 사라지고 ordinary parent가 arbitrary descendant audit token을 얻지 못했다. Linux는 pidfd가 exact known child signal을 보호했지만 env-clear descendant discovery를 제공하지 않았고, runner cgroup v2 subtree 생성은 `EACCES(13)`였다. PID 재사용을 실제 유발하는 identity-check/signal race fixture도 아직 없어 T005는 미완료다. 따라서 T010은 미완료이며 production consumer migration을 시작하지 않는다.
+
+### 검토할 배포 대안
+
+| 대안 | 충족하려는 불변식 | 배포/권한 비용 | 다음 결정 증거 |
+|---|---|---|---|
+| macOS 27+ Endpoint Security descendant client를 포함한 signed system extension/broker | fork/exec/exit 전체 subtree identity와 audit token을 env와 무관하게 유지 | Apple 승인 `com.apple.developer.endpoint-security.client`, system extension signing/activation, macOS 27+ 필요 | 실제 entitlement가 있는 release-shaped artifact에서 subtree event, env-clear/session/double-fork, broker/서버 crash recovery, exact signal을 검증 |
+| macOS ordinary app/keeper 유지 | 설치 비용 없음 | 현재 증거로 required containment 불충족 | 채택 불가. process group/nonce만으로 성공 처리하지 않음 |
+| Linux systemd service/scope의 delegated cgroup v2 | launch 전에 attempt cgroup을 만들고 모든 descendants를 kernel membership으로 유지, `cgroup.kill`/events로 quiescence 판정 | system/user unit 또는 D-Bus transient unit과 `Delegate=yes` 계약 필요; direct shell launch에는 delegation이 없을 수 있음 | supported distro의 release 설치 경로에서 unprivileged subtree create, assign-before-exec, env-clear/double-fork, daemon crash/startup recovery, direct launch fail-closed 검증 |
+| Linux privileged containment broker | systemd가 없거나 user delegation이 없는 배포에서 cgroup subtree 소유 | 별도 privileged service 설치·업데이트·auth surface | 지원 distro/container matrix와 최소 권한 threat review 뒤 판단 |
+
+Apple 문서는 Endpoint Security가 fork/exec 같은 process event를 제공하고 entitlement가 필요하다고 명시한다. 새 descendant-scoped client는 root/TCC 없이 전체 descendant subtree를 대상으로 하지만 availability metadata가 macOS 27.0+인 beta API라 현재 macOS 15 배포 해법으로 채택할 수 없다. Linux kernel cgroup v2 문서는 delegated subtree가 있어야 비권한 주체가 sub-hierarchy를 만들 수 있다고 정의하며, systemd `Delegate=`는 unit process에 그 하위 분할을 허용한다. 문서 가능성만으로 PASS 처리하지 않는다.
+
+공식 근거(조회일 2026-09-28):
+
+- Apple Endpoint Security: <https://developer.apple.com/documentation/EndpointSecurity>
+- Apple descendant client Markdown metadata (`macOS: 27.0.0 -`): <https://developer.apple.com/documentation/endpointsecurity/es_new_descendants_client%28_%3A_%3A%29.md>
+- Linux kernel cgroup v2 delegation: <https://cdn.kernel.org/doc/html/latest/admin-guide/cgroup-v2.html>
+- systemd resource control `Delegate=`: <https://www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html>
+
+### 후속 작업 의존성 판정
+
+| 작업군 | 현재 상태 | 근거 |
+|---|---|---|
+| target feasibility, 배포 spike, 문서/설계 리뷰 | 진행 가능 | production consumer를 바꾸지 않으며 T010을 통과시키기 위한 작업 |
+| pure lifecycle model, CAS/outbox, output policy의 isolated test/implementation | 설계상 분리 가능 후보 | OS spawn migration 없이 만들 수 있지만 현재 tasks의 hard gate가 T011 이후 전체를 막으므로 재리뷰 전 시작하지 않음 |
+| ACP/terminal/Git/helper production migration | 금지 | macOS/Linux capability unavailable에서 child를 안전하게 소유·복구할 수 없음 |
+| AW standalone server 전체 전환 | 계속 진행할 상위 목표 | 045 scope를 축소하거나 Windows-only 완료로 바꾸지 않음 |
+
+OCR delegate는 위 대안의 제품 배포 가능성, platform-neutral foundation의 gate 분리 가능성, fail-closed UX를 먼저 검토한다. 그 지적을 반영한 고정 tree만 Codex adversarial `--wait`에 넘긴다.

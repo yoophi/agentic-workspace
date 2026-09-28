@@ -54,16 +54,33 @@ cargo test -p process-supervisor --test platform_feasibility -- --nocapture
 - negative fixtures는 aliased `Command`, 동일 파일의 추가 constructor, `#[cfg(test)]` 뒤 production constructor를 각각 검출한다.
 - 현재 ServerOwned direct spawn은 baseline으로 별도 출력되며, 최종 migration gate에서는 `--enforce-supervised`로 0을 요구한다.
 
-## Linux / Windows
+## Actual-target CI
+
+- run: `36429844170`
+- exact HEAD: `c3e292f91a39d522e38bfb1449c2d28c2d767324`
+- macOS job `108953038337`: strict Clippy exit 0; parser 1, platform feasibility 10, inventory 2 passed; 각 suite filtered 0; job exit 0
+- Linux job `108953038084`: strict Clippy exit 0; platform feasibility 9, inventory 2 passed; 각 suite filtered 0; job exit 0
+- Windows job `108953037849`: strict Clippy exit 0; inventory 2, Windows feasibility 2 passed; 각 suite filtered 0; job exit 0
+
+0-test fixture binary harness는 compile 확인일 뿐 위 passed 수에 합산하지 않는다. 이 matrix 성공은 spike가 관측과 실패 경계를 예상대로 기록했다는 의미이며 세 target containment가 모두 성립했다는 뜻이 아니다. 전체 `validate` job은 이 문서 갱신 시점에 진행 중이므로 전체 gate 근거로 사용하지 않는다.
+
+## Linux
+
+- same-UID `/proc/<pid>/environ` marker 관측과 env-clear 후 marker 소실을 실제 runner에서 확인했다.
+- `pidfd_open`으로 exact known child handle을 확보하고 `pidfd_send_signal` 뒤 2초 안에 wait 및 원 start identity 소실을 확인했다.
+- unified cgroup v2와 `cgroup.kill`은 존재했다. 현재 `/system.slice/hosted-compute-agent.service` 아래 child cgroup 생성은 `EACCES(13)`로 거절됐다.
+- 따라서 pidfd는 이미 발견한 PID 재사용만 막고 env-clear+reparent descendant를 발견하지 못한다. cgroup directory 관측도 containment 증명이 아니다. `env_clear_descendant_trackable=false`이며 prerequisite는 실패다.
+
+## Windows
 
 | Target | Actual executed tests | Result | Evidence status |
 |---|---:|---|---|
-| Linux x86_64 | 0 | 미실행 | 없음 |
-| Windows x86_64 | 0 | macOS run에서 cfg로 제외 | 없음 |
+| Linux x86_64 | 11 | job 108953038084 exit 0 | API 관측 성공, required containment 실패 |
+| Windows x86_64 | 4 | job 108953037849 exit 0 | feasibility PASS |
 
-`windows_job_feasibility.rs`의 bool invariant test는 Job API 실행 증거가 아니다. Windows evidence는 suspended `CreateProcessW`, assign-before-resume, breakaway denial, kill-on-close, Job accounting와 wait를 실제 Windows job에서 실행한 뒤에만 기록한다.
+Windows 실제 API 시험은 suspended create, assign-before-resume, primary thread resume 1회, active processes 2를 관측했다. explicit breakaway는 `ERROR_ACCESS_DENIED`였고 명시적 `drop(job)` 뒤 미리 확보한 direct/descendant process handle 양쪽이 bounded wait 안에 종료됐다. 별도 owner/server hard-kill fixture는 아직 없다. 2건 중 1건은 이 실제 API 시험이고 1건은 bool invariant이므로 서로 구분한다.
 
-현재 branch에는 `045-process-supervisor` push에서 macOS/Linux/Windows actual-target job을 실행하는 feasibility matrix가 있다. 로컬 cross-target strict Clippy는 Linux와 Windows 모두 exit 0이지만 실행 증거로 세지 않는다. Linux의 cgroup probe는 unified hierarchy, `cgroup.kill`, 현재 cgroup 아래 directory 생성 권한만 관측하며, directory 생성 성공만으로 env-clear descendant containment를 입증하지 않는다. 실제 run ID/HEAD/test 수/exit code는 branch CI가 끝난 뒤 이 표에 기록한다.
+현재 branch에는 `045-process-supervisor` push에서 actual-target matrix를 실행하는 임시 trigger가 있다. 정식 PR 전 feasibility 증거를 얻기 위한 것이며 최종 workflow 정책은 구현 리뷰에서 다시 판정한다.
 
 ## 다음 feasibility 작업
 

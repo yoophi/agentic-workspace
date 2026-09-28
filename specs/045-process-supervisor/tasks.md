@@ -34,11 +34,11 @@ description: "독립 Workbench 서버의 모든 자식 프로세스를 공통 �
 
 **⚠️ CRITICAL GATE**: macOS/Linux/Windows target 중 하나라도 required containment를 입증하지 못하면 실패 근거와 대안을 설계 리뷰로 되돌린다. group kill, nonce 상속만의 통과, skip, threshold 완화로 다음 phase를 열지 않는다.
 
-- [ ] T005 `crates/process-supervisor/tests/platform_feasibility.rs`에 macOS/Linux의 process inventory 권한, env-clear+exec escape, keeper-only/server+keeper hard kill, safe identity-check-and-signal race를 재현하는 non-zero isolated tests를 먼저 작성한다
-- [ ] T006 [P] `crates/process-supervisor/tests/windows_job_feasibility.rs`에 suspended create, Job assign-before-resume, breakaway denial, kill-on-close와 direct wait fixture를 먼저 작성한다
-- [ ] T007 `crates/process-supervisor/src/platform/unix/feasibility.rs`에서 macOS/Linux 실제 public API와 배포 권한으로 reusable identity handle·descendant acquisition·signal 원자성을 spike하고 T005의 각 case를 PASS 또는 구체적 blocker로 판정한다
-- [ ] T008 [P] `crates/process-supervisor/src/platform/windows/feasibility.rs`에서 Windows Job Object spike를 구현하고 T006을 실제 Windows target에서 실행 가능하게 한다
-- [ ] T009 `.github/workflows/quality.yml`에 macOS Apple Silicon, Linux x86_64, Windows x86_64 feasibility jobs를 추가하고 `specs/045-process-supervisor/platform-evidence.md`에 API, 권한, test 수, exit code, leak/identity 결과를 기록한다
+- [ ] T005 `crates/process-supervisor/tests/platform_feasibility.rs`에 macOS/Linux의 process inventory 권한, env-clear+exec escape, keeper-only/server+keeper hard kill, safe identity-check-and-signal race를 재현하는 non-zero isolated tests를 먼저 작성한다. 현재 known-child pidfd/audit-token과 unsafe PID check→signal 한계는 확인했지만 PID 재사용 경합의 결정적 fixture는 미구현이다
+- [x] T006 [P] `crates/process-supervisor/tests/windows_job_feasibility.rs`에 suspended create, Job assign-before-resume, breakaway denial, kill-on-close와 direct wait fixture를 먼저 작성한다
+- [x] T007 `crates/process-supervisor/src/platform/unix/feasibility.rs`에서 macOS/Linux 실제 public API와 배포 권한으로 reusable identity handle·descendant acquisition·signal 원자성을 spike하고 T005의 각 case를 PASS 또는 구체적 blocker로 판정한다
+- [x] T008 [P] `crates/process-supervisor/src/platform/windows/feasibility.rs`에서 Windows Job Object spike를 구현하고 T006을 실제 Windows target에서 실행 가능하게 한다
+- [x] T009 `.github/workflows/quality.yml`에 macOS Apple Silicon, Linux x86_64, Windows x86_64 feasibility jobs를 추가하고 `specs/045-process-supervisor/platform-evidence.md`에 API, 권한, test 수, exit code, leak/identity 결과를 기록한다
 - [ ] T010 `specs/045-process-supervisor/platform-evidence.md`의 prerequisite matrix를 판정해 모든 required target 증거가 있을 때만 T011 이후를 시작하고, 실패 target은 `specs/045-process-supervisor/review-ledger.md`에 새 설계 review input으로 기록한다
 - [ ] T011 `crates/process-supervisor/src/spec.rs`와 `crates/process-supervisor/src/state.rs`에 `ProcessSpec`, owner/attempt, stream policy, `Reserved/Spawning/Adopted/Published/Active/Aborting/Terminal` reducer를 구현한다
 - [ ] T012 [P] `crates/workbench-core/src/ports/process_attempt_store.rs`와 `crates/workbench-core/src/ports/mod.rs`에 domain publication과 containment recovery anchor를 분리한 store port 및 typed CAS result를 정의한다
