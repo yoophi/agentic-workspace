@@ -58,6 +58,9 @@ pub struct BenchServices {
     close_hooks: Mutex<Vec<BenchCloseHook>>,
     /// 작업 관문(044 R14). 조립이 한 번 넣는다. 없으면(단위 시험 조립) 관문 판정 없이 동작한다.
     work_gate: OnceLock<Arc<WorkGate>>,
+    /// 시험 전용: `bench.open`이 런타임 입구를 지난 뒤 작업대 등록 **직전**에 부른다(등록 경합 시험이 여기서 붙잡는다).
+    #[cfg(feature = "test-hooks")]
+    pub open_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 /// 소유자 주체(044)는 작업대 소유 판정을 우회한다.
@@ -82,6 +85,8 @@ pub fn bench_fault(request_id: &RequestId, error: BenchError) -> WorkbenchFault 
             request_id.clone(),
             MESSAGE_BENCH_LIMIT,
         ),
+        // 폐기된 창 주체는 폐기된 토큰과 같은 뜻이다(인증 실패).
+        BenchError::Retired => WorkbenchFault::unauthenticated(request_id.clone()),
     }
 }
 
@@ -107,6 +112,8 @@ impl BenchServices {
             exchange_registry: InMemoryAgentWorkspaceRegistry::default(),
             close_hooks: Mutex::default(),
             work_gate: OnceLock::new(),
+            #[cfg(feature = "test-hooks")]
+            open_probe: Mutex::default(),
         }
     }
 
@@ -167,6 +174,17 @@ impl BenchServices {
                 MESSAGE_NOT_DIRECTORY,
                 Some("/workingDirectory"),
             ));
+        }
+        #[cfg(feature = "test-hooks")]
+        {
+            let probe = self
+                .open_probe
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(probe) = probe {
+                probe();
+            }
         }
         let view = self
             .registry

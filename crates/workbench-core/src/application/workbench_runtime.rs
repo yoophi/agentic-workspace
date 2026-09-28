@@ -647,6 +647,11 @@ impl Workbench for WorkbenchRuntime {
 
         let operation =
             authorization::resolve_operation(&request.request_id, &principal, &request.operation)?;
+        // 폐기된 창 주체(044 Codex 구현 리뷰): 전송 계층이 폐기 전에 인증한 요청(본문을 기다리던 호출 등)이 폐기 뒤에
+        // 도착하면 거절한다 — 폐기된 토큰과 같은 뜻이다.
+        if self.benches.registry.is_retired(&principal.subject) {
+            return Err(WorkbenchFault::unauthenticated(request.request_id));
+        }
         // 비우기·정지 입구 판정과 C-call 예약(044 T040·R14, OCR 구현 리뷰): 정지 중이면 모든 새 호출을, 비우기 중이면 새
         // 작업(N)을 입력을 보기 전에 거절한다. 이어 가기(K)는 handler가 조건을 본다(교환 전달·대기 task 배정). 조회·서버
         // 관리 호출이 아니면 처리 끝까지 관문에 예약한다 — 정지 판정이 진행 중인 호출과 그 호출이 만드는 파생 상태(저장된

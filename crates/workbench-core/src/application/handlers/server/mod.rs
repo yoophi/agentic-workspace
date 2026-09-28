@@ -222,7 +222,13 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
                 async move {
                     let principal =
                         window_principal(&ctx.request_id, &input.label, &input.incarnation)?;
-                    // 먼저 폐기해 닫는 동안 그 창이 새 호출을 넣지 못하게 한다(tombstone은 이후 발급도 막는다).
+                    // 먼저 주체를 폐기로 표시한다(작업대 등록과 같은 잠금): 폐기 전에 인증된 늦은 호출이 새 작업대를 열거나
+                    // 호출을 넣지 못한다(Codex 구현 리뷰). `closeBench:false`(앱 종료)에도 표시한다.
+                    control
+                        .benches()
+                        .registry
+                        .retire_subject(&principal.subject);
+                    // 토큰·표 폐기(tombstone은 이후 발급도 막는다).
                     let revoked_tokens =
                         host(&control, &ctx.request_id)?.retire_window(&principal.subject);
                     let closed_benches = if input.close_bench {

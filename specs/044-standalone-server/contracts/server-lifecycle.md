@@ -66,7 +66,7 @@ research R4–R6·R9·R10.
 | `lease.renew` | command | 소유자 | `{leaseId}` → `{ttlSeconds}`. 모르는 임대는 `notFound` |
 | `lease.release` | command | 소유자 | `{leaseId}` → `{}`(없어도 성공) |
 | `desktop.issueWindowToken` | command | 소유자 | `{label, incarnation, origin}` → `{token, expiresAt}`. 출처는 WebView 허용 목록만. 폐기된 주체(tombstone)면 `forbidden` |
-| `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBenches}`. `closeBench`면 그 창 주체가 **연** 작업대를 모두 닫는다(레지스트리의 `opened_by` 조회) |
+| `desktop.retireWindow` | command | 소유자 | `{label, incarnation, closeBench}` → `{revokedTokens, closedBenches}`. `closeBench`면 그 창 주체가 **연** 작업대를 모두 닫는다(레지스트리의 `opened_by` 조회). 닫기 전에 그 주체를 **폐기로 표시**한다(`closeBench:false`도). 표시 뒤 그 주체의 호출은 런타임 입구에서 `unauthenticated`로 거절되고, 작업대 등록(표시와 같은 잠금 아래의 검사·삽입)도 거절된다. 그래서 폐기 전에 인증된 늦은 요청이 새 작업대를 만들거나 호출을 넣지 못한다(Codex 구현 리뷰) |
 | `bench.list` | query | 모든 주체 | `{}` → `[{benchId, workingDirectory, owner, runs:[{runId, state}]}]`. 소유자는 전부, 그 밖은 자기 작업대만 |
 
 - 새 scope `server:admin`은 소유자만 갖는다.

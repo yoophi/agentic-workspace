@@ -43,6 +43,8 @@ pub enum BenchError {
     Forbidden,
     /// 작업대 수 상한.
     Limit,
+    /// 폐기된 창 주체(044 Codex 구현 리뷰): 폐기 뒤에는 그 주체로 작업대를 열 수 없다.
+    Retired,
 }
 
 enum BenchState {
@@ -90,6 +92,9 @@ impl CloseTicket {
 pub struct InMemoryBenchRegistry {
     limits: BenchLimits,
     benches: Mutex<HashMap<String, BenchRecord>>,
+    /// 폐기된 창 주체(세대 동안 유지). 표시와 작업대 열기의 검사·삽입은 모두 `benches` 잠금을 먼저 쥔다 — 폐기 표시
+    /// 전에 등록된 작업대는 뒤이은 닫기가 거두고, 표시 뒤의 열기는 거절된다(그 사이가 없다).
+    retired: Mutex<std::collections::HashSet<PrincipalSubject>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -103,6 +108,7 @@ impl InMemoryBenchRegistry {
         Self {
             limits,
             benches: Mutex::default(),
+            retired: Mutex::default(),
         }
     }
 
@@ -113,6 +119,9 @@ impl InMemoryBenchRegistry {
         opened_by: PrincipalSubject,
     ) -> Result<BenchView, BenchError> {
         let mut benches = lock(&self.benches);
+        if lock(&self.retired).contains(&opened_by) {
+            return Err(BenchError::Retired);
+        }
         if benches.len() >= self.limits.max_benches {
             return Err(BenchError::Limit);
         }
@@ -226,6 +235,18 @@ impl InMemoryBenchRegistry {
     }
 
     /// 열린 작업대와 연 주체(042 서버 종료: 모두 닫기).
+    /// 창 주체를 폐기로 표시한다(`desktop.retireWindow`가 닫기보다 **먼저** 부른다). `benches` 잠금 아래에서 표시해
+    /// 진행 중인 열기와 겹치지 않는다.
+    pub fn retire_subject(&self, subject: &PrincipalSubject) {
+        let _benches = lock(&self.benches);
+        lock(&self.retired).insert(subject.clone());
+    }
+
+    /// 폐기된 창 주체인가.
+    pub fn is_retired(&self, subject: &PrincipalSubject) -> bool {
+        lock(&self.retired).contains(subject)
+    }
+
     pub fn open_benches(&self) -> Vec<(String, PrincipalSubject)> {
         lock(&self.benches)
             .values()

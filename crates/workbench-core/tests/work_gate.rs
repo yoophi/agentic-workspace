@@ -444,7 +444,10 @@ fn a_stop_decision_read_before_a_lease_resumes_serving_does_not_stop() {
     let gate = WorkGate::new();
     gate.begin_drain(DrainMode::Idle);
     let generation = gate.activity_generation(); // 판정 시작(파생 값 읽기 전)
-    assert!(gate.resume_serving(), "a lease returns the idle drain to serving");
+    assert!(
+        gate.resume_serving(),
+        "a lease returns the idle drain to serving"
+    );
     assert!(
         !gate.try_stop_at(generation, || 0),
         "a decision started before the lease must not stop the serving server"
