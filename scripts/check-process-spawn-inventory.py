@@ -105,7 +105,7 @@ def discovered_sources() -> dict[str, int]:
             if "/tests/" in relative or path.name.endswith("_tests.rs"):
                 continue
             count = command_creation_count(
-                without_cfg_test_items(path.read_text(errors="replace"))
+                without_cfg_test_items(path.read_text(encoding="utf-8", errors="replace"))
             )
             if count:
                 discovered[relative] = count
@@ -113,7 +113,7 @@ def discovered_sources() -> dict[str, int]:
 
 
 def documented_sources() -> set[str]:
-    text = INVENTORY.read_text()
+    text = INVENTORY.read_text(encoding="utf-8")
     return {
         match.group(1)
         for match in re.finditer(r"^\| `([^`]+\.rs)`", text, flags=re.MULTILINE)
