@@ -101,3 +101,12 @@ quit_verdict() {
   fi
   return 5
 }
+
+# quit 스모크 최종 결과: <경로 판정 종료 코드> <owner-check 종료 코드>. 경로 무효(0 아님)면 그 코드(5), 경로는 유효한데 run 지속
+# 확인이 실패하면 6, 둘 다 통과하면 0. 한 줄 `smoke-result=`을 적는다.
+smoke_final() {
+  local verdict=$1 oc=$2
+  if [ "$verdict" != 0 ]; then echo "smoke-result=invalid-path (exit $verdict)"; return "$verdict"; fi
+  if [ "$oc" != 0 ]; then echo "smoke-result=owner-check-failed (owner-check exit $oc; exit 6)"; return 6; fi
+  echo "smoke-result=ok"; return 0
+}

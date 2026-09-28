@@ -57,6 +57,11 @@
 | (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
 | (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
 
+- **owner-check 종료 코드 재판정(Codex r8 docs)**: 옛 `quit-run.sh`는 owner-check 실패를 기록만 하고 최종 종료 코드에 넣지 않았다. 그래서 이 문서의 실행을 스크립트 종료 코드가 아니라 각 실행의 원자료 `meta.txt`의 `owner-check-exit=`로만 다시 판정했다.
+  - 이 문서가 인용한 실행 31개(`t045-*`) 모두 `owner-check-exit=0`이다.
+  - 경로가 무효인 실행(`path-exercised=no` 또는 `app-gone=no`: `t045-{dev,rel}-c-busytok-2`, `t045-rel-c-busytok-3`, `t045-rel-d-busy-1`)은 owner-check와 관계없이 이미 무효로 기록돼 있다.
+  - 옛 실행(`t045-*-{c,d,e,g}-1`)에는 `path-exercised` 줄이 없다(그 기록 전 스크립트). 판정 근거는 `app-gone=yes`와 owner-check다.
+  - 지금 스크립트는 경로 무효면 5, 유효한 종료 뒤 owner-check 실패면 6, 둘 다 통과해야 0으로 끝난다(`smoke_final`). 실제 스크립트의 판정 이후 구간을 그대로 떼어 모의 입력으로 돌리는 자기 시험으로 확인했다.
 - **(g) 송신 기록 한계(Codex r7 docs)**: 표의 모든 (g) 실행(`t045-*-g-*`)은 신원 확인·송신 결과 기록(`02831fe`·`c0afc54`) 전 스크립트로 돌았다. 앱 PID에 맨 `kill -TERM`을 보냈고 그 종료 코드는 기록하지 않았다(`kills.txt`에는 서버 정리만 있다). 앱은 신호 직전 probe 완료(`probe-status=done`) 상태였다. 따라서 이 실행들의 `path-exercised=yes`는 PID 소멸만 근거이며, 지금 규칙(`quit-action-sent=yes`와 PID 소멸을 모두 요구, 아니면 무효·종료 코드 5)으로 다시 판정한 증거가 아니다. 새 규칙은 모의 자기 시험(`selftest-signal.sh`, 최종 판정·종료 코드 포함 20개)으로만 검증했고, 실제 앱 (g) 재실행은 하지 않았다(후속).
 - 모든 실행: 종료 뒤 `busyRuns=1`. live 순번 `[9, 10]` = 9 `after-gate:<표지>` 출력, 10 완료. 취소 완료.
 - 무효 실행 기록: `t045-rel-d-busy-1`은 Dock 메뉴가 열리기 전에 누름이 가 `Invalid index`가 났다. 앱이 끝나지 않아 스크립트가 정확한 PID에 TERM을 보냈다. 그래서 (d) 증거가 아니다.

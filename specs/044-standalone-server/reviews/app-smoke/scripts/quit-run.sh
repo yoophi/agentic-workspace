@@ -116,11 +116,14 @@ if [ "${BUSY:-}" = 1 ]; then
 else
 python3 "$WT/specs/044-standalone-server/reviews/app-smoke/owner-check.py" --data-dir "$DATA" --run-id "$RUN" > "$R/owner-check.json" 2> "$R/owner-check.err"
 fi
-log "owner-check-exit=$?"
+OC=$?
+log "owner-check-exit=$OC"
 cat "$R/owner-check.json"
 # 서버를 정확한 PID로 정지(확인된 경우만).
 case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) kill_exact "$R/kills.txt" "$SPID" ;; esac
 for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "server-stopped=$(kill -0 "$SPID" 2>/dev/null && echo no || echo yes)"
-# 무효 실행은 정리를 모두 마친 뒤에도 비정상 종료 코드(5)로 끝난다.
-exit "$VERDICT"
+# 최종 결과(Codex r8 docs): 경로 무효는 정리를 모두 마친 뒤에도 5, 유효한 종료 뒤 run 지속 확인(owner-check) 실패는 6, 둘 다
+# 통과해야 0.
+smoke_final "$VERDICT" "$OC" | tee -a "$R/meta.txt"; FINAL=${PIPESTATUS[0]}
+exit "$FINAL"
