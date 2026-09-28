@@ -6,8 +6,8 @@ use std::sync::Arc;
 use workbench_protocol::{
     operations::exchange::{
         AgentExchangeDto, AgentPanelEndpointDto, AgentPeersDto, AgentWorkspaceSyncResponseDto,
-        ExchangeAcknowledgeInput, ExchangeDiscardDeliveryInput, ExchangeGetForRunInput, ExchangeListInput,
-        ExchangeListPeersInput, ExchangeSendFromRunInput, ExchangeSendInput,
+        ExchangeAcknowledgeInput, ExchangeDiscardDeliveryInput, ExchangeGetForRunInput,
+        ExchangeListInput, ExchangeListPeersInput, ExchangeSendFromRunInput, ExchangeSendInput,
         ExchangeSyncWorkspaceInput,
     },
     AuthenticatedPrincipal, FaultCode, OperationId, RequestId, WorkbenchFault,

@@ -161,11 +161,21 @@ impl ScriptedRunEngine {
     /// prompt 한 turn의 이벤트: 기본은 agent 응답 하나, `prompt_lifecycle`이면 앞뒤로 turn 경계 lifecycle.
     fn emit_turn(&self, run_id: &str, prompt: String, sink: &WorkbenchRunSink) {
         if self.script.prompt_lifecycle {
-            emit_lifecycle(sink, run_id, LifecycleStatus::PromptSent, "prompt submitted");
+            emit_lifecycle(
+                sink,
+                run_id,
+                LifecycleStatus::PromptSent,
+                "prompt submitted",
+            );
         }
         sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
         if self.script.prompt_lifecycle {
-            emit_lifecycle(sink, run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+            emit_lifecycle(
+                sink,
+                run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
         }
     }
 
@@ -275,13 +285,23 @@ impl RunEngine for ScriptedRunEngine {
         );
         self.mark_applied(format!("start:{run_id}"));
         if self.script.prompt_lifecycle {
-            emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptSent, "prompt submitted");
+            emit_lifecycle(
+                &sink,
+                &run_id,
+                LifecycleStatus::PromptSent,
+                "prompt submitted",
+            );
         }
         if self.script.start_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.start_settle_ms)).await;
         }
         if self.script.prompt_lifecycle && self.script.permission_id.is_none() {
-            emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+            emit_lifecycle(
+                &sink,
+                &run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
         }
         if let Some(permission) = &self.script.permission_id {
             sink.emit(
@@ -399,9 +419,19 @@ impl RunEngine for ScriptedRunEngine {
             );
             mark(&applied, &notify, format!("start:{run_id}"));
             if prompt_lifecycle {
-                emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptSent, "prompt submitted");
+                emit_lifecycle(
+                    &sink,
+                    &run_id,
+                    LifecycleStatus::PromptSent,
+                    "prompt submitted",
+                );
                 if permission.is_none() {
-                    emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+                    emit_lifecycle(
+                        &sink,
+                        &run_id,
+                        LifecycleStatus::PromptCompleted,
+                        "prompt completed",
+                    );
                 }
             }
             if let Some(permission) = &permission {
@@ -616,7 +646,12 @@ impl RunEngine for ScriptedRunEngine {
         };
         // 초기 turn이 끝났다(`prompt_lifecycle`): 실제 runner처럼 turn 끝을 알린다(잠금 밖에서).
         if let Some(sink) = finished_turn {
-            emit_lifecycle(&sink, run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+            emit_lifecycle(
+                &sink,
+                run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
         }
         if removed {
             Ok(())

@@ -7,15 +7,14 @@ pub mod ports;
 use application::appearance_preferences_service::AppearancePreferencesService;
 use inbound::tauri_commands::{
     WorktreeWatcherState, acknowledge_agent_exchange, adjust_font_size_step,
-    discard_agent_exchange_delivery,
     adopt_manual_orchestration_child, apply_window_title, bind_main_coordinator_run,
     bootstrap_orchestration_workspace, cancel_agent_run, cancel_current_prompt_and_send_to_run,
     cancel_orchestration_task, clear_goal, collect_orchestration_reports, create_git_worktree,
     create_goal, create_project, create_saved_prompt, declare_network_delivery,
     delegate_orchestration_goal, delete_git_worktree, delete_project, delete_saved_prompt,
-    dispatch_orchestration_prompt, ensure_window_bench, get_agent_run_settings,
-    get_appearance_preferences, get_goal, get_orchestration_workspace, get_workbench_connection,
-    get_workbench_mode, get_worktree_changes, get_worktree_commit_detail,
+    discard_agent_exchange_delivery, dispatch_orchestration_prompt, ensure_window_bench,
+    get_agent_run_settings, get_appearance_preferences, get_goal, get_orchestration_workspace,
+    get_workbench_connection, get_workbench_mode, get_worktree_changes, get_worktree_commit_detail,
     get_worktree_commit_file_diff, get_worktree_file_diff, get_worktree_git_graph,
     get_worktree_workspace_layout, handoff_orchestration_coordinator, list_agent_exchanges,
     list_agent_tool_command_candidates, list_agents, list_git_branches, list_git_remotes,

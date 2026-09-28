@@ -123,7 +123,11 @@ async fn discarding_a_queued_exchange_ends_it_so_the_wait_stop_completes() {
     discard(&h, &bench, EXCHANGE)
         .await
         .expect("discard is accepted while draining");
-    assert_eq!(pending(&h).await, 0, "the discarded exchange is no longer active");
+    assert_eq!(
+        pending(&h).await,
+        0,
+        "the discarded exchange is no longer active"
+    );
     assert!(control.try_stop().await, "the wait-stop completes");
 }
 
