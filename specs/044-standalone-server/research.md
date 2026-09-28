@@ -291,6 +291,18 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
 
   시험(r10): `a_recovery_between_the_bind_commit_and_an_abort_does_not_leak_the_slot`, `a_recovery_between_the_reservation_and_an_abort_keeps_the_hold_then_frees_the_slot`, `a_recovery_crossing_a_successful_launch_keeps_the_concurrency_limit`, `a_recovery_during_an_unstored_rollback_keeps_its_hold_until_the_retry_finishes`, scheduler 단위 시험 2. 한계: 복구가 기동 중 task 목록을 읽은 뒤·scheduler 잠금 전에 새로 시작한 시도는 보유가 있으면 "보유 있는 자리" 규칙으로 보존된다(목록에 없어도 자리는 남음). 그 시도가 저장소에 이미 `Running`으로 커밋한 뒤라면 실행 중으로 확정될 수 있으나, 그 경우 이미 자기 run 기동이 끝난 직후라 `transfer`와 같은 결과다.
 
+  Codex r11 수정(보유 수명과 복구 스냅샷):
+  - **보유는 얻은 순간부터 값이 소유한다(RAII).** `SlotHold`는 넘기지도(`transfer`) 놓지도(`release_hold`) 않고 버려지면 drop이 자기 보유를 놓는다. 그래서 보유를 얻은 뒤·기동 guard 전 구간(`launch_existing_task`·`launch_task_for_ui`의 작업 영역 읽기)에서 호출 future가 취소돼도 유령 보유가 남지 않는다(복구가 보존할 보유 자체가 없다).
+  - **복구는 스냅샷 뒤의 변경을 덮지 않는다.** `recover`는 저장소 스냅샷을 읽기 **전**의 scheduler 세대를 받아 `reconcile_since`에 넘긴다. scheduler는 자리·대기열이 바뀔 때마다 task별 변경 세대를 남긴다(보유 획득·놓기, 성공 인계, `release`, 대기열 진입, 승격). 그 세대보다 늦게 바뀐 task는 낡은 스냅샷이 아니라 지금 자리·대기 상태를 그대로 둔다.
+
+  | 스냅샷 뒤·적용 전 | 낡은 재구성(옛) | 지금 |
+  |---|---|---|
+  | 기동이 성공해 `transfer`(스냅샷엔 `Ready`) | 보유 0 자리를 버림 → 살아 있는 run이 한도에서 빠짐 | 실행 중 자리 유지(한도 1 유지) |
+  | task가 끝나 `release`(스냅샷엔 `Running`) | 실행 중 자리를 되살림 → 자식 없이 한도 점유 | 빈 채로 둠 |
+  | guard 전 취소(보유 유령) | 복구가 보유를 보존 → 영구 점유 | drop이 즉시 놓음(보유 없음) |
+
+  시험(r11): `a_stale_recovery_snapshot_keeps_a_launch_that_succeeded_meanwhile`, `a_stale_recovery_snapshot_does_not_revive_a_slot_released_meanwhile`(둘 다 새 지점 `LaunchPoint::RecoverBeforeSchedulerApply`에서 복구를 붙잡음), `aborting_an_assign_before_its_launch_guard_releases_the_hold`, `aborting_a_ui_launch_before_its_launch_guard_releases_the_hold`(`BeforeAssignSnapshot`에서 abort 뒤 복구 → 보유 0, 새 과제가 자리를 얻음). 한계: 스냅샷 전 세대 읽기와 스냅샷 사이에 바뀐 task도 "늦게 바뀐 task"로 취급돼 지금 상태가 이긴다(그 경우 지금 상태가 스냅샷보다 새것이므로 같은 결과).
+
   시험(r8): `a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot`(A 바인딩 커밋 뒤 abort, B가 보유를 얻고 작업 영역 읽기 전 `BeforeAssignSnapshot`에서 멈춤 → A 정리 끝 → B 재개: B 보유만 남고 실제 run 기동, 동시 한도 1 유지), `a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds`(되돌리기 커밋 오류 주입), `an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery`(실패 정리 + 커밋 오류 → 작업대 닫기·같은 저장소로 재조립 → `recover` → 새 run 기동).
 
   시험(`child_assign_atomic.rs`, 결정적 저장소·기동·엔진 취소 지점): 바인딩 커밋 직전·직후 abort, 실패 정리의 엔진 취소 대기·예약 해제 대기 중 abort, 되돌리기 중 새 배정. 각 시험은 노드 run 해제·task 상태 일치·관문 예약 0·scheduler 자리 반납·실행 중 task 0(정지 판정)과, 재배정(취소된 task면 새 과제)이 실제 run을 기동함을 확인한다.
