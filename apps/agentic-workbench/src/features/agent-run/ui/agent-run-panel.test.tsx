@@ -1215,6 +1215,36 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     expect(panel.container.textContent, "the applied prompt stays in the transcript").toContain("Follow-up work");
   });
 
+  it("a direct prompt the server applied but answered unknown is not put back into the composer once its turn was seen (Codex r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const send = holdNextSend((args) => (args as { prompt?: string } | undefined)?.prompt === "Direct work", MESSAGE_RESULT_UNKNOWN);
+
+    await panel.enterPrompt("Direct work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await send.sent;
+    });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      send.release();
+    });
+
+    await panel.rerender({
+      externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
+    });
+    await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
+    expect(panel.promptValue(), "the applied prompt is not offered for a duplicate send").not.toBe("Direct work");
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Direct work"),
+    ).toHaveLength(1);
+  });
+
   it("an exchange delivery answered unknown before any turn was seen is retried with the same key (Codex r12)", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     const send = holdNextSend(

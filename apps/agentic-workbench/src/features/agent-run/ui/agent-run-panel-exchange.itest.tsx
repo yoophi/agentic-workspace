@@ -85,8 +85,24 @@ async function scenario({
   const cancelsReachingServer: unknown[] = [];
   /** Codex r11: 다음 전달 포기 한 번을 문이 열릴 때까지 붙잡고, 보내지 않은 채 "보내지 않음"(notApplied)으로 끝낸다. */
   let nextDiscard: { gate: Promise<void>; held: () => void } | undefined;
+  /** Codex r12: 다음 교환 전달(`run.sendPrompt` + 이어 가기 표지) 한 번을 실제 서버에 보내 적용되게 한 뒤, 문이 열리면 답을 잃은
+   *  것(unknown)으로 끝낸다. */
+  let nextSend: { requestId: string; gate: Promise<void>; held: () => void } | undefined;
   const screenClient: typeof client = {
     call: async (operation, input, options) => {
+      if (
+        operation === ("run.sendPrompt" as OperationId) &&
+        nextSend &&
+        (input as { continuation?: { exchangeRequestId?: string } }).continuation?.exchangeRequestId === nextSend.requestId
+      ) {
+        const held = nextSend;
+        nextSend = undefined;
+        const applied = await client.call(operation, input, options);
+        expect(applied.kind, "the injected delivery really reached the server").toBe("ok");
+        held.held();
+        await held.gate;
+        return { kind: "unknown", reason: "lost" };
+      }
       if (operation === ("exchange.discardDelivery" as OperationId) && nextDiscard) {
         const held = nextDiscard;
         nextDiscard = undefined;
@@ -150,13 +166,22 @@ async function scenario({
   const http = createHttpTransport({ client: screenClient, ensureWindowBench: async () => bench, windowLabel: "session-a", events: network });
   // 패널이 보낸 command를 기록한다(전송은 그대로 실제 서버로).
   const recorded: Recorded[] = [];
+  /** Codex r12: 패널이 받은 run lifecycle(`<runId>:<status>`). 패널 callback이 끝난 뒤 적는다 — 적혔으면 패널이 처리했다. */
+  const lifecycleSeen: string[] = [];
   const recording: Transport = {
     kind: http.kind,
     invoke: (command, args, options) => {
       recorded.push({ command, args: args ?? {} });
       return http.invoke(command, args, options);
     },
-    listen: (event, callback) => http.listen(event, callback),
+    listen: (event, callback) =>
+      http.listen(event, (payload) => {
+        callback(payload);
+        const envelope = payload as { runId?: string; event?: { type?: string; status?: string } } | undefined;
+        if (envelope?.event?.type === "lifecycle" && envelope.runId) {
+          lifecycleSeen.push(`${envelope.runId}:${envelope.event.status}`);
+        }
+      }),
   };
   setTransport(recording);
   cleanup.push(() => setTransport(compatTransport));
@@ -289,6 +314,19 @@ async function scenario({
     nextDiscard = { gate, held: markHeld };
     return { release, held };
   };
+  /** 다음 교환 전달 한 번을 서버에 적용되게 한 뒤 답을 붙잡는다(`release`로 unknown을 돌려준다). */
+  const holdNextSendApplied = (requestId: string) => {
+    let release!: () => void;
+    let markHeld!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      markHeld = resolve;
+    });
+    nextSend = { requestId, gate, held: markHeld };
+    return { release, held };
+  };
   const sendExchange = async (requestId: string, message: string) => {
     await call("exchange.send", {
       benchId: bench,
@@ -317,6 +355,8 @@ async function scenario({
     injectNextCancel,
     holdNextCancel,
     holdNextDiscard,
+    holdNextSendApplied,
+    lifecycleSeen,
     sendExchange,
     exchangeSendsOf,
     benchRuns,
@@ -576,6 +616,35 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     expect(["drainingWait", "stopping"]).toContain(stop.state);
     await s.stopped();
     expect(s.exchangeSends()).toEqual([]);
+  });
+
+  // Codex r12(apps medium): 교환 전달이 서버에 적용돼 그 turn(`promptSent`→`promptCompleted`)까지 패널이 관측한 뒤에야 호출이
+  // 답을 잃은 것(unknown)으로 끝난다. 같은 키로 다시 보내면 서버는 저장된 결과만 재생해 새 turn 이벤트가 없어 응답 대기가 영영
+  // 풀리지 않는다 — 뒤에 확인된 교환이 전달되지 않고 wait-stop이 끝나지 않는다. 패널은 관측한 turn으로 적용을 알고 다시 보내지 않는다.
+  it("an exchange delivery applied on the server whose reply was lost after its turn was seen is not replayed; the next exchange is delivered and the server stops", async () => {
+    const s = await scenario({ drainFirst: false });
+    const send = s.holdNextSendApplied("x-1");
+    await s.finishTurn();
+    await send.held;
+    // 적용된 전달의 turn이 서버에서 끝났고, 패널이 그 lifecycle을 받았다.
+    await vi.waitFor(
+      () =>
+        expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptCompleted`).length).toBeGreaterThanOrEqual(2),
+      { timeout: 15_000, interval: 20 },
+    );
+    expect(s.lifecycleSeen.filter((entry) => entry === `${s.panelRun}:promptSent`).length).toBeGreaterThanOrEqual(2);
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(0), { timeout: 15_000, interval: 20 });
+    await act(async () => {
+      send.release();
+    });
+
+    await s.sendExchange("x-2", "second peer message");
+    // 전달이 빨리 끝나면 정지 요청이 곧바로 `stopping`일 수 있다(활동 0) — 어느 쪽이든 서버가 멈춰야 한다.
+    await s.requestWaitStop();
+    await s.stopped();
+    expect(s.exchangeSendsOf("x-1"), "the applied delivery was not replayed").toHaveLength(1);
+    expect(s.exchangeSendsOf("x-2"), "the next exchange was delivered once").toHaveLength(1);
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
   });
 
   it("cancel whose request was not applied keeps the run and its exchange; the exchange is delivered and the server stops", async () => {
