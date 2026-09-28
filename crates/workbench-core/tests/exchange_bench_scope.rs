@@ -193,7 +193,9 @@ async fn a_late_delivery_after_close(fail: bool) {
     let (a, b) = two_benches(&h).await;
     let gate_open = Arc::new(tokio::sync::Semaphore::new(0));
     *h.engine.queue_gate.lock().unwrap() = Some(Arc::clone(&gate_open));
-    h.engine.fail_next_queue_prompt.store(fail, Ordering::SeqCst);
+    h.engine
+        .fail_next_queue_prompt
+        .store(fail, Ordering::SeqCst);
     let entered = Arc::clone(&h.engine.queue_entered);
     let closer = async {
         // 전달이 엔진 안에서 문에 닿은 뒤(관문 소비 기록은 이미 섰다) 작업대 A를 닫는다.
@@ -219,7 +221,9 @@ async fn a_late_delivery_after_close(fail: bool) {
     );
     let failed = gate.failed_deliveries();
     assert!(
-        !failed.iter().any(|entry| entry.starts_with(&format!("{a}/"))),
+        !failed
+            .iter()
+            .any(|entry| entry.starts_with(&format!("{a}/"))),
         "no failure record for the closed bench: {failed:?}"
     );
     assert!(
