@@ -264,6 +264,13 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
   | 실패 되돌리기 중 | 엔진 취소 + 되돌리기 | 끝 → 결과(자리는 오늘 규칙대로 호출자) | 되돌리기는 끝까지 가고, 끝나면 자리 반납(호출자가 결과를 받지 못함) |
   | 끝 | — | — | 단일 비행 자리만 지운다 |
 
+  Codex r8 수정(위 표의 "자리 반납"·"끝"을 다음으로 바꾼다):
+  - **자리 보유는 시도마다**: scheduler 자리 안에 기동 시도별 보유(hold)를 따로 센다. 시도는 보유를 얻고(`acquire_hold`), 그 보유는 기동 guard가 끝까지 책임진다 — 자기 run을 실행하면 실행 중 자리로 넘기고(`transfer`), 그 밖의 모든 끝(오류·실패 결과·다른 기동의 run 반환·`alreadyAssigned`·`launchRollingBack`·abort 정리)은 **자기 보유만** 놓는다(`release_hold`). 보유가 모두 빠지고 실행 중이 아니면 자리가 빈다. task가 끝나는 경로(결과 보고·취소)는 자리를 통째로 비운다. 그래서 되돌리는 중인 앞 기동의 정리가 같은 자리에 보유를 더한 새 배정의 자리를 비우지 않는다.
+  - **되돌리기 저장 실패는 끝이 아니다**: 되돌리기가 결과를 돌려준다. 저장소 커밋이 실패하면 guard는 완료로 보지 않고 런타임의 재시도 목록으로 넘긴다 — 단일 비행 자리는 "되돌리는 중"으로 남고(새 배정은 `launchRollingBack`), 보유도 남는다. 재시도 주체: 서버 감시 한 바퀴(`tick` 시작)와 같은 task의 새 배정 시도. 서버 자신의 정리라 비우는 중에도 돈다. 끝날 때까지 활동 작업이다(`orchestrationTasks`에 더해 보고) — 저장 장애가 계속되면 `default`·`wait`·유휴 정지 모두 멈추지 않고 그렇게 보인다. 성공하면 단일 비행 자리를 지우고 보유를 놓는다.
+  - **재시작 복구**: 재시도 목록은 메모리라 서버가 멈추면 사라진다. 작업 영역 복구(`recover`)의 재조정은 예약만 된(`Starting`) 노드의 run이 엔진에 없고 이 프로세스의 진행 중 기동도 아니면 끝나지 못한 기동과 같이 되돌린다(노드 run 비움, 실행 중 task는 `Ready`). 실행까지 간(`Active`) 노드의 run이 없으면 기존대로 task를 `Blocked(runtimeLost, 재시도 가능)`로 둔다(재시도 명령이 노드 run을 비우고 다시 기동한다).
+
+  시험(r8): `a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot`(A 바인딩 커밋 뒤 abort, B가 보유를 얻고 작업 영역 읽기 전 `BeforeAssignSnapshot`에서 멈춤 → A 정리 끝 → B 재개: B 보유만 남고 실제 run 기동, 동시 한도 1 유지), `a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds`(되돌리기 커밋 오류 주입), `an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery`(실패 정리 + 커밋 오류 → 작업대 닫기·같은 저장소로 재조립 → `recover` → 새 run 기동).
+
   시험(`child_assign_atomic.rs`, 결정적 저장소·기동·엔진 취소 지점): 바인딩 커밋 직전·직후 abort, 실패 정리의 엔진 취소 대기·예약 해제 대기 중 abort, 되돌리기 중 새 배정. 각 시험은 노드 run 해제·task 상태 일치·관문 예약 0·scheduler 자리 반납·실행 중 task 0(정지 판정)과, 재배정(취소된 task면 새 과제)이 실제 run을 기동함을 확인한다.
 
 ### 알림 전달 예약 (Codex 재검토 3 F2)

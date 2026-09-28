@@ -97,6 +97,8 @@ stateDiagram-v2
 - `force`와 `SIGTERM`은 `stopping` 전에 `close_all_benches`를 한다.
 - 임대 획득은 `stopping`이 아닌 어느 상태에서든 활동 세대를 올린다(Codex r6). 그 전에 파생을 시작한 `default`·`wait`·유휴 정지 판정은 거절되고 다시 판정한다(임대가 생기면 미소비 교환이 활동이 된다). `stopping`이면 임대를 거절한다.
 - 자식 기동이 끝나지 못하면(배정 호출 abort·기동 실패) 되돌리기가 끝까지 가서 실행 중 task를 남기지 않는다(Codex r7, research R14 "기동 수명과 취소 책임"). 되돌리는 동안의 같은 task 배정은 재시도 가능한 `launchRollingBack`이다.
+- 되돌리기가 저장되지 못하면(Codex r8) 끝난 것으로 보지 않는다: 감시 한 바퀴와 같은 task의 새 배정이 다시 시도하고, 그 동안 활동 작업(`orchestrationTasks`)으로 정지를 막는다. 재시작하면 작업 영역 복구가 남은 예약을 되돌린다.
+- 활동 작업의 원천을 읽지 못하면(작업 영역·ledger 저장소 읽기 오류, Codex r8) 그 수는 0이 아니라 **모름**이다: `activeWork`의 해당 필드는 `null`이고(`blocksStop`은 `null`을 활동으로 본다) 파생 합계도 0이 되지 않아 `default`는 `conflict`, `wait`·유휴 정지는 멈추지 않는다. 읽기가 회복되면 다음 판정이 실제 수로 한다. ledger `unknown` 수를 읽지 못하면 `unresolvedOperations`가 `null`이다(보고만).
 - handshake와 `server.status`의 `state`에 현재 상태를 싣는다. 준비 상태 = `serving`.
 
 ## 6. 오류
