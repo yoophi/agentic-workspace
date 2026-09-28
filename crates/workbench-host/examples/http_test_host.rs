@@ -6,6 +6,7 @@
 //! 입력(환경 변수): `HOST_DATA_DIR`(같은 데이터로 재기동 = 새 세대), `HOST_JOURNAL_CAPACITY`(기본 4),
 //! `HOST_PROMPT_SETTLE_MS`(prompt 효과 뒤 응답 전 지연 — 응답 유실 시험), `HOST_PERMISSION_ID`(있으면 run 첫 turn이 그 id의
 //! 권한 응답을 기다린다 — 바쁜 run, 044 T043).
+//! `HOST_ALLOWED_ORIGINS`(쉼표 구분 허용 출처 — 브라우저 환경 화면 시험, 044 Codex r7).
 //! 044 T043: 소유자 토큰(`tokens.owner`, 소유자 principal)과 서버 감시 루프(`monitor`, wait-stop 판정)를 더했다. 멈추면
 //! 새 호출은 `unavailable`이다(프로세스는 stdin EOF까지 산다).
 //! 출력: 준비되면 stdout에 JSON 한 줄 `{"baseUrl","epoch","dataDir","tokens":{"windowA","windowB","owner"},"workDir"}`.
@@ -109,7 +110,19 @@ async fn main() {
         server_info: Arc::new(HostInfo {
             epoch: epoch.clone(),
         }),
-        origins: OriginPolicy::new(Vec::<String>::new()),
+        // `HOST_ALLOWED_ORIGINS`(쉼표 구분): 브라우저 환경(happy-dom)에서 그린 화면이 데스크톱 webview처럼 허용된 출처로
+        // 붙는 시험(044 Codex r7 패널 시험). 없으면 허용 출처 없음(비브라우저 클라이언트만).
+        origins: OriginPolicy::new(
+            std::env::var("HOST_ALLOWED_ORIGINS")
+                .map(|value| {
+                    value
+                        .split(',')
+                        .filter(|origin| !origin.is_empty())
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+        ),
         access_log: Arc::new(StderrAccessLog),
         exposure: ExposurePolicy::network_default(),
         tickets: Arc::new(EventTicketStore::default()),
