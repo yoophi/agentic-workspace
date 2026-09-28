@@ -69,7 +69,9 @@ fn fake_endpoint(response: &'static [u8]) -> String {
 }
 
 /// `request`를 별도 스레드에서 부른다. 시험 상한 안에 끝나야 하고, panic하지 않아야 한다(panic이면 그 payload로 실패).
-fn request_without_panic(response: &'static [u8]) -> (Result<(u16, serde_json::Value), String>, Duration) {
+fn request_without_panic(
+    response: &'static [u8],
+) -> (Result<(u16, serde_json::Value), String>, Duration) {
     let base_url = fake_endpoint(response);
     let (tx, rx) = mpsc::channel();
     let caller = thread::spawn(move || {
@@ -89,7 +91,9 @@ fn request_without_panic(response: &'static [u8]) -> (Result<(u16, serde_json::V
             outcome
         }
         Err(mpsc::RecvTimeoutError::Disconnected) => {
-            let payload = caller.join().expect_err("the request thread ended without a result");
+            let payload = caller
+                .join()
+                .expect_err("the request thread ended without a result");
             let message = payload
                 .downcast_ref::<String>()
                 .cloned()
@@ -143,7 +147,7 @@ fn a_chunk_size_that_does_not_fit_in_usize_is_an_error() {
 #[test]
 fn a_chunk_declared_over_the_response_cap_is_refused_before_its_body() {
     // 0x1000001 = 16MiB + 1: 선언만으로 상한을 넘는다(본문은 몇 바이트뿐, 연결은 열려 있다).
-    assert!(0x100_0001 > MAX_RESPONSE_BYTES);
+    const { assert!(0x100_0001 > MAX_RESPONSE_BYTES) };
     assert_prompt_error(
         b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n1000001\r\nabc",
         "too large",
