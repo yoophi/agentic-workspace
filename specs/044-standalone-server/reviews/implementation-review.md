@@ -409,7 +409,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | C17 | Medium | **유효** — FR-014가 구현과 다른 server-side incarnation 등록을 요구 | `spec.md`, research/contract | desktop 생성 incarnation + server token/tombstone 계약으로 정합화 | 최종 문서 교차검사 |
 | C18 | Medium | **유효** — 계약이 공개 `server:read` scope를 누락 | lifecycle contract, plan, data-model, spec | `server.status` 요구 scope와 owner 할당을 문서화 | 최종 문서 교차검사 |
 
-현재 결론은 **18건 모두 유효했고 반영·검증을 마쳤다.** targeted 결과만으로 끝내지 않고 최종 코드 `c4c8e0b`에서 gate-20과 Gate20 개발·배포 앱 smoke를 통과했다. owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다. 이는 044 범위의 완료이며 5단계 전체 로드맵 완료를 뜻하지 않는다.
+현재 결론은 **r13의 18건 모두 유효했고 반영·검증을 마쳤다.** targeted 결과만으로 끝내지 않고 코드 `c4c8e0b`에서 gate-20과 Gate20 개발·배포 앱 smoke를 통과했다. owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다.
+
+그러나 r13 뒤 `1a48e0c`·`c952011`·`89ebe49`·`c4c8e0b` 수정과 이 증거 문서까지 포함한 **최종 OCR delegate 재리뷰와 그 뒤 Codex adversarial `--wait` 4/4 재리뷰는 아직 실행 전**이다. 따라서 T053과 044 merge gate는 미완료이며, gate-20과 앱 smoke만으로 리뷰 완료 또는 044 전체 완료를 주장하지 않는다. 두 재리뷰 결과·유효 지적 반영·필요한 재검증을 이 문서에 추가한 뒤에만 완료로 바꾼다. 044를 완료하더라도 5단계 전체 로드맵 완료를 뜻하지 않는다.
 
 #### 수정 중 전체 suite에서 발견한 회귀
 
