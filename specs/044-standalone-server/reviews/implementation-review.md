@@ -255,6 +255,31 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 - gate-11(`17bbd11`)이 8차 수정을 모두 포함해 전부 통과했다.
 - **OCR 8차 재리뷰**(`82eb3ff..17bbd11`): High·Medium 없음. 확인: scheduler 시도별 보유(자기 보유만 놓음, 실행 중 자리 보존, 옛 보유가 새 시도에 영향 없음 — 단위 시험 3), unknown 활동의 합계 +1과 `null` 표시, tick 재시도, 패널의 unsettled 취소 분기(notApplied·unknown이면 상태 보존, unknown은 복구된 run 이벤트로 판단, 끝 이벤트가 먼저 온 경우 포함). Low(보고만): `unsettledCall`은 transport의 공유 메시지 상수를 문자열로 비교해 분류한다(같은 상수를 쓰므로 일치하지만 결합이 느슨하다); 대기열 승격으로 생긴 보유 없는 자리가 배정 없이 남는 것은 기존 동작.
 
+### 9차: 같은 HEAD `4a0b6a6`(트리 `22c4fbc`) 네 파티션 리뷰
+
+- crates 파티션이 984KB로 companion 버퍼(1MB)에 가까워 `crates/workbench-core/src`와 나머지 crates로 나눴다. 파티션: core-src 31 / crates 나머지 76 / apps·packages·루트 66 / specs·docs 228. 합 401 = 전체, 누락 0(`--no-renames`).
+  - 첫 분할은 경로 목록 누락으로 8개 파일이 빠졌다. `:(exclude)` pathspec으로 다시 만든 뒤 합집합 일치를 확인하고 실행했다.
+  - 네 검토 커밋 모두 트리 `22c4fbc`다. 검토 뒤 브랜치로 돌아왔다(status 0).
+- **네 파티션 모두 needs-attention**이었다. Medium 6건.
+- 담당: core fork는 `crates/workbench-core`, host fork는 `crates/workbench-host`, apps fork는 `apps/`, 메인은 스모크 스크립트·문서. 프로토콜 변경은 없었다.
+- 조율: host 증거 실행은 core 커밋 뒤에만 했다(그 전 실행은 비증거 표시). apps 최종 itest는 core·host 커밋 host에서 crates가 깨끗하고 표지 0일 때만 돌렸다. 스크립트는 bash로 실행했다(zsh 목록 분할 사고 방지).
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| U1 | medium(core-src) | 되돌리기 재시도가 항목을 목록에서 빼고 예약 없이 기다려, 동시 정지 판정이 활동 0으로 읽고 낡은 파생 값으로 stopping에 들어갈 수 있다. 재시도 future를 취소하면 정리 책임도 유실된다 | `3598fc1`: 재시도 중에도 항목을 목록에 두고 `in_flight`로 표시한다(동시 재시도는 하나로 묶음). 등록과 재시도의 시작·끝에서 관문 세대를 올린다(`note_activity_change`). 커밋·결과 반영은 소유 task가 끝까지 한다 | `child_assign_atomic.rs` (a) 재시도가 커밋 직전에 멈춘 사이 default 거절·wait 유지 → 다시 실패해도 활동 → 회복 뒤에야 정지, (b) 재시도 abort 뒤에도 정리 완료·재배정 실제 기동. 동작 red → green 19. 변이 m1(진행 중 항목 숨김)·m2(소유 task 없음) red |
+| U2 | medium(core-src) | 되돌리기가 작업대 id로만 작업 영역을 찾아, 작업대를 닫으면 영원히 NotFound → 영구 재시도·보유 잔존·정지 영구 차단 | `3598fc1`·`6d6ec3f`: `revert_child_launch`가 작업 영역 id로 찾는다(노드가 이 기동의 run일 때만 바꿈, 작업 영역이 없으면 바꿀 것 없음). R14 수명 표 | (c) 저장 실패 → 작업대 닫기 → 회복 → 목록·보유 해제, 활동 0 → 같은 작업 영역 재개 뒤 재배정 실제 기동. 변이 m3(작업대 id 조회) red |
+| U3 | medium(crates-rest) | identify HTTP 요청에 전체 시간·응답 크기 상한이 없다. 조금씩 보내는 끝점이면 `ensure`가 `startup.lock`을 쥔 채 멈춘다 | `0a800c7`: 요청 하나에 절대 deadline(`min(지금+5s, 호출자 deadline)`, 읽을 때마다 남은 시간 계산)과 응답 16MiB 상한을 둔다. `content-length`·chunked 끝에서 읽기를 끝낸다(헤더 해석 선형). `verify_by`·`require_serving_by`·`call_by`에 같은 deadline을 준다. `ensure`는 최초 확인 전에 `ready_timeout`을 시작한다 | `bounded_requests.rs`(시험 안 대기 상한 30초): 끝없이 조금씩 보냄 → deadline 안 오류, 초과 본문·헤더 없는 초과 → `too large`, 완결 응답은 열린 연결에서도 바로 반환, `ensure` → 상한 안 `Timeout` 뒤 `startup.lock` 재획득. 동작 red 5건(끝없는 읽기 2건은 시험 상한에서 실패), 변이 a·b·c red. 증거 실행은 모두 core 미커밋 0 |
+| U4 | medium(apps) | Full restart 취소 대기 중 도착해 확인된 교환을, 취소가 unknown·fault로 끝날 때 호출 전 스냅샷으로 덮어써 삭제 | `dcae39a`: 실패·거절·unknown이면 현재 대기열을 보존한다(취소 대기 중 들어온 항목 포함). 성공이면 취소된 run의 현재 대기열(끝 이벤트가 먼저 왔으면 그때 비운 대기열)로 재시작한다. 교환은 discard하고, 일반 prompt는 새 run으로 옮긴다. Cancel 버튼도 같은 규칙 | 패널 vitest: 옛 패널에서 새 시험 5개가 모두 동작 red → green 44, 변이 a·c red. **실제 host + 실제 AgentRunPanel itest**: 취소 응답을 붙잡은 사이 `x-2` 도착·확인 → unknown → `x-2` 보존(`pendingExchanges=2`) → turn 끝 `x-1`·`x-2` 각 1회 전달 → wait-stop 정지, 대체 run 없음. 옛 패널 red, 변이 a red |
+| U5 | medium(apps) | 첫 재시작이 unknown(미적용)이면 보류가 남고, 재시도의 cancelled 이벤트가 응답보다 먼저 오면 보류 callback과 성공 경로가 각각 run을 시작(중복) | `dcae39a`: Full restart마다 시도 id를 주고 재시작은 시도당 한 번만 소비한다. 새 Full restart·Cancel은 이전 보류를 대체하고, 대체된 시도의 늦은 결과는 패널을 바꾸지 않는다 | 패널 변이 d(두 guard 제거, 재시도)·e(Cancel) red. itest: 첫 재시작 unknown(미적용) → 재시도 취소가 서버에 닿고 응답은 끝 이벤트 뒤까지 붙잡음 → 대체 run 정확히 1개(서버 `bench.list`에 원래 run과 새 run만), `pendingExchanges=0`, wait-stop 완료. 옛 패널 red(run 3개), 변이 d red. **변이 b(단일 소비 검사만 제거)는 green으로 남았다**: 단일 소비 검사와 보류 해제가 각각 혼자서도 중복 기동을 막기 때문이다(방어 중복). 두 검사를 모두 뺀 d·e가 red다 |
+| U6 | medium(docs) | `close-run.sh`가 run 잔존·토큰 200을 기록만 하고 0으로 끝나고, `quit-run.sh`도 TOKEN=1의 토큰 결과를 무시 | `9519f42`: `close_final`(run 잔존 7, 토큰 미폐기·검사 오류 8), `token_verdict`. quit은 정상 종료(c·d·e) 401, SIGTERM(g) 대조 200을 요구하고 어긋나면 8. 판정은 정리 전에 보존하고 정리 뒤 종료 코드로 돌려준다 | 자기 시험이 두 스크립트의 판정 구간(`ok=no`·`gone=no`부터 끝)을 그대로 떼어 모의 입력으로 돌린다. 옛 스크립트 red 10 → green 46 → 변이 2건 red(각각 토큰·run 잔존 판정으로만 분리). 변이는 scratch 사본에만 적용했다. 과거 실제 앱 실행은 원자료 `run-removed=`·`token-after-*=`로 재판정했다(창 닫기 21개 모두 제거·401, quit 유효 경로 401, (g) 200; app-smoke.md) |
+
+- 한계:
+  - U1·U2: 닫기와 되돌리기가 함께 실패하면 정리가 목록에 남고 정지가 계속 막힌다(의도, status에 보임). 재시도에 backoff가 없다. 오류 주입은 test-hook이다.
+  - U3: 16MiB 상한은 lifecycle 응답 기준이다(그보다 큰 operation 출력은 거절). `ensure` 전체는 `startup_lock_timeout + ready_timeout`까지 걸릴 수 있다(기존 계약). 가짜 끝점은 시험 안 `TcpListener`이고, 실제로 다른 프로세스가 포트를 차지한 상황은 재현하지 않았다.
+  - U4·U5: 실패는 화면 호출 클라이언트에서 주입했다(실제 네트워크 단절 아님). 시험 host는 scripted engine이다.
+  - 실제 앱 스모크는 7·8·9차 수정 뒤 돌리지 않았다.
+- 9차 수정으로 코드가 바뀌었으므로 T052는 gate-12 전까지 다시 미완료로 둔다.
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
