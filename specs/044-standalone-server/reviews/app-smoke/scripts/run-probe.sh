@@ -52,6 +52,7 @@ for p in $LAUNCH $(descendants "$LAUNCH"); do
   APP_PIDS="$APP_PIDS $p"
 done
 echo "app-pids=$APP_PIDS" >> "$R/meta.txt"
+[ -n "${APP_PIDS// /}" ] && remember "$R" $APP_PIDS
 echo "server-tree=$SERVER_TREE" >> "$R/meta.txt"
 if [ -n "$SPID" ] && is_our_server "$SPID" "$DATA"; then echo "server-verified=yes" >> "$R/meta.txt"; else echo "server-verified=no" >> "$R/meta.txt"; fi
 if [ -z "$HOLD" ]; then

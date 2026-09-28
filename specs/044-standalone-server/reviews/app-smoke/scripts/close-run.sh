@@ -19,7 +19,7 @@ open -n "$APP" --env AW_APP_TRANSPORT_PROBE_FILE="$R/probe.json" --env AW_APP_PR
   --env AW_APP_PROBE_AGENT_COMMAND="$AGENT" --env AW_APP_PROBE_CWD="$CWD" --stdout "$R/app.log" --stderr "$R/app.log"
 APID=""
 for i in $(seq 1 60); do for p in $(app_pids); do case "$BEFORE" in *" $p "*) ;; *) APID=$p ;; esac; done; [ -n "$APID" ] && break; sleep 0.5; done
-need "$APID" app-pid; log "app-pid=$APID close-path=$CLOSE"
+need "$APID" app-pid; remember "$R" "$APID"; log "app-pid=$APID close-path=$CLOSE"
 deadline=$((SECONDS+240)); st=timeout
 while [ $SECONDS -lt $deadline ]; do
   kill -0 "$APID" 2>/dev/null || { st=app-exited; break; }
@@ -30,7 +30,7 @@ log "probe-status=$st"
 RUN=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('runId','') if d.get('result')=='ok' else '')" "$R/probe.json" 2>/dev/null)
 SPID=$(server_pid "$DATA"); SCMD=$(ps -o command= -p "${SPID:-0}" 2>/dev/null)
 log "run-id=${RUN:-none} server-pid=${SPID:-none}"
-case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) log "server-verified=yes" ;; *) log "server-verified=no"; kill_exact "$R/kills.txt" "$APID"; exit 3 ;; esac
+case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) log "server-verified=yes"; remember "$R" "$SPID" ;; *) log "server-verified=no"; kill_exact "$R/kills.txt" "$APID"; exit 3 ;; esac
 [ -n "$RUN" ] || { log "abort: no run"; kill_exact "$R/kills.txt" "$APID"; exit 3; }
 log "before: $(python3 "$SMOKE/bench-check.py" "$DATA" "$RUN")"
 if [ "$SCEN" = close-token ]; then

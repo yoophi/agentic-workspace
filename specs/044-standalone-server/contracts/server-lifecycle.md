@@ -34,7 +34,7 @@ research R4–R6·R9·R10.
   "serverVersion": "…",
   "protocolVersions": [1],
   "storageSchemaVersion": 2,
-  "ownerToken": "base64url 32바이트",
+  "ownerToken": "무작위 32바이트의 소문자 hex(64자)",
   "startedAt": "RFC 3339"
 }
 ```
@@ -46,7 +46,7 @@ research R4–R6·R9·R10.
 
 1. `startup.lock` 배타 잠금(상한 20초, 넘으면 실패).
 2. `server.json`이 있으면:
-   - **먼저 `POST /v1/system/identify {nonce}`(인증 없음)로 신원을 확인한다.** 응답 `{instanceId, proof}`의 `proof`를 안내 파일의 `ownerToken`으로 검증한다(`HMAC-SHA256(ownerToken, nonce ‖ instanceId)`). 틀리면 그 끝점에 자격 증명을 보내지 않고 "확인 실패"로 3단계로 간다.
+   - **먼저 `POST /v1/system/identify {nonce}`(인증 없음)로 신원을 확인한다.** 응답 `{instanceId, proof}`의 `proof`를 안내 파일의 `ownerToken`으로 검증한다(`proof = hex(HMAC-SHA256(key = ownerToken 문자열의 UTF-8 바이트, msg = nonce + "\n" + instanceId))`, 소문자 hex. 고정 벡터: ownerToken `00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff`, nonce `3f2c9a1e7b6d4c5a8e9f0a1b2c3d4e5f`, instanceId `6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b` → `f3d76425402ffeadb5458e75f4fec90cbfc0195e7cd233436f6950eae939cf64`, 시험 `identity::tests::identify_proof_matches_the_contract_vector`). 틀리면 그 끝점에 자격 증명을 보내지 않고 "확인 실패"로 3단계로 간다.
    - handshake로 `instanceId`가 일치하는지, 프로토콜·저장 형식을 지원하는지 확인한다.
    - 소유자 토큰으로 `server.status`를 불러 인증과 상태를 확인한다.
    - 상태가 `serving`이면 3을 건너뛰고 끝낸다.

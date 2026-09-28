@@ -18,8 +18,10 @@ AGENT="python3 $WT/crates/workbench-core/tests/support/agents/fake_acp_permissio
 # BUSY=1(T045 진행 중 turn): agent가 시작 turn을 문 파일로 붙잡고, probe는 완료 전에 보고한다. 종료 뒤 owner-check가 문을 푼다.
 SCEN=quit; PHASE=ready-to-quit
 if [ "${BUSY:-}" = 1 ]; then AGENT="$AGENT --end-turn-gate $R/turn.gate --after-gate-chunk"; SCEN=quit-busy; PHASE=ready-to-quit-busy; fi
+# TOKEN=1(Codex 코드 리뷰): close-token probe가 이 창 토큰을 비밀 파일(0600)에 넘긴다. 종료 뒤 같은 토큰이 거절되는지 본다.
+if [ "${TOKEN:-}" = 1 ]; then SCEN=close-token; PHASE=ready-to-close; fi
 CWD=$(cd "$R/work" && pwd -P)
-open -n "$APP" --env AW_APP_TRANSPORT_PROBE_FILE="$R/probe.json" --env AW_APP_PROBE_SCENARIO=$SCEN \
+open -n "$APP" --env AW_APP_TRANSPORT_PROBE_FILE="$R/probe.json" --env AW_APP_PROBE_SCENARIO=$SCEN --env AW_APP_PROBE_SECRET_FILE="$R/secret.json" \
   --env AW_APP_PROBE_AGENT_COMMAND="$AGENT" --env AW_APP_PROBE_CWD="$CWD" --stdout "$R/app.log" --stderr "$R/app.log"
 APID=""
 for i in $(seq 1 60); do
@@ -27,6 +29,7 @@ for i in $(seq 1 60); do
   [ -n "$APID" ] && break; sleep 0.5
 done
 need "$APID" app-pid
+remember "$R" "$APID"
 log "app-pid=$APID quit-path=$QUIT"
 deadline=$((SECONDS+240)); st=timeout
 while [ $SECONDS -lt $deadline ]; do
@@ -39,8 +42,9 @@ RUN=$(python3 -c "import json,sys;d=json.load(open(sys.argv[1]));print(d.get('ru
 SPID=$(server_pid "$DATA")
 log "run-id=${RUN:-none} server-pid=${SPID:-none}"
 SCMD=$(ps -o command= -p "${SPID:-0}" 2>/dev/null)
-case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) log "server-verified=yes" ;; *) log "server-verified=no cmd=$SCMD" ;; esac
+case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) log "server-verified=yes"; remember "$R" "$SPID" ;; *) log "server-verified=no cmd=$SCMD" ;; esac
 if [ -z "$RUN" ] || [ -z "$SPID" ]; then log "abort: no run or server"; kill_exact "$R/kills.txt" "$APID"; exit 3; fi
+[ "${TOKEN:-}" = 1 ] && log "token-before-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 SERVER_LINES_BEFORE=$(wc -l < "$DATA/workbench/server/server.log")
 case "$QUIT" in
   c) osascript -e "tell application id \"$BID\" to activate" >/dev/null 2>&1; sleep 1
@@ -60,6 +64,7 @@ for i in $(seq 1 60); do kill -0 "$APID" 2>/dev/null || { gone=yes; break; }; sl
 log "app-gone=$gone"
 if [ "$gone" != yes ]; then log "app still running after quit path; stopping exact pid"; log "path-exercised=no (this run is invalid evidence for path $QUIT)"; kill_exact "$R/kills.txt" "$APID"; else log "path-exercised=yes"; fi
 log "server-alive-after-quit=$(kill -0 "$SPID" 2>/dev/null && echo yes || echo no)"
+[ "${TOKEN:-}" = 1 ] && log "token-after-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 python3 "$SMOKE/status.py" "$DATA" > "$R/status-after-quit.json" 2>&1; log "status-after-quit=$(cat "$R/status-after-quit.json")"
 tail -n +"$((SERVER_LINES_BEFORE+1))" "$DATA/workbench/server/server.log" > "$R/server-after-quit.log"
 if [ "${BUSY:-}" = 1 ]; then

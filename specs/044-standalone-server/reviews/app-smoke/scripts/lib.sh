@@ -25,13 +25,34 @@ is_our_server() {
   case "$cmd" in *"$data"*) return 0 ;; *) return 1 ;; esac
 }
 
-# 정확한 PID 목록만 TERM으로 끝낸다. 목록과 결과를 기록한다.
-kill_exact() {
-  local log=$1; shift
+# 프로세스 신원: 시작 시각 + 명령줄. PID는 재사용될 수 있으므로 PID만으로 같은 프로세스라고 보지 않는다.
+proc_identity() {
+  ps -o lstart= -o command= -p "$1" 2>/dev/null
+}
+
+# 발견한 PID의 신원을 그 실행 디렉터리의 `pids/`에 기록한다. `kill_exact`는 기록된 신원과 지금 신원이 같을 때만 신호를 보낸다.
+remember() {
+  local dir=$1; shift
   local p
+  mkdir -p "$dir/pids"
   for p in "$@"; do
     need "$p" pid
-    echo "kill $p: $(ps -o command= -p "$p" 2>/dev/null | cut -c1-160)" >> "$log"
+    proc_identity "$p" > "$dir/pids/$p"
+  done
+}
+
+# 정확한 PID만 TERM으로 끝낸다(신호 직전에 신원을 다시 확인). 기록이 없거나, 이미 없거나, 신원이 바뀌었으면 보내지 않는다.
+kill_exact() {
+  local log=$1; shift
+  local dir p now
+  dir=$(dirname "$log")
+  for p in "$@"; do
+    need "$p" pid
+    if [ ! -s "$dir/pids/$p" ]; then echo "skip $p: identity was not recorded" >> "$log"; continue; fi
+    now=$(proc_identity "$p")
+    if [ -z "$now" ]; then echo "skip $p: already gone" >> "$log"; continue; fi
+    if [ "$now" != "$(cat "$dir/pids/$p")" ]; then echo "skip $p: identity changed (pid reused?)" >> "$log"; continue; fi
+    echo "kill $p: $(echo "$now" | cut -c1-200)" >> "$log"
     kill "$p" 2>/dev/null
   done
 }

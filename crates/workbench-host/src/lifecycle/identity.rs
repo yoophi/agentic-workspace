@@ -116,6 +116,23 @@ pub fn hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    /// 계약 고정 벡터(contracts/server-lifecycle.md §3, Codex 문서 리뷰): 키는 `ownerToken` 문자열(64자 hex)의 UTF-8 바이트,
+    /// 메시지는 `nonce + "\n" + instanceId`, 결과는 소문자 hex. 독립 클라이언트가 이 값으로 구현을 확인한다.
+    #[test]
+    fn identify_proof_matches_the_contract_vector() {
+        let identity = OwnerIdentity::from_parts(
+            "6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b",
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+        );
+        assert_eq!(
+            identity.proof(
+                "3f2c9a1e7b6d4c5a8e9f0a1b2c3d4e5f",
+                "6f1a2b3c-4d5e-4f60-8a7b-9c0d1e2f3a4b"
+            ),
+            "f3d76425402ffeadb5458e75f4fec90cbfc0195e7cd233436f6950eae939cf64"
+        );
+    }
+
     /// RFC 4231 시험 사례 2.
     #[test]
     fn hmac_matches_the_rfc_4231_vector() {

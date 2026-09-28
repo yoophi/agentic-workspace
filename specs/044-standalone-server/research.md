@@ -54,7 +54,7 @@
 
 - **Decision**:
   - **자격 증명을 보내기 전에 서버 신원부터 확인한다(설계 리뷰 D1)**: 안내 파일이 남아 있고 원래 서버가 죽었다면, 그 포트를 다른 프로세스가 차지하고 있을 수 있다. 확인 없이 소유자 자격 증명을 보내면 그 프로세스에 자격 증명이 새어 나간다.
-    - 인증 없는 `POST /v1/system/identify {nonce}` → `{instanceId, proof}`. `proof`는 `HMAC-SHA256(ownerToken, nonce ‖ instanceId)`다.
+    - 인증 없는 `POST /v1/system/identify {nonce}` → `{instanceId, proof}`. `proof`는 `hex(HMAC-SHA256(key = ownerToken 문자열의 UTF-8 바이트, msg = nonce + "\n" + instanceId))`다(고정 벡터는 contracts/server-lifecycle.md §3).
     - 클라이언트는 안내 파일의 `ownerToken`으로 `proof`를 검증한다. 맞을 때만 bearer로 소유자 자격 증명을 보낸다.
     - 서버는 `ownerToken`을 알기 때문에 증명을 만들 수 있다. 자격 증명 자체는 오가지 않는다.
   - 클라이언트 `ensure(data_dir, exe)`:
@@ -79,7 +79,7 @@
 ## R6. 소유자 주체와 창 토큰 발급
 
 - **Decision**:
-  - 안내 파일에 32바이트 무작위 **소유자 자격 증명**을 넣는다(파일 0600).
+  - 안내 파일에 32바이트 무작위 **소유자 자격 증명**을 소문자 hex(64자)로 넣는다(파일 0600).
   - 이 자격 증명의 주체는 새 `PrincipalKind::Owner`(`local:owner`)다. 가진 권한은 모든 scope와 `server:admin`, 그리고 **작업대 소유 판정 우회**(모든 작업대 조회·구독·닫기·run 취소)다.
   - 창 토큰은 소유자가 owner 전용 operation `desktop.issueWindowToken`으로 받는다. 입력은 `{label, incarnation, origin}`이고, 출력 `{token, expiresAt}`은 043과 같은 창 주체·출처 묶음이다.
   - 창 폐기는 `desktop.retireWindow {label, incarnation, closeBench}`다. 한 호출로 그 주체의 토큰·표 폐기와 (요청 시) 그 주체가 연 작업대 닫기를 한다.
