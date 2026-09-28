@@ -56,7 +56,12 @@ cat > "$T/mockbin/python3" <<MOCK
 case "\$1" in
   -c) exec "$REALPY" "\$@" ;;
   *owner-check.py) echo '{"mock":true}'; exit "\${MOCK_OC:-0}" ;;
-  *bench-check.py) echo "{\"runListed\": \${MOCK_RUN_LISTED:-false}}" ;;
+  *bench-check.py) case "\${MOCK_RUN_LISTED:-false}" in
+      identity-failed) echo '{"result": "identity-failed"}'; exit 2 ;;
+      empty) exit 2 ;;
+      badjson) echo '{"result": "ok", "runListed":' ;;
+      *) echo "{\"result\": \"ok\", \"runListed\": \${MOCK_RUN_LISTED:-false}}" ;;
+    esac ;;
   *token-check.py) [ "\${MOCK_TOKEN:-401}" = error ] && exit 1; echo "{\"status\": \${MOCK_TOKEN:-401}}" ;;
   *) echo '{"busyRuns": 0}' ;;
 esac
@@ -87,8 +92,8 @@ out=$(tail_run yes 0 g 1 200); rc=$?; check "quit g token 200 (contrast): exit c
 out=$(tail_run yes 0 g 1 401); rc=$?; check "quit g token 401 unexpected: exit code" "$rc" 8
 out=$(tail_run no 0 c 1 200); rc=$?; check "invalid path wins over token: exit code" "$rc" 5
 # 7) close-run.sh의 판정 구간(`ok=no`부터 끝)을 그대로 떼어 모의 입력으로 돌린다: run 잔존 7, 토큰 200·검사 오류 8, 통과 0.
-CR="$(dirname "$0")/close-run.sh"; CTAIL="$T/close-run-tail.sh"; sed -n '/^ok=no$/,$p' "$CR" > "$CTAIL"
-check "close tail extracted" "$(head -1 "$CTAIL")" "ok=no"
+CR="$(dirname "$0")/close-run.sh"; CTAIL="$T/close-run-tail.sh"; sed -nE '/^ok=(no|error)$/,$p' "$CR" > "$CTAIL"
+check "close tail extracted" "$(head -1 "$CTAIL" | grep -cE '^ok=(no|error)$')" 1
 close_run() { # <MOCK_RUN_LISTED true|false> <SCEN quit|close-token> <MOCK_TOKEN>
   ( R="$T/close-$1-$2-$3"; mkdir -p "$R"; : > "$R/meta.txt"; : > "$R/app.log"; log() { echo "$*" | tee -a "$R/meta.txt"; }
     APID=$D; SPID=$D; DATA="$T/data"; RUN=r1; SCEN=$2; WINRC=0; CLOSE=a; export MOCK_RUN_LISTED=$1 MOCK_TOKEN=$3; PATH="$T/mockbin:$PATH"
@@ -129,6 +134,16 @@ out=$(close_action b2 0 yes "Agentic Workbench" false close-token 200); rc=$?; c
 check "close b2 run removed unexpectedly: result" "$(echo "$out" | grep -c '^close-result=run-removed-unexpectedly')" 1
 out=$(close_action b2 0 yes "Agentic Workbench" true close-token 401); rc=$?; check "close b2 main token revoked unexpectedly: exit code" "$rc" 8
 out=$(close_action a 0 yes Settings false close-token 401); rc=$?; check "close a with token 401: exit code" "$rc" 0
+# 9) run 조회 실패(Codex r12 docs): b2에서 조회가 끝까지 실패하면 run 유지로 보지 않는다(7). 잘못된 JSON·빈 출력도 같다.
+out=$(close_action b2 0 yes "Agentic Workbench" identity-failed close-token 200); rc=$?; check "close b2 run check identity-failed: exit code" "$rc" 7
+check "close b2 run check identity-failed: result" "$(echo "$out" | grep -c '^close-result=run-state-unknown')" 1
+out=$(close_action b2 0 yes "Agentic Workbench" empty close-token 200); rc=$?; check "close b2 run check empty output: exit code" "$rc" 7
+out=$(close_action b2 0 yes "Agentic Workbench" badjson close-token 200); rc=$?; check "close b2 run check bad json: exit code" "$rc" 7
+out=$(close_action a 0 yes Settings identity-failed close-token 401); rc=$?; check "close a run check failed: exit code" "$rc" 7
+check "run_state_of ok listed" "$(run_state_of 0 '{"result": "ok", "runListed": true}')" listed
+check "run_state_of ok absent" "$(run_state_of 0 '{"result": "ok", "runListed": false}')" absent
+check "run_state_of nonzero exit" "$(run_state_of 2 '{"result": "ok", "runListed": false}')" error
+check "run_state_of missing runListed" "$(run_state_of 0 '{"result": "ok"}')" error
 out=$(close_action f 0 no ""); rc=$?; check "close f ok: exit code" "$rc" 0
 out=$(close_action f 1 no ""); rc=$?; check "close f click failed: exit code" "$rc" 6
 out=$(close_action f 0 yes Settings); rc=$?; check "close f app still running: exit code" "$rc" 9

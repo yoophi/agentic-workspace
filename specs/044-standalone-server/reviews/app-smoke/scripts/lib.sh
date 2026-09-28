@@ -130,6 +130,7 @@ close_final() {
   local removed=$1 tok=${2:-skip} win=${3:-0} want=${4:-yes}
   if [ "$win" = 6 ]; then echo "close-result=invalid-attempt (the close action failed; exit 6)"; return 6; fi
   if [ "$win" != 0 ]; then echo "close-result=unexpected-window-state (exit 9)"; return 9; fi
+  if [ "$removed" = error ]; then echo "close-result=run-state-unknown (no successful run check; exit 7)"; return 7; fi
   if [ "$removed" != "$want" ]; then
     if [ "$want" = yes ]; then echo "close-result=run-not-removed (exit 7)"; else echo "close-result=run-removed-unexpectedly (exit 7)"; fi
     return 7
@@ -153,4 +154,19 @@ window_verdict() {
     *) if [ "$alive" = yes ] && [ "$windows" = Settings ]; then echo "window-result=ok (main window closed, Settings kept)"; return 0; fi
        echo "window-result=unexpected (app alive=$alive, windows=[$windows]; expected only Settings to remain)"; return 9 ;;
   esac
+}
+
+# run 조회 결과 분류(Codex r12 docs): <bench-check 종료 코드> <출력>. 성공한 조회(종료 0, result=ok, runListed가 참/거짓)만
+# `listed`·`absent`, 나머지(종료 코드·빈 출력·잘못된 JSON·다른 result)는 `error`.
+run_state_of() {
+  local rc=$1 out=$2
+  [ "$rc" = 0 ] || { echo error; return; }
+  printf '%s' "$out" | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+except Exception:
+    print("error"); sys.exit()
+listed=d.get("runListed") if isinstance(d, dict) else None
+if d.get("result")!="ok" or not isinstance(listed, bool): print("error")
+else: print("listed" if listed else "absent")' 2>/dev/null || echo error
 }

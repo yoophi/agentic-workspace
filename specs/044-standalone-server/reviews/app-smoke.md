@@ -57,6 +57,7 @@
 | (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
 | (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
 
+- **run 조회 실패 분리(Codex r12 docs)**: 옛 `close-run.sh`는 `bench-check.py`의 종료 코드를 버리고, 출력에 `"runListed": false`가 없으면 "제거 안 됨"으로 봤다. 그래서 b2(run 유지 기대)에서 조회가 모두 실패해도 통과할 수 있었다. 지금 스크립트는 조회 결과를 있음·없음·검사 실패로 나누고(`run_state_of`), 한 번도 성공한 조회가 없으면 7로 끝난다(`run-state-unknown`). 과거 원자료 재판정: 옛 루프의 `run-removed=yes`는 출력에 `"runListed": false`가 있을 때만 기록되므로 모두 성공한 조회다. b2 과거 실행 7개는 모두 `run-removed=yes`(제거)라 조회 실패를 run 유지로 잘못 통과한 경우는 없다. 자기 시험(75개)에 조회 실패(`identity-failed`, 빈 출력, 잘못된 JSON)를 넣었다.
 - **b2 기대값 정정(Codex r11 docs)**: 10차 판정은 b2를 (a)(b1)과 같이 "Settings만 남음"으로 봤는데, 이는 실제 닫기 대상과 반대였다. `close-run.sh`는 b2에서 Settings를 연 뒤 앞에 있는 Settings에 Cmd+W를 보낸다(원자료 `front=Settings`). 그래서 올바른 b2 결과는 Settings만 닫히고, 메인 창(`Agentic Workbench`)·앱·run이 남고, 메인 창 토큰이 200인 것이다. 지금 스크립트는 경로별로 기대를 나눈다: (a)(b1)(f)는 run 제거·토큰 401, (b2)는 run 유지·토큰 200. 창 판정은 (b2)가 남은 창 `Agentic Workbench`다. 과거 b2 7개 실행은 모두 앱 전체가 종료돼(원자료 `app-alive-after-close=no`) 이 기대로도 9이고, b2는 여전히 미해결이다. 자기 시험(66개)에 정상 b2(Settings만 닫힘 → 0), 배경 메인 창만 닫힘(9), run 제거(7), 토큰 401(8)을 넣었다.
 - **닫기 동작·창 상태 재판정(Codex r10 docs)**: 옛 `close-run.sh`는 클릭 명령의 실패 코드를 버리고, 앱 생존·남은 창을 기록만 했다. 그래서 각 실행의 원자료(`action:` 줄, `app-alive-after-close=`, `windows-after-close=`)로만 다시 판정했다.
   - (a)(b1) 14개: 모두 앱이 살아 있고 남은 창은 `Settings` 하나다(대상 창만 닫힘) → 통과.

@@ -68,11 +68,16 @@ ALIVE=$(kill -0 "$APID" 2>/dev/null && echo yes || echo no)
 log "app-alive-after-close=$ALIVE"
 WINDOWS=""
 [ "$ALIVE" = yes ] && { WINDOWS=$(sx 'get name of every window'); log "windows-after-close=$WINDOWS"; }
-# 창 상태 판정: (a)(b1)(b2)는 대상 창만 닫혀 앱과 Settings가 남아야 하고, (f)는 마지막 창이라 앱이 끝나야 한다.
+# 창 상태 판정: 경로별 기대는 `window_verdict`(lib.sh) — (a)(b1)은 Settings만, (b2)는 메인 창만 남고, (f)는 앱이 끝난다.
 window_verdict "$CLOSE" "$ACTRC" "$ALIVE" "$WINDOWS" | tee -a "$R/meta.txt"; WINRC=${PIPESTATUS[0]}
-ok=no
+# run 조회(Codex r12 docs): 성공한 조회만 판정에 쓴다 — 있음(listed)·없음(absent)·검사 실패(error: 종료 코드·빈 출력·잘못된
+# JSON·result≠ok). 없음이 보이면 멈춘다. 끝까지 성공한 조회가 없으면 run 상태를 모른다(error).
+ok=error
 for i in $(seq 1 40); do
-  out=$(python3 "$SMOKE/bench-check.py" "$DATA" "$RUN"); case "$out" in *'"runListed": false'*) ok=yes; break ;; esac; sleep 0.5
+  out=$(python3 "$SMOKE/bench-check.py" "$DATA" "$RUN"); brc=$?
+  state=$(run_state_of "$brc" "$out"); log "run-check[$i]=$state"
+  case "$state" in absent) ok=yes; break ;; listed) ok=no ;; esac
+  sleep 0.5
 done
 log "after: $out"
 log "run-removed=$ok"
