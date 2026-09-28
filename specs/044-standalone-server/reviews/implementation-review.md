@@ -100,6 +100,36 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - 사용자 검토로 "완료 이벤트만"이 아니라 "종료 뒤 새 출력"까지 단정하게 보강했다.
 - 단위 시험 `quit_busy_probe_reports_before_the_start_turn_completes`: red(`quit-busy-red-1.log` 종료 101, 기본 템플릿으로 떨어짐) → green(`quit-busy-green-1.log` 3 passed).
 
+### 3차: 같은 HEAD `6d806c1` 분할 리뷰(코드 144 + 문서 157 = 301, 겹침 0)
+
+- 검토 커밋의 트리는 모두 `7eb0506` = HEAD 트리다. 부모는 분할 base이고, merge-base가 의도한 base임을 확인했다.
+- 코드 리뷰 1/2: needs-attention 3건. 문서 리뷰 2/2: needs-attention 2건.
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| X1 | high | 임대 획득이 진행 중 유휴 정지를 되돌리지 못함(`try_stop_at`이 서빙 복귀를 보지 않음) | `3c71214`: 비우기 시작·유휴 취소에서 세대 증가, 서빙이면 판정 거절. OCR 2차로 `b967ff7`: 임대 삽입 전후 서빙 복귀, `stopping`이면 임대 없이 `unavailable` | 관문 수준 결정적 끼어들기 red → green, 변이 2건 red. 삽입~복귀 창은 강제할 수 없음(한계) |
+| X2 | medium | 폐기 전에 인증한 요청이 폐기 뒤 작업대를 만들 수 있음 | `880379e`: 폐기 주체를 작업대 등록과 같은 잠금 아래 표시, 입구·등록이 거절 | 실제 HTTP delayed-body(`Expect: 100-continue`로 관찰 가능한 동기화) 401·작업대 없음. 등록 경합(probe로 등록 직전 멈춤) 거절. 변이 5건 red(등록만 뺀 변이는 HTTP 시험이 잡지 못함 → core (e)가 잡음, 한계 기록) |
+| X3 | medium | 정상 Quit에서 열린 창 토큰을 폐기하지 않음 | `16a51d2`: 종료 경로가 살아 있는 창을 모두 `closeBench:false`로 폐기. OCR 2차 `c6a5fc8`: 연결을 잃은 뒤에도 종료 폐기 | 단위 시험 동작 red(200 ≠ 401) → green. 실제 앱 Dock·AppleScript × 개발·배포(최종 빌드 `b8da72f`): 옛 창 토큰 401 + 진행 중 turn 지속. **Cmd+Q는 세션 잠금으로 미검증** |
+| X4 | medium | 계약의 identify 계산식(개행 없음·base64url)이 구현(`nonce\ninstanceId`, hex)과 다름 | `72badb6`: 계약·research 정정, 고정 벡터와 시험 | `identify_proof_matches_the_contract_vector` |
+| X5 | medium | 스모크 정리가 신호 직전 PID 신원을 다시 확인하지 않음 | `72badb6`: 시작 시각 + 명령줄 신원 기록·재확인 | 자기 시험: 신원이 바뀐 PID·사라진 PID에 신호 없음 |
+
+### OCR 2차 (`51eac2b..12101f0`, 코드·스크립트 38개 파일, 두 조각)
+
+| # | 등급 | 지적 | 처리 |
+|---|---|---|---|
+| R1 | Medium | 바쁜 coordinator의 거절이 시도 수 상한을 소진해 전달 가능한 알림이 stalled가 됨 | `b967ff7`: 상한은 **실제 전달 실패 수**(`deliveryFailureCount`, serde 기본 0)만 센다. 마지막 실패가 바쁨 거절이면 항상 활동. `attemptCount`는 전체 시도 수로 둔다. 시험 (a) 바쁨 거절이 상한을 넘어도 막음 → 뒤에 전달: red → green. (b) 바쁨 거절 3회 뒤 실제 실패 1회는 활동, 실제 실패가 상한에 닿으면 stalled: 누적 시도 수로 되돌리는 변이 red |
+| R2 | Medium | 임대 삽입과 서빙 복귀 사이 경합 | `b967ff7`(X1 참조). 시험 `a_stopping_server_hands_out_no_lease`는 입구 거절 경로라 handler 변경과 무관하게 통과한다(한계 기록) |
+| R3 | Low | 문서 주석 위치 | `b8da72f` |
+| R4 | High | 데스크톱이 죽은·바뀐 서버 인스턴스를 잊지 않음 | `c6a5fc8`: 갱신 재시도 때 안내 파일을 다시 읽고 확인, 사라졌거나 다르면 잊음. 단위 시험 red → green, 변이 red |
+| R5 | High | 스모크 Dock 경로가 메뉴 미확인·이름 일치만으로 누름(다른 앱을 끌 수 있음) | `c53dde6`: 표시 이름 → pid가 정확히 APID이고 메뉴가 열렸을 때만 누름 |
+| R6 | Medium | 연결을 잃은 뒤 종료하면 폐기가 재부착을 건너뜀 | `c6a5fc8` |
+| R7 | Medium | HTTP 폐기 시험이 목록 호출 실패에도 통과 | `b8da72f`: 200·배열 단정 |
+| R8 | Medium | 가짜 agent 문 대기 상한이 긴 스모크를 깸 | `c53dde6`: `--gate-limit`(스모크 600초) |
+| R9 | Medium | 닫힌 창 표가 한없이 자람 | `c6a5fc8`: 새 incarnation이 옛 닫힘 기록을 정리, 마지막 항목이 사라지면 잠금 제거. 세션 label은 재사용되지 않아 창마다 작은 기록 하나는 남는다(한계) |
+
+- 참고: 실제 알림 전달기(`EngineAgentWorker`)는 바쁜 coordinator를 거절하지 않고 turn 뒤에 줄 서 기다린다(`dispatching`, 예약 유지). 바쁨 거절은 `accepted: false`를 돌려주는 포트의 계약이고, 시험은 probe(`DeclineAsBusy`)로 재현했다.
+- 안전 사고 기록: 앞서 (c) Cmd+Q 시도 세 번이 대상 앱이 앞인지 확인하지 않고 전역 키 입력을 보냈다. 다른 앱 영향은 없음을 확인했다(`app-smoke.md`).
+
 ### 최종 HEAD 재검토
 
-C1 수정으로 HEAD가 바뀌었으므로 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
+위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).

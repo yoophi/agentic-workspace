@@ -1,0 +1,17 @@
+app-pid=36176 quit-path=c
+probe-status=done
+run-id=quit-35ab7ceb server-pid=36197
+server-verified=yes
+token-before-quit={"status": 200}
+frontmost-before-cmd-q=no
+cmd-q-not-sent: the target app is not frontmost (attempt invalid)
+app-gone=no
+app still running after quit path; stopping exact pid
+path-exercised=no (this run is invalid evidence for path c)
+server-alive-after-quit=yes
+token-after-quit={"status": 200}
+status-after-quit={"result": "ok", "state": "serving", "leases": 1, "busyRuns": 1}
+busy-after-quit=yes
+gate-exists-before-observe=no
+owner-check-exit=0
+server-stopped=yes

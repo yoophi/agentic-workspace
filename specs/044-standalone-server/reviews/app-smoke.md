@@ -95,6 +95,22 @@
   - Cmd+Q도 (d)(e)와 같은 `Exit` 처리 경로를 쓴다. 하지만 이것을 검증으로 세지 않는다. **세션 잠금 해제 뒤 (c)를 다시 실행해야 한다.**
 - 이 수정 전의 (c) 증거(`t045-*-c-busyout-1`)는 진행 중 turn 지속만 보인다. 그때 토큰은 폐기되지 않았다.
 
+### 최종 빌드 재실행 (`b8da72f`, OCR 2차·Codex 3차 수정 뒤)
+
+OCR 2차 수정이 종료 폐기 경로(연결을 잃은 뒤에도 종료 폐기, 사라진 서버 인스턴스 잊기)와 스모크 스크립트(Dock 안전)를 바꿨다. 그래서 정상 Quit 조합을 최종 빌드로 다시 돌렸다(`BUSY=1 TOKEN=1`).
+
+| 실행 | 결과 |
+|---|---|
+| `t045-rel-d-final-1`, `t045-dev-d-final-1` (Dock) | Dock 이름 → pid가 정확히 APID(`dock-name-pids`), 메뉴 열림 확인 뒤 누름. 종료 뒤 옛 창 토큰 401, `busyRuns=1`, 새 prompt 없이 종료 뒤 출력·완료 live, 취소. 앱 로그 `exit:` 1줄 |
+| `t045-rel-e-final-1`, `t045-dev-e-final-1` (AppleScript) | 같음 |
+
+- **(c) Cmd+Q는 여전히 미검증이다.** 세션이 잠긴 상태(`screenLocked=1`)라 다시 시도하지 않았다. 안전 분기 뒤 시도들(`t045-{rel,dev}-c-busytok-{3,4}`/`-{2,3}`)은 모두 키를 보내지 않은 무효 시도다. 잠금 해제 뒤 실행해야 한다.
+- 스모크 안전 조건:
+  - Cmd+Q는 대상 APID가 앞 프로세스임을 두 번 확인한 뒤에만 보낸다.
+  - Dock은 표시 이름(`NSRunningApplication.localizedName`)이 정확히 이 APID 하나일 때, 메뉴가 열린 것을 확인한 뒤에만 누른다. 설치본 `Agentic Workbench`는 다른 표시 이름이라 겹치지 않고, System Events 프로세스 이름(`agentic-workbench`)은 쓰지 않는다.
+  - 신호는 기록한 신원(시작 시각 + 명령줄)이 같을 때만 보낸다.
+  - 실행마다 보이는 앱 목록이 그대로임을 확인했다.
+
 ### 쉬는 세션 지속 (보조 증거)
 
 흐름(`quit` probe): 에코 run 시작 → 시작 에코·완료 → `ready-to-quit`(run 살려 둠) → 그 경로로 종료 → **앱 PID 소멸** → 서버 PID 생존 → `server.status` → `owner-check.py`(identify 증명 → handshake → `bench.list`에서 같은 run → replay → 구독으로 소유자 prompt 에코를 live로 받음 → `run.cancel` → 목록에서 사라짐).
