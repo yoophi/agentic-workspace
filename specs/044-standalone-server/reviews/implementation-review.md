@@ -47,8 +47,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | gate-7 | `8865589` | OCR 4차 수정 전에 중단(fmt·clippy 0까지). 무효 |
 | **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 | **gate-9** | **`a94372e`** | **전부 0**(Codex 6차 수정 뒤): fmt, clippy `-D warnings`, cargo 950 passed/0 failed/7 ignored/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
+| **gate-10** | **`07d60c7`** | **전부 0**(Codex 7차 수정 뒤): fmt, clippy `-D warnings`, cargo 960 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 646·기타 전부), build, workbench-client itest 7, AW itest 4(실제 host 패널 교환 2 포함) |
 
-- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. **최신 게이트는 gate-9(`a94372e`)다.** gate-9 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-9는 Codex 7차 수정 전 코드다. **최신 게이트는 gate-10(`07d60c7`)이다.** gate-10 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -220,6 +221,11 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - 소유 task의 join 오류(panic)는 조건부로 되돌린다.
   - drop 경로는 `scheduler.release`가 돌려준 다음 task를 기동하지 않는다(기존 동작).
 - 7차 수정으로 코드가 바뀌었으므로 T052는 gate-10 전까지 다시 미완료로 둔다.
+- gate-10(`07d60c7`)이 7차 수정을 모두 포함해 전부 통과했다.
+- **OCR 7차 재리뷰**(`f35c58d..07d60c7`, 코드·스크립트 31개 파일): High·Medium 없음.
+  - 기동 guard: 소유 task 결과 수신과 상태 전이가 같은 poll 안에서 일어난다(await 없음). `fail()`은 되돌리기가 끝난 뒤에만 Done이 된다. Drop은 상태별 소유 task(예약·바인딩·되돌리기)를 넘겨받아 기다린 뒤 반납한다. `revert_child_launch`는 노드가 이 기동의 run일 때만 task를 되돌린다. 되돌리는 중에는 `launchRollingBack`을 돌려준다.
+  - `exchange.discardDelivery`: 작업대 범위의 교환인지 확인하고, 닫힌 작업대 tombstone을 따른다. 패널은 먼저 대기열에서 뺀 뒤 서버에 알린다(자동 전송 경합 없음). steer는 버튼과 함수 모두에서 막았다.
+  - Low(보고만): discard가 서버에 반영된 뒤 응답만 유실되면 패널은 항목을 되돌린다. 그 항목을 다시 보내면 서버는 이미 소비된 교환이라 conflict로 거절한다(wait-stop에는 영향 없음, 화면에 오류 표시).
 
 ### 최종 HEAD 재검토
 
