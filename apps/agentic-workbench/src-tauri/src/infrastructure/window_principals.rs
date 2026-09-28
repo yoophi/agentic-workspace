@@ -62,6 +62,15 @@ pub fn retire(label: &str, incarnation: &str) -> AuthenticatedPrincipal {
     AuthenticatedPrincipal::desktop_window(label, incarnation)
 }
 
+/// 앱 종료(Codex 코드 리뷰): 등록된 창을 모두 거둬들이고 그 `(label, incarnation)`을 돌려준다. 종료 뒤 늦게 온
+/// `Destroyed`는 등록이 없어 같은 주체를 다시 폐기해도(서버에서 멱등) 새 주체를 만들지 않는다.
+pub fn drain_for_exit() -> Vec<(String, String)> {
+    let mut table = table();
+    let mut windows: Vec<(String, String)> = table.drain().collect();
+    windows.sort();
+    windows
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

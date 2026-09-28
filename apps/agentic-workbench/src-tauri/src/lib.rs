@@ -402,6 +402,8 @@ fn exit_external(app: &tauri::AppHandle) {
         return;
     };
     let server = server.inner().clone();
+    // 정상 Quit은 `Destroyed` 없이 `Exit`만 온다(R8) — 살아 있는 창의 토큰·표를 여기서 폐기한다(작업대는 닫지 않음).
+    server.retire_windows_for_exit(infrastructure::window_principals::drain_for_exit());
     eprintln!(
         "[workbench] exit: flushing {} window retirement(s) and releasing the lease",
         server.pending_retirements()

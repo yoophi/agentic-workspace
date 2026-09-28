@@ -494,6 +494,14 @@ impl ExternalServer {
         });
     }
 
+    /// 종료 경로(Codex 코드 리뷰): 살아 있는 창을 모두 `closeBench:false`로 폐기해 둔다(`release_for_exit`가 상한 안에서
+    /// 기다린다). 정상 Quit은 `Destroyed` 없이 `Exit`만 오므로(R8) 이것이 없으면 창 토큰이 만료까지 유효하다.
+    pub fn retire_windows_for_exit(self: &Arc<Self>, windows: Vec<(String, String)>) {
+        for (label, incarnation) in windows {
+            self.retire_window_detached(label, incarnation, false);
+        }
+    }
+
     fn settle_one(&self) {
         if self.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
             self.settled.notify_waiters();
@@ -720,6 +728,72 @@ mod tests {
             client.forget(&descriptor.instance_id).await;
             let retired = client.retire_window("session-c", "i1", true).await.unwrap();
             assert_eq!(retired["closedBenches"], json!([bench]), "{retired}");
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// Codex 코드 리뷰: 정상 Quit(Cmd+Q·Dock·AppleScript)은 `Exit`만 오고 `Destroyed`가 없다. 종료 경로가 살아 있는 창을
+    /// 모두 `closeBench:false`로 폐기해야, 앱이 끝난 뒤 그 창 토큰이 거절된다. 작업대(run)는 남는다.
+    #[test]
+    fn an_exit_retires_the_open_windows_without_closing_their_benches() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let bench = client
+                .open_bench("session-q", "i1", ORIGIN, &server.work)
+                .await
+                .unwrap();
+            let (base, token, _) = client
+                .issue_window_token("session-q", "i1", ORIGIN)
+                .await
+                .unwrap();
+            let handshake = |token: String, base: String| async move {
+                tokio::task::spawn_blocking(move || {
+                    workbench_host::lifecycle::client::request_with_origin(
+                        &base,
+                        "POST",
+                        "/v1/system/handshake",
+                        Some(&json!({ "supportedProtocolVersions": [1], "client": { "name": "t", "version": "0" } })),
+                        Some(&token),
+                        Some(ORIGIN),
+                    )
+                    .unwrap()
+                    .0
+                })
+                .await
+                .unwrap()
+            };
+            assert_eq!(handshake(token.clone(), base.clone()).await, 200);
+
+            client.retire_windows_for_exit(vec![("session-q".to_owned(), "i1".to_owned())]);
+            client.release_for_exit(EXIT_FLUSH_LIMIT).await;
+
+            assert_eq!(
+                handshake(token, base).await,
+                401,
+                "the quitting app's window token is rejected"
+            );
+            let benches = tokio::task::spawn_blocking(move || {
+                workbench_host::lifecycle::calls::call(
+                    &descriptor.base_url,
+                    &descriptor.owner_token,
+                    None,
+                    "bench.list",
+                    json!({}),
+                    false,
+                )
+                .unwrap()
+            })
+            .await
+            .unwrap();
+            assert!(
+                benches.to_string().contains(&bench),
+                "the bench stays on the server: {benches}"
+            );
         });
         server.runtime.block_on(server.host.shutdown());
     }
