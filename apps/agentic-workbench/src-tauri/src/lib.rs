@@ -365,7 +365,16 @@ pub fn run() {
                     let watcher_state = window.state::<WorktreeWatcherState>();
                     let _ = watcher_state.stop_for_window(&label);
                 }
-                let _ = infrastructure::native_window_menu::sync_window_menu(window.app_handle());
+                // 044 OCR(Cmd+W 두 창 닫힘 가설): 창 메뉴 재구성을 `Destroyed` 콜백 밖으로 미룬다. AppKit이 키
+                // 등가(Cmd+W) 처리 중에 창 메뉴가 바뀌면 두 번째 Close Window 항목이 다음 key 창에 맞을 수 있다.
+                // 다른 스레드에서 메인 스레드로 다시 보내 이 이벤트 처리가 끝난 뒤 돈다(메인 스레드에서 부르면 곧바로 실행된다).
+                let app = window.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let handle = app.clone();
+                    let _ = app.run_on_main_thread(move || {
+                        let _ = infrastructure::native_window_menu::sync_window_menu(&handle);
+                    });
+                });
             }
         })
         .manage(WorktreeWatcherState::new())
