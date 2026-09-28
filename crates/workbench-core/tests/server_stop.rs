@@ -1158,3 +1158,23 @@ async fn a_stopping_server_hands_out_no_lease() {
         "no lease is left behind"
     );
 }
+
+/// OCR 3차 M1: 유휴 비우기 중 임대가 **들어간 뒤, 서빙 복귀 전에** 정지 판정이 돌면 임대를 무시하고 멈췄다(파생 활동에 임대가
+/// 없음). 유휴 비우기의 정지 판정은 관문 잠금 아래에서 임대 수를 함께 본다. 넣기와 복귀 사이의 창은 임대 표에 직접 넣어
+/// 결정적으로 만든다(handler는 넣은 뒤 곧 복귀·`stopping` 확인을 한다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_idle_stop_decision_counts_a_lease_inserted_before_the_resume() {
+    use workbench_core::application::work_gate::DrainMode;
+    use workbench_protocol::operations::lease::LeaseClientKindDto;
+    let h = BenchHarness::new(RunScript::default());
+    let control = h.rt.runtime.server_control();
+    control.work_gate().begin_drain(DrainMode::Idle);
+    control
+        .leases()
+        .acquire(LeaseClientKindDto::Desktop, "just-now".into());
+    assert!(
+        !control.try_stop().await,
+        "a lease that exists at the decision keeps the server"
+    );
+    assert!(!control.work_gate().is_stopping());
+}

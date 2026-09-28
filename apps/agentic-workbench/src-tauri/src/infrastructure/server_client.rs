@@ -272,18 +272,31 @@ impl ExternalServer {
     }
 
     /// 안내 파일이 그 인스턴스를 가리키고 확인(신원 증명·서빙)을 통과하는가.
+    /// 그 인스턴스가 아직 있는가. **확실한 증거가 있을 때만** "없다"고 답한다(OCR 3차 M2): 안내 파일이 없음, 다른
+    /// 인스턴스의 안내 파일, 또는 확인이 실패하고 소유 잠금이 비어 있음(서버 프로세스 없음 — ensure와 같은 기준). 확인만
+    /// 실패하고 잠금을 누가 쥐고 있으면(부하·절전 복귀로 잠시 응답 없음) 살아 있는 것으로 보고 다시 시도한다.
     async fn instance_is_live(&self, instance_id: &str) -> bool {
         let dir = server_dir(&self.data_dir);
+        let data = self.data_dir.clone();
         let instance = instance_id.to_owned();
         tokio::task::spawn_blocking(move || {
-            read_descriptor(&dir)
-                .ok()
-                .flatten()
-                .filter(|descriptor| descriptor.instance_id == instance)
-                .is_some_and(|descriptor| verify(&descriptor).is_ok())
+            let Some(descriptor) = read_descriptor(&dir).ok().flatten() else {
+                return false;
+            };
+            if descriptor.instance_id != instance {
+                return false;
+            }
+            if verify(&descriptor).is_ok() {
+                return true;
+            }
+            // 잠금을 잡을 수 있으면 서버가 없다(잡은 잠금은 곧바로 놓는다).
+            !matches!(
+                workbench_host::lifecycle::lock::try_owner_lock(&data),
+                Ok(Some(_))
+            )
         })
         .await
-        .unwrap_or(false)
+        .unwrap_or(true)
     }
 
     /// 그 인스턴스와의 연결을 잊는다(다음 호출이 다시 `ensure`한다).
@@ -913,6 +926,50 @@ mod tests {
             let instance = client.connect().await.unwrap().instance_id;
             server.host.shutdown().await;
             std::fs::remove_file(server_dir(&data).join("server.json")).unwrap();
+            assert_eq!(client.renew_once(&instance).await, None);
+            assert_eq!(client.current_instance().await, None);
+        });
+    }
+
+    /// OCR 3차 M2: 살아 있는 서버(소유 잠금을 쥔 채)가 잠시 응답하지 않을 때(부하·절전 복귀) 한 번의 실패로 잊지 않는다.
+    /// 잊으면 갱신이 영원히 멈추고, 임대가 만료돼 서버가 유휴 정지할 수 있다. 확실한 증거(안내 파일 없음·다른 인스턴스·
+    /// 소유 잠금이 비어 있음)일 때만 잊는다.
+    #[test]
+    fn a_transient_failure_of_a_live_server_keeps_the_connection() {
+        let server = running_server();
+        let data = server.dir.path().join("data");
+        let client = ExternalServer::new(
+            data.clone(),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let instance = client.connect().await.unwrap().instance_id;
+            // 살아 있는 서버 = 소유 잠금을 쥔 프로세스. 끝점만 잠시 응답하지 않게 한다(안내 파일은 그대로).
+            let _owner = workbench_host::lifecycle::lock::try_owner_lock(&data)
+                .unwrap()
+                .expect("owner lock");
+            server.host.shutdown().await;
+            assert_eq!(
+                client.renew_once(&instance).await,
+                Some(RenewalStep::Retry),
+                "a transient failure is retried"
+            );
+            assert_eq!(client.current_instance().await, Some(instance));
+        });
+    }
+
+    /// 비정상 종료한 서버(안내 파일은 남았지만 소유 잠금이 비어 있음)는 잊는다.
+    #[test]
+    fn a_renewal_after_a_crash_forgets_the_instance() {
+        let server = running_server();
+        let data = server.dir.path().join("data");
+        let client = ExternalServer::new(
+            data.clone(),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let instance = client.connect().await.unwrap().instance_id;
+            server.host.shutdown().await;
             assert_eq!(client.renew_once(&instance).await, None);
             assert_eq!(client.current_instance().await, None);
         });

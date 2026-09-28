@@ -221,7 +221,14 @@ pub async fn forget_window(label: &str, incarnation: &str) {
     let mut table = table();
     table.external.forget(label, incarnation);
     // OCR 2차 M4: 그 label의 대응이 남지 않으면 잠금도 거둔다. 늦게 온 같은 incarnation의 `ensure`는 닫힘 기록으로 거절된다.
-    if !table.external.entries.contains_key(label) && !table.by_label.contains_key(label) {
+    // OCR 3차 M3: 단, 그 잠금을 다른 작업이 쥐고(기다리고) 있지 않을 때만 — 표와 이 호출자 둘뿐일 때. `label_lock`도 표 잠금
+    // 아래에서 복제하므로 이 확인과 엇갈리지 않는다.
+    let unused = table
+        .locks
+        .get(label)
+        .is_some_and(|held| Arc::strong_count(held) == 2 && Arc::ptr_eq(held, &lock));
+    if unused && !table.external.entries.contains_key(label) && !table.by_label.contains_key(label)
+    {
         table.locks.remove(label);
     }
 }
@@ -422,6 +429,20 @@ mod tests {
         assert!(
             !table().locks.contains_key(&label),
             "the label lock is dropped"
+        );
+    }
+
+    /// OCR 3차 M3: 다른 작업이 그 label 잠금을 쥐고 기다리는 중이면 잠금을 거두지 않는다. 거두면 다음 호출이 새 잠금을 받아
+    /// 기다리던 작업과 동시에 돌고(직렬화 깨짐), 둘 다 작업대를 열어 하나가 고아로 남을 수 있다.
+    #[tokio::test]
+    async fn a_label_lock_held_by_a_waiting_task_is_not_dropped() {
+        let label = format!("session-lock-{}", uuid::Uuid::new_v4());
+        table().external.record(&label, "i1", "server-a", "bench-1");
+        let waiting = label_lock(&label); // 기다리는 다른 작업이 쥔 복제본
+        forget_window(&label, "i1").await;
+        assert!(
+            Arc::ptr_eq(&waiting, &label_lock(&label)),
+            "the next caller queues on the same lock"
         );
     }
 

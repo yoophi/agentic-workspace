@@ -130,6 +130,15 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 - 참고: 실제 알림 전달기(`EngineAgentWorker`)는 바쁜 coordinator를 거절하지 않고 turn 뒤에 줄 서 기다린다(`dispatching`, 예약 유지). 바쁨 거절은 `accepted: false`를 돌려주는 포트의 계약이고, 시험은 probe(`DeclineAsBusy`)로 재현했다.
 - 안전 사고 기록: 앞서 (c) Cmd+Q 시도 세 번이 대상 앱이 앞인지 확인하지 않고 전역 키 입력을 보냈다. 다른 앱 영향은 없음을 확인했다(`app-smoke.md`).
 
+### OCR 3차 (`12101f0..283a0b8`, 17개 파일)
+
+| # | 등급 | 지적 | 처리 |
+|---|---|---|---|
+| Q1 | Medium | 서빙 중 tick이 조용함을 본 뒤 임대가 완전히 들어가고, 그다음 유휴 비우기·정지가 임대를 보지 않고 멈춤 | 유휴 비우기의 정지 판정이 관문 잠금 아래에서 임대 수를 더한다(`server_control.rs` `try_stop`). 시험 `an_idle_stop_decision_counts_a_lease_inserted_before_the_resume`: 임대 표에 직접 넣어 결정적으로 재현, 동작 red(`lease-idle-red-1`) → green(`lease-idle-green-1`, `server_stop` 25 passed). wait 비우기는 임대와 무관(계약대로) |
+| Q2 | Medium | 일시적 실패 한 번(identify 불가·NotReady)으로 살아 있는 서버를 잊고 갱신을 멈춤 | 확실한 증거(안내 파일 없음·다른 인스턴스·확인 실패 + 소유 잠금이 비어 있음)일 때만 잊는다. 시험: 살아 있는 서버(잠금 보유) 일시 불응 → 재시도·연결 유지: 동작 red(`liveness-red-2`) → green. 비정상 종료(잠금 빔) → 잊음(`a_renewal_after_a_crash_forgets_the_instance`). `liveness-red-1`은 필터 두 개를 준 명령 오류라 증거가 아니다 |
+| Q3 | Medium | 기다리는 작업이 쥔 label 잠금을 거둬 직렬화가 깨짐 | 표와 이 호출자 둘뿐일 때만 거둔다(`Arc::strong_count == 2`, 표 잠금 아래). 시험 `a_label_lock_held_by_a_waiting_task_is_not_dropped`: 동작 red(`lock-red-1`) → green(`desktop_benches` 8 passed) |
+| Q4 | 관찰 | Dock 경로는 `apps-named`가 빌드돼 있어야 동작(없으면 누르지 않음) | `app-smoke.md`에 빌드 절차 기록 |
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).

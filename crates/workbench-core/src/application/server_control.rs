@@ -338,10 +338,14 @@ impl ServerControl {
             // 비우기 정지 판정이다. 임대가 비우기를 서빙으로 되돌렸으면 멈추지 않는다(Codex 구현 리뷰 high).
             return false;
         }
+        let idle = self.work_gate.state() == GateState::Draining(DrainMode::Idle);
         let derived = self.derive().await;
-        let stopped = self
-            .work_gate
-            .try_stop_at(generation, || derived.active_total());
+        // 유휴 비우기의 판정은 관문 잠금 아래에서 임대도 본다(OCR 3차 M1): 임대가 들어간 뒤 서빙 복귀 전의 판정이 그 임대를
+        // 무시하고 멈추지 않게. 넣기가 이 판정보다 늦으면 handler가 `stopping`을 보고 임대를 되돌린다.
+        let leases = &self.leases;
+        let stopped = self.work_gate.try_stop_at(generation, || {
+            derived.active_total() + if idle { leases.count() as u64 } else { 0 }
+        });
         if stopped {
             self.mark_stopped();
         }

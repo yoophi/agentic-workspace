@@ -111,6 +111,8 @@ OCR 2차 수정이 종료 폐기 경로(연결을 잃은 뒤에도 종료 폐기
   - 신호는 기록한 신원(시작 시각 + 명령줄)이 같을 때만 보낸다.
   - 실행마다 보이는 앱 목록이 그대로임을 확인했다.
 
+- 스크립트 준비: `scripts/apps-named.swift`와 `winid.swift`, 진단용 `session-state`를 `swiftc -O <file>.swift -o $SMOKE/<name>`으로 `$SMOKE`에 빌드한다. `apps-named`가 없으면 Dock 경로는 누르지 않고 무효로 끝난다(닫힌 쪽으로 실패).
+
 ### 쉬는 세션 지속 (보조 증거)
 
 흐름(`quit` probe): 에코 run 시작 → 시작 에코·완료 → `ready-to-quit`(run 살려 둠) → 그 경로로 종료 → **앱 PID 소멸** → 서버 PID 생존 → `server.status` → `owner-check.py`(identify 증명 → handshake → `bench.list`에서 같은 run → replay → 구독으로 소유자 prompt 에코를 live로 받음 → `run.cancel` → 목록에서 사라짐).
