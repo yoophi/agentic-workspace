@@ -391,6 +391,14 @@ fn git_init(dir: &str) {
 /// 동시 한도 1에서 첫 task가 결과를 보고해 둘째 task가 배정 전 준비(Ready) 상태가 된 harness. coordinator run `coord`는
 /// 살아 있지만 turn이 없다. `probe`가 있으면 보고 전에 전달기에 설치한다(첫 poll에서 붙잡기).
 async fn with_ready_task(probe: Option<DispatchProbe>) -> (BenchHarness, String, String) {
+    with_ready_task_failing(probe, 0).await
+}
+
+/// `failing_deliveries`: 첫 결과 보고 전에 coordinator 알림 전달(`send_and_wait`)을 그 수만큼 실패시킨다.
+async fn with_ready_task_failing(
+    probe: Option<DispatchProbe>,
+    failing_deliveries: usize,
+) -> (BenchHarness, String, String) {
     let h = BenchHarness::with(
         |adapters| adapters.orchestration.max_concurrent_children = 1,
         RunScript::default(),
@@ -444,6 +452,9 @@ async fn with_ready_task(probe: Option<DispatchProbe>) -> (BenchHarness, String,
         h.rt.runtime.orchestration().set_dispatch_probe(Some(probe));
     }
     let first_run = first["runId"].as_str().unwrap().to_owned();
+    h.engine
+        .fail_send_and_wait
+        .store(failing_deliveries, std::sync::atomic::Ordering::SeqCst);
     h.call(
         &agent(&first_run),
         OperationId::OrchestrationReportResult,
@@ -598,4 +609,337 @@ async fn a_deferred_task_survives_the_stop_and_is_recoverable_after_restart() {
         recoverable.to_string().contains(&task_id),
         "the deferred task is recoverable: {recoverable}"
     );
+}
+
+/// OCR 구현 리뷰(core 2): 비우기가 시작된 뒤 만들어진 대기 task(비우기 전에 받은 호출이 비우기 안에서 끝나 만든 것)는
+/// 이어 가기로 배정받지 못한다(`ensure_assign_continues`). 활동으로 세지 않되 **보고에서 빠지지 않고** `deferredTasks`에
+/// 든다 — coordinator가 바빠 비우기 전 task는 세는 경우에도.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_task_created_after_the_drain_started_is_reported_as_deferred() {
+    use workbench_core::application::{
+        orchestration::agent_tools::{handle_tool, RoleLookup, CREATE_CHILD_TASK_TOOL},
+        work_gate::{DrainMode, ReservationKind},
+    };
+    let (h, _bench, before) = with_ready_task(None).await;
+    settled(&h).await;
+    let gate = h.rt.runtime.work_gate().clone();
+    let _turn = gate.reserve(ReservationKind::Turn, Some("coord")).unwrap();
+    gate.begin_drain(DrainMode::Wait);
+    // 입구를 이미 지난 호출이 비우기 안에서 끝나는 경우: 도구 처리부를 직접 부른다(입구 판정은 비우기 전에 끝났다).
+    let orchestration = h.rt.runtime.orchestration().clone();
+    let RoleLookup::Role(role) = orchestration.agent_role("coord").await else {
+        panic!("coord is the coordinator");
+    };
+    let created = handle_tool(
+        &orchestration,
+        "coord",
+        role,
+        CREATE_CHILD_TASK_TOOL,
+        &json!({ "requestId": "c-after", "title": "late", "objective": "read", "expectedResult": "summary",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" } }),
+    )
+    .await
+    .expect("the late task is created");
+    let after = created["taskId"].as_str().unwrap().to_owned();
+    let status = status(&h).await;
+    assert_eq!(
+        status["activeWork"]["queuedTasks"], 1,
+        "the pre-drain task can still be assigned by the busy coordinator: {status}"
+    );
+    let deferred: Vec<String> = serde_json::from_value(status["deferredTasks"].clone()).unwrap();
+    assert!(
+        deferred.contains(&after),
+        "the post-drain task is reported: {status}"
+    );
+    assert!(!deferred.contains(&before), "{status}");
+}
+
+async fn session_of(h: &BenchHarness, bench: &str) -> Value {
+    h.call(
+        &AuthenticatedPrincipal::desktop(),
+        OperationId::OrchestrationGet,
+        json!({ "benchId": bench }),
+    )
+    .await
+    .unwrap()
+}
+
+/// 알림 전달이 계속 실패하는 동안 상태를 지켜본다: 상한 전에는 정지를 막고, 상한을 넘으면 `stalledNotifications`에만
+/// 든다. `(알림 id, 상한 전 관측 수)`.
+async fn until_stalled(h: &BenchHarness, bench: &str) -> (String, usize) {
+    use workbench_core::application::server_control::MAX_NOTIFICATION_ATTEMPTS_FOR_STOP;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let mut blocked_before_cap = 0;
+    loop {
+        let current = status(h).await;
+        let note = session_of(h, bench).await["coordinatorNotifications"][0].clone();
+        let attempts = note["attemptCount"].as_u64().unwrap_or(0) as u32;
+        let stalled: Vec<String> =
+            serde_json::from_value(current["stalledNotifications"].clone()).unwrap_or_default();
+        if stalled.is_empty() {
+            if attempts < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP {
+                assert!(
+                    current["activeWork"]["pendingNotifications"]
+                        .as_u64()
+                        .unwrap()
+                        >= 1,
+                    "a notification under the cap blocks the stop: {current} {note}"
+                );
+                blocked_before_cap += 1;
+            }
+        } else {
+            let id = note["id"].as_str().unwrap().to_owned();
+            assert_eq!(stalled, vec![id.clone()]);
+            assert!(
+                attempts >= MAX_NOTIFICATION_ATTEMPTS_FOR_STOP,
+                "stalled only after the cap: {note}"
+            );
+            assert_eq!(note["status"], "failed", "{note}");
+            return (id, blocked_before_cap);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the notification reaches the attempt cap: {current} {note}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+/// 유휴 정지가 진행될 때까지 tick한다(배경 재시도의 전달 시도 중에는 그 시도가 활동이다 — 조건 대기).
+async fn idle_stops(h: &BenchHarness, why: &str) {
+    let control = h.rt.runtime.server_control();
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    while !control.tick(Duration::ZERO).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the idle stop proceeds: {why}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+/// OCR 구현 리뷰(core 3): coordinator turn이 계속 실패하면(인증·할당량 등) 재시도 가능한 실패 알림을 영원히 활동으로 세어
+/// wait·유휴 정지가 끝나지 않았다. 상한(`MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`) 전에는 정지를 막고, 상한을 넘은 실패 알림은
+/// `stalledNotifications`로 보고만 한다. 알림은 전달된 것으로 바뀌지 않고 재시도 가능한 실패로 저장된 채 남는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_notification_that_keeps_failing_stops_blocking_after_the_attempt_cap() {
+    let (h, bench, _task) = with_ready_task_failing(None, 10_000).await;
+    let (id, blocked_before_cap) = until_stalled(&h, &bench).await;
+    assert!(blocked_before_cap > 0, "the pre-cap window was observed");
+    idle_stops(&h, &id).await;
+    // 정지 뒤에는 호출 입구가 닫혀 있다 — 저장소를 직접 읽는다.
+    let session =
+        h.rt.runtime
+            .orchestration()
+            .get(&bench)
+            .await
+            .unwrap()
+            .expect("session");
+    let note = session
+        .coordinator_notifications
+        .iter()
+        .find(|note| note.id == id)
+        .expect("stored");
+    assert_eq!(
+        note.status,
+        workbench_core::domain::agent_orchestration::CoordinatorNotificationStatus::Failed,
+        "kept as a failed notification"
+    );
+    assert!(
+        note.failure
+            .as_ref()
+            .is_some_and(|failure| failure.retryable),
+        "still retryable"
+    );
+    assert!(note.collected_at.is_none());
+}
+
+/// 상한은 재시도를 **기다리는** 실패 알림에만 적용된다. 시도 수가 상한 이상이어도 진행 중인 전달 시도(`Dispatching`,
+/// N-notify 예약)는 정지를 막는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_attempt_in_progress_blocks_the_stop_even_past_the_cap() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use workbench_core::application::server_control::MAX_NOTIFICATION_ATTEMPTS_FOR_STOP;
+    let hold = std::sync::Arc::new(AtomicBool::new(false));
+    let (reached_tx, mut reached) = tokio::sync::mpsc::unbounded_channel();
+    let release = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let probe: DispatchProbe = {
+        let (hold, release) = (
+            std::sync::Arc::clone(&hold),
+            std::sync::Arc::clone(&release),
+        );
+        std::sync::Arc::new(move |at| {
+            let (hold, release, tx) = (
+                std::sync::Arc::clone(&hold),
+                std::sync::Arc::clone(&release),
+                reached_tx.clone(),
+            );
+            Box::pin(async move {
+                if at == DispatchPoint::AfterDispatchingSaved && hold.swap(false, Ordering::SeqCst)
+                {
+                    let _ = tx.send(());
+                    release.acquire().await.expect("probe gate").forget();
+                }
+                DispatchAction::Continue
+            })
+        })
+    };
+    let (h, bench, _task) = with_ready_task_failing(Some(probe), 10_000).await;
+    let (id, _) = until_stalled(&h, &bench).await;
+    hold.store(true, Ordering::SeqCst);
+    tokio::time::timeout(Duration::from_secs(20), reached.recv())
+        .await
+        .expect("the next retry attempt is held in flight")
+        .unwrap();
+    let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+    assert_eq!(note["status"], "dispatching", "{note}");
+    assert!(note["attemptCount"].as_u64().unwrap() as u32 > MAX_NOTIFICATION_ATTEMPTS_FOR_STOP);
+    let current = status(&h).await;
+    assert_eq!(current["stalledNotifications"], json!([]), "{current}");
+    assert!(
+        current["activeWork"]["pendingNotifications"]
+            .as_u64()
+            .unwrap()
+            >= 1,
+        "{current}"
+    );
+    assert!(
+        !h.rt.runtime.server_control().tick(Duration::ZERO).await,
+        "an attempt in flight blocks the stop"
+    );
+    release.add_permits(1);
+    // 그 시도도 실패하면 다시 재시도 대기로 돌아가 보고만 된다.
+    let (again, _) = until_stalled(&h, &bench).await;
+    assert_eq!(again, id);
+}
+
+/// 상한을 넘어 보고만 되던 알림도 잃지 않는다: coordinator가 다시 성공하면 배경 재시도가 전달해 `delivered`가 된다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stalled_notification_is_delivered_once_the_coordinator_recovers() {
+    use std::sync::atomic::Ordering;
+    let (h, bench, _task) = with_ready_task_failing(None, 10_000).await;
+    let (id, _) = until_stalled(&h, &bench).await;
+    h.engine.fail_send_and_wait.store(0, Ordering::SeqCst);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+        if note["status"] == "delivered" {
+            assert_eq!(note["id"], json!(id));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the retry delivers it: {note}"
+        );
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(status(&h).await["stalledNotifications"], json!([]));
+}
+
+/// 정지 뒤 같은 데이터로 runtime 재조립(같은 시험 프로세스, OS 프로세스 재시작 아님): 보고만 되던 알림은 재시도 가능한
+/// 실패로, 그 보고는 결과로 저장돼 있다. 복구 → 새 coordinator 인계 뒤 그 알림은 `superseded`가 되고 **새 coordinator에게
+/// 다시 전달되지 않는다**(041 인계 계약). 증명하는 것은 "저장 보존 + 보고 모으기(`orchestration.collectReports`)로 결과를
+/// 읽을 수 있음"이다. 자동 재전달은 증명하지 않는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stalled_notification_survives_the_stop_and_its_report_is_collected_after_a_restart() {
+    let limit = |adapters: &mut workbench_core::application::workbench_runtime::RuntimeAdapters| {
+        adapters.orchestration.max_concurrent_children = 1
+    };
+    let (h, _bench, _task) = with_ready_task_failing(None, 10_000).await;
+    let (id, _) = until_stalled(&h, &_bench).await;
+    idle_stops(&h, &id).await;
+    h.rt.runtime.close_all_benches().await;
+    let h = h.restart_runtime(limit, RunScript::default());
+    let bench = h.open().await;
+    let desktop = AuthenticatedPrincipal::desktop();
+    let recoverable = h
+        .call(
+            &desktop,
+            OperationId::OrchestrationListRecoverable,
+            json!({ "benchId": bench, "worktreePath": h.dir }),
+        )
+        .await
+        .unwrap();
+    let saved = &recoverable[0];
+    let note = saved["coordinatorNotifications"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|note| note["id"] == json!(id))
+        .cloned()
+        .expect("the stalled notification is stored");
+    assert_eq!(note["status"], "failed", "{note}");
+    assert_eq!(note["failure"]["retryable"], true, "{note}");
+    let report_task = note["taskId"].as_str().unwrap().to_owned();
+    assert!(
+        saved["reports"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|report| report["taskId"] == json!(report_task)),
+        "the report behind it is stored: {saved}"
+    );
+    let session = h
+        .call(
+            &desktop,
+            OperationId::OrchestrationBootstrap,
+            json!({ "benchId": bench, "worktreePath": h.dir, "resumeWorkspaceId": saved["id"] }),
+        )
+        .await
+        .unwrap();
+    h.start(&bench, "coord2").await.unwrap();
+    h.call(
+        &desktop,
+        OperationId::OrchestrationHandoffCoordinator,
+        json!({ "benchId": bench, "request": {
+            "requestId": "handoff-1", "successorRunId": "coord2", "summary": "resume after restart",
+            "confirmed": true, "expectedRevision": session["revision"] } }),
+    )
+    .await
+    .unwrap();
+    h.call(
+        &desktop,
+        OperationId::OrchestrationRecover,
+        json!({ "benchId": bench }),
+    )
+    .await
+    .unwrap();
+    // 결과는 저장돼 읽을 수 있다: 복구 뒤에도 보고 모으기(데스크톱·소유자)가 그 보고를 돌려준다.
+    let reports = h
+        .call(
+            &desktop,
+            OperationId::OrchestrationCollectReports,
+            json!({ "benchId": bench }),
+        )
+        .await
+        .unwrap();
+    assert!(
+        reports
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|report| report["taskId"] == json!(report_task) && report["summary"] == "done"),
+        "the result is still collectable: {reports}"
+    );
+    // 한계(041 계약): 새 세대로 인계하면 이전 세대의 전달 안 된 알림은 다음 전달 바퀴에서 `superseded`가 된다. 그 알림은
+    // 새 coordinator에게 다시 전달되지 않는다(재전달 아님). 새 coordinator의 `collectChildResults`도 이전 세대의 끝난
+    // task를 받지 않는다(활성 세대 한정) — 결과는 보고 모으기로만 읽는다.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let note = session_of(&h, &bench).await["coordinatorNotifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|note| note["id"] == json!(id))
+            .cloned()
+            .unwrap();
+        if note["status"] == "superseded" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the handoff supersedes it: {note}"
+        );
+        tokio::task::yield_now().await;
+    }
 }

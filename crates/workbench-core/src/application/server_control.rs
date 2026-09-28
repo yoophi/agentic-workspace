@@ -30,6 +30,11 @@ use crate::{
     ports::{operation_ledger::LedgerState, server_host::ServerHost},
 };
 
+/// 재시도 가능한 실패 coordinator 알림을 활동 작업으로 세는 전달 시도 상한(OCR 구현 리뷰). coordinator turn이 계속 실패하면
+/// (인증·할당량 등) 재시도가 끝나지 않아 정지가 영원히 막힌다. 이 수만큼 시도한 뒤의 실패 알림은 `stalled_notifications`로
+/// 보고만 한다(배경 재시도는 계속될 수 있고, 시도 중에는 그 시도가 활동이다).
+pub const MAX_NOTIFICATION_ATTEMPTS_FOR_STOP: u32 = 3;
+
 /// 파생 값(G 밖에서 읽음). `ActiveWorkDto`·`server.status`의 재료.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DerivedWork {
@@ -45,6 +50,9 @@ pub struct DerivedWork {
     pub unresolved_operations: u64,
     /// 배정할 수 있는 쪽(바쁜 coordinator·미전달 알림)이 없어 세지 않은 준비 task(보고만). 저장돼 있어 복구할 수 있다.
     pub deferred_tasks: Vec<String>,
+    /// 전달 시도 상한([`MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`])을 넘어 재시도를 기다리는 실패 알림(보고만). 저장된 채
+    /// 재시도 가능한 실패로 남는다 — 전달된 것으로 보지 않는다.
+    pub stalled_notifications: Vec<String>,
 }
 
 impl DerivedWork {
@@ -193,28 +201,37 @@ impl ServerControl {
                     None => false,
                 };
                 // 이 coordinator에게 아직 전달하지 않은 알림(알림 전달기가 넘겨 coordinator turn을 깨운다).
-                let undelivered = match (
+                // 전달 중(`Dispatching`)·대기(`Pending`)는 시도 수와 무관하게 활동이다. 재시도를 기다리는 실패 알림만
+                // 시도 상한 안에서 센다 — 상한을 넘으면 `stalled_notifications`로 보고만 한다(저장은 그대로).
+                let mut undelivered = 0;
+                if let (Some(generation), true) = (
                     session.active_coordinator_generation_id.as_deref(),
                     coordinator_alive,
                 ) {
-                    (Some(generation), true) => session
+                    for notification in session
                         .coordinator_notifications
                         .iter()
-                        .filter(|notification| {
-                            notification.generation_id == generation
-                                && match notification.status {
-                                    CoordinatorNotificationStatus::Pending
-                                    | CoordinatorNotificationStatus::Dispatching => true,
-                                    CoordinatorNotificationStatus::Failed => notification
-                                        .failure
-                                        .as_ref()
-                                        .is_some_and(|failure| failure.retryable),
-                                    _ => false,
+                        .filter(|notification| notification.generation_id == generation)
+                    {
+                        match notification.status {
+                            CoordinatorNotificationStatus::Pending
+                            | CoordinatorNotificationStatus::Dispatching => undelivered += 1,
+                            CoordinatorNotificationStatus::Failed
+                                if notification
+                                    .failure
+                                    .as_ref()
+                                    .is_some_and(|failure| failure.retryable) =>
+                            {
+                                if notification.attempt_count < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP {
+                                    undelivered += 1;
+                                } else {
+                                    derived.stalled_notifications.push(notification.id.clone());
                                 }
-                        })
-                        .count() as u64,
-                    _ => 0,
-                };
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 derived.pending_notifications += undelivered;
                 // 준비 task는 coordinator agent만 배정한다(`assignChildTask`는 coordinator 역할의 agent 도구 —
                 // 소유자·데스크톱·CLI는 부를 수 없다). coordinator는 turn 안에서만 배정하고, turn은 바쁜 실행(엔진
@@ -233,7 +250,10 @@ impl ServerControl {
                                 Some(started) => DateTime::parse_from_rfc3339(&task.created_at)
                                     .is_ok_and(|created| created < started),
                             };
+                            // 비우기가 시작된 뒤 만든 task(비우기 전에 받은 호출이 비우기 안에서 만든 것)는 이어 가기로
+                            // 배정받지 못한다(`ensure_assign_continues`) — 활동으로 세지 않되 보고에서 빼지 않는다.
                             if !before_drain {
+                                derived.deferred_tasks.push(task.id.clone());
                                 continue;
                             }
                             if can_assign {
@@ -276,6 +296,7 @@ impl ServerControl {
         }
         derived.undeliverable_exchanges.sort();
         derived.deferred_tasks.sort();
+        derived.stalled_notifications.sort();
         derived
     }
 

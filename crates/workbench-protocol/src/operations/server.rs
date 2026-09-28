@@ -81,6 +81,10 @@ pub struct ServerStatusOutput {
     /// 복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음.
     #[serde(default)]
     pub deferred_tasks: Option<Vec<String>>,
+    /// 전달 시도 상한을 넘어 재시도를 기다리는 실패 coordinator 알림 id(활동 작업 아님, 저장된 채 재시도 가능한 실패로
+    /// 남음). `None`은 아직 파생하지 않음.
+    #[serde(default)]
+    pub stalled_notifications: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_since: Option<String>,
     /// 이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의

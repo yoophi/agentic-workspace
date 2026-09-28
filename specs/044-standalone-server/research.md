@@ -167,6 +167,20 @@
     - 이 검증에서 드러난 기존 결함(041부터, 044 변경 아님): `recover`의 `scheduler.reconcile`이 준비 task를 자리와 무관하게 대기열에 넣고, `acquire`는 대기열에 있는 task에 자리가 비어도 `Queued`를 돌려줬다. 실행 중 task가 없으면 `release`가 오지 않아 재시작 뒤 재배정이 영원히 대기했다. 수정: 대기열의 task도 자리가 비면 `acquire`가 시작한다(`scheduler.rs`, 단위 시험 red→green, 변이 시 host 재시작 시험 실패).
     - 처음 제안의 잘못: 메인 세션이 처음 둔 조건 "데스크톱 임대 또는 coordinator 바쁨"은 틀렸다(임대는 배정 주체가 아님). 사용자 반론 뒤 코드로 확인해 고쳤다.
     - 구현 리뷰 대상으로 명시한다(정책 변경·scheduler 수정·증거 범위).
+  - **OCR 구현 리뷰 반영(정지 계약 변경, 구현 리뷰 대상)**:
+    - 비우기가 시작된 뒤 만든 준비 task(비우기 전에 받은 호출이 비우기 안에서 만든 것)는 이어 가기로 배정받지 못한다(`ensure_assign_continues`). 활동으로 세지 않고 `deferredTasks`로 보고한다. 이전에는 보고에서 빠졌다. 입구 판정과 C-call 예약도 관문의 한 잠금 아래에서 한다(`WorkGate::admit`).
+    - **알림 재시도 상한**: coordinator turn이 계속 실패하면(인증·할당량 등) 재시도 가능한 실패 알림이 영원히 활동이라 wait·유휴 정지가 끝나지 않았다(재시도는 50ms부터 두 배, 최대 5초 간격, 횟수 제한 없음). 결정:
+      - 재시도를 **기다리는** 재시도 가능 실패 알림은 `attemptCount < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`(3)일 때만 활동으로 센다. 넘으면 `stalledNotifications`로 보고만 한다.
+      - `pending`·`dispatching`(진행 중인 시도, N-notify 예약)은 시도 수와 무관하게 활동이다. 상한은 진행 중 시도에 적용하지 않는다.
+      - 시도 수는 "전달됨"이 아니다. 알림은 `failed`·재시도 가능 그대로 저장되고 거두지도 지우지도 않는다. 배경 재시도는 서빙 중 계속된다.
+    - 증명 범위(`crates/workbench-core/tests/server_stop.rs`):
+      - 주입한 전달 실패 → 재시도 → 상한 전에는 정지를 막는다 → 상한 뒤 유휴 정지가 진행되고 id가 `stalledNotifications`에 든다. 저장은 `failed`·재시도 가능, 거두지 않음.
+      - 상한을 넘긴 뒤의 진행 중 시도(`dispatching`)는 정지를 막는다.
+      - 같은 runtime에서 coordinator가 다시 성공하면 배경 재시도가 전달해 `delivered`가 된다.
+      - 정지 뒤 같은 데이터로 runtime을 재조립하면(같은 시험 프로세스, OS 프로세스 재시작 아님) 알림은 `failed`·재시도 가능으로, 그 보고는 결과로 저장돼 있다. 복구 → 새 coordinator 인계 뒤 알림은 `superseded`가 되고, 결과는 `orchestration.collectReports`로 읽힌다.
+    - 한계(증명하지 않은 것):
+      - 재시작 뒤 그 알림이 새 coordinator에게 **자동으로 다시 전달되지는 않는다**. 인계는 이전 세대 알림을 `superseded`로 바꾸고(041 계약), 새 coordinator의 `collectChildResults`는 이전 세대의 끝난 task를 받지 않는다(활성 세대 한정).
+      - 상한 뒤 N+1번째 시도에서 성공할 coordinator라도 정지가 먼저 오면, 그 알림은 전달되지 않은 채 저장된다. 재시작 뒤에는 인계로 `superseded`가 된다. 알림이 가리키는 보고는 저장돼 보고 모으기로 읽히지만, coordinator가 그 알림을 받지는 못한다.
   - **확인했지만 전달 prompt가 아직 소비되지 않은 교환**(`send`/`queue`, `rejected` 아님, 대상 run 살아 있음): **데스크톱 임대가 하나라도 있을 때만** 센다. 임대가 없으면 화면 대기열을 보낼 클라이언트가 없어 기다려도 끝나지 않는다. 이 경우 `server.status`의 `undeliverableExchanges`로 보고한다.
   - 이 프로세스가 적용 중인 ledger `pending` 수
   - 받아들인 분리 호출 수(HTTP·MCP)
