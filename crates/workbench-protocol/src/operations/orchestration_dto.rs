@@ -330,9 +330,15 @@ pub struct CoordinatorNotificationDto {
     pub main_run_id: Option<String>,
     pub status: CoordinatorNotificationStatusDto,
     pub attempt_count: u32,
+    /// 실제 전달 실패 수(전달 오류·중단된 시도). coordinator가 바빠 거절한 시도는 세지 않는다.
+    #[serde(default)]
+    pub delivery_failure_count: u32,
     pub failure: Option<CommandFailureDto>,
     #[serde(default)]
     pub collected_at: Option<String>,
+    /// 마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attempt_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

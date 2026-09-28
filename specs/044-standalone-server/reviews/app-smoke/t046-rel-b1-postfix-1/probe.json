@@ -1,0 +1,17 @@
+{
+  "origin": "tauri://localhost",
+  "scenario": "close-token",
+  "steps": {
+    "startEcho": "ok",
+    "capturedEvents": 9,
+    "lastSequence": 9,
+    "tokenBeforeClose": 200
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-104774e6",
+  "benchId": "039455d4-ed1a-4de1-aa6b-b36210111f1c",
+  "phase": "ready-to-close",
+  "result": "ok"
+}

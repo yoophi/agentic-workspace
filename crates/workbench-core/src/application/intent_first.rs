@@ -230,8 +230,10 @@ where
         Ok(match decide(existing.as_ref(), &fp, request_id) {
             ReplayDecision::Proceed => None,
             // ledger는 모든 aggregate에 revision을 매기지만, 저장 단위가 아닌 Git 변경은 첫 응답처럼 revision을 싣지 않는다.
-            ReplayDecision::ReturnStored(result) if !tracks_revision => Some(result.map(without_revision)),
-            ReplayDecision::ReturnStored(result) => Some(result),
+            ReplayDecision::ReturnStored(result) if !tracks_revision => {
+                Some(result.map(|reply| without_revision(reply).mark_replayed()))
+            }
+            ReplayDecision::ReturnStored(result) => Some(result.map(CallReply::mark_replayed)),
             ReplayDecision::Conflict(fault) => Some(Err(fault)),
         })
     };
@@ -456,6 +458,36 @@ mod tests {
             fault.message,
             "idempotencyKey is required for project.create."
         );
+    }
+
+    #[test]
+    fn a_stored_success_is_marked_as_an_idempotency_replay() {
+        let (_dir, ledger, coordinator, hooks) = runtime_parts();
+        let context = ctx(Some("same"), None);
+        let first = execute(
+            &ledger,
+            &coordinator,
+            &hooks,
+            &context,
+            spec(GOALS_AGGREGATE, Reservation::None, true),
+        )
+        .unwrap();
+        let replay = execute(
+            &ledger,
+            &coordinator,
+            &hooks,
+            &context,
+            spec(GOALS_AGGREGATE, Reservation::None, true),
+        )
+        .unwrap();
+        assert!(matches!(
+            first,
+            CallReply::Complete {
+                replayed: false,
+                ..
+            }
+        ));
+        assert!(matches!(replay, CallReply::Complete { replayed: true, .. }));
     }
 
     #[test]

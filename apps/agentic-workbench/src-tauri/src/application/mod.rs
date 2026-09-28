@@ -5,5 +5,6 @@ pub use acp_agent_core::application::{
 
 pub mod appearance_preferences_service;
 pub mod session_window_state_service;
+pub mod window_close_intent;
 pub mod window_menu_service;
 pub mod worktree_workspace_layout_service;

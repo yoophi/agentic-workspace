@@ -1,7 +1,7 @@
 //! 작업대 서비스(040, research R1). 작업대 수명(열기·닫기)과 공통 검사, 그리고 run·교환 서비스가 함께 쓰는
 //! 의존성(엔진·hub·데스크톱 포트·세대 멱등)을 한곳에 둔다.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use workbench_protocol::{
     operations::bench::{BenchCloseOutput, BenchOpenOutput},
@@ -12,6 +12,7 @@ use crate::{
     application::{
         agent_exchange_service::AgentExchangeService,
         epoch_idempotency::{open_scope, EpochIdempotency},
+        work_gate::WorkGate,
     },
     infrastructure::{
         bench::in_memory_bench_registry::{
@@ -44,6 +45,9 @@ pub type BenchCloseHook = Arc<
     dyn Fn(String) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync,
 >;
 
+#[cfg(feature = "test-hooks")]
+pub type ExchangeRejectionStoreProbe = Arc<dyn Fn() -> Result<(), String> + Send + Sync>;
+
 pub struct BenchServices {
     pub registry: Arc<InMemoryBenchRegistry>,
     pub engine: Arc<dyn RunEngine>,
@@ -55,6 +59,22 @@ pub struct BenchServices {
     /// 작업대별 교환 작업 영역(040 US2).
     pub exchange_registry: InMemoryAgentWorkspaceRegistry,
     close_hooks: Mutex<Vec<BenchCloseHook>>,
+    /// 작업 관문(044 R14). 조립이 한 번 넣는다. 없으면(단위 시험 조립) 관문 판정 없이 동작한다.
+    work_gate: OnceLock<Arc<WorkGate>>,
+    /// 시험 전용: `bench.open`이 런타임 입구를 지난 뒤 작업대 등록 **직전**에 부른다(등록 경합 시험이 여기서 붙잡는다).
+    #[cfg(feature = "test-hooks")]
+    pub open_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// 시험 전용: delivery가 exchange snapshot을 검증한 뒤 gate claim 직전에 멈춘다.
+    #[cfg(feature = "test-hooks")]
+    pub exchange_delivery_snapshot_probe: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// 시험 전용: rejection claim 뒤 저장 직전에 결정적 저장 실패를 주입한다.
+    #[cfg(feature = "test-hooks")]
+    pub exchange_rejection_store_probe: Mutex<Option<ExchangeRejectionStoreProbe>>,
+}
+
+/// 소유자 주체(044)는 작업대 소유 판정을 우회한다.
+pub fn is_owner(principal: &AuthenticatedPrincipal) -> bool {
+    principal.kind == workbench_protocol::PrincipalKind::Owner
 }
 
 pub fn bench_fault(request_id: &RequestId, error: BenchError) -> WorkbenchFault {
@@ -74,6 +94,8 @@ pub fn bench_fault(request_id: &RequestId, error: BenchError) -> WorkbenchFault 
             request_id.clone(),
             MESSAGE_BENCH_LIMIT,
         ),
+        // 폐기된 창 주체는 폐기된 토큰과 같은 뜻이다(인증 실패).
+        BenchError::Retired => WorkbenchFault::unauthenticated(request_id.clone()),
     }
 }
 
@@ -98,7 +120,23 @@ impl BenchServices {
             idempotency,
             exchange_registry: InMemoryAgentWorkspaceRegistry::default(),
             close_hooks: Mutex::default(),
+            work_gate: OnceLock::new(),
+            #[cfg(feature = "test-hooks")]
+            open_probe: Mutex::default(),
+            #[cfg(feature = "test-hooks")]
+            exchange_delivery_snapshot_probe: Mutex::default(),
+            #[cfg(feature = "test-hooks")]
+            exchange_rejection_store_probe: Mutex::default(),
         }
+    }
+
+    /// 작업 관문을 넣는다(한 번만).
+    pub fn attach_work_gate(&self, gate: Arc<WorkGate>) {
+        let _ = self.work_gate.set(gate);
+    }
+
+    pub fn work_gate(&self) -> Option<&Arc<WorkGate>> {
+        self.work_gate.get()
     }
 
     /// 교환 서비스. 소유 조회는 run 엔진, 발행은 교환 스트림 + 데스크톱 전달.
@@ -150,6 +188,17 @@ impl BenchServices {
                 Some("/workingDirectory"),
             ));
         }
+        #[cfg(feature = "test-hooks")]
+        {
+            let probe = self
+                .open_probe
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(probe) = probe {
+                probe();
+            }
+        }
         let view = self
             .registry
             .open(
@@ -169,9 +218,13 @@ impl BenchServices {
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
     ) -> Result<BenchView, WorkbenchFault> {
-        self.registry
-            .resolve(bench_id, &principal.subject)
-            .map_err(|error| bench_fault(request_id, error))
+        // 044: 소유자 주체는 작업대 소유 판정을 우회한다(contracts/server-lifecycle.md §4 우회 지점 1).
+        let resolved = if is_owner(principal) {
+            self.registry.resolve_any(bench_id)
+        } else {
+            self.registry.resolve(bench_id, &principal.subject)
+        };
+        resolved.map_err(|error| bench_fault(request_id, error))
     }
 
     pub fn admit(
@@ -180,8 +233,11 @@ impl BenchServices {
         principal: Option<&AuthenticatedPrincipal>,
         bench_id: &str,
     ) -> Result<BenchAdmission, WorkbenchFault> {
+        let subject = principal
+            .filter(|principal| !is_owner(principal))
+            .map(|principal| &principal.subject);
         self.registry
-            .admit(bench_id, principal.map(|principal| &principal.subject))
+            .admit(bench_id, subject)
             .map_err(|error| bench_fault(request_id, error))
     }
 
@@ -194,8 +250,36 @@ impl BenchServices {
         principal: &AuthenticatedPrincipal,
         bench_id: &str,
     ) -> Result<BenchCloseOutput, WorkbenchFault> {
-        self.close_as(request_id, &principal.subject, bench_id)
-            .await
+        // 044: 소유자는 연 주체로서 닫는다(없는 작업대는 오늘처럼 `closed: false`).
+        let subject = if is_owner(principal) {
+            self.registry
+                .owner(bench_id)
+                .unwrap_or_else(|| principal.subject.clone())
+        } else {
+            principal.subject.clone()
+        };
+        self.close_as(request_id, &subject, bench_id).await
+    }
+
+    /// 044 창 폐기(`desktop.retireWindow{closeBench}`): `subject`가 연 작업대를 모두 닫고, 닫은 작업대 id를 돌려준다.
+    pub async fn close_opened_by(
+        self: &Arc<Self>,
+        request_id: &RequestId,
+        subject: &workbench_protocol::PrincipalSubject,
+    ) -> Vec<String> {
+        let mut closed = Vec::new();
+        for (bench_id, owner) in self.registry.open_benches() {
+            if &owner != subject {
+                continue;
+            }
+            if let Ok(output) = self.close_as(request_id, subject, &bench_id).await {
+                if output.closed {
+                    closed.push(bench_id);
+                }
+            }
+        }
+        closed.sort();
+        closed
     }
 
     /// 열린 작업대 수.
@@ -244,11 +328,20 @@ impl BenchServices {
             }
             CloseStart::Started(ticket) => ticket,
         };
+        // 요청 future가 끊겨도 detached cleanup이 끝날 때까지 wait/idle stop이 0 work를 보지 않게 C-call 예약을 넘긴다.
+        // 바깥 bench.close 호출의 예약이 아직 살아 있어 stopping으로 바뀔 수 없으므로 이 continuation 예약은 성립한다.
+        let cleanup_reservation = self
+            .work_gate
+            .get()
+            .and_then(|gate| gate.admit(false, true).ok());
         let services = Arc::clone(self);
         let bench_id = bench_id.to_owned();
-        tokio::spawn(async move { services.finish_close(ticket, &bench_id).await })
-            .await
-            .map_err(|error| WorkbenchFault::internal(request_id.clone(), error.to_string()))
+        tokio::spawn(async move {
+            let _cleanup_reservation = cleanup_reservation;
+            services.finish_close(ticket, &bench_id).await
+        })
+        .await
+        .map_err(|error| WorkbenchFault::internal(request_id.clone(), error.to_string()))
     }
 
     async fn finish_close(&self, ticket: CloseTicket, bench_id: &str) -> BenchCloseOutput {
@@ -275,6 +368,9 @@ impl BenchServices {
         self.hub.remove_stream(StreamKind::Exchange, bench_id);
         self.hub.remove_stream(StreamKind::Bench, bench_id);
         self.idempotency.drop_bench(bench_id);
+        if let Some(gate) = self.work_gate.get() {
+            gate.forget_bench_exchanges(bench_id);
+        }
         self.idempotency
             .forget_open_of(&open_scope(&ticket.bench.opened_by), bench_id);
         drop(drained);

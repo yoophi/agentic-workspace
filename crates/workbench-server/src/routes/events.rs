@@ -74,6 +74,7 @@ pub async fn issue_ticket(State(state): State<Arc<AppState>>, request: Request) 
                 request_id,
                 MESSAGE_TICKETS_EXHAUSTED,
             )),
+            Err(IssueError::Retired) => unauthenticated(&request_id),
         },
     };
     record(

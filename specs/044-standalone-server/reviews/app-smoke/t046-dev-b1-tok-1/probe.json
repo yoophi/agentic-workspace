@@ -1,0 +1,17 @@
+{
+  "origin": "http://localhost:1420",
+  "scenario": "close-token",
+  "steps": {
+    "startEcho": "ok",
+    "capturedEvents": 9,
+    "lastSequence": 9,
+    "tokenBeforeClose": 200
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-69f56a3e",
+  "benchId": "15e8df45-ec90-4215-bd24-2a6996048696",
+  "phase": "ready-to-close",
+  "result": "ok"
+}

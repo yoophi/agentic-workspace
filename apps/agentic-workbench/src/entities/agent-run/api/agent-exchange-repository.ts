@@ -45,6 +45,11 @@ export function acknowledgeAgentExchange(request: AcknowledgeAgentExchangeInput)
   return invoke<AgentExchange>("acknowledge_agent_exchange", { request });
 }
 
+/** 화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7). 이미 확인한 교환을 서버에서 끝낸다(멱등). */
+export function discardAgentExchangeDelivery(requestId: string) {
+  return invoke<null>("discard_agent_exchange_delivery", { requestId });
+}
+
 export function listAgentExchanges() {
   return invoke<AgentExchange[]>("list_agent_exchanges");
 }

@@ -1,0 +1,61 @@
+app-pid=65699 close-path=b2
+probe-status=done
+run-id=quit-e9bd758d server-pid=65912
+server-verified=yes
+before: {"result": "ok", "runListed": true, "benchCount": 1, "leases": 1}
+secret-mode=0o600 probe-tokenBeforeClose=200
+token-before-close={"status": 200}
+main-window=Agentic Workbench
+windows-before-close=Settings, Agentic Workbench
+front=Settings
+app-alive-after-close=yes
+windows-after-close=Agentic Workbench
+window-result=ok (front Settings closed, main window kept)
+run-check[1]=listed
+run-check[2]=listed
+run-check[3]=listed
+run-check[4]=listed
+run-check[5]=listed
+run-check[6]=listed
+run-check[7]=listed
+run-check[8]=listed
+run-check[9]=listed
+run-check[10]=listed
+run-check[11]=listed
+run-check[12]=listed
+run-check[13]=listed
+run-check[14]=listed
+run-check[15]=listed
+run-check[16]=listed
+run-check[17]=listed
+run-check[18]=listed
+run-check[19]=listed
+run-check[20]=listed
+run-check[21]=listed
+run-check[22]=listed
+run-check[23]=listed
+run-check[24]=listed
+run-check[25]=listed
+run-check[26]=listed
+run-check[27]=listed
+run-check[28]=listed
+run-check[29]=listed
+run-check[30]=listed
+run-check[31]=listed
+run-check[32]=listed
+run-check[33]=listed
+run-check[34]=listed
+run-check[35]=listed
+run-check[36]=listed
+run-check[37]=listed
+run-check[38]=listed
+run-check[39]=listed
+run-check[40]=listed
+after: {"result": "ok", "runListed": true, "benchCount": 1, "leases": 1}
+run-removed=no
+expect: run-removed=no token=200
+token-after-close={"status": 200}
+token-result=ok (status 200, expected 200)
+retireWindow-calls=1
+cleanup: app=gone server=gone
+close-result=ok

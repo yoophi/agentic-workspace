@@ -31,6 +31,7 @@ pub fn tool_fault(request_id: &RequestId, error: ToolError) -> WorkbenchFault {
         }
         "revisionConflict" | "duplicateConflict" | "invalidTransition" => FaultCode::Conflict,
         "capacityExceeded" => FaultCode::RateLimited,
+        "draining" => FaultCode::Draining,
         _ => FaultCode::Unavailable,
     };
     let details = serde_json::json!({ "toolError": &error });

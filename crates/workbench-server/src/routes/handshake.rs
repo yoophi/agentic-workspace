@@ -54,6 +54,7 @@ pub async fn handshake(State(state): State<Arc<AppState>>, request: Request) -> 
             &request,
             state.config.server_info.as_ref(),
             &state.instance_id,
+            &state.config.server_info.state(),
         ) {
             Some(result) => json_response(&result),
             None => problem(

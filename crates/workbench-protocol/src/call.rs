@@ -108,6 +108,8 @@ pub enum OperationId {
     ExchangeSend,
     #[serde(rename = "exchange.acknowledge")]
     ExchangeAcknowledge,
+    #[serde(rename = "exchange.discardDelivery")]
+    ExchangeDiscardDelivery,
     #[serde(rename = "exchange.list")]
     ExchangeList,
     #[serde(rename = "exchange.listPeers")]
@@ -188,11 +190,27 @@ pub enum OperationId {
     OrchestrationGetAgentRole,
     #[serde(rename = "system.describe")]
     SystemDescribe,
+    #[serde(rename = "server.status")]
+    ServerStatus,
+    #[serde(rename = "server.stop")]
+    ServerStop,
+    #[serde(rename = "lease.acquire")]
+    LeaseAcquire,
+    #[serde(rename = "lease.renew")]
+    LeaseRenew,
+    #[serde(rename = "lease.release")]
+    LeaseRelease,
+    #[serde(rename = "desktop.issueWindowToken")]
+    DesktopIssueWindowToken,
+    #[serde(rename = "desktop.retireWindow")]
+    DesktopRetireWindow,
+    #[serde(rename = "bench.list")]
+    BenchList,
 }
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 85] = [
+    pub const ALL: [OperationId; 94] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -238,6 +256,7 @@ impl OperationId {
         OperationId::ExchangeSyncWorkspace,
         OperationId::ExchangeSend,
         OperationId::ExchangeAcknowledge,
+        OperationId::ExchangeDiscardDelivery,
         OperationId::ExchangeList,
         OperationId::ExchangeListPeers,
         OperationId::ExchangeSendFromRun,
@@ -278,6 +297,14 @@ impl OperationId {
         OperationId::OrchestrationSendParentMessage,
         OperationId::OrchestrationGetAgentRole,
         OperationId::SystemDescribe,
+        OperationId::ServerStatus,
+        OperationId::ServerStop,
+        OperationId::LeaseAcquire,
+        OperationId::LeaseRenew,
+        OperationId::LeaseRelease,
+        OperationId::DesktopIssueWindowToken,
+        OperationId::DesktopRetireWindow,
+        OperationId::BenchList,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -327,6 +354,7 @@ impl OperationId {
             OperationId::ExchangeSyncWorkspace => "exchange.syncWorkspace",
             OperationId::ExchangeSend => "exchange.send",
             OperationId::ExchangeAcknowledge => "exchange.acknowledge",
+            OperationId::ExchangeDiscardDelivery => "exchange.discardDelivery",
             OperationId::ExchangeList => "exchange.list",
             OperationId::ExchangeListPeers => "exchange.listPeers",
             OperationId::ExchangeSendFromRun => "exchange.sendFromRun",
@@ -367,6 +395,14 @@ impl OperationId {
             OperationId::OrchestrationSendParentMessage => "orchestration.sendParentMessage",
             OperationId::OrchestrationGetAgentRole => "orchestration.getAgentRole",
             OperationId::SystemDescribe => "system.describe",
+            OperationId::ServerStatus => "server.status",
+            OperationId::ServerStop => "server.stop",
+            OperationId::LeaseAcquire => "lease.acquire",
+            OperationId::LeaseRenew => "lease.renew",
+            OperationId::LeaseRelease => "lease.release",
+            OperationId::DesktopIssueWindowToken => "desktop.issueWindowToken",
+            OperationId::DesktopRetireWindow => "desktop.retireWindow",
+            OperationId::BenchList => "bench.list",
         }
     }
 
@@ -576,6 +612,8 @@ pub enum CallReply {
         output: serde_json::Value,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         revision: Option<u64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replayed: bool,
     },
     #[serde(rename_all = "camelCase")]
     Accepted {
@@ -587,7 +625,18 @@ pub enum CallReply {
 
 impl CallReply {
     pub fn complete(output: serde_json::Value, revision: Option<u64>) -> Self {
-        CallReply::Complete { output, revision }
+        CallReply::Complete {
+            output,
+            revision,
+            replayed: false,
+        }
+    }
+
+    pub fn mark_replayed(mut self) -> Self {
+        if let CallReply::Complete { replayed, .. } = &mut self {
+            *replayed = true;
+        }
+        self
     }
 
     pub fn output(&self) -> Option<&serde_json::Value> {

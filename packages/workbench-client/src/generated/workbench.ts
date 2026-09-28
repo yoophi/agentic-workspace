@@ -30,6 +30,51 @@ export interface components {
     schemas: {
         /** @enum {string} */
         AccessPolicyDto: "readOnly";
+        /**
+         * @description 유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다.
+         *
+         *     `null`인 수는 아직 파생하지 않은 값이다(0 = 없음이 아니다). 어떤 필드가 그런지는 [`ServerStatusOutput::not_yet_derived`]에
+         *     싣는다. 정지 판정은 모르는 값을 활동 작업으로 본다([`ActiveWorkDto::blocks_stop`]).
+         */
+        ActiveWorkDto: {
+            /**
+             * Format: int64
+             * @description 진행 중 turn·엔진 대기열 prompt·권한 대기가 있는 run.
+             */
+            busyRuns: number;
+            /** Format: int64 */
+            orchestrationTasks?: number | null;
+            /**
+             * Format: int64
+             * @description 비우기 시작 전에 만든 대기 task(K로 배정 가능).
+             */
+            queuedTasks?: number | null;
+            /**
+             * Format: int64
+             * @description 전달 prompt가 소비되지 않은 교환(데스크톱 임대가 있을 때만 셈).
+             */
+            pendingExchanges?: number | null;
+            /**
+             * Format: int64
+             * @description 저장된 미전달 coordinator 알림(대상 coordinator run이 살아 있음).
+             */
+            pendingNotifications?: number | null;
+            /**
+             * Format: int64
+             * @description 이 프로세스가 적용 중인 ledger `pending`.
+             */
+            pendingOperations?: number | null;
+            /**
+             * Format: int64
+             * @description 받아들인 분리 호출(HTTP·MCP).
+             */
+            acceptedCalls: number;
+            /**
+             * Format: int64
+             * @description 작업 관문의 활동 예약 수(A-turn·X-deliver·T-start·N-notify).
+             */
+            reservations: number;
+        };
         AgentCommandOverridesDto: {
             globalCommand?: string | null;
             agentCommands?: {
@@ -284,6 +329,8 @@ export interface components {
             /** @description 닫으면서 취소한 소유 run. */
             cancelledRuns: string[];
         };
+        /** @description `bench.list`(044): 소유자는 모든 작업대, 그 밖의 주체는 자기가 연 작업대만 본다. */
+        BenchListInput: Record<string, never>;
         BenchOpenInput: {
             /** @description 작업대의 대상 Worktree. 서버가 실제 경로로 정규화한다. */
             workingDirectory: string;
@@ -297,6 +344,18 @@ export interface components {
         BenchRequestTitleInput: {
             runId: string;
             title: string;
+        };
+        BenchRunDto: {
+            runId: string;
+            /** @description `busy`(진행 중 turn·대기열·권한 대기) 또는 `idle`. */
+            state: string;
+        };
+        BenchSummaryDto: {
+            benchId: string;
+            workingDirectory: string;
+            /** @description 작업대를 연 주체. */
+            owner: string;
+            runs: components["schemas"]["BenchRunDto"][];
         };
         BindMainRunRequestDto: {
             requestId: string;
@@ -317,6 +376,7 @@ export interface components {
             output: unknown;
             /** Format: int64 */
             revision?: number | null;
+            replayed?: boolean;
             /** @enum {string} */
             kind: "complete";
         } | {
@@ -690,6 +750,14 @@ export interface components {
             /** @enum {string} */
             kind: "complete";
             /** @enum {string} */
+            operation: "exchange.discardDelivery";
+            output: null;
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
             operation: "exchange.list";
             output: components["schemas"]["AgentExchangeDto"][];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
@@ -1004,6 +1072,70 @@ export interface components {
             /** @enum {string} */
             operation: "system.describe";
             output: components["schemas"]["DescribeOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "server.status";
+            output: components["schemas"]["ServerStatusOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "server.stop";
+            output: components["schemas"]["ServerStopOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "lease.acquire";
+            output: components["schemas"]["LeaseAcquireOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "lease.renew";
+            output: components["schemas"]["LeaseRenewOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "lease.release";
+            output: components["schemas"]["LeaseReleaseOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "desktop.issueWindowToken";
+            output: components["schemas"]["DesktopIssueWindowTokenOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "desktop.retireWindow";
+            output: components["schemas"]["DesktopRetireWindowOutput"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
+            operation: "bench.list";
+            output: components["schemas"]["BenchSummaryDto"][];
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
             revision?: number;
         };
@@ -1551,6 +1683,18 @@ export interface components {
             /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
             protocolVersion: number;
             /** @enum {string} */
+            operation: "exchange.discardDelivery";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ExchangeDiscardDeliveryInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
             operation: "exchange.list";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["ExchangeListInput"];
@@ -2027,6 +2171,102 @@ export interface components {
             expectedRevision?: number;
             /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
             timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "server.status";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ServerStatusInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "server.stop";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["ServerStopInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "lease.acquire";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["LeaseAcquireInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "lease.renew";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["LeaseRenewInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "lease.release";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["LeaseReleaseInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "desktop.issueWindowToken";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["DesktopIssueWindowTokenInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "desktop.retireWindow";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["DesktopRetireWindowInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "bench.list";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["BenchListInput"];
+            idempotencyKey?: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
         };
         CommandFailureDto: {
             code: components["schemas"]["OrchestrationErrorCodeDto"];
@@ -2068,8 +2308,15 @@ export interface components {
             status: components["schemas"]["CoordinatorNotificationStatusDto"];
             /** Format: int32 */
             attemptCount: number;
+            /**
+             * Format: int32
+             * @description 실제 전달 실패 수(전달 오류·중단된 시도). coordinator가 바빠 거절한 시도는 세지 않는다.
+             */
+            deliveryFailureCount?: number;
             failure?: null | components["schemas"]["CommandFailureDto"];
             collectedAt?: string | null;
+            /** @description 마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다. */
+            attemptId?: string | null;
             createdAt: string;
             updatedAt: string;
         };
@@ -2134,6 +2381,27 @@ export interface components {
             operations: components["schemas"]["OperationDescriptor"][];
             /** @description principal에게 허용되고 구독 가능한 이벤트 스키마(039). */
             eventSchemas: components["schemas"]["EventSchemaDescriptor"][];
+        };
+        DesktopIssueWindowTokenInput: {
+            label: string;
+            incarnation: string;
+            /** @description 창 WebView 출처. 허용 목록만. */
+            origin: string;
+        };
+        DesktopIssueWindowTokenOutput: {
+            token: string;
+            expiresAt: string;
+        };
+        DesktopRetireWindowInput: {
+            label: string;
+            incarnation: string;
+            /** @description 사용자가 창을 닫았으면 true(그 창 주체가 연 작업대를 모두 닫는다). 앱 종료가 창을 걷어 내면 false. */
+            closeBench: boolean;
+        };
+        DesktopRetireWindowOutput: {
+            /** Format: int64 */
+            revokedTokens: number;
+            closedBenches: string[];
         };
         DispatchPromptRequestDto: {
             requestId: string;
@@ -2274,6 +2542,14 @@ export interface components {
         ExchangeAcknowledgeInput: {
             benchId: string;
             request: components["schemas"]["AgentExchangeAckRequestDto"];
+        };
+        /**
+         * @description 화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7). 이미 확인(`delivered`)했지만 run에 보내지 않은 교환을 소비된
+         *     것으로 표시해 활동 작업에서 빼고, 이후 같은 교환의 전달은 거절된다. 이미 전달·포기된 교환이면 효과 없이 성공한다.
+         */
+        ExchangeDiscardDeliveryInput: {
+            benchId: string;
+            requestId: string;
         };
         ExchangeGetForRunInput: {
             runId: string;
@@ -2537,6 +2813,32 @@ export interface components {
          * @enum {string}
          */
         IdempotencyScope: "durable" | "epoch";
+        LeaseAcquireInput: {
+            clientKind: components["schemas"]["LeaseClientKindDto"];
+            /** @description 클라이언트가 정한 식별자(데스크톱: 앱 인스턴스 uuid). */
+            clientId: string;
+        };
+        LeaseAcquireOutput: {
+            leaseId: string;
+            /** Format: int64 */
+            ttlSeconds: number;
+        };
+        /** @enum {string} */
+        LeaseClientKindDto: "desktop" | "cli" | "test";
+        LeaseReleaseInput: {
+            leaseId: string;
+        };
+        LeaseReleaseOutput: {
+            /** @description 이 호출이 임대를 풀었으면 true(없던 임대도 성공, false). */
+            released: boolean;
+        };
+        LeaseRenewInput: {
+            leaseId: string;
+        };
+        LeaseRenewOutput: {
+            /** Format: int64 */
+            ttlSeconds: number;
+        };
         /** @enum {string} */
         LifecycleStatusDto: "started" | "initialized" | "sessionCreated" | "promptSent" | "promptCompleted" | "steerPending" | "steerAccepted" | "steerRejected" | "cancelled" | "completed";
         /** @enum {string} */
@@ -2713,6 +3015,10 @@ export interface components {
         };
         /** @enum {string} */
         PromotionPolicyDto: "manual" | "onAttention" | "always" | "onFailure" | "onCompletion";
+        /** @description 044 이어 가기(`contracts/drain-classification.md` K). */
+        PromptContinuationDto: {
+            exchangeRequestId: string;
+        };
         /** @enum {string} */
         PromptDeliveryDto: "send" | "queue" | "draft";
         PromptDispatchDto: {
@@ -2877,6 +3183,7 @@ export interface components {
             benchId: string;
             runId: string;
             prompt: string;
+            continuation?: null | components["schemas"]["PromptContinuationDto"];
         };
         /** @description core `RunReplay`의 미러(오늘 `RuntimeEventSnapshot`과 같은 JSON). */
         RunReplayDto: {
@@ -2941,7 +3248,7 @@ export interface components {
          * @description 권한 범위. descriptor의 `requiredScopes`로 wire에 노출되므로 serde를 가진다.
          * @enum {string}
          */
-        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "run:write" | "bench:read" | "bench:write" | "exchange:read" | "exchange:write" | "presentation:write" | "orchestration:read" | "orchestration:write" | "system:describe";
+        Scope: "project:read" | "project:write" | "savedPrompt:read" | "savedPrompt:write" | "goal:read" | "goal:write" | "agentRunSettings:read" | "agentRunSettings:write" | "git:read" | "git:write" | "worktree:read" | "agent:read" | "run:read" | "run:write" | "bench:read" | "bench:write" | "exchange:read" | "exchange:write" | "presentation:write" | "orchestration:read" | "orchestration:write" | "system:describe" | "server:read" | "server:admin";
         SendAgentExchangeRequestDto: {
             requestId: string;
             sourcePanelId: string;
@@ -2951,6 +3258,56 @@ export interface components {
             message: string;
             delivery: components["schemas"]["AgentExchangeDeliveryDto"];
         };
+        /**
+         * @description 서버 상태(research R7·R14). 준비 상태 = `serving`.
+         * @enum {string}
+         */
+        ServerStateDto: "starting" | "serving" | "drainingIdle" | "drainingWait" | "stopping";
+        ServerStatusInput: Record<string, never>;
+        ServerStatusOutput: {
+            state: components["schemas"]["ServerStateDto"];
+            instanceId: string;
+            serverEpoch: string;
+            activeWork: components["schemas"]["ActiveWorkDto"];
+            /**
+             * Format: int64
+             * @description 쉬는 세션(바쁘지 않은 run). 활동 작업이 아니다.
+             */
+            idleRuns: number;
+            /** Format: int64 */
+            leases: number;
+            /**
+             * Format: int64
+             * @description 이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님). `null` = 아직 파생하지 않음.
+             */
+            unresolvedOperations?: number | null;
+            /** @description 임대가 없어 전달할 클라이언트가 없는 미소비 교환. `null` = 아직 파생하지 않음. */
+            undeliverableExchanges?: string[] | null;
+            /** @description 엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음. */
+            failedExchangeDeliveries?: string[] | null;
+            /**
+             * @description 비우기 전 준비 task 중 배정할 쪽(바쁜 coordinator·미전달 알림)이 없어 활동으로 세지 않은 것(task id). 저장돼 있어
+             *     복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음.
+             */
+            deferredTasks?: string[] | null;
+            /**
+             * @description 전달 시도 상한을 넘어 재시도를 기다리는 실패 coordinator 알림 id(활동 작업 아님, 저장된 채 재시도 가능한 실패로
+             *     남음). `None`은 아직 파생하지 않음.
+             */
+            stalledNotifications?: string[] | null;
+            idleSince?: string | null;
+            /**
+             * @description 이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의
+             *     `null`·부재는 "없음"이 아니라 "모름"이다. 모두 파생하면 빈 배열.
+             */
+            notYetDerived: string[];
+        };
+        ServerStopInput: {
+            mode: components["schemas"]["StopModeDto"];
+        };
+        ServerStopOutput: {
+            state: components["schemas"]["ServerStateDto"];
+        };
         SetPresentationRequestDto: {
             requestId: string;
             nodeId: string;
@@ -2958,6 +3315,8 @@ export interface components {
             /** Format: int64 */
             expectedRevision: number;
         };
+        /** @enum {string} */
+        StopModeDto: "default" | "wait" | "force";
         /**
          * @description stream별 재연결 cursor. 호출자가 마지막으로 반영한 (스트림, 세대, 순번).
          *     알림용 스트림(`worktree:*`)은 `afterSequence`를 보지 않고 live부터 전달한다.

@@ -23,8 +23,13 @@ pub const PROBE_FILE_ENV: &str = "AW_HTTP_WEBVIEW_PROBE_FILE";
 pub const APP_PROBE_FILE_ENV: &str = "AW_APP_TRANSPORT_PROBE_FILE";
 pub const APP_PROBE_AGENT_ENV: &str = "AW_APP_PROBE_AGENT_COMMAND";
 pub const APP_PROBE_CWD_ENV: &str = "AW_APP_PROBE_CWD";
-/// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). 기본은 스트림·재연결 시나리오.
+/// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). `quit`: 044 T035 앱 종료 전 준비 시나리오
+/// (run을 띄우고 살려 둔 채 `ready-to-quit`을 보고한다, 한 번만 넣는다). `quit-busy`: 시작 turn이 진행 중인 채로 보고한다.
+/// `close-token`: T046 창 토큰 넘기기. 기본은 스트림·재연결 시나리오.
 pub const APP_PROBE_SCENARIO_ENV: &str = "AW_APP_PROBE_SCENARIO";
+/// 044 T046 `close-token`: 이 창 토큰(`{baseUrl, token, origin}`)을 넘기는 0600 비밀 파일. 보고서와 따로 둔다 — 스모크 스크립트는
+/// 이 파일로 닫기 전·뒤 같은 토큰의 인증 결과(상태 코드만)를 확인한다.
+pub const APP_PROBE_SECRET_FILE_ENV: &str = "AW_APP_PROBE_SECRET_FILE";
 
 static PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
 static APP_PROBE_INSTALLED: AtomicBool = AtomicBool::new(false);
@@ -59,7 +64,8 @@ pub fn write_diagnostic_file(http: &WorkbenchHttp) {
 pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     use std::sync::atomic::Ordering;
     // `refresh` 시나리오는 새로고침마다 다시 넣는다(단계는 화면의 sessionStorage가 이어 준다).
-    let refresh = std::env::var(APP_PROBE_SCENARIO_ENV).as_deref() == Ok("refresh");
+    let scenario = std::env::var(APP_PROBE_SCENARIO_ENV).unwrap_or_default();
+    let refresh = scenario == "refresh";
     if finished
         && webview.label() == "main"
         && std::env::var_os(APP_PROBE_FILE_ENV).is_some()
@@ -67,12 +73,7 @@ pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     {
         let agent = std::env::var(APP_PROBE_AGENT_ENV).unwrap_or_default();
         let cwd = std::env::var(APP_PROBE_CWD_ENV).unwrap_or_default();
-        let template = if refresh {
-            APP_REFRESH_PROBE_SCRIPT
-        } else {
-            APP_PROBE_SCRIPT
-        };
-        let script = template
+        let script = app_probe_template(&scenario)
             .replace("__AGENT__", &serde_json::to_string(&agent).expect("json"))
             .replace("__CWD__", &serde_json::to_string(&cwd).expect("json"));
         if let Err(error) = webview.eval(&script) {
@@ -88,6 +89,58 @@ pub fn install_probe(webview: &tauri::Webview, finished: bool) {
     if let Err(error) = webview.eval(PROBE_SCRIPT) {
         eprintln!("[workbench-http] failed to inject the WebView probe: {error}");
     }
+}
+
+/// 시나리오별 앱 probe 템플릿. `close-token`은 `quit` 흐름에 창 토큰 넘기기를 더한다.
+fn app_probe_template(scenario: &str) -> String {
+    match scenario {
+        "refresh" => APP_REFRESH_PROBE_SCRIPT.to_owned(),
+        "quit" => APP_QUIT_PROBE_SCRIPT.to_owned(),
+        // T045(Codex 문서 리뷰): 시작 turn이 끝나기 전(agent가 문으로 붙잡음)에 종료 준비를 보고한다.
+        "quit-busy" => quit_busy_script("quit-busy"),
+        // Codex 코드 리뷰: 진행 중 turn + 창 토큰 넘기기(정상 Quit 뒤 옛 창 토큰 거절과 turn 지속을 한 실행에서).
+        "quit-busy-token" => quit_busy_script("quit-busy-token").replace(
+            "    report.phase = 'ready-to-quit-busy-token';\n",
+            &CLOSE_TOKEN_STEP.replace("'ready-to-close'", "'ready-to-quit-busy-token'"),
+        ),
+        "close-token" => APP_QUIT_PROBE_SCRIPT
+            .replace("scenario: 'quit'", "scenario: 'close-token'")
+            .replace("    report.phase = 'ready-to-quit';\n", CLOSE_TOKEN_STEP),
+        _ => APP_PROBE_SCRIPT.to_owned(),
+    }
+}
+
+/// 시작 prompt의 에코만 받고 완료를 기다리지 않는 `quit` 변형(시나리오 이름·단계 이름은 `name`).
+fn quit_busy_script(name: &str) -> String {
+    APP_QUIT_PROBE_SCRIPT
+        .replace("scenario: 'quit'", &format!("scenario: '{name}'"))
+        .replace(
+            "    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');\n",
+            "    await waitFor(() => echoIndex() >= 0, 'start prompt echo');\n    report.steps.completedBeforeQuit = completedAfter(echoIndex());\n",
+        )
+        .replace(
+            "report.phase = 'ready-to-quit';",
+            &format!("report.phase = 'ready-to-{name}';"),
+        )
+}
+
+/// T046: 이 창의 토큰을 비밀 파일로만 넘기고, 그 토큰(+ 창 Origin)으로 handshake한 상태 코드만 보고서에 싣는다.
+const CLOSE_TOKEN_STEP: &str = r#"    const c = await invoke('get_workbench_connection');
+    await invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } });
+    const before = await fetch(c.baseUrl + '/v1/system/handshake', {
+      method: 'POST', headers: { authorization: 'Bearer ' + c.token, 'content-type': 'application/json' },
+      body: JSON.stringify({ supportedProtocolVersions: [1], client: { name: 'aw-close-token-probe', version: '0' } }),
+    });
+    report.steps.tokenBeforeClose = before.status;
+    report.phase = 'ready-to-close';
+"#;
+
+/// 창 토큰 비밀 파일(debug 전용 command, `close-token` 시나리오).
+#[tauri::command]
+pub fn report_app_probe_secret(secret: Value) -> Result<(), String> {
+    let path =
+        std::env::var_os(APP_PROBE_SECRET_FILE_ENV).ok_or("probe secret file is not enabled")?;
+    write_owner_only(Path::new(&path), &secret).map_err(|error| error.to_string())
 }
 
 /// probe 결과를 파일에 쓴다(debug 전용 command).
@@ -170,6 +223,64 @@ const APP_PROBE_SCRIPT: &str = r#"
     report.connectionAfter = debug.connectionState();
     report.result = report.steps.droppedSockets > 0 && report.steps.noDuplicates && report.steps.noGaps
       && report.steps.startEchoCount === 1 && report.steps.afterDropEchoCount === 1 ? 'ok' : 'failed';
+  } catch (error) {
+    report.result = 'error';
+    report.error = String(error);
+    report.observed = (window.__awProbeEvents || []).slice(-20);
+  }
+  await finish();
+})();
+"#;
+
+/// 044 T035: 앱 종료 뒤 소유자 확인(`reviews/app-smoke/owner-check.py`) 앞 단계. 앱 transport(`__awDebug`)로 에코 agent
+/// run을 시작하고 시작 에코와 prompt 완료를 받은 뒤, 모드(`external`·`embedded`)·transport·작업대 id·runId와
+/// `phase: "ready-to-quit"`을 보고한다. run은 취소하지 않고 살려 둔다(앱 종료 뒤 소유자가 같은 run을 이어 본다). 토큰은 싣지 않는다.
+const APP_QUIT_PROBE_SCRIPT: &str = r#"
+(async () => {
+  const report = { origin: location.origin, scenario: 'quit', steps: {} };
+  const invoke = window.__TAURI_INTERNALS__.invoke;
+  const finish = async () => { try { await invoke('report_app_probe', { report }); } catch (error) { console.error(error); } };
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 50));
+  const waitFor = async (condition, label, limit = 20000) => {
+    const started = Date.now();
+    while (!(await condition())) {
+      if (Date.now() - started > limit) { throw new Error('timeout: ' + label); }
+      await pause();
+    }
+  };
+  try {
+    await waitFor(() => Boolean(window.__awDebug), 'debug handle');
+    const debug = window.__awDebug;
+    report.mode = await invoke('get_workbench_mode');
+    report.transport = debug.transportKind();
+    report.connection = debug.connectionState();
+    const nonce = crypto.randomUUID().slice(0, 8);
+    const runId = 'quit-' + nonce;
+    report.runId = runId;
+    const events = [];
+    window.__awProbeEvents = events;
+    await debug.listen('agent-run-event', (payload) => {
+      if (payload.runId !== runId) { return; }
+      const event = payload.event || {};
+      events.push({ sequence: payload.sequence, type: event.type, status: event.status, text: event.text });
+    });
+    // runner가 목표 앞에 안내문을 붙이므로 에코는 `echo:`로 시작하고 고유 문자열로 끝나는 agent 메시지로 판정한다.
+    const startGoal = 'quit-start-' + nonce;
+    const echoIndex = () => events.findIndex((event) => event.type === 'agentMessage' && typeof event.text === 'string'
+      && event.text.startsWith('echo:') && event.text.endsWith(startGoal));
+    const completedAfter = (index) => index >= 0 && events.slice(index + 1).some((event) => event.type === 'lifecycle' && event.status === 'promptCompleted');
+    await debug.invoke('start_agent_run', {
+      request: { goal: startGoal, agentId: 'fake-acp', agentCommand: __AGENT__, cwd: __CWD__, runId, autoAllow: true },
+      panelId: 'probe-panel',
+    });
+    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');
+    report.steps.startEcho = 'ok';
+    report.steps.capturedEvents = events.length;
+    report.steps.lastSequence = events.length ? events[events.length - 1].sequence : null;
+    // 이 창의 작업대 id(없으면 열지 않는다) — 외부 서버 모드면 서버 작업대, 소유자가 bench.list에서 같은 id를 본다.
+    report.benchId = await invoke('ensure_window_bench', { open: false, hint: null });
+    report.phase = 'ready-to-quit';
+    report.result = report.benchId ? 'ok' : 'failed';
   } catch (error) {
     report.result = 'error';
     report.error = String(error);
@@ -339,3 +450,103 @@ const PROBE_SCRIPT: &str = r#"
   await invoke('report_http_probe', { report });
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quit_probe_reports_ready_to_quit_and_leaves_the_run_alive() {
+        let script = APP_QUIT_PROBE_SCRIPT
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(!script.contains("__AGENT__") && !script.contains("__CWD__"));
+        assert!(script.contains("scenario: 'quit'"));
+        assert!(script.contains("report.phase = 'ready-to-quit'"));
+        assert!(script.contains("invoke('get_workbench_mode')"));
+        assert!(script.contains("invoke('ensure_window_bench', { open: false, hint: null })"));
+        // 앱 종료 뒤 소유자가 같은 run을 이어 보므로 probe는 run을 끝내지 않고 토큰을 싣지 않는다.
+        for forbidden in ["cancel", "token", "get_workbench_connection"] {
+            assert!(
+                !script.contains(forbidden),
+                "quit probe must not use {forbidden}"
+            );
+        }
+    }
+
+    /// T045(SC-001, Codex 문서 리뷰): `quit-busy`는 시작 prompt의 에코만 받고 **완료를 기다리지 않은 채**(agent가 turn을
+    /// 문으로 붙잡는다) `ready-to-quit-busy`를 보고한다. 앱 종료 뒤 진행 중 turn이 서버에서 이어지는지 보려는 것이다.
+    #[test]
+    fn quit_busy_probe_reports_before_the_start_turn_completes() {
+        let script = app_probe_template("quit-busy")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'quit-busy'"));
+        assert!(script.contains("report.phase = 'ready-to-quit-busy'"));
+        assert!(script.contains("await waitFor(() => echoIndex() >= 0, 'start prompt echo');"));
+        assert!(script.contains("report.steps.completedBeforeQuit = completedAfter(echoIndex());"));
+        assert!(
+            !script.contains("'start prompt echo and completion'"),
+            "the busy probe must not wait for the turn to complete"
+        );
+        for forbidden in ["cancel", "token", "get_workbench_connection"] {
+            assert!(
+                !script.contains(forbidden),
+                "quit-busy probe must not use {forbidden}"
+            );
+        }
+        assert_eq!(app_probe_template("quit"), APP_QUIT_PROBE_SCRIPT);
+    }
+
+    /// Codex 코드 리뷰(정상 Quit 창 토큰 폐기): `quit-busy-token`은 `quit-busy`(시작 turn 진행 중 보고)에 창 토큰 넘기기를
+    /// 더한다. 앱 종료 뒤 같은 토큰이 거절되고 진행 중 turn은 이어지는지 한 실행에서 본다.
+    #[test]
+    fn quit_busy_token_probe_keeps_the_turn_in_flight_and_hands_the_token_to_the_secret_file() {
+        let script = app_probe_template("quit-busy-token")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'quit-busy-token'"));
+        assert!(script.contains("await waitFor(() => echoIndex() >= 0, 'start prompt echo');"));
+        assert!(!script.contains("'start prompt echo and completion'"));
+        assert!(script.contains("invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } })"));
+        assert!(script.contains("report.phase = 'ready-to-quit-busy-token'"));
+        for forbidden in [
+            "report.token",
+            "report.steps.token =",
+            "report.secret",
+            "cancel",
+        ] {
+            assert!(!script.contains(forbidden), "must not carry {forbidden}");
+        }
+    }
+
+    /// T046(SC-006): `close-token`은 `quit` 흐름에 "이 창 토큰을 비밀 파일로 넘기고, 닫기 전 그 토큰의 handshake 상태
+    /// 코드만 보고"를 더한다. 토큰은 보고서에 들어가지 않는다(비밀 파일 command에만 넘긴다).
+    #[test]
+    fn close_token_probe_hands_the_window_token_only_to_the_secret_file() {
+        let script = app_probe_template("close-token")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'close-token'"));
+        assert!(script.contains("report.phase = 'ready-to-close'"));
+        assert!(script.contains("invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } })"));
+        assert!(script.contains("report.steps.tokenBeforeClose = "));
+        // 보고서에 토큰을 싣는 대입이 없다.
+        for forbidden in [
+            "report.token",
+            "report.steps.token =",
+            "report.secret",
+            "{ report, token",
+        ] {
+            assert!(
+                !script.contains(forbidden),
+                "close-token report must not carry {forbidden}"
+            );
+        }
+        assert!(
+            !script.contains("cancel"),
+            "the run stays alive until the window closes"
+        );
+        assert_eq!(app_probe_template("quit"), APP_QUIT_PROBE_SCRIPT);
+    }
+}

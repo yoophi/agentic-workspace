@@ -7,7 +7,7 @@
 //! 이르면 그 작업대의 새 command를 거절한다(받으면 중복 보장을 깰 수밖에 없다).
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     sync::{Arc, Mutex, MutexGuard},
 };
@@ -72,6 +72,9 @@ pub struct EpochIdempotency {
     limits: EpochIdempotencyLimits,
     scopes: Mutex<HashMap<String, ScopeTable>>,
     in_flight: Mutex<InFlight>,
+    /// 이 세대에 닫힌 작업대의 범위(044 #207, research R12). 닫힌 뒤 끝난 호출이 그 작업대의 기록을 되살리지 않게 한다.
+    /// `scopes` 잠금을 쥔 채로만 읽고 쓴다 — `drop_bench`와 `record`가 엇갈리지 않는다. 작업대 id는 재사용되지 않는다.
+    closed_benches: Mutex<HashSet<String>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -148,7 +151,7 @@ impl EpochIdempotency {
             let table = scopes.get(&call.scope);
             match table.and_then(|table| table.entries.get(&key)) {
                 Some(Entry::Result { fingerprint, reply }) if *fingerprint == print => {
-                    Some(Ok(reply.clone()))
+                    Some(Ok(reply.clone().mark_replayed()))
                 }
                 Some(Entry::Summary { fingerprint }) if *fingerprint == print => {
                     Some(Err(WorkbenchFault::conflict(
@@ -189,6 +192,9 @@ impl EpochIdempotency {
 
     fn record(&self, scope: &str, key: Key, fingerprint: String, reply: CallReply) {
         let mut scopes = lock(&self.scopes);
+        if is_closed_scope(&lock(&self.closed_benches), scope) {
+            return; // 작업대가 닫힌 뒤 끝난 호출: 결과는 호출자에게만 돌려주고 기록하지 않는다
+        }
         let table = scopes.entry(scope.to_owned()).or_default();
         table
             .entries
@@ -209,7 +215,9 @@ impl EpochIdempotency {
     pub fn drop_bench(&self, bench_id: &str) {
         let scope = bench_scope(bench_id);
         let run_prefix = format!("{scope}:");
-        lock(&self.scopes).retain(|key, _| key != &scope && !key.starts_with(&run_prefix));
+        let mut scopes = lock(&self.scopes);
+        scopes.retain(|key, _| key != &scope && !key.starts_with(&run_prefix));
+        lock(&self.closed_benches).insert(scope);
     }
 
     /// 주체별 `bench.open` 기록에서 닫힌 작업대를 만든 항목을 버린다.
@@ -227,6 +235,14 @@ impl EpochIdempotency {
             table.results.retain(|key| entries.contains_key(key));
         }
     }
+}
+
+/// 닫힌 작업대 범위이거나 그 아래 run 범위인가.
+fn is_closed_scope(closed: &HashSet<String>, scope: &str) -> bool {
+    closed.contains(scope)
+        || scope
+            .split_once(":run:")
+            .is_some_and(|(bench, _)| closed.contains(bench))
 }
 
 /// 작업대 id를 멱등 기록 범위로.

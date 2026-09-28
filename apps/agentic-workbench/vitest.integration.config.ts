@@ -6,7 +6,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   test: {
-    include: ["src/**/*.itest.ts"],
+    include: ["src/**/*.itest.ts", "src/**/*.itest.tsx"],
     environment: "node",
     globalSetup: ["../../packages/workbench-client/src/test/integration/global-setup.ts"],
     testTimeout: 60_000,

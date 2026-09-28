@@ -18,6 +18,7 @@ import {
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { ConnectionFailure } from "@/shared/ui/connection-failure";
 import { ConnectionStatusView } from "@/shared/ui/connection-status";
 import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { CodeBlock, CodeBlockCode, CodeBlockGroup } from "@/components/ui/code-block";
@@ -494,6 +495,18 @@ export const WorkbenchConnectionStatus: Story = {
       <div className="relative h-12 [&>div]:static [&>div]:translate-x-0">
         <ConnectionStatusView status="disconnected" />
       </div>
+    </div>
+  ),
+};
+
+/** 044: 외부 서버 모드에서 창이 서버에 붙지 못했을 때의 연결 실패 화면(이유 + 다시 시도). */
+export const WorkbenchConnectionFailure: Story = {
+  render: () => (
+    <div className="[&>div]:min-h-80">
+      <ConnectionFailure
+        reason="Workbench server executable was not found (set AW_WORKBENCH_SERVER_PATH or build agentic-workbench-server)"
+        onRetry={() => undefined}
+      />
     </div>
   ),
 };

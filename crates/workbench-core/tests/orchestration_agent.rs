@@ -14,7 +14,22 @@ use std::{
 
 use serde_json::{json, Value};
 use support::{scripted_run_engine::RunScript, BenchHarness};
+use workbench_core::application::orchestration::runtime::{LaunchPoint, LaunchProbe};
 use workbench_protocol::{AuthenticatedPrincipal, FaultCode, OperationId, WorkbenchFault};
+
+/// 044 시작 장벽: 자식 실행(첫 턴 hook 포함)은 장벽이 열린 뒤 따로 돈다. 바인딩 **전에** 첫 턴이 끝나도록 장벽을 연
+/// 직후(`AfterOpen`) 지점에서 hook이 끝났다는 허가를 기다린다(오늘 "엔진 등록 직후·노드 기록 전" 순서를 결정적으로 유지).
+fn hold_binding_until(h: &BenchHarness, first_turn_done: Arc<tokio::sync::Semaphore>) {
+    let probe: LaunchProbe = Arc::new(move |point| {
+        let done = Arc::clone(&first_turn_done);
+        Box::pin(async move {
+            if point == LaunchPoint::AfterOpen {
+                done.acquire().await.expect("first turn gate").forget();
+            }
+        })
+    });
+    h.rt.runtime.orchestration().set_launch_probe(Some(probe));
+}
 
 fn desktop() -> AuthenticatedPrincipal {
     AuthenticatedPrincipal::desktop()
@@ -375,10 +390,16 @@ async fn coordinator_turn_can_call_tools_while_a_notification_is_delivered() {
 async fn child_first_turn_tools_are_allowed_while_launching() {
     let f = fixture().await;
     let seen = Arc::new(std::sync::Mutex::new(Vec::<Value>::new()));
+    let first_turn_done = Arc::new(tokio::sync::Semaphore::new(0));
+    hold_binding_until(&f.h, Arc::clone(&first_turn_done));
     {
-        let (h, seen) = (Arc::clone(&f.h), Arc::clone(&seen));
+        let (h, seen, done) = (
+            Arc::clone(&f.h),
+            Arc::clone(&seen),
+            Arc::clone(&first_turn_done),
+        );
         *f.h.engine.start_hook.lock().unwrap() = Some(Arc::new(move |run: String| {
-            let (h, seen) = (Arc::clone(&h), Arc::clone(&seen));
+            let (h, seen, done) = (Arc::clone(&h), Arc::clone(&seen), Arc::clone(&done));
             Box::pin(async move {
                 let own = tool(&h, &run, OperationId::OrchestrationGetOwnTask, json!({}))
                     .await
@@ -392,6 +413,7 @@ async fn child_first_turn_tools_are_allowed_while_launching() {
                 .await
                 .unwrap();
                 seen.lock().unwrap().extend([own, progress]);
+                done.add_permits(1);
             })
         }));
     }
@@ -484,10 +506,12 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
         ),
     ] {
         let f = fixture().await;
+        let first_turn_done = Arc::new(tokio::sync::Semaphore::new(0));
+        hold_binding_until(&f.h, Arc::clone(&first_turn_done));
         {
-            let h = Arc::clone(&f.h);
+            let (h, done) = (Arc::clone(&f.h), Arc::clone(&first_turn_done));
             *f.h.engine.start_hook.lock().unwrap() = Some(Arc::new(move |run: String| {
-                let h = Arc::clone(&h);
+                let (h, done) = (Arc::clone(&h), Arc::clone(&done));
                 Box::pin(async move {
                     if run == "coord" {
                         return;
@@ -496,17 +520,41 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
                         &h,
                         &run,
                         tool_op,
-                        json!({ "requestId": "first", "summary": "first turn", "question": "which?" }),
+                        json!({
+                            "requestId": format!("first-{run}"),
+                            "summary": "first turn",
+                            "question": "which?"
+                        }),
                     )
                     .await
                     .unwrap();
+                    done.add_permits(1);
                 })
             }));
         }
-        let (task, child) = create_child(&f, "c1").await;
+        let request = json!({
+            "requestId": "c1", "title": "task c1",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read the repo", "expectedResult": "summary"
+        });
+        let created = tool(
+            &f.h,
+            &f.coordinator,
+            OperationId::OrchestrationCreateChildTask,
+            request.clone(),
+        )
+        .await
+        .expect("the applied child creation is reported as success");
         let session = session_of(&f.h, &f.bench).await;
+        let task = created["taskId"].as_str().expect("created task id");
+        let task_entry = session["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == task)
+            .expect("the task was committed before its worker started");
         assert_eq!(
-            task_status(&session, &task),
+            task_status(&session, task),
             expected_status,
             "{report_type}"
         );
@@ -514,18 +562,66 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
         assert!(
             notifications
                 .iter()
-                .any(|entry| entry["taskId"] == task.as_str() && entry["reportType"] == report_type),
+                .any(|entry| entry["taskId"] == task && entry["reportType"] == report_type),
             "{report_type}: {notifications:?}"
         );
         let node = session["nodes"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|node| node["currentRunId"] == child.as_str())
-            .expect("reserved run became the node's run");
+            .find(|node| node["id"] == task_entry["assignedNodeId"])
+            .expect("the assigned child node remains available");
         if report_type == "result" {
+            assert_eq!(created["status"], "completed");
+            assert_eq!(created["executionStatus"], "idle");
+            assert_eq!(created["runId"], Value::Null);
+            assert_eq!(node["currentRunId"], Value::Null);
             assert_eq!(node["executionStatus"], "idle");
+
+            let repeated = tool(
+                &f.h,
+                &f.coordinator,
+                OperationId::OrchestrationCreateChildTask,
+                request,
+            )
+            .await
+            .expect("same-key retry returns the stored completed task");
+            assert_eq!(repeated["taskId"], task);
+            assert_eq!(repeated["status"], "completed");
+            assert_eq!(
+                session_of(&f.h, &f.bench).await["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1,
+                "same-key retry does not create duplicate work"
+            );
+
+            let distinct = tool(
+                &f.h,
+                &f.coordinator,
+                OperationId::OrchestrationCreateChildTask,
+                json!({
+                    "requestId": "c2", "title": "task c2",
+                    "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+                    "objective": "read the repo", "expectedResult": "summary"
+                }),
+            )
+            .await
+            .expect("a new key intentionally creates a distinct completed task");
+            assert_ne!(distinct["taskId"], task);
+            assert_eq!(distinct["status"], "completed");
+            assert_eq!(
+                session_of(&f.h, &f.bench).await["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2,
+                "new-key retry semantics remain a new operation"
+            );
         } else {
+            let child = created["runId"].as_str().expect("child started").to_owned();
+            assert_eq!(node["currentRunId"], child);
             assert_eq!(node["executionStatus"], "active");
         }
     }

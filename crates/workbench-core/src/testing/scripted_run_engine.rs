@@ -7,7 +7,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
     },
     time::Duration,
 };
@@ -16,6 +16,7 @@ use std::{
 pub type TurnHook = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 use crate::{
+    application::work_gate::{Reservation, ReservationKind, WorkGate, MESSAGE_STOPPING},
     infrastructure::run::workbench_run_sink::WorkbenchRunSink,
     ports::run_engine::{RunEngine, RunEngineError, RunErrorKind},
 };
@@ -51,25 +52,71 @@ pub struct RunScript {
     /// 동시 실행 상한.
     #[serde(default)]
     pub max_runs: Option<usize>,
+    /// turn마다 실제 ACP runner처럼 `PromptSent`(turn 시작)·`PromptCompleted`(turn 끝) lifecycle을 낸다(044 Codex r7: 화면이
+    /// turn 경계로 대기열을 보내는 시험). 기본은 끔 — prompt마다 run 이벤트 하나라는 보관 시험의 가정을 지킨다. 초기 turn은
+    /// 권한 대기가 있으면 마지막 권한 응답에서 끝난다.
+    #[serde(default)]
+    pub prompt_lifecycle: bool,
 }
 
 struct Slot {
     owner: String,
     permissions: HashSet<String>,
+    /// 044 A-turn 계약: 초기 turn이 권한 응답을 기다리는 동안 run은 바쁘다. 마지막 권한 응답·취소·종료로 놓는다.
+    initial_turn: Option<Reservation>,
+    /// `prompt_lifecycle`이고 초기 turn이 권한을 기다리면, 마지막 권한 응답에서 `PromptCompleted`를 낼 sink.
+    lifecycle_sink: Option<WorkbenchRunSink>,
+}
+
+fn emit_lifecycle(sink: &WorkbenchRunSink, run_id: &str, status: LifecycleStatus, message: &str) {
+    sink.emit(
+        run_id,
+        RunEvent::Lifecycle {
+            status,
+            message: message.into(),
+        },
+    );
 }
 
 #[derive(Default)]
 pub struct ScriptedRunEngine {
     script: RunScript,
-    runs: Mutex<HashMap<String, Slot>>,
+    runs: Arc<Mutex<HashMap<String, Slot>>>,
     pub starts: AtomicUsize,
+    /// 실제 실행(launcher) 수. 시작 장벽이 열리지 않은 준비는 세지 않는다(044 R14).
+    pub launches: Arc<AtomicUsize>,
     pub prompts: AtomicUsize,
+    /// 0보다 크면 `send_and_wait`가 하나 줄이고 재시도 가능 오류로 실패한다(044 T039 재전달 시험).
+    pub fail_send_and_wait: AtomicUsize,
     pub turn_hook: Mutex<Option<TurnHook>>,
     /// `start`가 슬롯을 만든 뒤·돌아가기 전에 실행한다(자식 첫 턴이 바인딩 전에 도구를 부르는 경우).
     pub start_hook: Mutex<Option<TurnHook>>,
+    /// 준비 안(run을 registry에 예약하고 실행 task를 spawn한 뒤·attach 전)에서 실행한다(044 T038 시작 장벽 지점).
+    pub prepare_hook: Mutex<Option<TurnHook>>,
+    /// `cancel`이 슬롯을 지우기 **전에** 실행한다(Codex r7: 실패 정리가 엔진 취소를 기다리는 동안의 abort 재현).
+    pub cancel_hook: Mutex<Option<TurnHook>>,
+    /// 다음 `start_gated` 한 번을 재시도 가능 오류로 실패시킨다(엔진 준비 실패 → 기동 실패 정리 재현).
+    pub fail_next_start: std::sync::atomic::AtomicBool,
     /// 효과 표지(`start:<run>`, `prompt:<run>:<text>`). 효과가 난 직후·settle 지연 전에 기록된다(042 R17 시험 동기화).
-    applied: Mutex<Vec<String>>,
-    applied_notify: tokio::sync::Notify,
+    applied: Arc<Mutex<Vec<String>>>,
+    applied_notify: Arc<tokio::sync::Notify>,
+    /// 있으면 `send_prompt`가 효과를 낸 **뒤** 허가를 하나 얻을 때까지 돌아가지 않는다(044 #207: 작업대 닫기와 호출 완료
+    /// 순서를 시간 지연 없이 뒤집는다).
+    pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// `queue_prompt`(교환 전달 등 대기열 prompt)을 붙잡는 문(OCR 4차: 진행 중 전달과 작업대 닫기의 순서 시험). 문에 닿으면
+    /// `queue_entered`를 알린다.
+    pub queue_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    pub queue_entered: Arc<tokio::sync::Notify>,
+    /// 다음 `queue_prompt` 한 번을 문 뒤에서 실패시킨다(실패로 끝나는 늦은 전달).
+    pub fail_next_queue_prompt: std::sync::atomic::AtomicBool,
+    work_gate: OnceLock<Arc<WorkGate>>,
+    /// `start`가 받은 요청(044: launch decorator가 넣은 MCP 연결을 시험이 확인한다).
+    pub start_requests: Mutex<Vec<AgentRunRequest>>,
+}
+
+fn mark(applied: &Mutex<Vec<String>>, notify: &tokio::sync::Notify, label: String) {
+    applied.lock().unwrap().push(label);
+    notify.notify_waiters();
 }
 
 fn not_active() -> RunEngineError {
@@ -81,6 +128,17 @@ impl ScriptedRunEngine {
         Self {
             script,
             ..Self::default()
+        }
+    }
+
+    /// `AcpRunEngine`과 같은 A-turn 계약: 동기 예약, 정지 중이면 거절, 관문이 없으면 예약 없음.
+    fn reserve_turn(&self, run_id: &str) -> Result<Option<Reservation>, RunEngineError> {
+        match self.work_gate.get() {
+            None => Ok(None),
+            Some(gate) => gate
+                .reserve(ReservationKind::Turn, Some(run_id))
+                .map(Some)
+                .map_err(|_| RunEngineError::new(RunErrorKind::Unavailable, MESSAGE_STOPPING)),
         }
     }
 
@@ -100,9 +158,29 @@ impl ScriptedRunEngine {
         );
     }
 
+    /// prompt 한 turn의 이벤트: 기본은 agent 응답 하나, `prompt_lifecycle`이면 앞뒤로 turn 경계 lifecycle.
+    fn emit_turn(&self, run_id: &str, prompt: String, sink: &WorkbenchRunSink) {
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(
+                sink,
+                run_id,
+                LifecycleStatus::PromptSent,
+                "prompt submitted",
+            );
+        }
+        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(
+                sink,
+                run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
+        }
+    }
+
     fn mark_applied(&self, label: String) {
-        self.applied.lock().unwrap().push(label);
-        self.applied_notify.notify_waiters();
+        mark(&self.applied, &self.applied_notify, label);
     }
 
     /// `pred`에 맞는 효과 표지가 기록될 때까지 기다린다(settle 지연 구간 진입 확인).
@@ -122,6 +200,11 @@ impl ScriptedRunEngine {
         .expect("effect marker within the wait")
     }
 
+    /// 지금까지 기록된 효과 표지.
+    pub fn applied(&self) -> Vec<String> {
+        self.applied.lock().unwrap().clone()
+    }
+
     pub fn run_count(&self) -> usize {
         self.runs.lock().unwrap().len()
     }
@@ -138,6 +221,10 @@ impl ScriptedRunEngine {
 
 #[async_trait]
 impl RunEngine for ScriptedRunEngine {
+    fn attach_work_gate(&self, gate: Arc<WorkGate>) {
+        let _ = self.work_gate.set(gate);
+    }
+
     async fn start(
         &self,
         request: AgentRunRequest,
@@ -145,10 +232,12 @@ impl RunEngine for ScriptedRunEngine {
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
+        self.start_requests.lock().unwrap().push(request.clone());
         if self.script.start_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.start_delay_ms)).await;
         }
         let run_id = request.run_id.clone().expect("normalized run id");
+        let initial_turn = self.reserve_turn(&run_id)?;
         {
             let mut runs = self.runs.lock().unwrap();
             if runs.contains_key(&run_id) {
@@ -173,10 +262,20 @@ impl RunEngine for ScriptedRunEngine {
                 run_id.clone(),
                 Slot {
                     owner: owner.to_owned(),
+                    // 권한 대기가 없으면 초기 turn은 여기서 끝난다(guard drop).
+                    initial_turn: if permissions.is_empty() {
+                        None
+                    } else {
+                        initial_turn
+                    },
+                    lifecycle_sink: (self.script.prompt_lifecycle && !permissions.is_empty())
+                        .then(|| sink.clone()),
                     permissions,
                 },
             );
         }
+        self.launches.fetch_add(1, Ordering::SeqCst);
+        self.mark_applied(format!("launch:{run_id}"));
         sink.emit(
             &run_id,
             RunEvent::Lifecycle {
@@ -185,8 +284,24 @@ impl RunEngine for ScriptedRunEngine {
             },
         );
         self.mark_applied(format!("start:{run_id}"));
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(
+                &sink,
+                &run_id,
+                LifecycleStatus::PromptSent,
+                "prompt submitted",
+            );
+        }
         if self.script.start_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.start_settle_ms)).await;
+        }
+        if self.script.prompt_lifecycle && self.script.permission_id.is_none() {
+            emit_lifecycle(
+                &sink,
+                &run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
         }
         if let Some(permission) = &self.script.permission_id {
             sink.emit(
@@ -216,6 +331,141 @@ impl RunEngine for ScriptedRunEngine {
         })
     }
 
+    /// 044 R14 시작 장벽: 슬롯(registry 예약)을 만들고 실행 task를 spawn한 뒤 돌아온다. 실행(launcher 표지 `launch:<run>`·
+    /// Started·권한 요청·`start_hook`)은 장벽이 열린 뒤에만 한다. 장벽이 닫힌 채 drop되면 실행 없이 슬롯을 지운다. 열리기
+    /// 전에 취소된 슬롯은 실행하지 않는다(registry 취소가 실행 task를 멈추는 것과 같다).
+    async fn start_gated(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.starts.fetch_add(1, Ordering::SeqCst);
+        self.start_requests.lock().unwrap().push(request.clone());
+        if self.fail_next_start.swap(false, Ordering::SeqCst) {
+            return Err(RunEngineError::new(
+                RunErrorKind::Unavailable,
+                "scripted start failure",
+            ));
+        }
+        let run_id = request.run_id.clone().expect("normalized run id");
+        let initial_turn = self.reserve_turn(&run_id)?;
+        {
+            let mut runs = self.runs.lock().unwrap();
+            if runs.contains_key(&run_id) {
+                return Err(RunEngineError::new(
+                    RunErrorKind::Conflict,
+                    format!("duplicate run id: {run_id}"),
+                ));
+            }
+            if let Some(limit) = self.script.max_runs {
+                if runs.len() >= limit {
+                    return Err(RunEngineError::new(
+                        RunErrorKind::RateLimited,
+                        format!("concurrent run limit ({limit}) reached; cancel an existing run before starting a new one"),
+                    ));
+                }
+            }
+            runs.insert(
+                run_id.clone(),
+                Slot {
+                    owner: owner.to_owned(),
+                    permissions: HashSet::new(),
+                    initial_turn: None,
+                    lifecycle_sink: None,
+                },
+            );
+        }
+        let (runs, launches, applied, notify) = (
+            Arc::clone(&self.runs),
+            Arc::clone(&self.launches),
+            Arc::clone(&self.applied),
+            Arc::clone(&self.applied_notify),
+        );
+        let permission = self.script.permission_id.clone();
+        let prompt_lifecycle = self.script.prompt_lifecycle;
+        let start_hook = self.start_hook.lock().unwrap().clone();
+        let task_run = run_id.clone();
+        tokio::spawn(async move {
+            let run_id = task_run;
+            // 초기 turn은 준비 때 예약해 실행이 끝날 때까지 쥔다(`AcpRunEngine`의 초기 순서 guard와 같다).
+            let turn = initial_turn;
+            if start_gate.await.is_err() {
+                runs.lock().unwrap().remove(&run_id);
+                return;
+            }
+            {
+                let mut runs = runs.lock().unwrap();
+                let Some(slot) = runs.get_mut(&run_id) else {
+                    return;
+                };
+                if let Some(permission) = &permission {
+                    slot.permissions.insert(permission.clone());
+                    slot.initial_turn = turn;
+                    if prompt_lifecycle {
+                        slot.lifecycle_sink = Some(sink.clone());
+                    }
+                }
+            }
+            launches.fetch_add(1, Ordering::SeqCst);
+            mark(&applied, &notify, format!("launch:{run_id}"));
+            sink.emit(
+                &run_id,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::Started,
+                    message: "started".into(),
+                },
+            );
+            mark(&applied, &notify, format!("start:{run_id}"));
+            if prompt_lifecycle {
+                emit_lifecycle(
+                    &sink,
+                    &run_id,
+                    LifecycleStatus::PromptSent,
+                    "prompt submitted",
+                );
+                if permission.is_none() {
+                    emit_lifecycle(
+                        &sink,
+                        &run_id,
+                        LifecycleStatus::PromptCompleted,
+                        "prompt completed",
+                    );
+                }
+            }
+            if let Some(permission) = &permission {
+                sink.emit(
+                    &run_id,
+                    RunEvent::Permission {
+                        permission_id: Some(permission.clone()),
+                        title: "allow?".into(),
+                        input: None,
+                        options: vec![PermissionOption {
+                            name: "Allow".into(),
+                            kind: "allow_once".into(),
+                            option_id: "allow".into(),
+                        }],
+                        selected: None,
+                        requires_response: true,
+                    },
+                );
+            }
+            if let Some(hook) = start_hook {
+                hook(run_id.clone()).await;
+            }
+        });
+        let prepare = self.prepare_hook.lock().unwrap().clone();
+        if let Some(prepare) = prepare {
+            prepare(run_id.clone()).await;
+        }
+        Ok(AgentRun {
+            id: run_id,
+            goal: request.goal,
+            agent_id: request.agent_id,
+        })
+    }
+
     async fn send_prompt(
         &self,
         run_id: &str,
@@ -228,6 +478,7 @@ impl RunEngine for ScriptedRunEngine {
                 "prompt is empty",
             ));
         }
+        let _guard = self.reserve_turn(run_id)?;
         if self.script.prompt_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
         }
@@ -236,9 +487,13 @@ impl RunEngine for ScriptedRunEngine {
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.mark_applied(format!("prompt:{run_id}:{prompt}"));
-        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        self.emit_turn(run_id, prompt, &sink);
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
+        }
+        let gate = self.prompt_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("prompt gate open").forget();
         }
         Ok(())
     }
@@ -255,12 +510,24 @@ impl RunEngine for ScriptedRunEngine {
                 format!("unknown or finished run: {run_id}"),
             ));
         }
+        let _guard = self.reserve_turn(run_id)?;
         if self.script.prompt_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
         }
+        let gate = self.queue_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            self.queue_entered.notify_one();
+            gate.acquire().await.expect("queue gate open").forget();
+        }
+        if self.fail_next_queue_prompt.swap(false, Ordering::SeqCst) {
+            return Err(RunEngineError::new(
+                RunErrorKind::Internal,
+                "injected queue_prompt failure",
+            ));
+        }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.mark_applied(format!("prompt:{run_id}:{prompt}"));
-        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        self.emit_turn(run_id, prompt, &sink);
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
         }
@@ -274,6 +541,20 @@ impl RunEngine for ScriptedRunEngine {
         _queue: bool,
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError> {
+        // turn 전체(효과 + 턴 안 도구 호출)를 하나의 A-turn으로 센다.
+        let _guard = self.reserve_turn(run_id)?;
+        if self
+            .fail_send_and_wait
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok()
+        {
+            return Err(RunEngineError::new(
+                RunErrorKind::Internal,
+                "injected coordinator delivery failure",
+            ));
+        }
         self.queue_prompt(run_id, prompt, sink).await?;
         let hook = self.turn_hook.lock().unwrap().clone();
         if let Some(hook) = hook {
@@ -325,6 +606,10 @@ impl RunEngine for ScriptedRunEngine {
     }
 
     async fn cancel(&self, run_id: &str, sink: WorkbenchRunSink) {
+        let hook = self.cancel_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(run_id.to_owned()).await;
+        }
         let cancelled = self.runs.lock().unwrap().remove(run_id).is_some();
         sink.emit(
             run_id,
@@ -345,11 +630,29 @@ impl RunEngine for ScriptedRunEngine {
         permission_id: &str,
         _option_id: &str,
     ) -> Result<(), RunEngineError> {
-        let mut runs = self.runs.lock().unwrap();
-        let removed = runs
-            .get_mut(run_id)
-            .map(|slot| slot.permissions.remove(permission_id))
-            .unwrap_or(false);
+        let (removed, finished_turn) = {
+            let mut runs = self.runs.lock().unwrap();
+            runs.get_mut(run_id)
+                .map(|slot| {
+                    let removed = slot.permissions.remove(permission_id);
+                    let mut finished = None;
+                    if slot.permissions.is_empty() {
+                        slot.initial_turn = None;
+                        finished = slot.lifecycle_sink.take();
+                    }
+                    (removed, finished)
+                })
+                .unwrap_or((false, None))
+        };
+        // 초기 turn이 끝났다(`prompt_lifecycle`): 실제 runner처럼 turn 끝을 알린다(잠금 밖에서).
+        if let Some(sink) = finished_turn {
+            emit_lifecycle(
+                &sink,
+                run_id,
+                LifecycleStatus::PromptCompleted,
+                "prompt completed",
+            );
+        }
         if removed {
             Ok(())
         } else {

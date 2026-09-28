@@ -30,6 +30,10 @@ _Avoid_: user, caller, client
 데스크톱 창 하나에 묶인 principal. 창을 만들 때마다 새 **incarnation**으로 발급되므로, 같은 창 이름으로 다시 연 창도 다른 주체다. 창이 닫히면 그 주체의 자격 증명은 모두 무효가 된다.
 _Avoid_: desktop user, window label(주체 이름으로는)
 
+**소유자 주체 (Owner Principal)**:
+같은 OS 사용자가 데이터 디렉터리 안내 파일의 자격 증명으로 얻는 principal. 모든 작업대를 조회·구독·취소할 수 있어, 데스크톱 없이도 서버의 run을 다룬다. agent만 부를 수 있는 operation은 부르지 못한다.
+_Avoid_: admin, root, desktop(창 주체와 혼동)
+
 **Scope**:
 principal에게 허용된 도메인별 조회/변경 권한 단위.
 _Avoid_: permission(agent 실행 권한과 혼동), role
@@ -105,6 +109,36 @@ _Avoid_: crashed, failed, disconnected
 **Client Instance**:
 이벤트 구독을 여는 주체 하나(데스크톱 창 하나, HTTP 연결 하나). 이벤트를 누구에게 보낼지만 정하며 run이나 Worktree를 소유하지 않는다. 소유는 작업대(Bench)의 일이다.
 _Avoid_: window, client, session(Provider Session과 혼동)
+
+### 서버 생명주기
+
+**서버 인스턴스 (Server Instance)**:
+한 데이터 디렉터리를 쓰는 유일한 Workbench 서버 프로세스 하나. 데이터 디렉터리마다 동시에 하나만 있다. 클라이언트는 인스턴스 식별자로 자기가 붙은 서버가 맞는지 확인한다.
+_Avoid_: daemon, backend, host
+
+**임대 (Lease)**:
+붙어 있는 클라이언트가 만료 시간을 두고 갱신하는 "아직 쓰고 있음" 표시. 임대가 있는 동안 서버는 유휴 종료하지 않는다. 임대는 작업이 아니다. 작업을 끝낼 때까지 서버를 붙잡지 않는다.
+_Avoid_: session, connection, keepalive
+
+**비우기 (Draining)**:
+정지를 요청받은 서버가 새 작업을 거절하면서 이미 받아들인 작업이 끝나기를 기다리는 상태.
+_Avoid_: shutdown, graceful stop
+
+**비우기 분류 (Drain Class)**:
+비우는 동안 operation을 받을지 정하는 분류. 조회, 끝내는 제어(권한 응답·취소·보고처럼 활동 작업을 줄이는 것), 조건부 이어 가기(이미 약속된 작업을 마저 하는 것), 새 작업(거절) 네 가지다.
+_Avoid_: allowlist, priority
+
+**활동 작업 (Active Work)**:
+정지·유휴 종료를 막는 일. 진행 중 turn·권한 대기, 배정된 task, 배정할 쪽이 있는 대기 task, 전달할 알림, 판정 전 변경이 여기에 든다. 쉬고 있는 세션과 결과를 끝내 알 수 없는 변경은 들지 않는다.
+_Avoid_: busy, running, pending
+
+**보류 task (Deferred Task)**:
+배정할 쪽(turn 중이거나 전달할 알림이 남은 coordinator)이 없어 정지를 막지 않는 대기 task. 사라지지 않고 저장돼, 서버를 다시 띄운 뒤 복구해 배정할 수 있다.
+_Avoid_: dropped task, orphan
+
+**작업 관문 (Work Gate)**:
+활동 작업의 예약과 정지 판정을 한 줄로 세우는 관문. 정지가 결정된 뒤에는 새 예약이 서지 않고, 예약이 선 뒤에는 정지가 그것을 건너뛰지 않는다.
+_Avoid_: lock, semaphore, mutex
 
 ### 도메인
 

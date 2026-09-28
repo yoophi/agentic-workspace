@@ -33,6 +33,16 @@ export function exchangeDeliveryKey(requestId: string) {
   return `exchange-delivery:${requestId}`;
 }
 
+/** 교환 전달 prompt의 이어 가기 표지(044 T043). 서버는 이것이 있는 `run.sendPrompt`를 이미 확인된 교환의 전달(K)로 보고,
+ *  비우는 중(wait-stop)에도 교환마다 한 번 받는다. 없으면 새 작업이라 비우는 중에는 거절된다. */
+export interface ExchangeContinuation {
+  exchangeRequestId: string;
+}
+
+export function exchangeContinuation(requestId: string): ExchangeContinuation {
+  return { exchangeRequestId: requestId };
+}
+
 function requestOf(exchange: AgentExchange): AgentExchangeRequestedEvent {
   const { requestId, source, target, message, delivery, createdAt } = exchange;
   return { requestId, source, target, message, delivery, createdAt };

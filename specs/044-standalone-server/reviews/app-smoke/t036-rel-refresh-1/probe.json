@@ -1,0 +1,14 @@
+{
+  "origin": "tauri://localhost",
+  "scenario": "refresh",
+  "phase": 2,
+  "steps": {
+    "routedAfterRefresh": 1,
+    "acknowledgedAfterRefresh": 1,
+    "echoCountInAppStream": 1,
+    "barrier": "refresh-barrier-3faa5dde",
+    "message": "refresh-message-3faa5dde"
+  },
+  "transport": "http",
+  "result": "ok"
+}

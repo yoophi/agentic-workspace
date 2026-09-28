@@ -28,6 +28,7 @@
 | agent-run-repository | cancel_agent_run, respond_agent_permission | run.cancel / respondPermission | lookup | fault.message |
 | agent-exchange-repository | sync_agent_workspace | exchange.syncWorkspace | ensure(hint worktreePath) | 교환 오류 JSON `{code,message}` |
 | agent-exchange-repository | send_agent_exchange / acknowledge_agent_exchange / list_agent_exchanges | exchange.send / acknowledge / list | lookup | 교환 오류 JSON |
+| agent-exchange-repository | discard_agent_exchange_delivery (044 Codex r7에서 추가) | exchange.discardDelivery | lookup | 교환 오류 JSON |
 | orchestration-repository | bootstrap_orchestration_workspace, adopt_manual_orchestration_child, recover_orchestration_workspace | orchestration.bootstrap / adoptManualChild / recover | ensure | `session_for_window`(`eventStreamId` 제거, `boundWindowLabel` = 창 label) + orchestration 오류(`details.orchestrationError` JSON, 없으면 message) |
 | orchestration-repository | bind_main_coordinator_run, set_orchestration_presentation, cancel/retry/reassign task, handoff_orchestration_coordinator | orchestration.bindCoordinator / setPresentation / cancelTask / retryTask / reassignTask / handoffCoordinator | ensure(입력 `{benchId, request}`) | session_for_window + orchestration 오류 |
 | orchestration-repository | get_orchestration_workspace | orchestration.get | lookup(없으면 `null`) | session_for_window(결과가 null이 아닐 때) |

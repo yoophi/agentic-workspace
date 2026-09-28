@@ -18,7 +18,7 @@ export interface ConnectionPort {
 }
 
 export type CallOutcome<Output> =
-  | { kind: "ok"; output: Output; revision: number | undefined }
+  | { kind: "ok"; output: Output; revision: number | undefined; replayed?: boolean }
   | { kind: "fault"; fault: WorkbenchFault }
   | { kind: "notApplied"; reason: "offline" }
   | { kind: "unknown"; reason: "epochChanged" | "lost" };
@@ -75,8 +75,13 @@ export function createWorkbenchClient(options: WorkbenchClientOptions): Workbenc
 
   function outcomeOf<Output>(sent: Extract<Sent, { kind: "reply" }>): CallOutcome<Output> {
     if (sent.response.ok) {
-      const reply = sent.body as { output?: Output; revision?: number | null };
-      return { kind: "ok", output: reply.output as Output, revision: reply.revision ?? undefined };
+      const reply = sent.body as { output?: Output; revision?: number | null; replayed?: boolean };
+      return {
+        kind: "ok",
+        output: reply.output as Output,
+        revision: reply.revision ?? undefined,
+        ...(reply.replayed ? { replayed: true } : {}),
+      };
     }
     return { kind: "fault", fault: sent.body as WorkbenchFault };
   }

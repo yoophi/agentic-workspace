@@ -42,8 +42,22 @@ export async function startAgentRun(request: AgentRunRequest, panelId?: string, 
   return invoke<AgentRun>("start_agent_run", { request, panelId }, options);
 }
 
-export async function sendPromptToRun(runId: string, prompt: string, options?: InvokeOptions) {
-  return invoke<void>("send_prompt_to_run", { runId, prompt }, options);
+/** 교환 전달 prompt의 이어 가기 표지(044). `features/agent-run/model/exchange-reconciler`의 `exchangeContinuation`이 만든다. */
+export interface PromptContinuation {
+  exchangeRequestId: string;
+}
+
+export async function sendPromptToRun(
+  runId: string,
+  prompt: string,
+  options?: InvokeOptions,
+  continuation?: PromptContinuation,
+) {
+  return invoke<void>(
+    "send_prompt_to_run",
+    continuation ? { runId, prompt, continuation } : { runId, prompt },
+    options,
+  );
 }
 
 export async function steerPromptToRun(runId: string, prompt: string) {

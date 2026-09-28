@@ -22,7 +22,7 @@ use crate::{
             WorkerCommandOutcome,
         },
         coordinator_notification::{CoordinatorNotificationPort, CoordinatorNotificationReceipt},
-        desktop_bridge::{LaunchContext, OrchestrationLaunchRole},
+        desktop_bridge::{LaunchContext, OrchestrationLaunchRole, PendingLaunchRevocation},
     },
 };
 
@@ -51,13 +51,19 @@ impl EngineAgentWorker {
         }
     }
 
-    async fn launch(&self, assignment: &WorkerAssignment, goal: String) -> Result<String, String> {
+    async fn launch(
+        &self,
+        assignment: &WorkerAssignment,
+        goal: String,
+        start_gate: Option<tokio::sync::oneshot::Receiver<()>>,
+    ) -> Result<String, String> {
         let mut request = build_worker_request(assignment, goal);
         // 입장권: 작업대가 닫히는 중이면 띄우지 않는다. 엔진이 run을 등록할 때까지 쥔다(research R2·R8).
         let admission = self
             .benches
             .admit(&RequestId::random(), None, &assignment.bench_id)
             .map_err(|_| MESSAGE_OWNER_UNAVAILABLE.to_owned())?;
+        let mut launch_revocation = None;
         if let Some(decorator) = &self.benches.launch_decorator {
             decorator.decorate(
                 &mut request,
@@ -72,6 +78,10 @@ impl EngineAgentWorker {
                     }),
                 },
             )?;
+            launch_revocation = Some(PendingLaunchRevocation::armed(
+                Arc::clone(decorator),
+                assignment.planned_run_id.clone(),
+            ));
         }
         if !self
             .benches
@@ -80,16 +90,17 @@ impl EngineAgentWorker {
         {
             return Err(format!("duplicate run id: {}", assignment.planned_run_id));
         }
-        let run = match self
-            .benches
-            .engine
-            .start(
-                request,
-                &assignment.bench_id,
-                self.benches.run_sink(&assignment.bench_id),
-            )
-            .await
-        {
+        let engine = &self.benches.engine;
+        let sink = self.benches.run_sink(&assignment.bench_id);
+        let started = match start_gate {
+            Some(gate) => {
+                engine
+                    .start_gated(request, &assignment.bench_id, sink, gate)
+                    .await
+            }
+            None => engine.start(request, &assignment.bench_id, sink).await,
+        };
+        let run = match started {
             Ok(run) => run,
             Err(error) => {
                 self.benches
@@ -98,6 +109,9 @@ impl EngineAgentWorker {
                 return Err(error.message);
             }
         };
+        if let Some(revocation) = &mut launch_revocation {
+            revocation.disarm();
+        }
         drop(admission);
         Ok(run.id)
     }
@@ -138,10 +152,20 @@ pub fn worker_goal(assignment: &WorkerAssignment) -> String {
     )
 }
 
-impl AgentWorkerPort for EngineAgentWorker {
-    async fn start_worker(
+impl EngineAgentWorker {
+    /// 044 R14 시작 장벽: 자식 run을 **준비**만 한다(registry 예약·실행 task spawn·attach). `start_gate`가 열려야 실행한다.
+    pub async fn prepare_worker(
         &self,
         assignment: WorkerAssignment,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
+    ) -> Result<StartWorkerOutcome, OrchestrationError> {
+        self.start_worker_with(assignment, Some(start_gate)).await
+    }
+
+    async fn start_worker_with(
+        &self,
+        assignment: WorkerAssignment,
+        start_gate: Option<tokio::sync::oneshot::Receiver<()>>,
     ) -> Result<StartWorkerOutcome, OrchestrationError> {
         if !assignment.runtime_profile.supports_read_only {
             return Ok(StartWorkerOutcome::Failed {
@@ -155,7 +179,7 @@ impl AgentWorkerPort for EngineAgentWorker {
             .await
             .map_err(|error| Self::command_error(error.to_string()))??;
         let goal = worker_goal(&assignment);
-        match self.launch(&assignment, goal).await {
+        match self.launch(&assignment, goal, start_gate).await {
             Ok(run_id) => {
                 self.guards.insert(
                     &run_id,
@@ -178,6 +202,15 @@ impl AgentWorkerPort for EngineAgentWorker {
                 retryable: true,
             }),
         }
+    }
+}
+
+impl AgentWorkerPort for EngineAgentWorker {
+    async fn start_worker(
+        &self,
+        assignment: WorkerAssignment,
+    ) -> Result<StartWorkerOutcome, OrchestrationError> {
+        self.start_worker_with(assignment, None).await
     }
 
     async fn send_prompt(

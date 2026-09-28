@@ -3,15 +3,33 @@
 //! (session 창) 작업대 닫기. 정리는 전역 창 이벤트가 아니라 창별 처리기가 하므로, 같은 label로 다시 만든 창이 옛 창의
 //! 늦은 정리에 휘말리지 않는다(`window_principals` 참조).
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
 use workbench_core::application::workbench_runtime::WorkbenchRuntime;
 use workbench_protocol::AuthenticatedPrincipal;
 
-use crate::infrastructure::{
-    desktop_benches, tauri_desktop_bridge, window_principals, workbench_http::WorkbenchHttp,
+use crate::{
+    application::window_close_intent::{CloseDecision, WindowCloseIntent},
+    infrastructure::{
+        desktop_benches, server_client::ExternalServer, tauri_desktop_bridge, window_principals,
+        workbench_http::WorkbenchHttp, workbench_mode::WorkbenchMode,
+    },
 };
+
+/// 창 닫기 의도(044 T031, research R8). 앱 전역 하나 — 종료 의도가 서면 모든 창에 적용된다.
+fn close_intent() -> MutexGuard<'static, WindowCloseIntent> {
+    static INTENT: OnceLock<Mutex<WindowCloseIntent>> = OnceLock::new();
+    INTENT
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// 앱 종료 의도(`ExitRequested`·`RunEvent::Exit`에서 부른다). 그 뒤의 `CloseRequested`·`Destroyed`는 작업대를 남긴다.
+pub fn mark_quitting() {
+    close_intent().quitting();
+}
 
 /// 등록 → 창 만들기 → 창별 정리 처리기. 만들기가 실패하면 방금 발급한 incarnation을 거둬들인다.
 pub fn build_tracked(
@@ -42,11 +60,21 @@ pub fn adopt(app: &AppHandle, window: &WebviewWindow) {
 fn track(app: &AppHandle, window: &WebviewWindow, incarnation: String) {
     let app = app.clone();
     let label = window.label().to_owned();
-    window.on_window_event(move |event| {
-        if matches!(event, WindowEvent::Destroyed) {
-            let principal = window_principals::retire(&label, &incarnation);
-            on_destroyed(&app, &label, &incarnation, principal);
+    window.on_window_event(move |event| match event {
+        WindowEvent::CloseRequested { .. } => {
+            close_intent().close_requested(&label, &incarnation);
         }
+        WindowEvent::Destroyed => {
+            let decision = close_intent().destroyed(&label, &incarnation);
+            let principal = window_principals::retire(&label, &incarnation);
+            match app.try_state::<WorkbenchMode>().map(|mode| *mode) {
+                Some(WorkbenchMode::External) => {
+                    on_destroyed_external(&app, &label, &incarnation, decision)
+                }
+                _ => on_destroyed(&app, &label, &incarnation, principal),
+            }
+        }
+        _ => {}
     });
 }
 
@@ -98,6 +126,22 @@ impl Teardown for AppTeardown<'_> {
             desktop_benches::close(&runtime, &label, principal).await;
         });
     }
+}
+
+/// 외부 서버 모드의 창 `Destroyed`(044 T031): 서버에 창 폐기를 보낸다. 작업대 닫기는 창 닫기 의도가 있을 때만(R8).
+/// 진행 중 폐기는 종료 경로가 짧은 상한 안에 흘려보낸다.
+fn on_destroyed_external(app: &AppHandle, label: &str, incarnation: &str, decision: CloseDecision) {
+    if let Some(server) = app.try_state::<Arc<ExternalServer>>() {
+        server.retire_window_detached(
+            label.to_owned(),
+            incarnation.to_owned(),
+            decision == CloseDecision::CloseBench,
+        );
+    }
+    let (label, incarnation) = (label.to_owned(), incarnation.to_owned());
+    tauri::async_runtime::spawn(async move {
+        desktop_benches::forget_window(&label, &incarnation).await
+    });
 }
 
 fn on_destroyed(

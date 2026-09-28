@@ -14,6 +14,7 @@ use workbench_protocol::{
 };
 
 pub const MESSAGE_KEY_ON_QUERY: &str = "idempotencyKey is only accepted for command operations.";
+use crate::application::drain::MESSAGE_STOPPING;
 
 use crate::{
     application::{
@@ -73,6 +74,8 @@ pub struct RuntimeAdapters {
     pub idempotency_limits: EpochIdempotencyLimits,
     /// orchestration 동시 자식 수·자식 프로필(041). 운영은 환경 변수, 테스트는 직접 지정.
     pub orchestration: OrchestrationConfig,
+    /// 작업 관문(044, research R14). 엔진·호출 입구·생명주기가 같은 관문을 쓴다.
+    pub work_gate: Arc<crate::application::work_gate::WorkGate>,
 }
 
 impl RuntimeAdapters {
@@ -93,6 +96,7 @@ impl RuntimeAdapters {
             bench_limits: BenchLimits::default(),
             idempotency_limits: EpochIdempotencyLimits::default(),
             orchestration: OrchestrationConfig::from_env(),
+            work_gate: crate::application::work_gate::WorkGate::new(),
         }
     }
 }
@@ -246,6 +250,8 @@ pub struct WorkbenchRuntime {
     hooks: Arc<TestHooks>,
     benches: Arc<BenchServices>,
     orchestration: Arc<OrchestrationRuntime>,
+    work_gate: Arc<crate::application::work_gate::WorkGate>,
+    server_control: Arc<crate::application::server_control::ServerControl>,
 }
 
 /// run 종료 hook 여러 개를 차례로 부른다.
@@ -256,6 +262,14 @@ impl RunTerminalHook for ChainedTerminalHook {
         for hook in &self.0 {
             hook.on_terminal(run_id);
         }
+    }
+}
+
+struct RevokeRunOnTerminal(Arc<dyn RunLaunchDecorator>);
+
+impl RunTerminalHook for RevokeRunOnTerminal {
+    fn on_terminal(&self, run_id: &str) {
+        self.0.revoke_run(run_id);
     }
 }
 
@@ -294,15 +308,19 @@ impl WorkbenchRuntime {
                 Arc::new(JsonAcpSessionStore::from_paths(&paths)),
             )),
         };
+        // 044: 엔진이 prompt 실행을 작업 관문에 예약한다(실행 수명 계약, research R14).
+        let work_gate = adapters.work_gate.clone();
+        engine.attach_work_gate(work_gate.clone());
         // orchestration(041): run 종료 hook은 core가 소유한다(worktree 감시). AW가 넘긴 hook이 있으면 뒤에 잇는다.
         let orchestration_hook = Arc::new(OrchestrationTerminalHook::new());
-        let terminal_hook: Arc<dyn RunTerminalHook> = match adapters.terminal_hook.clone() {
-            Some(extra) => Arc::new(ChainedTerminalHook(vec![
-                orchestration_hook.clone() as Arc<dyn RunTerminalHook>,
-                extra,
-            ])),
-            None => orchestration_hook.clone(),
-        };
+        let mut terminal_hooks = vec![orchestration_hook.clone() as Arc<dyn RunTerminalHook>];
+        if let Some(decorator) = adapters.launch_decorator.clone() {
+            terminal_hooks.push(Arc::new(RevokeRunOnTerminal(decorator)));
+        }
+        if let Some(extra) = adapters.terminal_hook.clone() {
+            terminal_hooks.push(extra);
+        }
+        let terminal_hook: Arc<dyn RunTerminalHook> = Arc::new(ChainedTerminalHook(terminal_hooks));
         let benches = Arc::new(BenchServices::new(
             Arc::new(InMemoryBenchRegistry::new(adapters.bench_limits)),
             engine,
@@ -312,6 +330,7 @@ impl WorkbenchRuntime {
             adapters.launch_decorator.clone(),
             Arc::new(EpochIdempotency::new(adapters.idempotency_limits)),
         ));
+        benches.attach_work_gate(Arc::clone(&work_gate));
         let bindings = Arc::new(OrchestrationBindings::default());
         let repository = BoundOrchestrationRepository::new(
             JsonOrchestrationRepository::from_paths(&paths),
@@ -340,6 +359,7 @@ impl WorkbenchRuntime {
             Arc::new(WorktreeGuards::default()),
             adapters.orchestration.clone(),
         ));
+        orchestration.attach_self();
         orchestration_hook.attach(&orchestration);
         {
             // 작업대 닫기 → 묶인 작업 영역 복구 가능 전환(research R3). 동기 파일 입출력이라 blocking pool에서.
@@ -356,6 +376,13 @@ impl WorkbenchRuntime {
             }));
         }
 
+        let server_control = Arc::new(crate::application::server_control::ServerControl::new(
+            Arc::clone(&work_gate),
+            epoch.clone(),
+            Arc::clone(&benches),
+            Arc::clone(&ledger),
+            Arc::clone(&orchestration),
+        ));
         let hooks = Arc::new(TestHooks::default());
         let (registry, reconcilers) = crate::application::handlers::build_registry(
             Arc::clone(&ledger),
@@ -363,8 +390,8 @@ impl WorkbenchRuntime {
             Arc::clone(&hooks),
             &adapters,
             &epoch,
-            &benches,
             &orchestration,
+            &server_control,
         );
 
         // 중단된 변경의 적용 여부를 operation별 reconciler로 판정한다. 자동 재실행은 하지 않는다(FR-009).
@@ -384,7 +411,35 @@ impl WorkbenchRuntime {
             hooks,
             benches,
             orchestration,
+            work_gate,
+            server_control,
         }))
+    }
+
+    /// 작업 관문(044, research R14).
+    pub fn work_gate(&self) -> &Arc<crate::application::work_gate::WorkGate> {
+        &self.work_gate
+    }
+
+    /// 서버 제어 상태(044): 임대 표와 조립이 넣는 서버 host port.
+    pub fn server_control(&self) -> &Arc<crate::application::server_control::ServerControl> {
+        &self.server_control
+    }
+
+    /// 조립(`workbench-host`)이 창 토큰 발급기·이벤트 표·인스턴스 식별자를 넣는다. 한 번만.
+    pub fn attach_server_host(&self, host: Arc<dyn crate::ports::server_host::ServerHost>) -> bool {
+        self.server_control.attach_host(host)
+    }
+
+    /// 서버 상태(작업 관문).
+    pub fn server_state(&self) -> crate::application::work_gate::GateState {
+        self.work_gate.state()
+    }
+
+    /// 활동 작업 중 관문 예약에서 파생하는 부분(data-model ActiveWork). 저장소·ledger에서 파생하는 수(`orchestrationTasks`·
+    /// `queuedTasks`·`pendingExchanges`·`pendingOperations`)는 서버 조립(`server.status`)이 채운다.
+    pub fn active_work(&self) -> crate::application::work_gate::GateActiveWork {
+        self.work_gate.active_work()
     }
 
     /// orchestration 런타임(041).
@@ -434,6 +489,8 @@ impl WorkbenchRuntime {
                 _ => continue,
             }
             match self.benches.registry.owner(bench_id) {
+                // 044: 소유자 주체는 작업대 소유 판정을 우회한다(우회 지점 2: 스트림 구독 판정).
+                Some(_) if crate::application::bench_service::is_owner(principal) => {}
                 Some(owner) if owner == principal.subject => {}
                 Some(_) => {
                     return Err(WorkbenchFault::new(
@@ -456,10 +513,9 @@ impl WorkbenchRuntime {
     }
 
     fn owns_bench(&self, principal: &AuthenticatedPrincipal, bench_id: &str) -> bool {
-        self.benches
-            .registry
-            .owner(bench_id)
-            .is_some_and(|owner| owner == principal.subject)
+        self.benches.registry.owner(bench_id).is_some_and(|owner| {
+            owner == principal.subject || crate::application::bench_service::is_owner(principal)
+        })
     }
 
     /// `orchestration:<bindingId>`(041): 그 묶임의 작업대를 연 주체만. 풀린 묶임(제거 표식)은 `Gap(evicted)`로 보낸다.
@@ -559,6 +615,21 @@ impl WorkbenchRuntime {
     }
 }
 
+/// 호출 처리 동안 C-call 예약을 잡는가. 조회와 서버 관리 호출(정지·임대·창 토큰 발급)은 잡지 않는다 — 정지 요청이 자기
+/// 호출을 활동 작업으로 세지 않게.
+fn holds_call_reservation(operation: workbench_protocol::OperationId) -> bool {
+    use workbench_protocol::OperationId;
+    !matches!(spec_for(operation).kind, OperationKind::Query)
+        && !matches!(
+            operation,
+            OperationId::ServerStop
+                | OperationId::LeaseAcquire
+                | OperationId::LeaseRenew
+                | OperationId::LeaseRelease
+                | OperationId::DesktopIssueWindowToken
+        )
+}
+
 #[async_trait]
 impl Workbench for WorkbenchRuntime {
     async fn call(
@@ -585,6 +656,35 @@ impl Workbench for WorkbenchRuntime {
 
         let operation =
             authorization::resolve_operation(&request.request_id, &principal, &request.operation)?;
+        // 폐기된 창 주체(044 Codex 구현 리뷰): 전송 계층이 폐기 전에 인증한 요청(본문을 기다리던 호출 등)이 폐기 뒤에
+        // 도착하면 거절한다 — 폐기된 토큰과 같은 뜻이다.
+        if self.benches.registry.is_retired(&principal.subject) {
+            return Err(WorkbenchFault::unauthenticated(request.request_id));
+        }
+        // 비우기·정지 입구 판정과 C-call 예약(044 T040·R14, OCR 구현 리뷰): 정지 중이면 모든 새 호출을, 비우기 중이면 새
+        // 작업(N)을 입력을 보기 전에 거절한다. 이어 가기(K)는 handler가 조건을 본다(교환 전달·대기 task 배정). 조회·서버
+        // 관리 호출이 아니면 처리 끝까지 관문에 예약한다 — 정지 판정이 진행 중인 호출과 그 호출이 만드는 파생 상태(저장된
+        // 알림·확인된 교환)를 놓치지 않는다. 판정과 예약은 관문의 한 잠금 아래에서 한다(따로면 서빙 중 판정을 통과한 새
+        // 작업이 뒤이은 비우기 안에서 돈다).
+        let new_work = crate::application::drain::drain_class(operation)
+            == crate::application::drain::DrainClass::NewWork;
+        let _call = match self
+            .work_gate
+            .admit(new_work, holds_call_reservation(operation))
+        {
+            Ok(reservation) => reservation,
+            Err(crate::application::work_gate::AdmitRefused::Stopping) => {
+                return Err(WorkbenchFault::unavailable(
+                    request.request_id,
+                    MESSAGE_STOPPING,
+                ));
+            }
+            Err(crate::application::work_gate::AdmitRefused::Draining) => {
+                return Err(crate::application::drain::draining_fault(
+                    &request.request_id,
+                ));
+            }
+        };
         // 조회에 멱등성 키를 실어 보내는 것은 계약 위반이다(contracts §1 규칙 1). 조용히 무시하면 호출자가
         // 재시도 중복 제거가 되는 줄 오해한다.
         if matches!(spec_for(operation).kind, OperationKind::Query)
@@ -617,6 +717,12 @@ impl Workbench for WorkbenchRuntime {
         principal: AuthenticatedPrincipal,
         request: Subscription,
     ) -> Result<EventStream, WorkbenchFault> {
+        // 호출과 같은 폐기 경계: 인증 뒤 retire가 먼저 선형화됐으면 새 구독을 만들지 않는다.
+        if self.benches.registry.is_retired(&principal.subject) {
+            return Err(WorkbenchFault::unauthenticated(
+                RequestId::new("events").unwrap(),
+            ));
+        }
         self.authorize_bench_streams(&principal, &request)?;
         self.events.subscribe(&principal, request)
     }
@@ -737,6 +843,25 @@ mod tests {
             (FaultCode::NotFound, MESSAGE_ORCHESTRATION_STREAM_NOT_FOUND)
         );
         assert!(!runtime.epoch().is_empty());
+    }
+
+    #[tokio::test]
+    async fn events_reject_a_window_retired_after_authentication() {
+        let (_dir, runtime) = runtime();
+        let principal = AuthenticatedPrincipal::desktop();
+        runtime.benches.registry.retire_subject(&principal.subject);
+
+        let fault = runtime
+            .events(
+                principal,
+                Subscription {
+                    cursors: Vec::new(),
+                },
+            )
+            .unwrap_err();
+
+        assert_eq!(fault.code, FaultCode::Unauthenticated);
+        assert_eq!(runtime.events_hub().subscription_count(), 0);
     }
 
     #[tokio::test]

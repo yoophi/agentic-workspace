@@ -141,6 +141,26 @@ impl TestRuntime {
         }
     }
 
+    /// 같은 데이터 디렉터리로, **새 어댑터**(새 작업 관문·엔진)로 runtime을 다시 조립한다. 같은 시험 프로세스 안의 재조립이다
+    /// — OS 프로세스 재시작이 아니다.
+    pub fn restart_with(self, adapters: RuntimeAdapters) -> Self {
+        let TestRuntime {
+            dir,
+            paths,
+            runtime,
+            adapters: _,
+        } = self;
+        drop(runtime);
+        let runtime = WorkbenchRuntime::bootstrap_with(paths.clone(), adapters.clone())
+            .expect("bootstrap again");
+        Self {
+            dir,
+            paths,
+            runtime,
+            adapters,
+        }
+    }
+
     pub async fn call(&self, request: CallRequest) -> Result<CallReply, WorkbenchFault> {
         self.runtime
             .call(AuthenticatedPrincipal::desktop(), request)
@@ -262,6 +282,23 @@ impl BenchHarness {
             engine,
             desktop,
             dir,
+        }
+    }
+
+    /// 정지한 runtime을 같은 데이터 디렉터리의 새 runtime으로 대신한다(새 관문·엔진·데스크톱). 같은 시험 프로세스 안의
+    /// 재조립이다 — OS 프로세스 재시작이 아니다.
+    pub fn restart_runtime(
+        self,
+        configure: impl FnOnce(&mut RuntimeAdapters),
+        script: scripted_run_engine::RunScript,
+    ) -> Self {
+        let (mut adapters, engine, desktop) = stub_adapters_with(Vec::new(), Vec::new(), script);
+        configure(&mut adapters);
+        Self {
+            rt: self.rt.restart_with(adapters),
+            engine,
+            desktop,
+            dir: self.dir,
         }
     }
 

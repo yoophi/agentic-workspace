@@ -74,6 +74,9 @@ where
     catalog: C,
     permissions: P,
     session_store: Arc<dyn AcpSessionStore>,
+    /// 선택: 시작의 초기 prompt 순서(Ralph 반복 포함)가 끝날 때 놓는 guard. 호스트가 "바쁜 run"을 실행 수명으로 셀 때
+    /// 쓴다(workbench 044). 넘기지 않으면 동작이 같다.
+    initial_turn_guard: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl<C, P> AcpAgentRunner<C, P>
@@ -86,7 +89,15 @@ where
             catalog,
             permissions,
             session_store,
+            initial_turn_guard: None,
         }
+    }
+
+    /// 초기 prompt 순서(시작 목표 + Ralph 반복)가 끝나면 놓을 guard를 붙인다. 순서가 끝나면 세션이 살아 있어도
+    /// 놓는다(다음 prompt를 기다리는 쉬는 세션은 바쁘지 않다). launch가 실패하거나 run이 abort되면 drop으로 놓인다.
+    pub fn with_initial_turn_guard(mut self, guard: Box<dyn std::any::Any + Send + Sync>) -> Self {
+        self.initial_turn_guard = Some(guard);
+        self
     }
 
     pub async fn start_session<S>(
@@ -370,7 +381,12 @@ where
     where
         S: RunEventSink,
     {
-        let setup = self
+        let initial_turn_guard = self.initial_turn_guard;
+        let this = Self {
+            initial_turn_guard: None,
+            ..self
+        };
+        let setup = this
             .start_session(&request, run_id.clone(), sink.clone())
             .await?;
         let AcpSessionSetup {
@@ -389,6 +405,7 @@ where
             run_id,
             initial_goal: request.goal,
             ralph_loop: request.ralph_loop,
+            initial_turn_guard,
         };
 
         Ok(LaunchedSession {
@@ -410,6 +427,7 @@ where
     run_id: String,
     initial_goal: String,
     ralph_loop: Option<RalphLoopRequest>,
+    initial_turn_guard: Option<Box<dyn std::any::Any + Send + Sync>>,
 }
 
 impl<S> RunCommander for AcpRunCommander<S>
@@ -427,6 +445,7 @@ where
                 run_id,
                 initial_goal,
                 ralph_loop,
+                initial_turn_guard,
             } = *self;
 
             run_prompt_sequence(
@@ -440,6 +459,8 @@ where
                 },
             )
             .await;
+            // 초기 prompt 순서가 끝났다: 세션은 살아 있어도 바쁘지 않다.
+            drop(initial_turn_guard);
 
             match child.wait().await {
                 Ok(status) => {

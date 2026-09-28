@@ -1,6 +1,9 @@
 //! Durable Child report notification delivery to the active Main generation.
 
+use std::sync::Arc;
+
 use crate::{
+    application::work_gate::{Reservation, WorkGate},
     domain::agent_orchestration::{
         CommandFailure, CoordinatorGenerationStatus, CoordinatorNotification,
         CoordinatorNotificationStatus, OrchestrationError, OrchestrationErrorCode,
@@ -13,9 +16,101 @@ use crate::{
     },
 };
 
+/// 전달 한 바퀴의 관측 지점(044 T039 시험). 운영에서는 probe가 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchPoint {
+    /// 전달 한 바퀴의 첫 poll(저장소를 읽기 전).
+    FirstPoll,
+    /// `Dispatching{attemptId}` 저장 commit 직후·coordinator 전달 전.
+    AfterDispatchingSaved,
+    /// coordinator 전달이 돌아온 뒤·결과 저장 transaction 직전.
+    BeforeResultSave,
+}
+
+/// probe가 지점에서 돌려주는 지시.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchAction {
+    Continue,
+    /// 결과 저장이 실패한 것처럼 저장하지 않고 오류로 끝낸다.
+    FailResultSave,
+    /// (`AfterDispatchingSaved`에서) 전달기를 부르지 않고 coordinator가 바빠 거절한 영수증(`accepted: false`)으로 처리한다.
+    DeclineAsBusy,
+}
+
+pub type DispatchProbe = std::sync::Arc<
+    dyn Fn(
+            DispatchPoint,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = DispatchAction> + Send>>
+        + Send
+        + Sync,
+>;
+
+/// 전달 한 바퀴가 서버에 알리는 일(044 R14 표 6'·6'').
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchEvent {
+    /// 시도가 결과를 저장하지 못하고 끝났다(drop·저장 실패) — 회수와 재전달이 필요하다.
+    Orphaned,
+    /// 한 바퀴가 끝났고 재시도 가능 실패가 남았다 — backoff 뒤 다시 전달한다.
+    RetryableFailures,
+    /// 한 바퀴가 끝났고 남은 재시도 가능 실패가 없다.
+    Settled,
+}
+
+pub type DispatchEvents = Arc<dyn Fn(&str, DispatchEvent) + Send + Sync>;
+
+/// 전달 시도 하나: 시도 id와 그 N-notify 예약(관문이 없으면 예약 없음).
+pub struct NotifyAttempt {
+    attempt_id: String,
+    _reservation: Option<Reservation>,
+}
+
+impl NotifyAttempt {
+    /// 새 시도. 관문이 `stopping`이면 `None`(새 전달을 시작하지 않는다).
+    pub fn begin(gate: Option<&Arc<WorkGate>>) -> Option<Self> {
+        let attempt_id = uuid::Uuid::new_v4().to_string();
+        let reservation = match gate {
+            Some(gate) => Some(gate.reserve_notify(&attempt_id).ok()?),
+            None => None,
+        };
+        Some(Self {
+            attempt_id,
+            _reservation: reservation,
+        })
+    }
+}
+
+/// 시도의 끝을 지킨다: 결과 저장 commit 없이 drop되면 예약을 먼저 놓고 회수를 부탁한다.
+struct AttemptGuard {
+    attempt: Option<NotifyAttempt>,
+    saved: bool,
+    done: bool,
+    bench_id: String,
+    events: Option<DispatchEvents>,
+}
+
+impl AttemptGuard {
+    fn attempt_id(&self) -> &str {
+        &self.attempt.as_ref().expect("live attempt").attempt_id
+    }
+}
+
+impl Drop for AttemptGuard {
+    fn drop(&mut self) {
+        drop(self.attempt.take());
+        if self.saved && !self.done {
+            if let Some(events) = &self.events {
+                events(&self.bench_id, DispatchEvent::Orphaned);
+            }
+        }
+    }
+}
+
 pub struct CoordinatorNotificationDispatcher<R, N> {
     repository: R,
     notifier: N,
+    probe: Option<DispatchProbe>,
+    gate: Option<Arc<WorkGate>>,
+    events: Option<DispatchEvents>,
 }
 
 impl<R, N> CoordinatorNotificationDispatcher<R, N>
@@ -27,6 +122,28 @@ where
         Self {
             repository,
             notifier,
+            probe: None,
+            gate: None,
+            events: None,
+        }
+    }
+
+    /// 작업 관문과 서버 알림을 붙인다(운영 조립). 관문이 있으면 시도마다 N-notify를 쥐고 회수 한 바퀴를 돈다.
+    pub fn with_server(mut self, gate: Arc<WorkGate>, events: DispatchEvents) -> Self {
+        self.gate = Some(gate);
+        self.events = Some(events);
+        self
+    }
+
+    pub fn with_probe(mut self, probe: Option<DispatchProbe>) -> Self {
+        self.probe = probe;
+        self
+    }
+
+    async fn probe(&self, point: DispatchPoint) -> DispatchAction {
+        match &self.probe {
+            Some(probe) => probe(point).await,
+            None => DispatchAction::Continue,
         }
     }
 
@@ -34,9 +151,41 @@ where
         &self,
         bench_id: &str,
     ) -> Result<Vec<CoordinatorNotification>, OrchestrationError> {
+        self.dispatch_pending_with(bench_id, None).await
+    }
+
+    /// 전달 한 바퀴(044 R14 표 6'·6''). 시작할 때 살아 있는 시도가 없는 `Dispatching{attemptId}`를 회수한다. 전달마다
+    /// 시도 id와 N-notify 예약(`first`가 있으면 보고 호출이 넘긴 예약)을 쥐고 `Dispatching{attemptId}`를 저장한 뒤
+    /// coordinator에 전달하고, **결과 저장 commit 뒤에만** 예약을 놓는다. 결과를 저장하지 못하고 끝나면(drop·저장 실패)
+    /// 시도 guard가 회수 한 바퀴를 부탁한다. 재시도 가능 실패가 남으면 서버 재전달을 부탁한다.
+    pub async fn dispatch_pending_with(
+        &self,
+        bench_id: &str,
+        first: Option<NotifyAttempt>,
+    ) -> Result<Vec<CoordinatorNotification>, OrchestrationError> {
+        let mut first = first;
         let mut delivered = Vec::new();
         let mut reactivate_failed = true;
+        let mut retryable_failures = false;
+        self.probe(DispatchPoint::FirstPoll).await;
+        self.reclaim_orphaned(bench_id)?;
         loop {
+            let attempt = match first.take() {
+                Some(attempt) => attempt,
+                None => match NotifyAttempt::begin(self.gate.as_ref()) {
+                    Some(attempt) => attempt,
+                    // 정지 판정이 끝났다(`stopping`): 새 전달을 시작하지 않는다.
+                    None => break,
+                },
+            };
+            let mut guard = AttemptGuard {
+                attempt: Some(attempt),
+                saved: false,
+                done: false,
+                bench_id: bench_id.to_owned(),
+                events: self.events.clone(),
+            };
+            let attempt_id = guard.attempt_id().to_owned();
             // 저장소 경계는 각 단계 블록 안에서만 쥔다 — Main 턴을 기다리는 동안 쥐지 않는다(research R2·R9).
             let (notification_id, binding, snapshot) = {
                 let mut tx = self.repository.begin()?;
@@ -59,6 +208,7 @@ where
                 }
                 let Some((notification_id, binding)) = next_delivery(session, bench_id)? else {
                     tx.commit()?;
+                    guard.done = true;
                     break;
                 };
                 {
@@ -68,6 +218,7 @@ where
                         .find(|notification| notification.id == notification_id)
                         .ok_or_else(|| not_found("Coordinator notification"))?;
                     notification.attempt_count += 1;
+                    notification.attempt_id = Some(attempt_id.clone());
                     notification.transition(CoordinatorNotificationStatus::Dispatching, now())?;
                 }
                 touch(session);
@@ -78,9 +229,28 @@ where
                     .cloned()
                     .ok_or_else(|| not_found("Coordinator notification"))?;
                 tx.commit()?;
+                guard.saved = true;
                 (notification_id, binding, snapshot)
             };
-            let receipt = self.notifier.notify_coordinator(&binding, &snapshot).await;
+            let receipt = if self.probe(DispatchPoint::AfterDispatchingSaved).await
+                == DispatchAction::DeclineAsBusy
+            {
+                Ok(
+                    crate::ports::coordinator_notification::CoordinatorNotificationReceipt {
+                        accepted: false,
+                        reason: Some("Injected busy decline.".into()),
+                    },
+                )
+            } else {
+                self.notifier.notify_coordinator(&binding, &snapshot).await
+            };
+            if self.probe(DispatchPoint::BeforeResultSave).await == DispatchAction::FailResultSave {
+                return Err(OrchestrationError::new(
+                    OrchestrationErrorCode::WorkerUnavailable,
+                    "Injected result save failure.",
+                )
+                .retryable());
+            }
 
             let notification = {
                 let mut tx = self.repository.begin()?;
@@ -92,7 +262,10 @@ where
                         .iter_mut()
                         .find(|candidate| candidate.id == notification_id)
                         .ok_or_else(|| not_found("Coordinator notification"))?;
-                    if notification.status != CoordinatorNotificationStatus::Processed {
+                    // 이 시도가 소유한 `Dispatching`일 때만 결과를 쓴다(회수됐거나 다른 상태로 바뀌었으면 그대로 둔다).
+                    let owned = notification.status == CoordinatorNotificationStatus::Dispatching
+                        && notification.attempt_id.as_deref() == Some(attempt_id.as_str());
+                    if owned {
                         match receipt {
                             Ok(receipt) if receipt.accepted => {
                                 notification.failure = None;
@@ -115,8 +288,12 @@ where
                             });
                                 notification
                                     .transition(CoordinatorNotificationStatus::Failed, now())?;
+                                retryable_failures = true;
                             }
                             Err(error) => {
+                                retryable_failures |= error.retryable;
+                                // 실제 전달 실패(바쁨 거절이 아님) — 정지 판정의 시도 상한이 센다.
+                                notification.delivery_failure_count += 1;
                                 notification.failure = Some(CommandFailure {
                                     code: error.code,
                                     message: error.message,
@@ -133,9 +310,82 @@ where
                 tx.commit()?;
                 notification
             };
+            // 결과 저장 commit 뒤에만 N-notify를 놓는다.
+            guard.done = true;
+            drop(guard);
             delivered.push(notification);
         }
+        if let Some(events) = &self.events {
+            events(
+                bench_id,
+                if retryable_failures {
+                    DispatchEvent::RetryableFailures
+                } else {
+                    DispatchEvent::Settled
+                },
+            );
+        }
         Ok(delivered)
+    }
+
+    /// 회수 한 바퀴(R14 표 6''): 시도의 N-notify 예약이 관문에 없는 `Dispatching{attemptId}`를 같은 id일 때만
+    /// `Failed(retryable)`로 되돌린다. 살아 있는 시도는 건드리지 않는다. 관문이 없으면(재시작 복구 전용 조립) 하지 않는다.
+    /// 예약 판정은 저장소 경계 밖에서 한다 — 시도의 예약은 결과 commit 뒤에만 풀리고 시도 id는 다시 쓰지 않으므로,
+    /// 한 번 "예약 없음"이면 그 시도는 끝났다.
+    pub fn reclaim_orphaned(&self, bench_id: &str) -> Result<usize, OrchestrationError> {
+        let Some(gate) = &self.gate else {
+            return Ok(0);
+        };
+        let candidates: Vec<(String, String)> = {
+            let mut tx = self.repository.begin()?;
+            let sessions = tx.sessions();
+            let session = session_for_bench_mut(sessions, bench_id)?;
+            session
+                .coordinator_notifications
+                .iter()
+                .filter(|notification| {
+                    notification.status == CoordinatorNotificationStatus::Dispatching
+                })
+                .filter_map(|notification| {
+                    notification
+                        .attempt_id
+                        .clone()
+                        .map(|attempt| (notification.id.clone(), attempt))
+                })
+                .collect()
+        };
+        let orphaned: Vec<(String, String)> = candidates
+            .into_iter()
+            .filter(|(_, attempt)| !gate.notify_attempt_live(attempt))
+            .collect();
+        if orphaned.is_empty() {
+            return Ok(0);
+        }
+        let mut tx = self.repository.begin()?;
+        let sessions = tx.sessions();
+        let session = session_for_bench_mut(sessions, bench_id)?;
+        let mut reclaimed = 0;
+        for notification in &mut session.coordinator_notifications {
+            let same_attempt = orphaned.iter().any(|(id, attempt)| {
+                *id == notification.id && notification.attempt_id.as_deref() == Some(attempt)
+            });
+            if same_attempt && notification.status == CoordinatorNotificationStatus::Dispatching {
+                // 중단된 시도(회수)도 실제 전달 실패다.
+                notification.delivery_failure_count += 1;
+                notification.failure = Some(CommandFailure {
+                    code: OrchestrationErrorCode::RuntimeLost,
+                    message: "Main notification delivery was interrupted.".into(),
+                    retryable: true,
+                });
+                notification.transition(CoordinatorNotificationStatus::Failed, now())?;
+                reclaimed += 1;
+            }
+        }
+        if reclaimed > 0 {
+            touch(session);
+            tx.commit()?;
+        }
+        Ok(reclaimed)
     }
 
     pub fn recover_interrupted(
@@ -149,6 +399,9 @@ where
         for notification in &mut session.coordinator_notifications {
             if notification.status == CoordinatorNotificationStatus::Dispatching {
                 notification.status = CoordinatorNotificationStatus::Pending;
+                notification.attempt_id = None;
+                // 중단된 시도(회수)도 실제 전달 실패다.
+                notification.delivery_failure_count += 1;
                 notification.failure = Some(CommandFailure {
                     code: OrchestrationErrorCode::RuntimeLost,
                     message: "Main notification delivery was interrupted.".into(),
@@ -356,8 +609,10 @@ mod tests {
                 main_run_id: main_available.then(|| "main-run".into()),
                 status: CoordinatorNotificationStatus::Pending,
                 attempt_count: 0,
+                delivery_failure_count: 0,
                 failure: None,
                 collected_at: None,
+                attempt_id: None,
                 created_at: now.clone(),
                 updated_at: now,
             });

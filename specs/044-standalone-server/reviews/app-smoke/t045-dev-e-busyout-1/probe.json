@@ -1,0 +1,17 @@
+{
+  "origin": "http://localhost:1420",
+  "scenario": "quit-busy",
+  "steps": {
+    "completedBeforeQuit": false,
+    "startEcho": "ok",
+    "capturedEvents": 8,
+    "lastSequence": 8
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-539f0160",
+  "benchId": "3347eb7c-41c5-45cd-ad41-06a538821684",
+  "phase": "ready-to-quit-busy",
+  "result": "ok"
+}

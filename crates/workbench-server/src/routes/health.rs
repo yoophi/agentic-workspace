@@ -2,7 +2,11 @@
 
 use std::{sync::Arc, time::Instant};
 
-use axum::{extract::State, http::HeaderMap, response::Response};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+};
 use workbench_protocol::RequestId;
 
 use super::{authenticate, json_response, record, unauthenticated};
@@ -17,8 +21,18 @@ pub async fn ready(State(state): State<Arc<AppState>>, headers: HeaderMap) -> Re
     let started = Instant::now();
     let principal = authenticate(&state, &headers);
     let response = match &principal {
+        Some(_) if state.config.server_info.state() != "serving" => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            axum::Json(serde_json::json!({
+                "ready": false,
+                "state": state.config.server_info.state(),
+                "serverEpoch": state.config.server_info.server_epoch(),
+            })),
+        )
+            .into_response(),
         Some(_) => json_response(&serde_json::json!({
             "ready": true,
+            "state": "serving",
             "serverEpoch": state.config.server_info.server_epoch(),
         })),
         None => unauthenticated(&RequestId::random()),

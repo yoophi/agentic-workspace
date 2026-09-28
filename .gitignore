@@ -19,3 +19,7 @@ Thumbs.db
 .env*
 .acp*/
 .gstack/
+
+# Python bytecode (스모크 스크립트 import)
+__pycache__/
+*.pyc

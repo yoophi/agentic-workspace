@@ -739,6 +739,20 @@
       }
     },
     {
+      "command": "discard_agent_exchange_delivery",
+      "args": {
+        "requestId": "x1"
+      },
+      "benchId": "bench-1",
+      "expected": {
+        "operation": "exchange.discardDelivery",
+        "input": {
+          "benchId": "bench-1",
+          "requestId": "x1"
+        }
+      }
+    },
+    {
       "command": "bootstrap_orchestration_workspace",
       "args": {
         "input": {

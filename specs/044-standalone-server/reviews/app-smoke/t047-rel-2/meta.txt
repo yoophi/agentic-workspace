@@ -1,0 +1,13 @@
+servers-before=
+app-pid=87534
+shot 224, 93, 1280, 860
+servers-while-failed= server.json=no
+created symlink
+click: button 다시 시도 of group 2 of group 1 of UI element 1 of scroll area 1 of group 1 of group 1 of window Agentic Workbench of application process agentic-workbench
+server.json-after-retry=yes servers=87805 
+shot 224, 93, 1280, 860
+status={"result": "ok", "state": "serving", "leases": 1, "busyRuns": 0}
+app1-gone=yes servers-after-quit=87805  status={"result": "ok", "state": "serving", "leases": 0, "busyRuns": 0}
+app2-pid=88139
+app2-lease=yes servers=87805  server-pid=87805 (before 87805)
+cleanup: app2=gone servers=

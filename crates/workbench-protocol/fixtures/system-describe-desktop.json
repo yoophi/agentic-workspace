@@ -355,6 +355,14 @@
             "idempotencyScope": "epoch"
           },
           {
+            "id": "exchange.discardDelivery",
+            "kind": "command",
+            "requiredScopes": [
+              "exchange:write"
+            ],
+            "idempotencyScope": "epoch"
+          },
+          {
             "id": "exchange.list",
             "kind": "query",
             "requiredScopes": [
@@ -659,6 +667,13 @@
             "kind": "query",
             "requiredScopes": [
               "system:describe"
+            ]
+          },
+          {
+            "id": "bench.list",
+            "kind": "query",
+            "requiredScopes": [
+              "bench:read"
             ]
           }
         ],

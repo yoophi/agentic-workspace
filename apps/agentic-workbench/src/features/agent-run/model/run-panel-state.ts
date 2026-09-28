@@ -32,6 +32,11 @@ export type QueuedPrompt = {
   dispatchAfterRunStart?: boolean;
   /** run 전송 멱등성 키(043: 교환 prompt는 `exchange-delivery:<requestId>`). */
   idempotencyKey?: string;
+  /** 교환 전달 prompt면 그 교환 id(044: `run.sendPrompt`에 `continuation`으로 싣는다). */
+  exchangeRequestId?: string;
+  /** 교환 항목이 속한 run(Codex r11): 대기열에 들어올 때의 활성 run. 교환은 그 run이 대상이라 다른 run의 대기열에 들어가지
+   *  않는다(서버가 다른 run으로의 전달을 거절한다). 활성 run 없이 들어온 교환은 비어 있다(묶인 run 없음). */
+  exchangeRunId?: string;
 };
 
 export type QueuedPromptSource =
@@ -530,12 +535,16 @@ export function createQueuedPrompt({
   source = "manual-queue",
   dispatchAfterRunStart = false,
   idempotencyKey,
+  exchangeRequestId,
+  exchangeRunId,
 }: {
   id: string;
   text: string;
   source?: QueuedPromptSource;
   dispatchAfterRunStart?: boolean;
   idempotencyKey?: string;
+  exchangeRequestId?: string;
+  exchangeRunId?: string;
 }): QueuedPrompt | null {
   const normalizedText = text.trim();
   if (!normalizedText) {
@@ -548,6 +557,8 @@ export function createQueuedPrompt({
     source,
     ...(dispatchAfterRunStart ? { dispatchAfterRunStart: true } : {}),
     ...(idempotencyKey ? { idempotencyKey } : {}),
+    ...(exchangeRequestId ? { exchangeRequestId } : {}),
+    ...(exchangeRequestId && exchangeRunId ? { exchangeRunId } : {}),
   };
 }
 

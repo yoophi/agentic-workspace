@@ -26,6 +26,15 @@ pub enum MainRunBindingState {
     Ended,
 }
 
+/// `reserve_child_run`의 결과(044 R14 표 4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChildRunReservation {
+    /// 예정 run을 노드의 현재 run으로 예약했다.
+    Reserved,
+    /// 노드에 이미 run이 있다(다른 배정이 먼저 예약했다). 그 run id.
+    Existing(String),
+}
+
 #[derive(Debug, Clone, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BindMainRunRequest {
@@ -798,46 +807,70 @@ where
     }
 
     /// 자식 기동 전에 예정 run을 노드의 현재 run으로 예약한다(041 Codex 리뷰): 엔진이 run을 등록한 직후·결과 저장
-    /// 전에 온 첫 턴 보고도 현재 run의 보고로 반영된다. 기동이 실패하면 `release_child_run_reservation`으로 되돌린다.
+    /// 전에 온 첫 턴 보고도 현재 run의 보고로 반영된다. 기동이 끝나지 못하면 `revert_child_launch`로 되돌린다.
+    ///
+    /// 044 R14 표 4: 저장소 RMW 비교 후 변경이다. task가 기동할 수 있는 상태(`ready`·`running`)이고 노드에 run이
+    /// 없을 때만 예약한다. 이미 run이 있으면 그 run을 돌려주고(`Existing`) 바꾸지 않는다. 종료된(취소 포함) task는 거절한다.
     pub fn reserve_child_run(
         &self,
         bench_id: &str,
         task_id: &str,
         node_id: &str,
         run_id: &str,
-    ) -> Result<(), OrchestrationError> {
+    ) -> Result<ChildRunReservation, OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
         let session = session_for_bench_mut(sessions, bench_id)?;
-        if !session
+        let task = session
             .tasks
             .iter()
-            .any(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
-        {
-            return Err(not_found("Assigned task"));
+            .find(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
+            .ok_or_else(|| not_found("Assigned task"))?;
+        if !matches!(task.status, TaskStatus::Ready | TaskStatus::Running) {
+            return Err(OrchestrationError::new(
+                OrchestrationErrorCode::InvalidTransition,
+                "Only a ready task can be assigned to a worker.",
+            ));
         }
         let node = session
             .nodes
             .iter_mut()
             .find(|node| node.id == node_id)
             .ok_or_else(|| not_found("Assigned child node"))?;
+        if let Some(existing) = node.current_run_id.clone() {
+            return Ok(ChildRunReservation::Existing(existing));
+        }
         node.current_run_id = Some(run_id.into());
         node.execution_status = ExecutionStatus::Starting;
         session.revision += 1;
         session.updated_at = now();
-        tx.commit()
+        tx.commit()?;
+        Ok(ChildRunReservation::Reserved)
     }
 
-    /// 기동이 실패한 예약을 되돌린다(그 사이 다른 run이 들어왔으면 그대로 둔다).
-    pub fn release_child_run_reservation(
+    /// 끝나지 못한 자식 기동을 한 트랜잭션에서 되돌린다(Codex r7). 노드의 현재 run이 이 기동의 run일 때만: 노드 run을
+    /// 비우고 `Idle`로, 그 run 때문에 실행 중(`Running`·`InputRequired`)이 된 task는 다시 배정할 수 있는 `Ready`로 돌린다
+    /// (run 없는 실행 중 task를 남기지 않는다). 종료·실패·막힘 상태는 그대로 둔다(그 run이 이미 결과를 냈다 — 종료 또는
+    /// 재시도로 다시 배정). 그 사이 다른 run이 노드에 들어왔으면 아무것도 바꾸지 않는다.
+    ///
+    /// 작업 영역은 작업대가 아니라 **작업 영역 id**로 찾는다(Codex r9): 저장되지 않은 되돌리기가 남은 채 작업대가 닫히면
+    /// 작업대 묶임이 풀리므로(`release_bench`) 작업대 id로는 다시 찾을 수 없다. 되돌리기는 노드가 이 기동의 run을 가리킬
+    /// 때만 바꾸므로(조건부) 작업대 범위 확인 없이도 다른 기동을 건드리지 않는다. 작업 영역이 없으면(삭제) 되돌릴 것이 없다.
+    pub fn revert_child_launch(
         &self,
-        bench_id: &str,
+        workspace_id: &str,
+        task_id: &str,
         node_id: &str,
         run_id: &str,
     ) -> Result<(), OrchestrationError> {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
-        let session = session_for_bench_mut(sessions, bench_id)?;
+        let Some(session) = sessions
+            .iter_mut()
+            .find(|session| session.id == workspace_id)
+        else {
+            return Ok(());
+        };
         let Some(node) = session
             .nodes
             .iter_mut()
@@ -847,8 +880,16 @@ where
         };
         node.current_run_id = None;
         node.execution_status = ExecutionStatus::Idle;
+        let now = now();
+        if let Some(task) = session
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
+        {
+            task.revert_aborted_launch(now.clone());
+        }
         session.revision += 1;
-        session.updated_at = now();
+        session.updated_at = now;
         tx.commit()
     }
 
@@ -873,6 +914,14 @@ where
                     "Assigned orchestration task was not found.",
                 )
             })?;
+        // 시작 장벽을 연 직후 첫 turn이 결과를 보고할 수 있다. 이미 terminal인 task에 늦게 run을 묶으면 scheduler 자리는
+        // 풀린 채 worker만 살아 남으므로 모든 terminal 상태를 거절해 launch cleanup이 준비한 run을 취소하게 한다.
+        if task.status.is_terminal() {
+            return Err(OrchestrationError::new(
+                OrchestrationErrorCode::InvalidTransition,
+                "A terminal task cannot be bound to a worker run.",
+            ));
+        }
         if task.status == TaskStatus::Ready {
             task.transition(TaskStatus::Running, now.clone())?;
         }
@@ -1061,8 +1110,10 @@ where
                     main_run_id,
                     status: CoordinatorNotificationStatus::Pending,
                     attempt_count: 0,
+                    delivery_failure_count: 0,
                     failure: None,
                     collected_at: None,
+                    attempt_id: None,
                     created_at: now.clone(),
                     updated_at: now.clone(),
                 });
@@ -1419,15 +1470,40 @@ where
         bench_id: &str,
         request: TaskActionRequest,
     ) -> Result<OrchestrationSession, OrchestrationError> {
-        self.mutate_task(bench_id, &request, "cancelTask", |task, node, now| {
-            if task.status.is_terminal() {
-                return Ok(());
-            }
-            task.transition(TaskStatus::Cancelled, now.to_owned())?;
-            node.execution_status = ExecutionStatus::Stopped;
-            node.last_activity_at = Some(now.to_owned());
-            Ok(())
-        })
+        self.cancel_task_with(bench_id, request, true)
+    }
+
+    /// 044 R14 표 5: 기동 토큰을 `Cancelled`로 바꾼 뒤의 task 취소. 토큰 전이가 선형화 지점이므로 그 사이 기동 경로의
+    /// 저장소 예약이 revision을 올렸어도 거절하지 않는다(멱등 기록은 같다).
+    pub fn cancel_launching_task(
+        &self,
+        bench_id: &str,
+        request: TaskActionRequest,
+    ) -> Result<OrchestrationSession, OrchestrationError> {
+        self.cancel_task_with(bench_id, request, false)
+    }
+
+    fn cancel_task_with(
+        &self,
+        bench_id: &str,
+        request: TaskActionRequest,
+        check_revision: bool,
+    ) -> Result<OrchestrationSession, OrchestrationError> {
+        self.mutate_task_with(
+            bench_id,
+            &request,
+            "cancelTask",
+            check_revision,
+            |task, node, now| {
+                if task.status.is_terminal() {
+                    return Ok(());
+                }
+                task.transition(TaskStatus::Cancelled, now.to_owned())?;
+                node.execution_status = ExecutionStatus::Stopped;
+                node.last_activity_at = Some(now.to_owned());
+                Ok(())
+            },
+        )
     }
 
     pub fn retry_task(
@@ -1652,10 +1728,26 @@ where
     where
         F: FnOnce(&mut OrchestrationTask, &mut AgentNode, &str) -> Result<(), OrchestrationError>,
     {
+        self.mutate_task_with(bench_id, request, operation, true, mutate)
+    }
+
+    fn mutate_task_with<F>(
+        &self,
+        bench_id: &str,
+        request: &TaskActionRequest,
+        operation: &str,
+        check_revision: bool,
+        mutate: F,
+    ) -> Result<OrchestrationSession, OrchestrationError>
+    where
+        F: FnOnce(&mut OrchestrationTask, &mut AgentNode, &str) -> Result<(), OrchestrationError>,
+    {
         let mut tx = self.repository.begin()?;
         let sessions = tx.sessions();
         let session = session_for_bench_mut(sessions, bench_id)?;
-        ensure_revision(session, request.expected_revision)?;
+        if check_revision {
+            ensure_revision(session, request.expected_revision)?;
+        }
         if let Some(record) = session.idempotency_records.iter().find(|record| {
             record.actor_key == bench_id
                 && record.operation == operation
@@ -1720,6 +1812,20 @@ fn reconcile_session_runtime(session: &mut OrchestrationSession, live_run_ids: &
         let Some(run_id) = node.current_run_id.as_ref() else {
             continue;
         };
+        // Codex r8: 예약만 하고(`Starting`) 실행되지 않은 기동이 남긴 run(되돌리기가 저장되지 못한 채 서버가 멈춤 등). 그
+        // run은 엔진에 없고 기동 중도 아니다 — 끝나지 못한 기동과 같이 되돌린다(노드 run 비움, 그 기동이 만든 실행 중
+        // task는 다시 배정할 수 있는 `Ready`). 남기면 다음 배정이 죽은 run id를 `alreadyAssigned`로 받는다.
+        if node.execution_status == ExecutionStatus::Starting && !live_run_ids.contains(run_id) {
+            node.current_run_id = None;
+            node.execution_status = ExecutionStatus::Idle;
+            node.last_activity_at = Some(now.clone());
+            if let Some(task_id) = node.assigned_task_id.as_ref() {
+                if let Some(task) = session.tasks.iter_mut().find(|task| task.id == *task_id) {
+                    task.revert_aborted_launch(now.clone());
+                }
+            }
+            continue;
+        }
         if node.execution_status == ExecutionStatus::Active && !live_run_ids.contains(run_id) {
             node.execution_status = ExecutionStatus::Stopped;
             node.last_activity_at = Some(now.clone());

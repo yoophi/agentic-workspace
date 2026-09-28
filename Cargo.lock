@@ -101,8 +101,20 @@ dependencies = [
  "tower-http 0.5.2",
  "uuid",
  "workbench-core",
+ "workbench-host",
  "workbench-protocol",
  "workbench-server",
+]
+
+[[package]]
+name = "agentic-workbench-server"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "rusqlite",
+ "serde_json",
+ "tempfile",
+ "workbench-host",
 ]
 
 [[package]]
@@ -5625,6 +5637,28 @@ dependencies = [
  "tokio-tungstenite",
  "uuid",
  "walkdir",
+ "workbench-core",
+ "workbench-protocol",
+ "workbench-server",
+]
+
+[[package]]
+name = "workbench-host"
+version = "0.1.0"
+dependencies = [
+ "acp-agent-core",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "chrono",
+ "futures-util",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
  "workbench-core",
  "workbench-protocol",
  "workbench-server",

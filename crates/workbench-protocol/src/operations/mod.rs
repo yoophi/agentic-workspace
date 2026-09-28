@@ -4,14 +4,17 @@ pub mod agent;
 pub mod agent_run_settings;
 pub mod bench;
 pub mod common;
+pub mod desktop;
 pub mod exchange;
 pub mod git;
 pub mod goal;
+pub mod lease;
 pub mod orchestration;
 pub mod orchestration_dto;
 pub mod project;
 pub mod run;
 pub mod saved_prompt;
+pub mod server;
 pub mod system;
 pub mod worktree;
 
@@ -70,7 +73,7 @@ const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpe
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 85] = [
+pub const OPERATIONS: [OperationSpec; 94] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -125,6 +128,10 @@ pub const OPERATIONS: [OperationSpec; 85] = [
     epoch_command(OperationId::ExchangeSyncWorkspace, &[Scope::ExchangeWrite]),
     epoch_command(OperationId::ExchangeSend, &[Scope::ExchangeWrite]),
     epoch_command(OperationId::ExchangeAcknowledge, &[Scope::ExchangeWrite]),
+    epoch_command(
+        OperationId::ExchangeDiscardDelivery,
+        &[Scope::ExchangeWrite],
+    ),
     query(OperationId::ExchangeList, &[Scope::ExchangeRead]),
     query(OperationId::ExchangeListPeers, &[Scope::ExchangeRead]),
     epoch_command(OperationId::ExchangeSendFromRun, &[Scope::ExchangeWrite]),
@@ -264,6 +271,14 @@ pub const OPERATIONS: [OperationSpec; 85] = [
         &[Scope::OrchestrationRead],
     ),
     query(OperationId::SystemDescribe, &[Scope::SystemDescribe]),
+    query(OperationId::ServerStatus, &[Scope::ServerRead]),
+    epoch_command(OperationId::ServerStop, &[Scope::ServerAdmin]),
+    epoch_command(OperationId::LeaseAcquire, &[Scope::ServerAdmin]),
+    epoch_command(OperationId::LeaseRenew, &[Scope::ServerAdmin]),
+    epoch_command(OperationId::LeaseRelease, &[Scope::ServerAdmin]),
+    epoch_command(OperationId::DesktopIssueWindowToken, &[Scope::ServerAdmin]),
+    epoch_command(OperationId::DesktopRetireWindow, &[Scope::ServerAdmin]),
+    query(OperationId::BenchList, &[Scope::BenchRead]),
 ];
 
 pub fn spec_for(id: OperationId) -> &'static OperationSpec {
@@ -428,6 +443,10 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
             exchange::ExchangeAcknowledgeInput::schema(),
             exchange::AgentExchangeDto::schema(),
         ),
+        OperationId::ExchangeDiscardDelivery => (
+            exchange::ExchangeDiscardDeliveryInput::schema(),
+            EmptyOutput::schema(),
+        ),
         OperationId::ExchangeList => (
             exchange::ExchangeListInput::schema(),
             exchange::exchange_list_output_schema(),
@@ -584,6 +603,38 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
         OperationId::SystemDescribe => (
             system::SystemDescribeInput::schema(),
             crate::descriptor::DescribeOutput::schema(),
+        ),
+        OperationId::ServerStatus => (
+            server::ServerStatusInput::schema(),
+            server::ServerStatusOutput::schema(),
+        ),
+        OperationId::ServerStop => (
+            server::ServerStopInput::schema(),
+            server::ServerStopOutput::schema(),
+        ),
+        OperationId::LeaseAcquire => (
+            lease::LeaseAcquireInput::schema(),
+            lease::LeaseAcquireOutput::schema(),
+        ),
+        OperationId::LeaseRenew => (
+            lease::LeaseRenewInput::schema(),
+            lease::LeaseRenewOutput::schema(),
+        ),
+        OperationId::LeaseRelease => (
+            lease::LeaseReleaseInput::schema(),
+            lease::LeaseReleaseOutput::schema(),
+        ),
+        OperationId::DesktopIssueWindowToken => (
+            desktop::DesktopIssueWindowTokenInput::schema(),
+            desktop::DesktopIssueWindowTokenOutput::schema(),
+        ),
+        OperationId::DesktopRetireWindow => (
+            desktop::DesktopRetireWindowInput::schema(),
+            desktop::DesktopRetireWindowOutput::schema(),
+        ),
+        OperationId::BenchList => (
+            bench::BenchListInput::schema(),
+            bench::bench_list_output_schema(),
         ),
     };
     (

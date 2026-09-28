@@ -20,6 +20,8 @@ const DESKTOP_COMMANDS = new Set([
   "open_worktree_window",
   "open_external_url",
   "get_workbench_connection",
+  "get_workbench_mode",
+  "apply_window_title",
   "ensure_window_bench",
   "declare_network_delivery",
   "withdraw_network_delivery",

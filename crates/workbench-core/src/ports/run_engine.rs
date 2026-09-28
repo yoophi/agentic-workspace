@@ -19,6 +19,8 @@ pub enum RunErrorKind {
     Conflict,
     RateLimited,
     PreconditionFailed,
+    /// 044: 서버가 정지 중이라 새 실행을 시작하지 않는다.
+    Unavailable,
     Internal,
 }
 
@@ -47,12 +49,27 @@ impl std::error::Error for RunEngineError {}
 
 #[async_trait]
 pub trait RunEngine: Send + Sync {
+    /// 044: 작업 관문을 붙인다(bootstrap이 한 번 부른다). 붙은 엔진은 prompt 실행 진입점에서 A-turn을 동기 예약하고
+    /// 실행 future가 끝날 때 해제한다(research R14). 기본은 아무것도 하지 않는다.
+    fn attach_work_gate(&self, _gate: std::sync::Arc<crate::application::work_gate::WorkGate>) {}
+
     /// run을 예약(소유 기록)하고 spawn한 뒤 돌아온다. 완료는 기다리지 않는다.
     async fn start(
         &self,
         request: AgentRunRequest,
         owner: &str,
         sink: WorkbenchRunSink,
+    ) -> Result<AgentRun, RunEngineError>;
+
+    /// 044 R14 시작 장벽: `start`의 **준비**(run을 registry에 예약하고 실행 task를 spawn·attach)까지만 하고 돌아온다.
+    /// 돌아올 때 run은 취소할 수 있고, `start_gate`가 열리기 전에는 실행(launcher·초기 prompt)하지 않는다. sender를 열지
+    /// 않고 drop하면 실행 없이 run을 끝낸다.
+    async fn start_gated(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+        start_gate: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<AgentRun, RunEngineError>;
 
     async fn send_prompt(
@@ -92,6 +109,20 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<(), RunEngineError>;
 
+    /// `queue_prompt`와 같은 조기 등록 계약이지만, production의 detached 실행 결과를 소유자에게 돌려준다. 동기 엔진은
+    /// `queue_prompt` 결과 자체가 최종 결과이므로 기본 구현을 쓴다.
+    async fn queue_prompt_with_completion(
+        &self,
+        run_id: &str,
+        prompt: String,
+        sink: WorkbenchRunSink,
+        completion: QueuePromptCompletion,
+    ) -> Result<(), RunEngineError> {
+        let result = self.queue_prompt(run_id, prompt, sink).await;
+        completion(result.clone());
+        result
+    }
+
     /// orchestration(041): 턴이 끝날 때까지 기다린다(coordinator 알림 전달). `queue`면 지금 턴 뒤에 이어 붙인다.
     async fn send_and_wait(
         &self,
@@ -120,3 +151,5 @@ pub trait RunEngine: Send + Sync {
     /// 소유자의 run을 모두 취소하고 취소한 run id를 돌려준다.
     async fn cancel_runs_owned_by(&self, owner: &str) -> Vec<String>;
 }
+/// 비동기 queue 등록 뒤 실제 ACP queue/RPC가 끝났을 때 부르는 관찰자. 등록 호출의 조기 응답 계약은 유지한다.
+pub type QueuePromptCompletion = Box<dyn FnOnce(Result<(), RunEngineError>) + Send + 'static>;

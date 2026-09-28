@@ -1,0 +1,17 @@
+{
+  "origin": "tauri://localhost",
+  "scenario": "quit-busy",
+  "steps": {
+    "completedBeforeQuit": false,
+    "startEcho": "ok",
+    "capturedEvents": 8,
+    "lastSequence": 8
+  },
+  "mode": "external",
+  "transport": "http",
+  "connection": "connected",
+  "runId": "quit-97dde4b9",
+  "benchId": "541f896b-40aa-4940-a4b2-712513fe72d6",
+  "phase": "ready-to-quit-busy",
+  "result": "ok"
+}

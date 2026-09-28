@@ -160,6 +160,17 @@ pub struct RunPromptInput {
     pub bench_id: String,
     pub run_id: String,
     pub prompt: String,
+    /// 044: `run.sendPrompt`에서만. 이미 요청된 교환의 전달 prompt임을 밝힌다(비우기 중 K, 교환마다 1회 소비).
+    /// `run.steer`·`run.cancelAndSend`에 싣으면 `invalidArgument`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<PromptContinuationDto>,
+}
+
+/// 044 이어 가기(`contracts/drain-classification.md` K).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PromptContinuationDto {
+    pub exchange_request_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

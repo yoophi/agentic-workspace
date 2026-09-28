@@ -17,6 +17,18 @@ pub trait ServerInfo: Send + Sync {
     fn server_version(&self) -> String;
     fn server_epoch(&self) -> String;
     fn storage_schema_version(&self) -> i64;
+    fn state(&self) -> String {
+        "serving".to_owned()
+    }
+    /// 서버 인스턴스 식별자(044). 독립 서버는 안내 파일과 같은 값을 쓴다. 없으면 router가 새로 만든다.
+    fn instance_id(&self) -> Option<String> {
+        None
+    }
+    /// `/v1/system/identify` 증명(044 research R5): 소유자 자격 증명을 아는 서버만 만들 수 있는 값. 없으면 그 경로는
+    /// `notFound`다(embedded·시험 조립).
+    fn identity_proof(&self, _nonce: &str, _instance_id: &str) -> Option<String> {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -44,6 +56,7 @@ pub struct HandshakeResponse {
     pub instance_id: String,
     pub server_epoch: String,
     pub storage_schema_version: i64,
+    pub state: String,
     pub features: Vec<String>,
 }
 
@@ -68,6 +81,7 @@ pub fn respond(
     request: &HandshakeRequest,
     info: &dyn ServerInfo,
     instance_id: &str,
+    state: &str,
 ) -> Option<HandshakeResponse> {
     let selected = negotiate(&request.supported_protocol_versions)?;
     Some(HandshakeResponse {
@@ -79,6 +93,7 @@ pub fn respond(
         instance_id: instance_id.to_owned(),
         server_epoch: info.server_epoch(),
         storage_schema_version: info.storage_schema_version(),
+        state: state.to_owned(),
         features: Vec::new(),
     })
 }

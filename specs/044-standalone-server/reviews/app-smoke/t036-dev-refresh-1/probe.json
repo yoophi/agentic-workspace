@@ -1,0 +1,14 @@
+{
+  "origin": "http://localhost:1420",
+  "scenario": "refresh",
+  "phase": 2,
+  "steps": {
+    "routedAfterRefresh": 1,
+    "acknowledgedAfterRefresh": 1,
+    "echoCountInAppStream": 1,
+    "barrier": "refresh-barrier-f029066a",
+    "message": "refresh-message-f029066a"
+  },
+  "transport": "http",
+  "result": "ok"
+}

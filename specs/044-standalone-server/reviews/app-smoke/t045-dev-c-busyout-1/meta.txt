@@ -1,0 +1,12 @@
+app-pid=38716 quit-path=c
+probe-status=done
+run-id=quit-c5d45cd7 server-pid=38744
+server-verified=yes
+app-gone=yes
+path-exercised=yes
+server-alive-after-quit=yes
+status-after-quit={"result": "ok", "state": "serving", "leases": 0, "busyRuns": 1}
+busy-after-quit=yes
+gate-exists-before-observe=no
+owner-check-exit=0
+server-stopped=yes

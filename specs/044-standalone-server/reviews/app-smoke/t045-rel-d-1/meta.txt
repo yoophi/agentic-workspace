@@ -1,0 +1,8 @@
+app-pid=60461 quit-path=d
+probe-status=done
+run-id=quit-0ab08ac1 server-pid=60474
+server-verified=yes
+app-gone=yes
+server-alive-after-quit=yes
+owner-check-exit=0
+server-stopped=yes

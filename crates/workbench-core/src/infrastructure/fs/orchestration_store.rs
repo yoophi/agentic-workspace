@@ -245,8 +245,10 @@ mod tests {
                 main_run_id: Some("main-run".into()),
                 status: CoordinatorNotificationStatus::Accepted,
                 attempt_count: 1,
+                delivery_failure_count: 0,
                 failure: None,
                 collected_at: None,
+                attempt_id: None,
                 created_at: "now".into(),
                 updated_at: "now".into(),
             });

@@ -24,7 +24,7 @@ use crate::{
     },
     domain::agent_orchestration::MAIN_AGENT_NODE_ID,
     infrastructure::storage_coordinator::StorageCoordinator,
-    ports::desktop_bridge::LaunchContext,
+    ports::desktop_bridge::{LaunchContext, PendingLaunchRevocation},
 };
 
 /// 모든 `run.start`가 공유하는 aggregate. 예약·spawn까지만 lock 안이라 짧다.
@@ -117,6 +117,7 @@ impl OperationHandler for StartHandler {
                     }
                     _ => None,
                 };
+                let mut launch_revocation = None;
                 if let Some(decorator) = &services.launch_decorator {
                     let context = LaunchContext {
                         bench_id: bench_id.clone(),
@@ -131,6 +132,10 @@ impl OperationHandler for StartHandler {
                             message,
                         )));
                     }
+                    launch_revocation = Some(PendingLaunchRevocation::armed(
+                        Arc::clone(decorator),
+                        run_id.clone(),
+                    ));
                 }
                 let sink = services.run_sink(&bench_id);
                 // 소유 등록(research R17·R18): 발행 전 run을 기다리는 구독도 소유 작업대로 판단한다. 다른 작업대가 이미
@@ -143,7 +148,12 @@ impl OperationHandler for StartHandler {
                     )));
                 }
                 match runtime.block_on(services.engine.start(request, &bench_id, sink)) {
-                    Ok(run) => Ok(Applied::Ok(convert::<_, AgentRunDto>(&run))),
+                    Ok(run) => {
+                        if let Some(revocation) = &mut launch_revocation {
+                            revocation.disarm();
+                        }
+                        Ok(Applied::Ok(convert::<_, AgentRunDto>(&run)))
+                    }
                     Err(error) => {
                         // 묶기 전 claim한 계획 id는 작업 영역이 기록 중이므로 되돌리지 않는다(같은 id로 다시 띄울 수 있게).
                         if !prebound_here {
@@ -208,16 +218,45 @@ pub fn register(
                 services,
                 |input: &RunPromptInput| Scope::Bench(input.bench_id.clone()),
                 move |services, ctx, input: RunPromptInput| async move {
-                    run_service::prompt(
-                        services,
-                        &ctx.request_id,
-                        &ctx.principal,
-                        &input.bench_id,
-                        &input.run_id,
-                        input.prompt,
-                        kind,
-                    )
-                    .await
+                    match (&input.continuation, kind) {
+                        (Some(continuation), PromptKind::Send) => {
+                            run_service::deliver_exchange(
+                                services,
+                                &ctx.request_id,
+                                &ctx.principal,
+                                &input.bench_id,
+                                &input.run_id,
+                                input.prompt,
+                                &continuation.exchange_request_id,
+                                ctx.idempotency_key.as_ref(),
+                            )
+                            .await
+                        }
+                        (Some(_), _) => Err(WorkbenchFault::invalid_argument(
+                            ctx.request_id.clone(),
+                            run_service::MESSAGE_CONTINUATION_SEND_ONLY,
+                            Some("/input/continuation"),
+                        )),
+                        (None, _) => {
+                            // 044 K: continuation 없는 prompt는 새 작업이다. 비우기 중이면 거절한다(T040 입구 판정의
+                            // 이어 가기 분류는 이 handler가 판정한다).
+                            if crate::application::drain::is_draining(services.work_gate()) {
+                                return Err(crate::application::drain::draining_fault(
+                                    &ctx.request_id,
+                                ));
+                            }
+                            run_service::prompt(
+                                services,
+                                &ctx.request_id,
+                                &ctx.principal,
+                                &input.bench_id,
+                                &input.run_id,
+                                input.prompt,
+                                kind,
+                            )
+                            .await
+                        }
+                    }
                     .map(|()| serde_json::Value::Null)
                 },
             ),

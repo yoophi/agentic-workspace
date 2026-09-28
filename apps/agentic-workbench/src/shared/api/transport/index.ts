@@ -23,3 +23,4 @@ export function listen<T>(event: string, callback: EventCallback<T>): Promise<()
 
 export type { EventCallback, InvokeOptions, Transport } from "./transport";
 export { compatTransport } from "./compat-transport";
+export { MESSAGE_NOT_APPLIED, MESSAGE_RESULT_UNKNOWN, unsettledCall } from "./call-outcome";

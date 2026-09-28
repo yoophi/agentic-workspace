@@ -58,6 +58,79 @@
           "readOnly"
         ]
       },
+      "ActiveWorkDto": {
+        "type": "object",
+        "description": "유휴·wait 정지를 막는 활동 작업(research R14). 세션 수가 아니라 바쁜 run을 센다.\n\n`null`인 수는 아직 파생하지 않은 값이다(0 = 없음이 아니다). 어떤 필드가 그런지는 [`ServerStatusOutput::not_yet_derived`]에\n싣는다. 정지 판정은 모르는 값을 활동 작업으로 본다([`ActiveWorkDto::blocks_stop`]).",
+        "required": [
+          "busyRuns",
+          "acceptedCalls",
+          "reservations"
+        ],
+        "properties": {
+          "busyRuns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "진행 중 turn·엔진 대기열 prompt·권한 대기가 있는 run.",
+            "minimum": 0
+          },
+          "orchestrationTasks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "queuedTasks": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "비우기 시작 전에 만든 대기 task(K로 배정 가능).",
+            "minimum": 0
+          },
+          "pendingExchanges": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "전달 prompt가 소비되지 않은 교환(데스크톱 임대가 있을 때만 셈).",
+            "minimum": 0
+          },
+          "pendingNotifications": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "저장된 미전달 coordinator 알림(대상 coordinator run이 살아 있음).",
+            "minimum": 0
+          },
+          "pendingOperations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "이 프로세스가 적용 중인 ledger `pending`.",
+            "minimum": 0
+          },
+          "acceptedCalls": {
+            "type": "integer",
+            "format": "int64",
+            "description": "받아들인 분리 호출(HTTP·MCP).",
+            "minimum": 0
+          },
+          "reservations": {
+            "type": "integer",
+            "format": "int64",
+            "description": "작업 관문의 활동 예약 수(A-turn·X-deliver·T-start·N-notify).",
+            "minimum": 0
+          }
+        }
+      },
       "AgentCommandOverridesDto": {
         "type": "object",
         "properties": {
@@ -1093,6 +1166,11 @@
           }
         }
       },
+      "BenchListInput": {
+        "type": "object",
+        "description": "`bench.list`(044): 소유자는 모든 작업대, 그 밖의 주체는 자기가 연 작업대만 본다.",
+        "additionalProperties": false
+      },
       "BenchOpenInput": {
         "type": "object",
         "required": [
@@ -1138,6 +1216,49 @@
           }
         },
         "additionalProperties": false
+      },
+      "BenchRunDto": {
+        "type": "object",
+        "required": [
+          "runId",
+          "state"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "description": "`busy`(진행 중 turn·대기열·권한 대기) 또는 `idle`."
+          }
+        }
+      },
+      "BenchSummaryDto": {
+        "type": "object",
+        "required": [
+          "benchId",
+          "workingDirectory",
+          "owner",
+          "runs"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "workingDirectory": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string",
+            "description": "작업대를 연 주체."
+          },
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BenchRunDto"
+            }
+          }
+        }
       },
       "BindMainRunRequestDto": {
         "type": "object",
@@ -1185,6 +1306,9 @@
                 ],
                 "format": "int64",
                 "minimum": 0
+              },
+              "replayed": {
+                "type": "boolean"
               },
               "kind": {
                 "type": "string",
@@ -2618,6 +2742,36 @@
           },
           {
             "type": "object",
+            "title": "CallReply_exchange_discardDelivery",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "exchange.discardDelivery"
+                ]
+              },
+              "output": {
+                "type": "null"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallReply_exchange_list",
             "required": [
               "kind",
@@ -3828,6 +3982,249 @@
               },
               "output": {
                 "$ref": "#/components/schemas/DescribeOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_server_status",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "server.status"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/ServerStatusOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_server_stop",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "server.stop"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/ServerStopOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_lease_acquire",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.acquire"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/LeaseAcquireOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_lease_renew",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.renew"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/LeaseRenewOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_lease_release",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.release"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/LeaseReleaseOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_desktop_issueWindowToken",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "desktop.issueWindowToken"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/DesktopIssueWindowTokenOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_desktop_retireWindow",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "desktop.retireWindow"
+                ]
+              },
+              "output": {
+                "$ref": "#/components/schemas/DesktopRetireWindowOutput"
+              },
+              "revision": {
+                "type": "integer",
+                "description": "command 성공 시 새 aggregate revision. query는 없다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallReply_bench_list",
+            "required": [
+              "kind",
+              "operation",
+              "output"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "complete"
+                ]
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.list"
+                ]
+              },
+              "output": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BenchSummaryDto"
+                }
               },
               "revision": {
                 "type": "integer",
@@ -5622,6 +6019,46 @@
           },
           {
             "type": "object",
+            "title": "CallRequest_exchange_discardDelivery",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "exchange.discardDelivery"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ExchangeDiscardDeliveryInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
             "title": "CallRequest_exchange_list",
             "required": [
               "protocolVersion",
@@ -7206,6 +7643,324 @@
                 "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
               }
             }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_server_status",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "server.status"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ServerStatusInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_server_stop",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "server.stop"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/ServerStopInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_lease_acquire",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.acquire"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/LeaseAcquireInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_lease_renew",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.renew"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/LeaseRenewInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_lease_release",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "lease.release"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/LeaseReleaseInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_desktop_issueWindowToken",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "desktop.issueWindowToken"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/DesktopIssueWindowTokenInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_desktop_retireWindow",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input",
+              "idempotencyKey"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "desktop.retireWindow"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/DesktopRetireWindowInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
+          },
+          {
+            "type": "object",
+            "title": "CallRequest_bench_list",
+            "required": [
+              "protocolVersion",
+              "operation",
+              "requestId",
+              "input"
+            ],
+            "properties": {
+              "protocolVersion": {
+                "type": "integer",
+                "description": "generic call/event wire 호환성 축. 037은 1만 지원한다."
+              },
+              "operation": {
+                "type": "string",
+                "enum": [
+                  "bench.list"
+                ]
+              },
+              "requestId": {
+                "$ref": "#/components/schemas/RequestId"
+              },
+              "input": {
+                "$ref": "#/components/schemas/BenchListInput"
+              },
+              "idempotencyKey": {
+                "$ref": "#/components/schemas/IdempotencyKey"
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "description": "command에서만 의미. aggregate revision과 다르면 preconditionFailed."
+              },
+              "timeoutMs": {
+                "type": "integer",
+                "description": "서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다."
+              }
+            }
           }
         ]
       },
@@ -7374,6 +8129,12 @@
             "format": "int32",
             "minimum": 0
           },
+          "deliveryFailureCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "실제 전달 실패 수(전달 오류·중단된 시도). coordinator가 바빠 거절한 시도는 세지 않는다.",
+            "minimum": 0
+          },
           "failure": {
             "oneOf": [
               {
@@ -7389,6 +8150,13 @@
               "string",
               "null"
             ]
+          },
+          "attemptId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다."
           },
           "createdAt": {
             "type": "string"
@@ -7646,6 +8414,83 @@
               "$ref": "#/components/schemas/EventSchemaDescriptor"
             },
             "description": "principal에게 허용되고 구독 가능한 이벤트 스키마(039)."
+          }
+        }
+      },
+      "DesktopIssueWindowTokenInput": {
+        "type": "object",
+        "required": [
+          "label",
+          "incarnation",
+          "origin"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "incarnation": {
+            "type": "string"
+          },
+          "origin": {
+            "type": "string",
+            "description": "창 WebView 출처. 허용 목록만."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesktopIssueWindowTokenOutput": {
+        "type": "object",
+        "required": [
+          "token",
+          "expiresAt"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        }
+      },
+      "DesktopRetireWindowInput": {
+        "type": "object",
+        "required": [
+          "label",
+          "incarnation",
+          "closeBench"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "incarnation": {
+            "type": "string"
+          },
+          "closeBench": {
+            "type": "boolean",
+            "description": "사용자가 창을 닫았으면 true(그 창 주체가 연 작업대를 모두 닫는다). 앱 종료가 창을 걷어 내면 false."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DesktopRetireWindowOutput": {
+        "type": "object",
+        "required": [
+          "revokedTokens",
+          "closedBenches"
+        ],
+        "properties": {
+          "revokedTokens": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "closedBenches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         }
       },
@@ -8202,6 +9047,23 @@
           },
           "request": {
             "$ref": "#/components/schemas/AgentExchangeAckRequestDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ExchangeDiscardDeliveryInput": {
+        "type": "object",
+        "description": "화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7). 이미 확인(`delivered`)했지만 run에 보내지 않은 교환을 소비된\n것으로 표시해 활동 작업에서 빼고, 이후 같은 교환의 전달은 거절된다. 이미 전달·포기된 교환이면 효과 없이 성공한다.",
+        "required": [
+          "benchId",
+          "requestId"
+        ],
+        "properties": {
+          "benchId": {
+            "type": "string"
+          },
+          "requestId": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -9177,6 +10039,97 @@
           "epoch"
         ]
       },
+      "LeaseAcquireInput": {
+        "type": "object",
+        "required": [
+          "clientKind",
+          "clientId"
+        ],
+        "properties": {
+          "clientKind": {
+            "$ref": "#/components/schemas/LeaseClientKindDto"
+          },
+          "clientId": {
+            "type": "string",
+            "description": "클라이언트가 정한 식별자(데스크톱: 앱 인스턴스 uuid)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaseAcquireOutput": {
+        "type": "object",
+        "required": [
+          "leaseId",
+          "ttlSeconds"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string"
+          },
+          "ttlSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "LeaseClientKindDto": {
+        "type": "string",
+        "enum": [
+          "desktop",
+          "cli",
+          "test"
+        ]
+      },
+      "LeaseReleaseInput": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaseReleaseOutput": {
+        "type": "object",
+        "required": [
+          "released"
+        ],
+        "properties": {
+          "released": {
+            "type": "boolean",
+            "description": "이 호출이 임대를 풀었으면 true(없던 임대도 성공, false)."
+          }
+        }
+      },
+      "LeaseRenewInput": {
+        "type": "object",
+        "required": [
+          "leaseId"
+        ],
+        "properties": {
+          "leaseId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "LeaseRenewOutput": {
+        "type": "object",
+        "required": [
+          "ttlSeconds"
+        ],
+        "properties": {
+          "ttlSeconds": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
       "LifecycleStatusDto": {
         "type": "string",
         "enum": [
@@ -9909,6 +10862,19 @@
           "onCompletion"
         ]
       },
+      "PromptContinuationDto": {
+        "type": "object",
+        "description": "044 이어 가기(`contracts/drain-classification.md` K).",
+        "required": [
+          "exchangeRequestId"
+        ],
+        "properties": {
+          "exchangeRequestId": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "PromptDeliveryDto": {
         "type": "string",
         "enum": [
@@ -10632,6 +11598,17 @@
           },
           "prompt": {
             "type": "string"
+          },
+          "continuation": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PromptContinuationDto",
+                "description": "044: `run.sendPrompt`에서만. 이미 요청된 교환의 전달 prompt임을 밝힌다(비우기 중 K, 교환마다 1회 소비).\n`run.steer`·`run.cancelAndSend`에 싣으면 `invalidArgument`."
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -10881,7 +11858,9 @@
           "presentation:write",
           "orchestration:read",
           "orchestration:write",
-          "system:describe"
+          "system:describe",
+          "server:read",
+          "server:admin"
         ]
       },
       "SendAgentExchangeRequestDto": {
@@ -10923,6 +11902,143 @@
           }
         }
       },
+      "ServerStateDto": {
+        "type": "string",
+        "description": "서버 상태(research R7·R14). 준비 상태 = `serving`.",
+        "enum": [
+          "starting",
+          "serving",
+          "drainingIdle",
+          "drainingWait",
+          "stopping"
+        ]
+      },
+      "ServerStatusInput": {
+        "type": "object",
+        "additionalProperties": false
+      },
+      "ServerStatusOutput": {
+        "type": "object",
+        "required": [
+          "state",
+          "instanceId",
+          "serverEpoch",
+          "activeWork",
+          "idleRuns",
+          "leases",
+          "notYetDerived"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ServerStateDto"
+          },
+          "instanceId": {
+            "type": "string"
+          },
+          "serverEpoch": {
+            "type": "string"
+          },
+          "activeWork": {
+            "$ref": "#/components/schemas/ActiveWorkDto"
+          },
+          "idleRuns": {
+            "type": "integer",
+            "format": "int64",
+            "description": "쉬는 세션(바쁘지 않은 run). 활동 작업이 아니다.",
+            "minimum": 0
+          },
+          "leases": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "unresolvedOperations": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "이전 세대에서 판정하지 못한 ledger `unknown`(활동 작업이 아님). `null` = 아직 파생하지 않음.",
+            "minimum": 0
+          },
+          "undeliverableExchanges": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "임대가 없어 전달할 클라이언트가 없는 미소비 교환. `null` = 아직 파생하지 않음."
+          },
+          "failedExchangeDeliveries": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "엔진 대기열 전달이 run 종료로 실패한 교환. `null` = 아직 파생하지 않음."
+          },
+          "deferredTasks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "비우기 전 준비 task 중 배정할 쪽(바쁜 coordinator·미전달 알림)이 없어 활동으로 세지 않은 것(task id). 저장돼 있어\n복구할 수 있다(044 메인 세션 검토). `null` = 아직 파생하지 않음."
+          },
+          "stalledNotifications": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "전달 시도 상한을 넘어 재시도를 기다리는 실패 coordinator 알림 id(활동 작업 아님, 저장된 채 재시도 가능한 실패로\n남음). `None`은 아직 파생하지 않음."
+          },
+          "idleSince": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "notYetDerived": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "이 서버가 아직 파생하지 않는 필드의 JSON 경로(예: `activeWork.pendingExchanges`, `idleSince`). 목록에 있는 필드의\n`null`·부재는 \"없음\"이 아니라 \"모름\"이다. 모두 파생하면 빈 배열."
+          }
+        }
+      },
+      "ServerStopInput": {
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/StopModeDto"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ServerStopOutput": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/ServerStateDto"
+          }
+        }
+      },
       "SetPresentationRequestDto": {
         "type": "object",
         "required": [
@@ -10947,6 +12063,14 @@
             "minimum": 0
           }
         }
+      },
+      "StopModeDto": {
+        "type": "string",
+        "enum": [
+          "default",
+          "wait",
+          "force"
+        ]
       },
       "StreamCursor": {
         "type": "object",

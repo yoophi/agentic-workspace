@@ -1,0 +1,6 @@
+data=~/Library/Application Support/com.yoophi.agentic-workbench.smoke044x
+launch=49441
+probe-status=done
+app-pids=49441 49468 49688 49757 49763 49798 50476 51146 
+server-pid=50476
+server-verified=yes

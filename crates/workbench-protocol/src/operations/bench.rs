@@ -54,3 +54,30 @@ pub struct TitleChangeResultDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
 }
+
+/// `bench.list`(044): 소유자는 모든 작업대, 그 밖의 주체는 자기가 연 작업대만 본다.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BenchListInput {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BenchRunDto {
+    pub run_id: String,
+    /// `busy`(진행 중 turn·대기열·권한 대기) 또는 `idle`.
+    pub state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BenchSummaryDto {
+    pub bench_id: String,
+    pub working_directory: String,
+    /// 작업대를 연 주체.
+    pub owner: String,
+    pub runs: Vec<BenchRunDto>,
+}
+
+pub fn bench_list_output_schema() -> utoipa::openapi::RefOr<utoipa::openapi::Schema> {
+    super::common::array_schema(<BenchSummaryDto as utoipa::PartialSchema>::schema())
+}
