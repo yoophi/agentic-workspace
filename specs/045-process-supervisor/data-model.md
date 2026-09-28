@@ -69,7 +69,20 @@ stateDiagram-v2
 - Reaped 전 registry entry를 제거하지 않는다.
 - Unix cleanup은 process group과 descendant identity 집합이 모두 0으로 수렴하기 전 Reaped가 아니다.
 
-## ProcessAttemptRecord (SQLite schema v3 containment anchor)
+## ProcessPublicationRecord (SQLite schema v3)
+
+- `attempt_id` primary key
+- `state`: `pending | published | withdrawn`
+- optional `result_json`
+- `created_at`, `updated_at`
+
+규칙:
+- 이 행은 platform-neutral publication 예약과 winner/result만 나타내며 child spawn, adopt, containment identity를 뜻하지 않는다.
+- `Pending → Published|Withdrawn`은 조건부 갱신이며 최초 성공 전이만 승자다.
+- `Published` 전이는 result와 outbox를 같은 transaction에 기록한다. 동일 result/event/payload 재시도는 replay하고 다른 payload는 거절한다.
+- v2 ledger 파일을 v3로 올릴 때 기존 operation row와 contract/schema handshake를 보존한다.
+
+## ProcessAttemptRecord (T016 이후 additive containment anchor schema)
 
 - `attempt_id` primary key
 - `owner_kind`, `owner_id`, optional `parent_owner_id`
@@ -85,7 +98,7 @@ stateDiagram-v2
 - 모든 ServerOwned child가 spawn 전에 durable row를 만든다. 이 row는 crash containment용이며 transient helper를 durable business command로 바꾸지 않는다.
 - env/argv payload, credential, protocol content는 저장하지 않는다.
 - `Adopted → Published|Active|Aborting`은 동일 행을 조건부 갱신하는 단일 CAS다. 최초 성공 전이만 승자다.
-- Published commit이 caller ack보다 정본이다. ack 유실 시 resolver가 이 값과 outbox를 읽는다.
+- Published commit이 caller ack보다 정본이다. ack 유실 시 resolver가 v3 publication winner와 outbox를 읽는다.
 - startup recovery는 unfinished row를 읽고 platform identity를 재검증한다.
 - Reaped 뒤 anchor는 terminal tombstone/진단 보존 기간 후 GC한다.
 
@@ -98,9 +111,10 @@ stateDiagram-v2
 - `stream_sequence`, `created_at`, optional `delivered_at`
 
 규칙:
-- durable domain result, `ProcessAttemptRecord=Published`, outbox insert는 하나의 transaction이다.
+- durable domain result, `ProcessPublicationRecord=Published`, outbox insert는 하나의 transaction이다. T016에서 containment anchor를 추가한 뒤에는 publication winner와 anchor lifecycle의 원자적 연결을 별도 migration/transaction 계약으로 확장한다.
 - unique event id로 logical publication을 한 번만 만든다. dispatcher 재전송과 reconnect replay는 허용하지만 projection은 중복 적용하지 않는다.
 - `Aborting` winner에는 outbox가 없고, 이미 Published인 행에 cleanup CAS를 적용할 수 없다.
+- 현재 foundation 시험의 메모리 projection은 한 live instance의 중복 억제만 증명한다. 실제 WS reconnect와 client process restart 뒤 중복 억제는 T020에서 durable cursor/projection 경계에 연결해 검증한다.
 
 ## TransientAttempt
 

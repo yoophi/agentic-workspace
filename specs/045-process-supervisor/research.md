@@ -134,18 +134,18 @@
 
 ## R11. durable owner와 attempt 저장소 매핑
 
-**Decision**: 기존 SQLite operation ledger schema v2에는 process attempt/outbox table이 없고 `SessionRegistry::reserve_run`, terminal map, watcher/catalog/PATH owner는 memory-only다. 따라서 additive schema v3 `process_attempt`과 `process_publication_outbox`를 만든다. business durability와 containment durability를 구분한다. read-only helper operation/result는 transient지만 모든 ServerOwned child의 recovery anchor는 Reaped까지 durable하다.
+**Decision**: 기존 SQLite operation ledger schema v2에는 process publication/attempt/outbox table이 없고 `SessionRegistry::reserve_run`, terminal map, watcher/catalog/PATH owner는 memory-only다. platform-neutral foundation은 additive schema v3 `process_publication`과 `process_publication_outbox`만 만든다. T010 뒤 T016의 별도 additive migration이 `process_attempt` containment anchor와 retention을 추가한다. business durability와 containment durability를 구분한다. read-only helper operation/result는 transient지만 production migration 뒤 모든 ServerOwned child의 recovery anchor는 Reaped까지 durable하다.
 
 | Process family | Existing owner boundary | Domain durability | Containment recovery anchor |
 |---|---|---|---|
-| ACP run | `operation_ledger`의 run start intent + memory `SessionRegistry` | execution/run result + Published/outbox | v3 row를 execution/run id에 연결 |
-| ACP terminal | run/session 아래 memory terminal map만 존재 | terminal owner + Published/outbox를 v3 transaction에 기록 | v3 row를 run id + terminal id에 연결 |
-| Git/worktree mutation | existing `operation_ledger.execution_id` | 같은 operation retry는 같은 result | v3 row를 execution id에 연결 |
-| Git read/history/diff/status | authenticated call, durable mutation intent 없음 | transient; crash 뒤 result 재개 없음 | v3 recovery anchor, terminal 뒤 GC |
-| worktree watcher Git probe | live watcher subscription/refcount | transient; restart에서 watcher 재구성 | v3 recovery anchor, terminal 뒤 GC |
-| orchestration worktree guard | durable orchestration task, 실행은 read-only diff | task id는 durable, helper result는 transient | v3 recovery anchor; task store에 PID를 쓰지 않음 |
-| catalog `curl` | cache file은 결과 cache일 뿐 owner가 아님 | server-scoped transient; timeout/failure 시 cache fallback | v3 recovery anchor, terminal 뒤 GC |
-| login-shell PATH probe | 기존 durable store 없음 | server-scoped transient; timeout/failure 시 fallback PATH | v3 recovery anchor, terminal 뒤 GC |
+| ACP run | `operation_ledger`의 run start intent + memory `SessionRegistry` | execution/run result + v3 Published/outbox | T016 anchor를 execution/run id에 연결 |
+| ACP terminal | run/session 아래 memory terminal map만 존재 | terminal owner + v3 Published/outbox | T016 anchor를 run id + terminal id에 연결 |
+| Git/worktree mutation | existing `operation_ledger.execution_id` | 같은 operation retry는 같은 result | T016 anchor를 execution id에 연결 |
+| Git read/history/diff/status | authenticated call, durable mutation intent 없음 | transient; crash 뒤 result 재개 없음 | T016 recovery anchor, terminal 뒤 GC |
+| worktree watcher Git probe | live watcher subscription/refcount | transient; restart에서 watcher 재구성 | T016 recovery anchor, terminal 뒤 GC |
+| orchestration worktree guard | durable orchestration task, 실행은 read-only diff | task id는 durable, helper result는 transient | T016 recovery anchor; task store에 PID를 쓰지 않음 |
+| catalog `curl` | cache file은 결과 cache일 뿐 owner가 아님 | server-scoped transient; timeout/failure 시 cache fallback | T016 recovery anchor, terminal 뒤 GC |
+| login-shell PATH probe | 기존 durable store 없음 | server-scoped transient; timeout/failure 시 fallback PATH | T016 recovery anchor, terminal 뒤 GC |
 
 **Rationale**: 존재하지 않는 durable terminal/helper business store를 기존 저장소라고 가정할 수 없다. long-lived 또는 side-effecting process만 crash/retry 가능한 domain intent가 필요하다. 그러나 keeper까지 죽는 crash에서 escaped descendant를 식별하려면 read-only helper도 비밀값 없는 recovery anchor가 필요하다. anchor는 result 재생이나 operation retry를 뜻하지 않는다.
 
@@ -172,7 +172,7 @@
 1. descendant가 `env_clear` 또는 새로운 `execve` environment로 attempt nonce를 제거한 뒤 session/group을 이탈할 수 있다.
 2. 같은 uid process environment를 읽는 기능이 macOS/Linux의 실제 배포 권한·sandbox·hardened runtime에서 허용되는지 확인되지 않았다.
 3. PID/start identity를 확인한 직후 signal하기 전 PID가 재사용되는 TOCTOU를 target handle/pidfd/audit token 없이 막을 수 있는지 확인되지 않았다.
-4. live server takeover와 다음 startup을 recovery owner로 설계했지만, keeper hard kill 뒤 durable v3 anchor로 escaped descendant를 실제 안전하게 재획득·정리할 수 있는지 입증되지 않았다.
+4. live server takeover와 다음 startup을 recovery owner로 설계했지만, keeper hard kill 뒤 T016에서 추가할 durable containment anchor로 escaped descendant를 실제 안전하게 재획득·정리할 수 있는지 입증되지 않았다.
 
 OCR/Codex 설계 리뷰는 nonce 상속 fixture만으로 전체 containment를 주장하지 않는지 검토해야 한다. 구현 task로 넘어가기 전 platform spike는 env 제거+exec, leader 조기 종료, new session/group, double-fork+reparent, control FD close, server hard kill, keeper hard kill, identity-check/signal 사이 PID-reuse 대조를 실제 macOS/Linux에서 실행해야 한다. public API와 권한 안에서 안전한 identity handle을 확보하지 못하면 해당 target은 fail-closed blocker이며 group kill 성공으로 대체하지 않는다.
 

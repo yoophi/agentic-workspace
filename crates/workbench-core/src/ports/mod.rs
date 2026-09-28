@@ -11,6 +11,7 @@ pub mod goal_repository;
 pub mod operation_ledger;
 pub mod orchestration_event_sink;
 pub mod orchestration_repository;
+pub mod process_publication_store;
 pub mod project_repository;
 pub mod provider_session_repository;
 pub mod run_engine;

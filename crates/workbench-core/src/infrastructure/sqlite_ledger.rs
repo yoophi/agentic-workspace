@@ -6,7 +6,9 @@
 use std::{path::PathBuf, sync::Mutex, time::Duration};
 
 use chrono::{DateTime, SecondsFormat, Utc};
-use rusqlite::{params, Connection, ErrorCode, OptionalExtension, Transaction};
+use rusqlite::{
+    params, Connection, ErrorCode, OptionalExtension, Transaction, TransactionBehavior,
+};
 use workbench_protocol::{IdempotencyKey, OperationId, PrincipalKind, RequestId};
 
 use crate::{
@@ -15,11 +17,16 @@ use crate::{
         LedgerError, LedgerKey, LedgerRecord, LedgerResult, LedgerState, NewLedgerEntry,
         OperationLedger, ReconcileSummary,
     },
+    ports::process_publication_store::{
+        ProcessPublicationStore, PublicationEvent, PublicationRecord, PublicationState,
+        PublicationStoreError, PublicationStoreResult, PublishOutcome, PublishRequest,
+        WithdrawOutcome,
+    },
 };
 
-/// v2(038, research R16): 자원 예약 unique index를 `pending` 행에만 적용한다. 종료 상태(applied/failed/unknown)는
-/// 예약을 해제하되 `reserved_resource_id` 값은 재시작 판정 증거로 남긴다.
-pub const SCHEMA_VERSION: i64 = 2;
+/// v2(038, research R16)는 자원 예약 unique index를 `pending` 행에만 적용한다.
+/// v3(045)는 containment와 독립적인 process publication/result/outbox를 추가한다.
+pub const SCHEMA_VERSION: i64 = 3;
 /// 멱등성 결과 보존 기간. `pending`/`unknown`에는 적용하지 않는다.
 pub const RESULT_TTL: chrono::Duration = chrono::Duration::hours(24);
 
@@ -110,11 +117,32 @@ CREATE UNIQUE INDEX IF NOT EXISTS operation_ledger_reserved_pending
   WHERE reserved_resource_id IS NOT NULL AND state = 'pending';
 "#;
 
+const MIGRATION_V3: &str = r#"
+CREATE TABLE IF NOT EXISTS process_publication (
+  attempt_id  TEXT PRIMARY KEY,
+  state       TEXT NOT NULL CHECK (state IN ('pending','published','withdrawn')),
+  result_json TEXT,
+  created_at  TEXT NOT NULL,
+  updated_at  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS process_publication_outbox (
+  event_id      TEXT PRIMARY KEY,
+  attempt_id    TEXT NOT NULL UNIQUE REFERENCES process_publication(attempt_id) ON DELETE CASCADE,
+  event_kind    TEXT NOT NULL,
+  payload_json  TEXT NOT NULL,
+  created_at    TEXT NOT NULL,
+  delivered_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS process_publication_outbox_pending
+  ON process_publication_outbox (created_at) WHERE delivered_at IS NULL;
+"#;
+
 pub struct SqliteOperationLedger {
     path: PathBuf,
     connection: Mutex<Connection>,
     /// 시험: 켜져 있으면 상태별 수 읽기(`count_by_state`)가 저장소 오류로 끝난다(Codex r8).
     count_fault: std::sync::atomic::AtomicBool,
+    publication_fault: std::sync::atomic::AtomicU8,
 }
 
 pub fn now_rfc3339() -> String {
@@ -176,6 +204,7 @@ impl SqliteOperationLedger {
             path,
             connection: Mutex::new(connection),
             count_fault: std::sync::atomic::AtomicBool::new(false),
+            publication_fault: std::sync::atomic::AtomicU8::new(0),
         })
     }
 
@@ -229,6 +258,12 @@ impl SqliteOperationLedger {
         })
     }
 
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn set_publication_fault(&self, fault: PublicationCommitFault) {
+        self.publication_fault
+            .store(fault as u8, std::sync::atomic::Ordering::SeqCst);
+    }
+
     /// 테스트·진단용: `applied` 항목이 예약한 resource id 목록.
     #[cfg(any(test, feature = "test-hooks"))]
     pub fn applied_resource_ids(&self, aggregate: &str) -> LedgerResult<Vec<String>> {
@@ -246,6 +281,19 @@ impl SqliteOperationLedger {
             rows.collect::<Result<Vec<_>, _>>().map_err(storage)
         })
     }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum PublicationCommitFault {
+    None = 0,
+    BeforeCommit = 1,
+    AfterCommit = 2,
+}
+
+fn publication_storage(error: rusqlite::Error) -> PublicationStoreError {
+    PublicationStoreError::Storage(error.to_string())
 }
 
 fn bump_revision(tx: &Transaction<'_>, aggregate: &str, now: &str) -> LedgerResult<u64> {
@@ -353,10 +401,13 @@ impl OperationLedger for SqliteOperationLedger {
                 })
                 .map_err(storage)?;
             match current {
-                // 새 파일(None) 또는 037의 v1 파일: v2 index로 교체하고 버전을 기록한다.
-                None | Some(1) => {
+                // 새 파일(None) 또는 legacy 파일은 빠진 migration을 한 transaction에서 적용한다.
+                None | Some(1) | Some(2) => {
                     let tx = conn.transaction().map_err(storage)?;
-                    tx.execute_batch(MIGRATION_V2).map_err(storage)?;
+                    if current != Some(2) {
+                        tx.execute_batch(MIGRATION_V2).map_err(storage)?;
+                    }
+                    tx.execute_batch(MIGRATION_V3).map_err(storage)?;
                     tx.execute(
                         "INSERT INTO schema_version (version, applied_at) VALUES (?1, ?2)",
                         params![SCHEMA_VERSION, now_rfc3339()],
@@ -554,6 +605,254 @@ impl OperationLedger for SqliteOperationLedger {
     }
 }
 
+fn read_publication_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<PublicationRecord> {
+    let state: String = row.get("state")?;
+    let result: Option<String> = row.get("result_json")?;
+    Ok(PublicationRecord {
+        attempt_id: row.get("attempt_id")?,
+        state: PublicationState::parse(&state).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(1, "state".into(), rusqlite::types::Type::Text)
+        })?,
+        result: result
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    2,
+                    rusqlite::types::Type::Text,
+                    Box::new(error),
+                )
+            })?,
+        created_at: row.get("created_at")?,
+        updated_at: row.get("updated_at")?,
+    })
+}
+
+const SELECT_PUBLICATION: &str =
+    "SELECT attempt_id, state, result_json, created_at, updated_at FROM process_publication";
+
+impl ProcessPublicationStore for SqliteOperationLedger {
+    fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<()> {
+        let now = now_rfc3339();
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        match conn.execute(
+            "INSERT INTO process_publication (attempt_id, state, created_at, updated_at)
+             VALUES (?1, 'pending', ?2, ?2)",
+            params![attempt_id, now],
+        ) {
+            Ok(_) => Ok(()),
+            Err(rusqlite::Error::SqliteFailure(error, _))
+                if error.code == ErrorCode::ConstraintViolation =>
+            {
+                Err(PublicationStoreError::DuplicateAttempt(attempt_id.into()))
+            }
+            Err(error) => Err(publication_storage(error)),
+        }
+    }
+
+    fn find_publication(
+        &self,
+        attempt_id: &str,
+    ) -> PublicationStoreResult<Option<PublicationRecord>> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        conn.query_row(
+            &format!("{SELECT_PUBLICATION} WHERE attempt_id = ?1"),
+            params![attempt_id],
+            read_publication_record,
+        )
+        .optional()
+        .map_err(publication_storage)
+    }
+
+    fn publish(&self, request: &PublishRequest) -> PublicationStoreResult<PublishOutcome> {
+        let now = now_rfc3339();
+        let mut conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(publication_storage)?;
+        let record = tx
+            .query_row(
+                &format!("{SELECT_PUBLICATION} WHERE attempt_id = ?1"),
+                params![request.attempt_id],
+                read_publication_record,
+            )
+            .optional()
+            .map_err(publication_storage)?
+            .ok_or_else(|| PublicationStoreError::NotFound(request.attempt_id.clone()))?;
+
+        if record.state == PublicationState::Published {
+            let stored: (String, String, String) = tx
+                .query_row(
+                    "SELECT event_id, event_kind, payload_json FROM process_publication_outbox
+                     WHERE attempt_id = ?1",
+                    params![request.attempt_id],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .map_err(publication_storage)?;
+            let payload: serde_json::Value = serde_json::from_str(&stored.2)
+                .map_err(|error| PublicationStoreError::Storage(error.to_string()))?;
+            if record.result.as_ref() != Some(&request.result)
+                || stored.0 != request.event_id
+                || stored.1 != request.event_kind
+                || payload != request.payload
+            {
+                return Err(PublicationStoreError::ReplayMismatch(
+                    request.attempt_id.clone(),
+                ));
+            }
+            return Ok(PublishOutcome::Replayed(record));
+        }
+        if record.state != PublicationState::Pending {
+            return Ok(PublishOutcome::Lost(record.state));
+        }
+
+        tx.execute(
+            "UPDATE process_publication SET state = 'published', result_json = ?2, updated_at = ?3
+             WHERE attempt_id = ?1 AND state = 'pending'",
+            params![request.attempt_id, request.result.to_string(), now],
+        )
+        .map_err(publication_storage)?;
+        tx.execute(
+            "INSERT INTO process_publication_outbox
+             (event_id, attempt_id, event_kind, payload_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                request.event_id,
+                request.attempt_id,
+                request.event_kind,
+                request.payload.to_string(),
+                now
+            ],
+        )
+        .map_err(publication_storage)?;
+
+        if self
+            .publication_fault
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == 1
+        {
+            return Err(PublicationStoreError::Storage(
+                "injected failure before publication commit".into(),
+            ));
+        }
+        tx.commit().map_err(publication_storage)?;
+        if self
+            .publication_fault
+            .load(std::sync::atomic::Ordering::SeqCst)
+            == 2
+        {
+            return Err(PublicationStoreError::Storage(
+                "injected ambiguous publication commit".into(),
+            ));
+        }
+        drop(conn);
+        Ok(PublishOutcome::Published(
+            ProcessPublicationStore::find_publication(self, &request.attempt_id)?
+                .expect("committed publication exists"),
+        ))
+    }
+
+    fn withdraw(&self, attempt_id: &str) -> PublicationStoreResult<WithdrawOutcome> {
+        let now = now_rfc3339();
+        let mut conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        let tx = conn
+            .transaction_with_behavior(TransactionBehavior::Immediate)
+            .map_err(publication_storage)?;
+        let state: String = tx
+            .query_row(
+                "SELECT state FROM process_publication WHERE attempt_id = ?1",
+                params![attempt_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(publication_storage)?
+            .ok_or_else(|| PublicationStoreError::NotFound(attempt_id.into()))?;
+        let state = PublicationState::parse(&state)
+            .ok_or_else(|| PublicationStoreError::Storage("invalid publication state".into()))?;
+        let outcome = match state {
+            PublicationState::Pending => {
+                tx.execute(
+                    "UPDATE process_publication SET state = 'withdrawn', updated_at = ?2
+                     WHERE attempt_id = ?1 AND state = 'pending'",
+                    params![attempt_id, now],
+                )
+                .map_err(publication_storage)?;
+                WithdrawOutcome::Withdrawn
+            }
+            PublicationState::Withdrawn => WithdrawOutcome::AlreadyWithdrawn,
+            PublicationState::Published => WithdrawOutcome::Lost(PublicationState::Published),
+        };
+        tx.commit().map_err(publication_storage)?;
+        Ok(outcome)
+    }
+
+    fn pending_events(&self, limit: usize) -> PublicationStoreResult<Vec<PublicationEvent>> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        let mut statement = conn
+            .prepare(
+                "SELECT event_id, attempt_id, event_kind, payload_json, created_at, delivered_at
+                 FROM process_publication_outbox WHERE delivered_at IS NULL
+                 ORDER BY created_at, event_id LIMIT ?1",
+            )
+            .map_err(publication_storage)?;
+        let rows = statement
+            .query_map(params![limit as i64], |row| {
+                let payload: String = row.get(3)?;
+                Ok(PublicationEvent {
+                    event_id: row.get(0)?,
+                    attempt_id: row.get(1)?,
+                    event_kind: row.get(2)?,
+                    payload: serde_json::from_str(&payload).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?,
+                    created_at: row.get(4)?,
+                    delivered_at: row.get(5)?,
+                })
+            })
+            .map_err(publication_storage)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(publication_storage)
+    }
+
+    fn acknowledge_event(&self, event_id: &str) -> PublicationStoreResult<()> {
+        let conn = self
+            .connection
+            .lock()
+            .map_err(|_| PublicationStoreError::Storage("ledger mutex poisoned".into()))?;
+        let changed = conn
+            .execute(
+                "UPDATE process_publication_outbox SET delivered_at = COALESCE(delivered_at, ?2)
+                 WHERE event_id = ?1",
+                params![event_id, now_rfc3339()],
+            )
+            .map_err(publication_storage)?;
+        if changed == 0 {
+            Err(PublicationStoreError::NotFound(event_id.into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -606,7 +905,7 @@ mod tests {
 
     /// research R16 (a): 037이 만든 v1 파일에 `applied` 예약이 남아 있어도, v2로 승격되면 같은 자원을 다시 예약할 수 있다.
     #[test]
-    fn v1_file_upgrades_to_v2_and_releases_terminal_reservations() {
+    fn v1_file_upgrades_through_v3_and_releases_terminal_reservations() {
         let dir = tempfile::tempdir().unwrap();
         let paths = DataPaths::new(dir.path());
         paths.ensure_dirs().unwrap();
@@ -631,7 +930,7 @@ mod tests {
 
         let ledger = SqliteOperationLedger::open(&paths).unwrap();
         ledger.migrate().unwrap();
-        assert_eq!(schema_version(&ledger), 2);
+        assert_eq!(schema_version(&ledger), 3);
         let indexes: Vec<String> = ledger
             .with_connection(|conn| {
                 let mut statement = conn
@@ -664,7 +963,7 @@ mod tests {
         // 다시 migrate해도 멱등 — v1 예약 index를 다시 만들지 않는다(applied+pending이 같은 자원을 가진 지금
         // 그 index를 다시 만들면 constraint 위반으로 기동이 실패한다).
         ledger.migrate().unwrap();
-        assert_eq!(schema_version(&ledger), 2);
+        assert_eq!(schema_version(&ledger), 3);
         ledger
             .begin(entry_for(
                 "k-after",
@@ -706,7 +1005,7 @@ mod tests {
         ledger
             .with_connection(|conn| {
                 conn.execute(
-                    "INSERT INTO schema_version (version, applied_at) VALUES (3, ?1)",
+                    "INSERT INTO schema_version (version, applied_at) VALUES (4, ?1)",
                     params![now_rfc3339()],
                 )
                 .map_err(storage)
@@ -715,7 +1014,7 @@ mod tests {
         assert_eq!(
             ledger.migrate().unwrap_err(),
             LedgerError::UnsupportedSchema {
-                found: 3,
+                found: 4,
                 supported: SCHEMA_VERSION
             }
         );
@@ -817,5 +1116,115 @@ mod tests {
         assert_eq!(ledger.count_by_state(LedgerState::Applied).unwrap(), 0);
         assert_eq!(ledger.count_by_state(LedgerState::Pending).unwrap(), 1);
         assert_eq!(ledger.current_revision("projects").unwrap(), 1);
+    }
+
+    #[test]
+    fn v2_file_upgrades_to_v3_without_changing_existing_ledger_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        {
+            let conn = Connection::open(paths.ledger_file()).unwrap();
+            conn.execute_batch(DDL_BASE).unwrap();
+            conn.execute_batch(MIGRATION_V2).unwrap();
+            conn.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (2, ?1)",
+                params![now_rfc3339()],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO operation_ledger (execution_id, principal_kind, operation,
+                 contract_revision, idempotency_key, input_fingerprint, aggregate,
+                 reserved_resource_id, state, result_json, revision, request_id,
+                 created_at, updated_at, expires_at)
+                 VALUES ('exec-v2', 'desktop', 'project.create', ?1, 'v2-key', 'fp',
+                 'projects', 'project-v2', 'applied', '{\"id\":\"project-v2\"}', 7,
+                 'request-v2', ?2, ?2, ?2)",
+                params![CONTRACT_REVISION as i64, now_rfc3339()],
+            )
+            .unwrap();
+        }
+
+        let ledger = SqliteOperationLedger::open(&paths).unwrap();
+        ledger.migrate().unwrap();
+        assert_eq!(schema_version(&ledger), 3);
+        let record = OperationLedger::find(&ledger, &entry("v2-key", "ignored").key)
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.execution_id, "exec-v2");
+        assert_eq!(record.result_json, Some(json!({"id": "project-v2"})));
+        assert!(ProcessPublicationStore::pending_events(&ledger, 10)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ambiguous_after_commit_is_recovered_as_replay_after_file_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        let request = PublishRequest {
+            attempt_id: "ambiguous-attempt".into(),
+            event_id: "ambiguous-attempt:started".into(),
+            event_kind: "started".into(),
+            result: json!({"runId": "run-ambiguous"}),
+            payload: json!({"runId": "run-ambiguous", "status": "started"}),
+        };
+        {
+            let ledger = SqliteOperationLedger::open(&paths).unwrap();
+            ledger.migrate().unwrap();
+            ledger.reserve(&request.attempt_id).unwrap();
+            ledger.set_publication_fault(PublicationCommitFault::AfterCommit);
+            assert!(matches!(
+                ledger.publish(&request),
+                Err(PublicationStoreError::Storage(_))
+            ));
+        }
+
+        let reopened = SqliteOperationLedger::open(&paths).unwrap();
+        reopened.migrate().unwrap();
+        assert_eq!(
+            ProcessPublicationStore::find_publication(&reopened, &request.attempt_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            PublicationState::Published
+        );
+        assert!(matches!(
+            reopened.publish(&request).unwrap(),
+            PublishOutcome::Replayed(_)
+        ));
+        assert_eq!(reopened.pending_events(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn failure_before_commit_reopens_as_pending_without_outbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = DataPaths::new(dir.path());
+        paths.ensure_dirs().unwrap();
+        let request = PublishRequest {
+            attempt_id: "rollback-attempt".into(),
+            event_id: "rollback-attempt:started".into(),
+            event_kind: "started".into(),
+            result: json!({"runId": "run-rollback"}),
+            payload: json!({"runId": "run-rollback"}),
+        };
+        {
+            let ledger = SqliteOperationLedger::open(&paths).unwrap();
+            ledger.migrate().unwrap();
+            ledger.reserve(&request.attempt_id).unwrap();
+            ledger.set_publication_fault(PublicationCommitFault::BeforeCommit);
+            assert!(ledger.publish(&request).is_err());
+        }
+        let reopened = SqliteOperationLedger::open(&paths).unwrap();
+        reopened.migrate().unwrap();
+        assert_eq!(
+            ProcessPublicationStore::find_publication(&reopened, &request.attempt_id)
+                .unwrap()
+                .unwrap()
+                .state,
+            PublicationState::Pending
+        );
+        assert!(reopened.pending_events(10).unwrap().is_empty());
     }
 }

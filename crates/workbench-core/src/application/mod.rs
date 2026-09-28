@@ -17,6 +17,7 @@ pub mod idempotency;
 pub mod intent_first;
 pub mod lease;
 pub mod orchestration;
+pub mod process_publication;
 pub mod project_service;
 pub mod provider_session_service;
 pub mod reconcilers;

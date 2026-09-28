@@ -95,3 +95,18 @@ OCR delegate는 위 대안의 제품 배포 가능성, platform-neutral foundati
 | C3 High | 유효 | Windows를 Job API probe PASS/platform PENDING으로 하향하고 T006에 server hard-kill 등 남은 matrix를 명시 |
 | C4 Medium | 유효 | T012–T015를 pure publication/outbox로 분리하고 containment anchor/schema/lease를 T016과 T010 뒤에 유지 |
 | C5 Medium | 유효 | 최신 HEAD inventory 수를 5건으로 정정하고 새 exact HEAD matrix 재실행을 요구 |
+
+## T011–T015 platform-neutral foundation 구현 증거
+
+- T011 reducer는 `9672bb7`에서 publication winner와 published/active termination을 분리했고 단위 시험 6/6, strict Clippy를 통과했다.
+- T012–T015는 containment·spawn·adopt·cleanup resolver를 참조하지 않는 typed publication port, SQLite v3 publication/result/outbox transaction, dispatcher 경계를 구현했다.
+- publish/withdraw 경합은 한 store mutex의 순차 호출이 아니라 같은 file-backed DB를 연 두 독립 SQLite connection이 barrier에서 동시에 요청하는 시험으로 검증한다. `BEGIN IMMEDIATE` 뒤 조건부 `Pending → Published|Withdrawn` 전이가 winner 하나를 고정한다.
+- commit-before-send는 store를 실제 close/reopen한 뒤 같은 result/event/payload가 `Replayed`이고 pending outbox가 하나인 것을 검증한다. commit 전 fault는 reopen 뒤 `Pending`/outbox 0, ambiguous-after-commit은 reopen 뒤 `Published`/정확한 replay/outbox 1을 검증한다.
+- v2 file fixture를 v3로 migrate한 뒤 기존 operation ledger의 execution id, result JSON, contract revision과 schema handshake를 보존하고, v1→v3 연속 migration 및 future schema 거절도 유지한다.
+- callback 전송 실패를 storage 실패와 구분한 typed delivery 오류로 반환한다. send 뒤 ack 전과 ack commit 뒤에 각각 store를 실제 close/reopen해 전자는 pending replay, 후자는 미전달 0과 ack 재시도 멱등성을 검증한다. 한 live `PublicationProjection` instance의 중복 억제도 별도로 검증하지만, 이 메모리 projection은 실제 client reconnect 또는 client process restart 보장이 아니다. WS replay/cursor와 실제 client projection 연결은 T020으로 미완료 유지한다.
+
+foundation 구현 검증은 다음처럼 구분한다.
+
+- pushed reducer HEAD `9672bb7c340d62db851149818026b0fff9e6b2ec`: GitHub Actions run `36431941843` 전체 success. 이 run은 이후의 미커밋 publication 변경 증거가 아니다.
+- publication/result/outbox 구현 snapshot: `CARGO_INCREMENTAL=0 cargo test -p workbench-core --all-targets --all-features` exit 0, 576 passed / 0 failed / 7 ignored. 이후 typed delivery error와 file-backed ack 양쪽 fixture를 추가했다.
+- 현재 publication 변경: integration 6/6, SQLite ledger unit 12/12, `cargo clippy -p workbench-core --all-targets --all-features -- -D warnings` exit 0, `git diff --check` exit 0. 전체 workspace/final gate는 구현 리뷰와 후속 045 작업 뒤 별도 실행한다.
