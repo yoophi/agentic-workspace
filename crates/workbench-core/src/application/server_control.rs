@@ -322,7 +322,12 @@ impl ServerControl {
             self.mark_stopped();
             return true;
         }
+        // 세대를 먼저 읽고 상태를 본다: 그 사이 전이가 있었다면 세대가 달라 `try_stop_at`이 거절한다.
         let generation = self.work_gate.activity_generation();
+        if self.work_gate.state() == GateState::Serving {
+            // 비우기 정지 판정이다. 임대가 비우기를 서빙으로 되돌렸으면 멈추지 않는다(Codex 구현 리뷰 high).
+            return false;
+        }
         let derived = self.derive().await;
         let stopped = self
             .work_gate

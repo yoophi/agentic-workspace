@@ -246,6 +246,29 @@ async fn a_lease_keeps_the_server_serving_and_cancels_an_idle_drain() {
     );
 }
 
+/// Codex 구현 리뷰(high): 감시 루프가 임대 0을 본 뒤 정지 판정에 들어가기 전에 임대가 잡혀 서빙으로 돌아갔다면,
+/// 비우기용 정지 판정(`try_stop`)은 서빙 중인 서버를 멈추지 않는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_lease_taken_before_the_idle_stop_decision_keeps_the_server_serving() {
+    let h = BenchHarness::new(RunScript::default());
+    let control = h.rt.runtime.server_control();
+    h.rt.runtime.work_gate().begin_drain(DrainMode::Idle);
+    owner(
+        &h,
+        OperationId::LeaseAcquire,
+        json!({"clientKind": "desktop", "clientId": "app"}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Serving);
+    assert!(
+        !control.try_stop().await,
+        "the drain was cancelled by the lease; its stop decision must not stop the server"
+    );
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Serving);
+    assert!(!*control.stopped().borrow());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn idle_clock_starts_only_when_quiet_and_stops_after_the_timeout() {
     let h = BenchHarness::new(RunScript::default());

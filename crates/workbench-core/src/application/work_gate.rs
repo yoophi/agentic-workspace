@@ -452,10 +452,17 @@ impl WorkGate {
         match inner.state() {
             GateState::Stopping => {}
             GateState::Draining(DrainMode::Wait) => {}
-            GateState::Draining(DrainMode::Idle) => inner.state = Some(GateState::Draining(mode)),
+            GateState::Draining(DrainMode::Idle) => {
+                if mode != DrainMode::Idle {
+                    inner.state = Some(GateState::Draining(mode));
+                    inner.generation += 1;
+                }
+            }
             GateState::Serving => {
                 inner.drain_started_at = Some(chrono::Utc::now());
                 inner.state = Some(GateState::Draining(mode));
+                // 상태 전이도 세대를 바꾼다: 전이 전에 시작한 정지 판정은 쓸 수 없다.
+                inner.generation += 1;
             }
         }
     }
@@ -472,6 +479,9 @@ impl WorkGate {
             GateState::Draining(DrainMode::Idle) => {
                 inner.state = Some(GateState::Serving);
                 inner.drain_started_at = None;
+                // Codex 구현 리뷰(high): 비우기 동안 시작한 정지 판정(세대를 읽고 파생 값을 기다리는 중)이 서빙을
+                // `stopping`으로 바꾸지 못하게 세대를 바꾼다.
+                inner.generation += 1;
                 true
             }
             GateState::Serving => true,
@@ -493,7 +503,7 @@ impl WorkGate {
         true
     }
 
-    /// 활동 세대(예약 해제 수). [`WorkGate::try_stop_at`]과 짝.
+    /// 활동 세대(예약 해제와 상태 전이 — 비우기 시작·유휴 비우기 취소 — 마다 증가). [`WorkGate::try_stop_at`]과 짝.
     pub fn activity_generation(&self) -> u64 {
         self.lock().generation
     }

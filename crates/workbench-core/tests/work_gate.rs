@@ -436,3 +436,25 @@ fn admission_checks_the_drain_and_reserves_the_call_under_one_lock() {
     assert_eq!(gate.admit(false, false).err(), Some(AdmitRefused::Stopping));
     assert_eq!(gate.admit(true, true).err(), Some(AdmitRefused::Stopping));
 }
+
+/// Codex 구현 리뷰(high): 유휴 비우기의 정지 판정은 세대를 읽고 파생 값을 기다린 뒤 전이한다. 그 사이 임대가 비우기를
+/// 서빙으로 되돌렸다면(`resume_serving`) 낡은 판정이 서빙을 `stopping`으로 바꾸면 안 된다.
+#[test]
+fn a_stop_decision_read_before_a_lease_resumes_serving_does_not_stop() {
+    let gate = WorkGate::new();
+    gate.begin_drain(DrainMode::Idle);
+    let generation = gate.activity_generation(); // 판정 시작(파생 값 읽기 전)
+    assert!(gate.resume_serving(), "a lease returns the idle drain to serving");
+    assert!(
+        !gate.try_stop_at(generation, || 0),
+        "a decision started before the lease must not stop the serving server"
+    );
+    assert_eq!(gate.state(), GateState::Serving);
+    // 비우기에 다시 들어가도 옛 판정은 쓸 수 없다(상태 전이도 세대를 바꾼다).
+    gate.begin_drain(DrainMode::Idle);
+    assert!(!gate.try_stop_at(generation, || 0));
+    assert_eq!(gate.state(), GateState::Draining(DrainMode::Idle));
+    // 새로 시작한 판정은 전이한다.
+    let fresh = gate.activity_generation();
+    assert!(gate.try_stop_at(fresh, || 0));
+}
