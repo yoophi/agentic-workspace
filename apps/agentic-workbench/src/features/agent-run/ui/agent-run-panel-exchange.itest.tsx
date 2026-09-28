@@ -83,8 +83,17 @@ async function scenario({
   const client = createWorkbenchClient({ connection: windowConnection });
   let nextCancel: CancelInjection | HeldCancel | undefined;
   const cancelsReachingServer: unknown[] = [];
+  /** Codex r11: 다음 전달 포기 한 번을 문이 열릴 때까지 붙잡고, 보내지 않은 채 "보내지 않음"(notApplied)으로 끝낸다. */
+  let nextDiscard: { gate: Promise<void>; held: () => void } | undefined;
   const screenClient: typeof client = {
     call: async (operation, input, options) => {
+      if (operation === ("exchange.discardDelivery" as OperationId) && nextDiscard) {
+        const held = nextDiscard;
+        nextDiscard = undefined;
+        held.held();
+        await held.gate;
+        return { kind: "notApplied", reason: "offline" };
+      }
       if (operation === ("run.cancel" as OperationId) && typeof nextCancel === "object") {
         const held = nextCancel;
         nextCancel = undefined;
@@ -222,6 +231,7 @@ async function scenario({
     await waitForAgentRunPanel(() => findButton("Full restart") !== null, 15_000);
     expect(panel.container.textContent).toContain("steer unsupported");
   }
+  const requestWaitStop = () => owner<{ state: string }>("server.stop", { mode: "wait" });
   const beginWaitStop = async () => {
     const draining = await owner<{ state: string }>("server.stop", { mode: "wait" });
     expect(draining.state).toBe("drainingWait");
@@ -266,6 +276,19 @@ async function scenario({
     nextCancel = { mode, gate, held: markHeld };
     return { release, held };
   };
+  /** 다음 전달 포기 한 번을 붙잡는다(`release`로 notApplied를 돌려준다). */
+  const holdNextDiscard = () => {
+    let release!: () => void;
+    let markHeld!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      markHeld = resolve;
+    });
+    nextDiscard = { gate, held: markHeld };
+    return { release, held };
+  };
   const sendExchange = async (requestId: string, message: string) => {
     await call("exchange.send", {
       benchId: bench,
@@ -293,12 +316,14 @@ async function scenario({
     exchangeSends,
     injectNextCancel,
     holdNextCancel,
+    holdNextDiscard,
     sendExchange,
     exchangeSendsOf,
     benchRuns,
     cancelsReachingServer,
     respondPermission,
     beginWaitStop,
+    requestWaitStop,
   };
 }
 
@@ -502,6 +527,55 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     await s.stopped();
     expect(s.recorded.filter((item) => item.command === "start_agent_run"), "still exactly one replacement").toHaveLength(2);
     expect(s.exchangeSends(), "nothing was sent to the cancelled run").toEqual([]);
+  });
+
+  // Codex r11(apps medium): 교환 항목을 지우고 전달 포기의 답을 붙잡은 사이 Full restart가 run을 바꿨다(취소 적용·새 run). 포기가
+  // 서버에 닿지 않은 채(notApplied) 끝나도 그 교환은 끝난 run이 대상이라 새 run의 대기열에 되살리지 않는다 — 뒤의 일반 prompt가 새
+  // run에 전달되고, 서버는 대상 run이 없는 교환을 세지 않아 wait-stop이 끝난다.
+  it("a discard that failed after a full restart replaced its run does not revive the exchange; the next prompt reaches the new run", async () => {
+    const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
+    const discard = s.holdNextDiscard();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await discard.held;
+    await press("Full restart");
+    await waitForAgentRunPanel(
+      () => s.recorded.filter((item) => item.command === "start_agent_run").length === 2,
+      15_000,
+    );
+    const replacement = (s.recorded.filter((item) => item.command === "start_agent_run")[1].args.request as { runId: string })
+      .runId;
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(1), { timeout: 15_000, interval: 20 });
+    await s.panel.rerender({ externalPromptRequest: { id: "manual-3", text: "Follow-up work", delivery: "queue" } });
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes("Follow-up work") ?? false, 15_000);
+    await act(async () => {
+      discard.release();
+    });
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_NOT_APPLIED) ?? false, 15_000);
+    expect(s.panel.container.textContent, "the old run's exchange is not revived in the new run's queue").not.toContain(
+      "hello peer",
+    );
+
+    // 새 run의 첫 turn이 끝나면 다음 일반 prompt가 새 run에 전달된다(옛 교환이 선두를 막지 않는다).
+    await s.respondPermission(replacement);
+    await vi.waitFor(
+      () =>
+        expect(
+          s.recorded.filter((item) => item.command === "send_prompt_to_run" && item.args.prompt === "Follow-up work"),
+        ).toHaveLength(1),
+      { timeout: 15_000, interval: 20 },
+    );
+    const follow = s.recorded.find((item) => item.command === "send_prompt_to_run" && item.args.prompt === "Follow-up work");
+    expect(follow?.args.runId, "the follow-up goes to the new run").toBe(replacement);
+    expect(s.exchangeSends(), "the old exchange never reached any run").toEqual([]);
+
+    // 끝난 run이 대상인 교환은 서버가 세지 않는다: 활동이 없으니 wait-stop은 곧바로(또는 비운 뒤) 멈춘다.
+    expect((await s.status()).activeWork.pendingExchanges, "an exchange whose target run ended is not counted").toBe(0);
+    const stop = await s.requestWaitStop();
+    expect(["drainingWait", "stopping"]).toContain(stop.state);
+    await s.stopped();
+    expect(s.exchangeSends()).toEqual([]);
   });
 
   it("cancel whose request was not applied keeps the run and its exchange; the exchange is delivered and the server stops", async () => {
