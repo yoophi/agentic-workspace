@@ -120,6 +120,10 @@ pub struct ExternalServer {
     exiting: AtomicBool,
     pending: AtomicUsize,
     settled: Notify,
+    /// 시험 전용 실패 주입(Codex r5): 이 operation의 **다음 응답 하나**를 잃는다. 요청은 실제 서버에 가서 처리되고, 클라이언트가
+    /// 응답만 버리고 전송 오류로 만든다(응답 유실·시간 초과와 같은 모양).
+    #[cfg(test)]
+    drop_next_response: std::sync::Mutex<Option<&'static str>>,
 }
 
 impl ExternalServer {
@@ -134,6 +138,8 @@ impl ExternalServer {
             exiting: AtomicBool::new(false),
             pending: AtomicUsize::new(0),
             settled: Notify::new(),
+            #[cfg(test)]
+            drop_next_response: std::sync::Mutex::new(None),
         })
     }
 
@@ -319,12 +325,38 @@ impl ExternalServer {
     ) -> Result<Value, CallError> {
         let base = descriptor.base_url.clone();
         let token = descriptor.owner_token.clone();
-        tokio::task::spawn_blocking(move || call(&base, &token, None, operation, input, command))
-            .await
-            .map_err(|error| CallError::Transport(error.to_string()))?
+        let result = tokio::task::spawn_blocking(move || {
+            call(&base, &token, None, operation, input, command)
+        })
+        .await
+        .map_err(|error| CallError::Transport(error.to_string()))?;
+        #[cfg(test)]
+        {
+            let mut drop = self.drop_next_response.lock().unwrap();
+            if *drop == Some(operation) {
+                *drop = None;
+                return Err(CallError::Transport(format!(
+                    "injected: the {operation} response was lost"
+                )));
+            }
+        }
+        result
     }
 
-    /// 소유자 호출. 전송 오류면 연결을 잊고 한 번 다시 `ensure`해 부른다(서버 재기동).
+    /// 시험 전용: `operation`의 다음 응답 하나를 잃게 한다.
+    #[cfg(test)]
+    fn drop_next_response_of(&self, operation: &'static str) {
+        *self.drop_next_response.lock().unwrap() = Some(operation);
+    }
+
+    #[cfg(test)]
+    fn response_drop_pending(&self) -> bool {
+        self.drop_next_response.lock().unwrap().is_some()
+    }
+
+    /// 소유자 호출. 전송 오류면 그 인스턴스가 정말 없어졌는지 먼저 본다(Codex r5, `renew_once`와 같은 확실한 증거 규칙).
+    /// 살아 있으면(응답 유실·일시 불응, 비우는 중 포함) 연결과 임대를 그대로 두고 같은 인스턴스에 한 번 다시 부른다. 없어졌거나
+    /// 바뀌었을 때만 잊고 다시 `ensure`한다(서버 재기동) — 비우는 서버를 잊으면 `ensure`가 그 서버를 거절해 되돌아오지 못한다.
     async fn owner_call_reconnecting(
         self: &Arc<Self>,
         operation: &'static str,
@@ -337,6 +369,17 @@ impl ExternalServer {
             .await
         {
             Ok(output) => Ok((descriptor, output)),
+            Err(CallError::Transport(error))
+                if self.instance_is_live(&descriptor.instance_id).await =>
+            {
+                eprintln!(
+                    "[workbench-server] {operation} failed on a live instance (retrying once): {error}"
+                );
+                self.owner_call(&descriptor, operation, input, command)
+                    .await
+                    .map(|output| (descriptor, output))
+                    .map_err(|error| error.to_string())
+            }
             Err(CallError::Transport(_)) => {
                 self.forget(&descriptor.instance_id).await;
                 let descriptor = self.connect().await?;
@@ -928,6 +971,95 @@ mod tests {
             std::fs::remove_file(server_dir(&data).join("server.json")).unwrap();
             assert_eq!(client.renew_once(&instance).await, None);
             assert_eq!(client.current_instance().await, None);
+        });
+    }
+
+    /// Codex r5(apps high): 창 토큰 발급의 응답 하나를 잃어도(전송 오류) 살아 있는 같은 인스턴스를 잊지 않는다. 서버가
+    /// `drainingWait`이면 잊은 뒤의 `connect`→`ensure`가 서빙이 아닌 그 서버를 거절해 토큰 발급이 다시 되지 않고, 갱신
+    /// task도 끝나 임대가 만료된다(임대가 없으면 미소비 교환이 정지를 막지 않음). 실패 주입: 요청은 실제 서버가 처리하고
+    /// 클라이언트가 응답만 버린다.
+    #[test]
+    fn a_lost_token_response_from_a_draining_server_keeps_the_connection() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            // 활동 작업(예약)이 있어 wait 비우기가 끝나지 않는다.
+            let _work = server
+                .host
+                .runtime
+                .server_control()
+                .work_gate()
+                .reserve(
+                    workbench_core::application::work_gate::ReservationKind::Call,
+                    None,
+                )
+                .unwrap();
+            let drained = client
+                .owner_call(&descriptor, "server.stop", json!({ "mode": "wait" }), true)
+                .await
+                .unwrap();
+            assert_eq!(drained["state"], "drainingWait", "{drained}");
+
+            client.drop_next_response_of("desktop.issueWindowToken");
+            let issued = client.issue_window_token("session-r5", "i1", ORIGIN).await;
+            assert!(!client.response_drop_pending(), "the injected loss happened");
+            let (base, token, _) =
+                issued.expect("the token is issued again on the same live instance");
+            assert_eq!(
+                client.current_instance().await,
+                Some(descriptor.instance_id.clone()),
+                "the draining server is not forgotten"
+            );
+            assert_eq!(
+                client.renew_once(&descriptor.instance_id).await,
+                Some(RenewalStep::Renewed),
+                "the lease keeps renewing on the same instance"
+            );
+            let status = tokio::task::spawn_blocking(move || {
+                workbench_host::lifecycle::client::request_with_origin(
+                    &base,
+                    "POST",
+                    "/v1/system/handshake",
+                    Some(&json!({ "supportedProtocolVersions": [1], "client": { "name": "t", "version": "0" } })),
+                    Some(&token),
+                    Some(ORIGIN),
+                )
+                .unwrap()
+                .0
+            })
+            .await
+            .unwrap();
+            assert_eq!(status, 200, "the reissued window token works");
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// 대조: 서버가 실제로 없어졌으면(끝점 불응 + 소유 잠금 빔) 전송 오류 뒤 잊는다.
+    #[test]
+    fn a_transport_error_from_a_gone_server_forgets_it() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            server.host.shutdown().await;
+            assert!(
+                client
+                    .issue_window_token("session-r5g", "i1", ORIGIN)
+                    .await
+                    .is_err()
+            );
+            assert_ne!(
+                client.current_instance().await,
+                Some(descriptor.instance_id),
+                "a gone server is forgotten"
+            );
         });
     }
 
