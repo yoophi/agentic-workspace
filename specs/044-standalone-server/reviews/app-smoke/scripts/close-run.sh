@@ -74,8 +74,7 @@ log "run-removed=$ok"
 [ "$SCEN" = close-token ] && log "token-after-close=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 grep -o 'operation="desktop.retireWindow"[^\n]*' "$DATA/workbench/server/server.log" > "$R/retire.log"; log "retireWindow-calls=$(wc -l < "$R/retire.log" | tr -d ' ')"
 grep -n "retire" "$R/app.log" | head -5 >> "$R/meta.txt"
-# 정리: 앱이 살아 있으면 AppleScript quit, 그래도 남으면 정확한 PID. 서버는 확인된 PID.
-# 정리: 번들 id quit 대신 기록한 신원의 pid만 끝낸다.
+# 정리: 앱·서버 모두 기록한 신원(pid·시작 시각·명령줄)이 같은 이 실행의 pid만 끝낸다(번들 id quit 없음).
 kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
 kill_exact "$R/kills.txt" "$SPID"; for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "cleanup: app=$(kill -0 "$APID" 2>/dev/null && echo alive || echo gone) server=$(kill -0 "$SPID" 2>/dev/null && echo alive || echo gone)"
