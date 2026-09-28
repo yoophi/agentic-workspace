@@ -216,7 +216,6 @@ pub struct OrchestrationRuntime {
 /// 정리하므로 작업대가 닫혀도 끝낼 수 있다. 목록은 메모리라 프로세스가 끝나면 재시작 복구(`reconcile_session_runtime`의
 /// 예약 노드 되돌리기)가 맡는다.
 pub(crate) struct PendingRevert {
-    pub(crate) bench: String,
     pub(crate) workspace_id: String,
     pub(crate) node_id: String,
     pub(crate) planned_run_id: String,

@@ -56,6 +56,8 @@ research R4–R6·R9·R10.
    - 상태가 `draining`/`stopping`이면 그 서버가 끝나기를 기다렸다가 새로 띄운다.
 4. 새 `server.json`이 확인을 통과하면 `startup.lock`을 풀고 결과를 돌려준다.
 
+- 시간·크기 상한(Codex r9): 대기 상한 20초(`ready_timeout`)는 **최초 확인 전에** 시작하고, 2·3단계의 모든 확인 요청이 그 안에서 끝난다. 요청 하나는 연결·쓰기·읽기를 합친 전체 상한 5초와 응답 크기 상한 16MiB를 가진다(읽기 대기마다가 아님). 응답 읽기는 `content-length`나 chunked의 마지막 chunk에서 끝나고, 둘 다 없을 때만 EOF까지 읽는다. 그래서 남은 안내 파일의 포트를 차지한 프로세스가 끝없이 조금씩 보내거나 큰 응답을 보내도 `ensure`는 상한 안에 실패하고 `startup.lock`을 놓는다. 같은 규칙이 데스크톱·소유자 클라이언트의 `/v1/calls`(lifecycle `calls::call`)에도 적용된다. 시험: `crates/workbench-host/tests/bounded_requests.rs`.
+
 ## 4. 새 operation (계약 생성 대상)
 
 | operation | 종류 | 권한 | 입력 → 출력 |
@@ -98,6 +100,7 @@ stateDiagram-v2
 - 임대 획득은 `stopping`이 아닌 어느 상태에서든 활동 세대를 올린다(Codex r6). 그 전에 파생을 시작한 `default`·`wait`·유휴 정지 판정은 거절되고 다시 판정한다(임대가 생기면 미소비 교환이 활동이 된다). `stopping`이면 임대를 거절한다.
 - 자식 기동이 끝나지 못하면(배정 호출 abort·기동 실패) 되돌리기가 끝까지 가서 실행 중 task를 남기지 않는다(Codex r7, research R14 "기동 수명과 취소 책임"). 되돌리는 동안의 같은 task 배정은 재시도 가능한 `launchRollingBack`이다.
 - 되돌리기가 저장되지 못하면(Codex r8) 끝난 것으로 보지 않는다: 감시 한 바퀴와 같은 task의 새 배정이 다시 시도하고, 그 동안 활동 작업(`orchestrationTasks`)으로 정지를 막는다. 재시작하면 작업 영역 복구가 남은 예약을 되돌린다.
+  - 재시도가 진행 중인 동안에도 그 정리는 목록에 남아 활동으로 보이고(Codex r9), 재시도의 시작·끝은 관문 세대를 올려 그 전에 파생한 정지 판정을 무효로 한다. 재시도의 커밋과 결과 반영은 호출과 따로 도는 소유 task가 끝까지 한다(호출이 취소돼도 정리 책임이 남는다). 되돌리기는 작업 영역 id로 하므로 작업대가 닫혀도 끝낼 수 있다.
 - 활동 작업의 원천을 읽지 못하면(작업 영역·ledger 저장소 읽기 오류, Codex r8) 그 수는 0이 아니라 **모름**이다: `activeWork`의 해당 필드는 `null`이고(`blocksStop`은 `null`을 활동으로 본다) 파생 합계도 0이 되지 않아 `default`는 `conflict`, `wait`·유휴 정지는 멈추지 않는다. 읽기가 회복되면 다음 판정이 실제 수로 한다. ledger `unknown` 수를 읽지 못하면 `unresolvedOperations`가 `null`이다(보고만).
 - handshake와 `server.status`의 `state`에 현재 상태를 싣는다. 준비 상태 = `serving`.
 

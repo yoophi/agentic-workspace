@@ -1206,7 +1206,6 @@ fn finish_undo(
             runtime.defer_revert(
                 &target.task_id,
                 PendingRevert {
-                    bench: target.bench,
                     workspace_id: target.workspace_id,
                     node_id: target.node_id,
                     planned_run_id: target.planned_run_id,

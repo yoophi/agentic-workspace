@@ -269,6 +269,18 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
   - **되돌리기 저장 실패는 끝이 아니다**: 되돌리기가 결과를 돌려준다. 저장소 커밋이 실패하면 guard는 완료로 보지 않고 런타임의 재시도 목록으로 넘긴다 — 단일 비행 자리는 "되돌리는 중"으로 남고(새 배정은 `launchRollingBack`), 보유도 남는다. 재시도 주체: 서버 감시 한 바퀴(`tick` 시작)와 같은 task의 새 배정 시도. 서버 자신의 정리라 비우는 중에도 돈다. 끝날 때까지 활동 작업이다(`orchestrationTasks`에 더해 보고) — 저장 장애가 계속되면 `default`·`wait`·유휴 정지 모두 멈추지 않고 그렇게 보인다. 성공하면 단일 비행 자리를 지우고 보유를 놓는다.
   - **재시작 복구**: 재시도 목록은 메모리라 서버가 멈추면 사라진다. 작업 영역 복구(`recover`)의 재조정은 예약만 된(`Starting`) 노드의 run이 엔진에 없고 이 프로세스의 진행 중 기동도 아니면 끝나지 못한 기동과 같이 되돌린다(노드 run 비움, 실행 중 task는 `Ready`). 실행까지 간(`Active`) 노드의 run이 없으면 기존대로 task를 `Blocked(runtimeLost, 재시도 가능)`로 둔다(재시도 명령이 노드 run을 비우고 다시 기동한다).
 
+  Codex r9 수정(저장되지 않은 되돌리기의 수명 — 한 소유 구조):
+
+  | 단계 | 목록·표시 | 정지 판정 | 취소·drop | 작업대 닫기 |
+  |---|---|---|---|---|
+  | 등록(guard가 넘김) | 목록에 있음, 단일 비행 "되돌리는 중", 보유 유지 | 활동(`orchestrationTasks`에 더함), 관문 세대 올림 | — | 목록은 작업대가 아니라 작업 영역 id로 정리한다 |
+  | 재시도 진행 중 | 목록에 **남은 채** `in_flight`(같은 정리의 동시 재시도는 하나) | 계속 활동, 시작·끝에 세대 올림(낡은 파생 판정 무효) | 커밋과 결과 반영은 호출 future와 따로 도는 소유 task가 끝까지 한다 | 영향 없음 |
+  | 저장됨 | 목록에서 빼고 단일 비행 자리·보유를 놓는다 | 활동 아님 | — | 작업대 묶임이 풀렸어도 작업 영역 id로 조건부 되돌리기(이미 재조정됐으면 바꿀 것 없음) |
+  | 다시 실패 | `in_flight` 해제, 시도 수·오류 기록(경고) | 계속 활동(저장소 장애가 계속되면 정지가 계속 막히고 status에 보인다) | — | — |
+  | 프로세스 끝 | 목록은 메모리라 사라진다 | — | — | 재시작 복구가 남은 예약 노드를 되돌린다(r8) |
+
+  시험(r9): `a_rollback_retry_in_flight_stays_active_work_until_it_is_stored`(재시도가 커밋 직전에 멈춘 사이 `default` 거절·`wait` 비우기 유지 → 재시도 저장 실패 → 계속 활동·wait 안 멈춤 → 회복 뒤 정지), `aborting_a_rollback_retry_mid_commit_still_finishes_the_cleanup`(재시도 future abort → 정리 책임 유지 → 자리·보유 정리·재배정 기동), `an_unstored_rollback_survives_a_bench_close_and_finishes_by_workspace`(저장 실패 → 작업대 닫기 → 회복 → 목록·보유 해제·파생 활동 0 → 같은 작업 영역 재개·재배정 기동).
+
   시험(r8): `a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot`(A 바인딩 커밋 뒤 abort, B가 보유를 얻고 작업 영역 읽기 전 `BeforeAssignSnapshot`에서 멈춤 → A 정리 끝 → B 재개: B 보유만 남고 실제 run 기동, 동시 한도 1 유지), `a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds`(되돌리기 커밋 오류 주입), `an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery`(실패 정리 + 커밋 오류 → 작업대 닫기·같은 저장소로 재조립 → `recover` → 새 run 기동).
 
   시험(`child_assign_atomic.rs`, 결정적 저장소·기동·엔진 취소 지점): 바인딩 커밋 직전·직후 abort, 실패 정리의 엔진 취소 대기·예약 해제 대기 중 abort, 되돌리기 중 새 배정. 각 시험은 노드 run 해제·task 상태 일치·관문 예약 0·scheduler 자리 반납·실행 중 task 0(정지 판정)과, 재배정(취소된 task면 새 과제)이 실제 run을 기동함을 확인한다.
