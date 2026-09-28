@@ -271,7 +271,11 @@ fn remaining(deadline: Instant) -> Result<Duration, String> {
 }
 
 /// 응답 하나를 읽는다: 메시지가 끝나면(길이·마지막 chunk) 멈추고, 길이 정보가 없으면 EOF까지. 전체가 `deadline` 안이고
-/// `max` 바이트를 넘으면 거절한다. 헤더 끝은 새로 받은 부분만 찾고 헤더는 한 번만 해석한다(큰 응답에서도 선형).
+/// `max` 바이트를 넘으면 거절한다. 헤더 끝은 새로 받은 부분만 찾고 헤더는 한 번만 해석한다. chunked 본문은 한 번 지나간
+/// 곳을 다시 보지 않는 증분 검사로 끝을 찾는다(큰 응답에서도 선형, Codex r9·r10).
+///
+/// 응답 틀은 신뢰하지 않는 입력이다(Codex r10): 신원 확인 전에 아무 프로세스가 보낼 수 있다. 길이 선언은 모두 검사한
+/// 산술로 다루고, 상한을 넘는 선언은 본문을 기다리지 않고 곧바로, 잘못된 틀은 곧바로 오류로 끝난다(panic 없음).
 fn read_message(stream: &mut TcpStream, deadline: Instant, max: usize) -> Result<Vec<u8>, String> {
     let mut raw = Vec::new();
     let mut buffer = [0u8; 8192];
@@ -290,61 +294,177 @@ fn read_message(stream: &mut TcpStream, deadline: Instant, max: usize) -> Result
             Err(error) => return Err(error.to_string()),
         };
         if raw.len() + read > max {
-            return Err(format!("server response too large (over {max} bytes)"));
+            return Err(too_large(max));
         }
         let scan_from = raw.len().saturating_sub(3);
         raw.extend_from_slice(&buffer[..read]);
-        if framing.is_none() {
-            framing = raw[scan_from..]
+        if framing.is_none()
+            && let Some(at) = raw[scan_from..]
                 .windows(4)
                 .position(|window| window == b"\r\n\r\n")
-                .map(|at| {
-                    let body_start = scan_from + at + 4;
-                    (body_start, Framing::of(&raw[..body_start - 4]))
-                });
+        {
+            let body_start = scan_from + at + 4;
+            framing = Some((body_start, Framing::of(&raw[..body_start - 4], max)?));
         }
-        if let Some((body_start, framing)) = &framing
-            && framing.complete(&raw[*body_start..])
+        if let Some((body_start, framing)) = &mut framing
+            && framing.complete(&raw[*body_start..], max)?
         {
             return Ok(raw);
         }
     }
 }
 
+const MESSAGE_MALFORMED_CHUNK: &str = "malformed chunk";
+/// chunk 크기 줄(확장자 포함)·trailer 줄 하나의 길이 상한.
+const MAX_CHUNK_LINE: usize = 1024;
+
+fn too_large(max: usize) -> String {
+    format!("server response too large (over {max} bytes)")
+}
+
 /// 응답 본문의 끝을 아는 방법.
 enum Framing {
     Length(usize),
-    Chunked,
+    Chunked(ChunkScan),
     /// 길이 정보 없음: EOF까지 읽는다.
     UntilClose,
 }
 
 impl Framing {
-    fn of(head: &[u8]) -> Self {
+    /// 헤더에서 본문 틀을 정한다. `content-length`가 숫자가 아니거나 서로 다른 값으로 여러 번 오면 잘못된 틀, `max`를 넘으면
+    /// 상한 초과다(본문을 기다리지 않는다).
+    fn of(head: &[u8], max: usize) -> Result<Self, String> {
         let head = String::from_utf8_lossy(head).to_ascii_lowercase();
-        let header = |name: &str| {
+        let values = |name: &str| -> Vec<String> {
             head.lines()
                 .skip(1)
-                .find_map(|line| line.split_once(':').filter(|(key, _)| key.trim() == name))
+                .filter_map(|line| line.split_once(':'))
+                .filter(|(key, _)| key.trim() == name)
                 .map(|(_, value)| value.trim().to_owned())
+                .collect()
         };
-        if header("transfer-encoding").is_some_and(|value| value.contains("chunked")) {
-            return Self::Chunked;
+        if values("transfer-encoding")
+            .iter()
+            .any(|value| value.contains("chunked"))
+        {
+            return Ok(Self::Chunked(ChunkScan::default()));
         }
-        match header("content-length").and_then(|value| value.parse::<usize>().ok()) {
-            Some(length) => Self::Length(length),
-            None => Self::UntilClose,
+        let lengths = values("content-length");
+        let Some(first) = lengths.first() else {
+            return Ok(Self::UntilClose);
+        };
+        if lengths.iter().any(|value| value != first) {
+            return Err("malformed content-length (conflicting values)".into());
+        }
+        if first.is_empty() || !first.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(format!("malformed content-length {first:?}"));
+        }
+        match first.parse::<usize>() {
+            Ok(length) if length <= max => Ok(Self::Length(length)),
+            // 자릿수가 usize를 넘거나 상한보다 크다.
+            _ => Err(too_large(max)),
         }
     }
 
-    fn complete(&self, body: &[u8]) -> bool {
+    /// 본문이 끝났는가(잘못된 chunk 틀이면 오류). chunked는 지난 호출에서 본 곳부터 이어 본다.
+    fn complete(&mut self, body: &[u8], max: usize) -> Result<bool, String> {
         match self {
-            Self::Length(length) => body.len() >= *length,
-            // 마지막 chunk(`0\r\n\r\n`)는 항상 빈 줄로 끝난다: 그때만 풀어 본다.
-            Self::Chunked => body.ends_with(b"\r\n\r\n") && dechunk(body).is_ok(),
-            Self::UntilClose => false,
+            Self::Length(length) => Ok(body.len() >= *length),
+            Self::Chunked(scan) => scan.advance(body, max),
+            Self::UntilClose => Ok(false),
         }
     }
+}
+
+/// chunked 본문의 증분 검사. `pos`까지는 확인한 완결 단위(크기 줄·데이터·trailer 줄)다.
+#[derive(Default)]
+struct ChunkScan {
+    pos: usize,
+    state: ChunkState,
+    /// 지금까지 선언된 데이터 합(상한 검사).
+    declared: usize,
+}
+
+#[derive(Default, Clone, Copy)]
+enum ChunkState {
+    #[default]
+    Size,
+    Data(usize),
+    Trailer,
+}
+
+impl ChunkScan {
+    fn advance(&mut self, body: &[u8], max: usize) -> Result<bool, String> {
+        loop {
+            match self.state {
+                ChunkState::Size => {
+                    let Some(line_end) = line_end_from(body, self.pos)? else {
+                        return Ok(false);
+                    };
+                    let size = chunk_size(&body[self.pos..line_end], max)?;
+                    self.declared = self
+                        .declared
+                        .checked_add(size)
+                        .filter(|total| *total <= max)
+                        .ok_or_else(|| too_large(max))?;
+                    self.pos = line_end + 2;
+                    self.state = if size == 0 {
+                        ChunkState::Trailer
+                    } else {
+                        ChunkState::Data(size)
+                    };
+                }
+                ChunkState::Data(size) => {
+                    let data_end = self.pos.checked_add(size).ok_or_else(|| too_large(max))?;
+                    // 데이터와 그 뒤 CRLF가 아직 다 오지 않았다.
+                    let Some(crlf) = body.get(data_end..data_end.saturating_add(2)) else {
+                        return Ok(false);
+                    };
+                    if crlf != b"\r\n" {
+                        return Err(MESSAGE_MALFORMED_CHUNK.into());
+                    }
+                    self.pos = data_end + 2;
+                    self.state = ChunkState::Size;
+                }
+                ChunkState::Trailer => {
+                    let Some(line_end) = line_end_from(body, self.pos)? else {
+                        return Ok(false);
+                    };
+                    if line_end == self.pos {
+                        return Ok(true);
+                    }
+                    // trailer 헤더 줄은 건너뛴다.
+                    self.pos = line_end + 2;
+                }
+            }
+        }
+    }
+}
+
+/// `from`부터 첫 CRLF 위치(없으면 아직 모름). 줄이 [`MAX_CHUNK_LINE`]을 넘으면 잘못된 틀.
+fn line_end_from(body: &[u8], from: usize) -> Result<Option<usize>, String> {
+    let rest = body.get(from..).unwrap_or(&[]);
+    match rest.windows(2).position(|window| window == b"\r\n") {
+        Some(at) if at <= MAX_CHUNK_LINE => Ok(Some(from + at)),
+        Some(_) => Err(MESSAGE_MALFORMED_CHUNK.into()),
+        None if rest.len() > MAX_CHUNK_LINE => Err(MESSAGE_MALFORMED_CHUNK.into()),
+        None => Ok(None),
+    }
+}
+
+/// chunk 크기 줄(`<16진 크기>[;확장자]`)을 해석한다. 16진이 아니거나 자릿수가 usize를 넘으면 잘못된 틀, `max`를 넘으면 상한
+/// 초과다.
+fn chunk_size(line: &[u8], max: usize) -> Result<usize, String> {
+    let text = std::str::from_utf8(line).map_err(|_| MESSAGE_MALFORMED_CHUNK.to_owned())?;
+    let digits = text.split(';').next().unwrap_or("").trim();
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(MESSAGE_MALFORMED_CHUNK.into());
+    }
+    let size = usize::from_str_radix(digits, 16).map_err(|_| MESSAGE_MALFORMED_CHUNK.to_owned())?;
+    if size > max {
+        return Err(too_large(max));
+    }
+    Ok(size)
 }
 
 fn parse_response(raw: &[u8]) -> Result<(u16, Value), String> {
@@ -352,48 +472,49 @@ fn parse_response(raw: &[u8]) -> Result<(u16, Value), String> {
         .windows(4)
         .position(|window| window == b"\r\n\r\n")
         .ok_or_else(|| "malformed http response".to_owned())?;
-    let head = String::from_utf8_lossy(&raw[..split]);
-    let mut body = raw[split + 4..].to_vec();
+    let head_bytes = &raw[..split];
+    let head = String::from_utf8_lossy(head_bytes);
     let status = head
         .lines()
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| "malformed status line".to_owned())?;
-    let chunked = head
-        .lines()
-        .any(|line| line.to_ascii_lowercase().replace(' ', "") == "transfer-encoding:chunked");
-    if chunked {
-        body = dechunk(&body)?;
-    }
+    let body = &raw[split + 4..];
+    let body = match Framing::of(head_bytes, MAX_RESPONSE_BYTES)? {
+        Framing::Chunked(_) => dechunk(body, MAX_RESPONSE_BYTES)?,
+        Framing::Length(length) => body
+            .get(..length)
+            .ok_or_else(|| "truncated response body".to_owned())?
+            .to_vec(),
+        Framing::UntilClose => body.to_vec(),
+    };
     Ok((status, serde_json::from_slice(&body).unwrap_or(Value::Null)))
 }
 
-fn dechunk(mut body: &[u8]) -> Result<Vec<u8>, String> {
+/// chunked 본문을 푼다(한 번 지나가는 검사, 검사한 산술). 잘못된 틀·잘린 chunk는 오류.
+fn dechunk(body: &[u8], max: usize) -> Result<Vec<u8>, String> {
     let mut out = Vec::new();
+    let mut pos = 0usize;
     loop {
-        let line_end = body
-            .windows(2)
-            .position(|window| window == b"\r\n")
-            .ok_or_else(|| "malformed chunk".to_owned())?;
-        let size = usize::from_str_radix(
-            String::from_utf8_lossy(&body[..line_end])
-                .split(';')
-                .next()
-                .unwrap_or("")
-                .trim(),
-            16,
-        )
-        .map_err(|error| error.to_string())?;
-        body = &body[line_end + 2..];
+        let line_end = line_end_from(body, pos)?.ok_or_else(|| "truncated chunk".to_owned())?;
+        let size = chunk_size(&body[pos..line_end], max)?;
+        pos = line_end + 2;
         if size == 0 {
             return Ok(out);
         }
-        if body.len() < size + 2 {
-            return Err("truncated chunk".into());
+        let data_end = pos.checked_add(size).ok_or_else(|| too_large(max))?;
+        let data = body
+            .get(pos..data_end)
+            .ok_or_else(|| "truncated chunk".to_owned())?;
+        if body.get(data_end..data_end.saturating_add(2)) != Some(b"\r\n".as_slice()) {
+            return Err(MESSAGE_MALFORMED_CHUNK.into());
         }
-        out.extend_from_slice(&body[..size]);
-        body = &body[size + 2..];
+        if out.len() + data.len() > max {
+            return Err(too_large(max));
+        }
+        out.extend_from_slice(data);
+        pos = data_end + 2;
     }
 }
 

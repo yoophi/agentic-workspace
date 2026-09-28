@@ -57,6 +57,7 @@ research R4–R6·R9·R10.
 4. 새 `server.json`이 확인을 통과하면 `startup.lock`을 풀고 결과를 돌려준다.
 
 - 시간·크기 상한(Codex r9): 대기 상한 20초(`ready_timeout`)는 **최초 확인 전에** 시작하고, 2·3단계의 모든 확인 요청이 그 안에서 끝난다. 요청 하나는 연결·쓰기·읽기를 합친 전체 상한 5초와 응답 크기 상한 16MiB를 가진다(읽기 대기마다가 아님). 응답 읽기는 `content-length`나 chunked의 마지막 chunk에서 끝나고, 둘 다 없을 때만 EOF까지 읽는다. 그래서 남은 안내 파일의 포트를 차지한 프로세스가 끝없이 조금씩 보내거나 큰 응답을 보내도 `ensure`는 상한 안에 실패하고 `startup.lock`을 놓는다. 같은 규칙이 데스크톱·소유자 클라이언트의 `/v1/calls`(lifecycle `calls::call`)에도 적용된다. 시험: `crates/workbench-host/tests/bounded_requests.rs`.
+- 신뢰하지 않는 응답 틀(Codex r10): 응답 틀은 신원 확인 전에 아무 프로세스가 보낼 수 있는 입력이다. 길이 선언(`content-length`, chunk 크기)은 검사한 산술로 다룬다. 응답 크기 상한을 넘는 선언은 본문을 기다리지 않고 곧바로 `too large`로 거절한다. 잘못된 틀(숫자·16진이 아닌 길이, 서로 다른 `content-length`, chunk 뒤 CRLF 없음, 1KiB를 넘는 크기·trailer 줄)도 곧바로 오류다. 어느 경우도 panic하지 않는다. chunked 끝 검사는 한 번 본 곳을 다시 보지 않는다(선형). 시험: `crates/workbench-host/tests/untrusted_framing.rs`.
 
 ## 4. 새 operation (계약 생성 대상)
 
