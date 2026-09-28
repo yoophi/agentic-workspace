@@ -30,6 +30,7 @@ import {
   resolveSelectedProfileId,
   shouldAutoDispatchQueuedPromptWithSteers,
   shouldAutoDispatchQueuedPrompt,
+  unsettledDispatchWasApplied,
   updateQueuedPrompt,
 } from "./run-panel-state";
 import type { RunEventState } from "./run-panel-state";
@@ -1164,5 +1165,39 @@ describe("run panel state", () => {
         hasModifierKey: false,
       }),
     ).toEqual({ handled: false, nextInput: "draft", nextState: state });
+  });
+});
+
+describe("unsettled dispatch (Codex r12)", () => {
+  const counts = new Map<string, number>([["run-1", 3]]);
+  const count = (runId: string) => counts.get(runId) ?? 0;
+
+  it("treats an unknown send as applied once its run started a later turn", () => {
+    expect(
+      unsettledDispatchWasApplied(
+        { id: "q", text: "x", unsettledDispatch: { runId: "run-1", promptSentBefore: 2 } },
+        count,
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat it as applied before any later turn of that run was seen", () => {
+    expect(
+      unsettledDispatchWasApplied(
+        { id: "q", text: "x", unsettledDispatch: { runId: "run-1", promptSentBefore: 3 } },
+        count,
+      ),
+    ).toBe(false);
+    expect(
+      unsettledDispatchWasApplied(
+        { id: "q", text: "x", unsettledDispatch: { runId: "run-2", promptSentBefore: 0 } },
+        count,
+      ),
+      "turns of another run do not count",
+    ).toBe(false);
+  });
+
+  it("never drops a prompt whose previous send was not unknown", () => {
+    expect(unsettledDispatchWasApplied({ id: "q", text: "x" }, count)).toBe(false);
   });
 });

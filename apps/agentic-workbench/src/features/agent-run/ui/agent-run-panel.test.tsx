@@ -642,8 +642,11 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
   /** Codex r11: 다음 전달 포기 한 번의 답을 붙잡는 문과, 그 답을 실패로 바꾸는 오류. */
   let discardGate: Promise<void> | undefined;
   let discardOutcome: string | undefined;
+  /** Codex r12: 화면이 보낸 `send_prompt_to_run`의 호출 옵션(멱등성 키). */
+  let sendOptions: Array<{ args: unknown; options: unknown }> = [];
 
   beforeEach(() => {
+    sendOptions = [];
     cancelOutcome = undefined;
     beforeCancelReply = undefined;
     cancelGate = undefined;
@@ -653,6 +656,9 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     setTransport({
       kind: "http",
       invoke: async (command, args, options) => {
+        if (command === "send_prompt_to_run") {
+          sendOptions.push({ args, options });
+        }
         if (command === "discard_agent_exchange_delivery" && (discardGate || discardOutcome !== undefined)) {
           const gate = discardGate;
           const thrown = discardOutcome;
@@ -1123,6 +1129,120 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
 
     await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
     await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 2);
+  });
+
+  // Codex r12(apps medium): 전송이 서버에 적용돼 그 turn(`promptSent`→`promptCompleted`)까지 관측됐는데 호출 결과가 unknown으로
+  // 끝났다. 같은 키로 다시 보내면 서버는 저장된 결과만 재생해 새 lifecycle 이벤트가 없다 — 응답 대기가 영영 풀리지 않아 뒤 항목이
+  // 막힌다. 관측된 turn이 있으면 적용된 것으로 보고 다시 보내지 않는다.
+  function holdNextSend(matches: (args: Record<string, unknown> | undefined) => boolean, outcome: string) {
+    const base = invokeMock.getMockImplementation();
+    let armed = true;
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reached!: () => void;
+    const sent = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "send_prompt_to_run" && armed && matches(args)) {
+        armed = false;
+        // 서버가 적용했다(기록·효과) — 답만 잃는다.
+        await base?.(command, args);
+        reached();
+        await held;
+        throw outcome;
+      }
+      return base?.(command, args);
+    });
+    return { sent, release };
+  }
+
+  it("an exchange delivery the server applied but answered unknown is not resent once its turn was seen (Codex r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    const send = holdNextSend(
+      (args) => (args as { continuation?: { exchangeRequestId?: string } } | undefined)?.continuation?.exchangeRequestId === "x-7",
+      MESSAGE_RESULT_UNKNOWN,
+    );
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      await send.sent;
+    });
+    // 적용된 전달의 turn이 답보다 먼저 관측된다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      send.release();
+    });
+
+    await panel.rerender({
+      externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
+    });
+    await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
+    expect(deliveriesOf("x-7"), "the applied delivery is not replayed as a new turn").toHaveLength(1);
+  });
+
+  it("a queued prompt the server applied but answered unknown is not resent once its turn was seen (Codex r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.rerender({ externalPromptRequest: { id: "manual-4", text: "Follow-up work", delivery: "queue" } });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Follow-up work") ?? false);
+    const send = holdNextSend((args) => (args as { prompt?: string } | undefined)?.prompt === "Follow-up work", MESSAGE_RESULT_UNKNOWN);
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      await send.sent;
+    });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      send.release();
+    });
+
+    await panel.rerender({ externalPromptRequest: { id: "manual-5", text: "Next work", delivery: "queue" } });
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some((args) => (args as { prompt?: string }).prompt === "Next work"),
+    );
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Follow-up work"),
+      "the applied prompt is not sent again",
+    ).toHaveLength(1);
+    expect(panel.container.textContent, "the applied prompt stays in the transcript").toContain("Follow-up work");
+  });
+
+  it("an exchange delivery answered unknown before any turn was seen is retried with the same key (Codex r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    const send = holdNextSend(
+      (args) => (args as { continuation?: { exchangeRequestId?: string } } | undefined)?.continuation?.exchangeRequestId === "x-7",
+      MESSAGE_RESULT_UNKNOWN,
+    );
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await act(async () => {
+      await send.sent;
+      send.release();
+    });
+    await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 2);
+    const [first, second] = sendOptions
+      .filter(
+        ({ args }) =>
+          (args as { continuation?: { exchangeRequestId?: string } }).continuation?.exchangeRequestId === "x-7",
+      )
+      .map(({ options }) => (options as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+    expect(first, "the exchange carries its delivery key").toBe("exchange-delivery:x-7");
+    expect(second, "the retry replays the same key").toBe(first);
+    // 적용된 원래 전달의 turn이 늦게 와도 응답 대기가 풀리고 뒤 교환이 전달된다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await panel.rerender({
+      externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
+    });
+    await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
   });
 
   it("still abandons the queued exchange when the cancel succeeds", async () => {
