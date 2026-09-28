@@ -174,9 +174,9 @@ async function scenario({
       recorded.push({ command, args: args ?? {} });
       return http.invoke(command, args, options);
     },
-    listen: (event, callback) =>
-      http.listen(event, (payload) => {
-        callback(payload);
+    listen: <T,>(event: string, callback: (payload: T) => void | Promise<void>) =>
+      http.listen<T>(event, async (payload) => {
+        await callback(payload);
         const envelope = payload as { runId?: string; event?: { type?: string; status?: string } } | undefined;
         if (envelope?.event?.type === "lifecycle" && envelope.runId) {
           lifecycleSeen.push(`${envelope.runId}:${envelope.event.status}`);
