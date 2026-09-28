@@ -461,3 +461,27 @@ fn a_stop_decision_read_before_a_lease_resumes_serving_does_not_stop() {
     let fresh = gate.activity_generation();
     assert!(gate.try_stop_at(fresh, || 0));
 }
+
+/// OCR 4차 M1: 작업대 닫기(`forget_bench_exchanges`)보다 늦게 도착한 진행 중 전달이 닫힌 작업대의 교환 기록을 되살리지
+/// 않는다(`failedExchangeDeliveries`에 닫힌 작업대가 남지 않음). 닫기와 같은 관문 잠금 아래에서 거절·무시한다.
+#[test]
+fn a_delivery_arriving_after_the_bench_closed_leaves_no_record() {
+    use workbench_core::application::work_gate::DeliveryRefused;
+    let gate = WorkGate::new();
+    gate.forget_bench_exchanges("bench-a");
+    assert_eq!(
+        gate.begin_exchange_delivery("bench-a", "q1", "r1").err(),
+        Some(DeliveryRefused::BenchClosed),
+        "a late delivery to a closed bench is refused"
+    );
+    gate.record_failed_delivery("bench-a", "q1");
+    assert!(
+        gate.failed_deliveries().is_empty(),
+        "a closed bench leaves no failure record: {:?}",
+        gate.failed_deliveries()
+    );
+    assert!(
+        gate.begin_exchange_delivery("bench-b", "q1", "r2").is_ok(),
+        "another bench is unaffected"
+    );
+}

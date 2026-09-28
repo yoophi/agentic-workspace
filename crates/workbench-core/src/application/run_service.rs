@@ -290,6 +290,11 @@ pub async fn deliver_exchange(
                         request_id.clone(),
                         crate::application::work_gate::MESSAGE_STOPPING,
                     ),
+                    DeliveryRefused::BenchClosed => refuse(WorkbenchFault::new(
+                        FaultCode::NotFound,
+                        request_id.clone(),
+                        MESSAGE_EXCHANGE_NOT_FOUND,
+                    )),
                 })?,
         ),
         None => None,

@@ -139,6 +139,8 @@ pub enum DeliveryRefused {
     AlreadyConsumed,
     /// 서버가 정지 중이다.
     Stopping,
+    /// 교환의 작업대가 이미 닫혔다(닫기보다 늦게 도착한 전달, OCR 4차 M1).
+    BenchClosed,
 }
 
 /// 정지 뒤의 예약 시도.
@@ -171,6 +173,9 @@ struct Inner {
     /// 교환 전달 prompt 소비(교환마다 1회, K). 키는 (작업대, 요청 id)다 — 요청 id는 호출자가 정해 작업대마다 겹칠 수 있고,
     /// 교환 저장소도 같은 키로 구별한다(Codex r5).
     consumed_exchanges: HashSet<ExchangeKey>,
+    /// 교환 기록을 거둔 닫힌 작업대(OCR 4차 M1): 닫기보다 늦게 도착한 전달이 기록을 되살리지 않게 한다. 작업대 id는 재사용되지
+    /// 않는다.
+    closed_exchange_benches: HashSet<String>,
     /// 소비했지만 엔진 대기열 등록에 실패한 교환(대상 run이 없음). `server.status`의 `failedExchangeDeliveries`.
     failed_deliveries: HashSet<ExchangeKey>,
     /// N-notify 예약 → 그 전달 시도 id(R14 표 6'·6'').
@@ -549,6 +554,9 @@ impl WorkGate {
         if inner.state() == GateState::Stopping {
             return Err(DeliveryRefused::Stopping);
         }
+        if inner.closed_exchange_benches.contains(bench_id) {
+            return Err(DeliveryRefused::BenchClosed);
+        }
         if !inner
             .consumed_exchanges
             .insert(exchange_key(bench_id, request_id))
@@ -564,7 +572,12 @@ impl WorkGate {
 
     /// 소비한 교환의 대기열 등록이 실패했다(대상 run이 없음). 소비 표시는 남긴다(R14 표 3 오류).
     pub fn record_failed_delivery(&self, bench_id: &str, request_id: &str) {
-        self.lock()
+        let mut inner = self.lock();
+        // 닫힌 작업대의 늦은 실패는 적지 않는다(닫기 뒤 보고에 남지 않게).
+        if inner.closed_exchange_benches.contains(bench_id) {
+            return;
+        }
+        inner
             .failed_deliveries
             .insert(exchange_key(bench_id, request_id));
     }
@@ -593,6 +606,7 @@ impl WorkGate {
     /// 쌓이지 않게).
     pub fn forget_bench_exchanges(&self, bench_id: &str) {
         let mut inner = self.lock();
+        inner.closed_exchange_benches.insert(bench_id.to_owned());
         inner
             .consumed_exchanges
             .retain(|(bench, _)| bench != bench_id);

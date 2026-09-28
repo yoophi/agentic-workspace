@@ -84,7 +84,14 @@ case "$QUIT" in
          log "dock-quit-not-sent: the Dock menu did not open (attempt invalid)"
        fi
      fi ;;
-  e) osascript -e "tell application id \"$BID\" to quit" >> "$R/quit.txt" 2>&1 ;;
+  e) # AppleScript quit은 번들 id로 간다 — 그 번들의 실행 중 인스턴스가 정확히 이 APID 하나일 때만 보낸다.
+     same=$("$SMOKE/apps-named" --bundle "$BID" 2>/dev/null)
+     log "bundle-pids=${same:-none}"
+     if [ "$same" = "$APID" ]; then
+       osascript -e "tell application id \"$BID\" to quit" >> "$R/quit.txt" 2>&1
+     else
+       log "applescript-quit-not-sent: the bundle id does not map to exactly this app (attempt invalid)"
+     fi ;;
   g) kill -TERM "$APID" ;;
   *) log "unknown path"; exit 4 ;;
 esac

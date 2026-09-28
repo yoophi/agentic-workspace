@@ -82,6 +82,12 @@ pub struct ScriptedRunEngine {
     /// 있으면 `send_prompt`가 효과를 낸 **뒤** 허가를 하나 얻을 때까지 돌아가지 않는다(044 #207: 작업대 닫기와 호출 완료
     /// 순서를 시간 지연 없이 뒤집는다).
     pub prompt_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    /// `queue_prompt`(교환 전달 등 대기열 prompt)을 붙잡는 문(OCR 4차: 진행 중 전달과 작업대 닫기의 순서 시험). 문에 닿으면
+    /// `queue_entered`를 알린다.
+    pub queue_gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
+    pub queue_entered: Arc<tokio::sync::Notify>,
+    /// 다음 `queue_prompt` 한 번을 문 뒤에서 실패시킨다(실패로 끝나는 늦은 전달).
+    pub fail_next_queue_prompt: std::sync::atomic::AtomicBool,
     work_gate: OnceLock<Arc<WorkGate>>,
     /// `start`가 받은 요청(044: launch decorator가 넣은 MCP 연결을 시험이 확인한다).
     pub start_requests: Mutex<Vec<AgentRunRequest>>,
@@ -420,6 +426,17 @@ impl RunEngine for ScriptedRunEngine {
         let _guard = self.reserve_turn(run_id)?;
         if self.script.prompt_delay_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_delay_ms)).await;
+        }
+        let gate = self.queue_gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            self.queue_entered.notify_one();
+            gate.acquire().await.expect("queue gate open").forget();
+        }
+        if self.fail_next_queue_prompt.swap(false, Ordering::SeqCst) {
+            return Err(RunEngineError::new(
+                RunErrorKind::Internal,
+                "injected queue_prompt failure",
+            ));
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.mark_applied(format!("prompt:{run_id}:{prompt}"));

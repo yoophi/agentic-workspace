@@ -41,10 +41,10 @@ osascript -e "tell application id \"$BID\" to activate" >/dev/null 2>&1; sleep 1
 MAIN=$(sx 'get name of front window')
 log "main-window=$MAIN"
 invalid_stop() {
-  # 전역 키를 보내지 않고 이 시도를 무효로 끝낸다. 정리는 이 앱(번들 id)과 기록한 신원의 pid만.
+  # 전역 키를 보내지 않고 이 시도를 무효로 끝낸다. 정리는 기록한 신원(pid·시작 시각·명령줄)이 같은 이 실행의 pid만 —
+  # 번들 id로 quit하지 않는다(`open -n`으로 같은 번들의 다른 인스턴스가 떠 있을 수 있다).
   log "key-not-sent: $1 (attempt invalid)"
-  osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1; for i in $(seq 1 20); do kill -0 "$APID" 2>/dev/null || break; sleep 0.5; done
-  kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
+  kill_exact "$R/kills.txt" "$APID"
   kill_exact "$R/kills.txt" "$SPID"
   exit 6
 }
@@ -75,7 +75,7 @@ log "run-removed=$ok"
 grep -o 'operation="desktop.retireWindow"[^\n]*' "$DATA/workbench/server/server.log" > "$R/retire.log"; log "retireWindow-calls=$(wc -l < "$R/retire.log" | tr -d ' ')"
 grep -n "retire" "$R/app.log" | head -5 >> "$R/meta.txt"
 # 정리: 앱이 살아 있으면 AppleScript quit, 그래도 남으면 정확한 PID. 서버는 확인된 PID.
-if kill -0 "$APID" 2>/dev/null; then osascript -e "tell application id \"$BID\" to quit" >/dev/null 2>&1; for i in $(seq 1 20); do kill -0 "$APID" 2>/dev/null || break; sleep 0.5; done; fi
+# 정리: 번들 id quit 대신 기록한 신원의 pid만 끝낸다.
 kill -0 "$APID" 2>/dev/null && kill_exact "$R/kills.txt" "$APID"
 kill_exact "$R/kills.txt" "$SPID"; for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "cleanup: app=$(kill -0 "$APID" 2>/dev/null && echo alive || echo gone) server=$(kill -0 "$SPID" 2>/dev/null && echo alive || echo gone)"

@@ -164,6 +164,13 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | Y3 | high(docs) | close-run.sh의 전역 Cmd+,·Cmd+W가 앞 앱 확인 없이 나감 | `77d5213`: `send_key_to`가 앞 프로세스가 APID임을 두 번 확인한 뒤에만 보냄, 아니면 무효·정리 | 스크립트 |
 | Y4 | medium(docs) | stalled 상한 조건이 문서마다 `attemptCount`/시도 횟수로 남음 | `77d5213`: data-model·spec·ADR 0009를 `deliveryFailureCount < 3` + 바쁨 거절 예외로 통일(구현 리뷰의 옛 결정은 "대체됨"으로 표시) | 문서 |
 
+### OCR 4차 (`299cb3a..8865589`)
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| P1 | Medium | 진행 중 교환 전달(작업대 입장권을 쥐지 않음)이 작업대 닫기 뒤 완료되면서 닫힌 작업대의 기록을 되살림(`failedExchangeDeliveries`에 남음) | 관문에 닫힌 작업대 tombstone. `forget_bench_exchanges`가 세우고, `begin_exchange_delivery`는 `BenchClosed`(→ notFound)로 거절, `record_failed_delivery`는 적지 않음(모두 관문 잠금 아래) | 단위 시험 `a_delivery_arriving_after_the_bench_closed_leaves_no_record`: compile red(`closed-red-1`) → 동작 red(`closed-red-2`, 변형만 추가) → green(`closed-green-1`, `work_gate` 10 passed). **결정적 순서 시험**(`exchange_bench_scope.rs`): 가짜 엔진 `queue_prompt` 문(`queue_gate`·`queue_entered`)으로 전달을 엔진 안에서 붙잡음 → 작업대 A 닫기 완료 → 문 열기. 성공 완료·실패 완료(`fail_next_queue_prompt`) 두 경우 모두 A의 소비·실패 기록이 되살아나지 않고, B의 같은 id 교환은 그대로 1회 전달된다(`late-green-1`, 6 passed). 실패 기록 건너뛰기를 뺀 변이: 실패 완료 시험 red(`late-mut-record`). 순서 시험은 수정 뒤 작성했으므로 수정 전 실패는 변이로 보였다 |
+| P2 | Medium | 스모크 `invalid_stop`이 번들 id로 quit(같은 번들의 다른 인스턴스를 끌 수 있음) | `invalid_stop`과 close-run 최종 정리가 기록한 신원(pid·시작 시각·명령줄) 확인을 거친 `kill_exact`만 쓴다. quit-run의 (e) AppleScript quit은 시험 대상 경로라 번들 id로 보내되, 그 번들의 실행 중 인스턴스가 정확히 APID 하나일 때만 보낸다(`apps-named --bundle`) | 스크립트. `kill_exact` 신원 확인은 앞선 자기 시험으로 검증됨 |
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).

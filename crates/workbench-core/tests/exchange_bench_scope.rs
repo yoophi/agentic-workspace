@@ -183,3 +183,61 @@ async fn closing_a_bench_drops_only_its_exchange_records() {
         "bench B's record stays"
     );
 }
+
+/// OCR 4차 M1: 이미 진행 중인 교환 전달(엔진 대기열 prompt 안에서 문으로 붙잡음)이 **작업대 닫기가 끝난 뒤** 완료될 때
+/// 닫힌 작업대의 기록(소비·실패)을 되살리지 않고, 다른 작업대의 같은 id 교환에도 영향을 주지 않는다. `fail`이면 늦은
+/// 전달이 실패로 끝난다(실패 기록 경로).
+async fn a_late_delivery_after_close(fail: bool) {
+    use std::sync::{atomic::Ordering, Arc};
+    let h = BenchHarness::new(RunScript::default());
+    let (a, b) = two_benches(&h).await;
+    let gate_open = Arc::new(tokio::sync::Semaphore::new(0));
+    *h.engine.queue_gate.lock().unwrap() = Some(Arc::clone(&gate_open));
+    h.engine.fail_next_queue_prompt.store(fail, Ordering::SeqCst);
+    let entered = Arc::clone(&h.engine.queue_entered);
+    let closer = async {
+        // 전달이 엔진 안에서 문에 닿은 뒤(관문 소비 기록은 이미 섰다) 작업대 A를 닫는다.
+        entered.notified().await;
+        h.call(
+            &AuthenticatedPrincipal::desktop(),
+            OperationId::BenchClose,
+            json!({ "benchId": a }),
+        )
+        .await
+        .expect("close bench A while its delivery is in flight");
+        let gate = h.rt.runtime.work_gate();
+        assert!(!gate.exchange_consumed(&a, EXCHANGE), "dropped at close");
+        gate_open.add_permits(1);
+    };
+    let (delivered, ()) = tokio::join!(deliver(&h, &a, "r2"), closer);
+    let _ = delivered; // 성공이든 실패든 — 닫힌 작업대의 기록이 되살아나지 않는지를 본다
+    *h.engine.queue_gate.lock().unwrap() = None;
+    let gate = h.rt.runtime.work_gate();
+    assert!(
+        !gate.exchange_consumed(&a, EXCHANGE),
+        "the late completion does not recreate bench A's consumption record"
+    );
+    let failed = gate.failed_deliveries();
+    assert!(
+        !failed.iter().any(|entry| entry.starts_with(&format!("{a}/"))),
+        "no failure record for the closed bench: {failed:?}"
+    );
+    assert!(
+        !gate.exchange_consumed(&b, EXCHANGE),
+        "bench B's exchange is untouched"
+    );
+    deliver(&h, &b, "r4")
+        .await
+        .expect("bench B still delivers its own exchange once");
+    assert!(gate.exchange_consumed(&b, EXCHANGE));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_delivery_that_succeeds_after_its_bench_closed_leaves_no_record() {
+    a_late_delivery_after_close(false).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_delivery_that_fails_after_its_bench_closed_leaves_no_record() {
+    a_late_delivery_after_close(true).await;
+}
