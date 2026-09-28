@@ -411,13 +411,13 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 현재 결론은 **r13의 18건 모두 유효했고 반영·검증을 마쳤다.** targeted 결과만으로 끝내지 않고 코드 `c4c8e0b`에서 gate-20과 Gate20 개발·배포 앱 smoke를 통과했다. owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다.
 
-그러나 r13 뒤 `1a48e0c`·`c952011`·`89ebe49`·`c4c8e0b` 수정에는 아래의 **최종 OCR delegate 재리뷰와 그 뒤 Codex adversarial `--wait` 4/4 재리뷰**가 추가로 필요하다. OCR 재리뷰와 지적 반영은 아래처럼 끝났지만 Codex 재리뷰는 아직 실행 전이다. 따라서 T053과 044 merge gate는 미완료이며, gate-20과 앱 smoke만으로 리뷰 완료 또는 044 전체 완료를 주장하지 않는다. Codex 결과·유효 지적 반영·필요한 재검증을 이 문서에 추가한 뒤에만 완료로 바꾼다. 044를 완료하더라도 5단계 전체 로드맵 완료를 뜻하지 않는다.
+r13 뒤 `1a48e0c`·`c952011`·`89ebe49`·`c4c8e0b` 수정에는 아래의 **최종 OCR delegate 재리뷰와 그 뒤 Codex adversarial `--wait` 4/4 재리뷰**를 추가로 수행했다. gate-20과 앱 smoke만으로 리뷰 완료를 주장하지 않고, 두 재리뷰의 8건을 반영한 뒤 gate-21까지 통과해 T053을 완료했다. 044를 완료하더라도 5단계 전체 로드맵 완료를 뜻하지 않는다.
 
 ### 최종 OCR delegate 재리뷰
 
 - 순서·범위: Codex 최종 재리뷰보다 먼저 `cb0bd4c..f288d85`를 `ocr delegate preview --format json`으로 고정했다. Git 변경은 451개, OCR reviewable은 339개, 규칙상 제외는 112개다. reviewable 339개를 모두 검토했고(`reviewed=339`, `skipped=0`, coverage 100%), 제외 112개는 preview의 사유와 함께 별도 계수했다. 원 preview·규칙·파일별 coverage는 `/private/tmp/aw-044-final-rereview/`에 보존한다.
 - verdict: **needs-attention, Medium 1건**. `agentic-workbench-server status`가 `server.status` 전에 신규 연결용 `verify()`를 호출해 `/health/ready`가 503인 정상 `drainingWait` 서버의 query까지 실패했다. 계약은 draining 중에도 `server.status` 조회를 허용한다.
-- 반영·검증: CLI만 동일 인스턴스 신원·protocol/storage를 확인하는 `verify_instance()`를 사용하도록 바꾸고, 실제 process 시험에서 busy turn → `stop --wait` → `drainingWait` 중 `status` CLI 종료 코드 0과 상태 payload를 확인했다. targeted 결과는 **1 passed, 0 failed, filtered 16, 종료 코드 0**이다. 이 수정 뒤 HEAD에서 Codex adversarial `--wait` 4/4를 실행하며, 그 전까지 T053은 미완료다.
+- 반영·검증: CLI만 동일 인스턴스 신원·protocol/storage를 확인하는 `verify_instance()`를 사용하도록 바꾸고, 실제 process 시험에서 busy turn → `stop --wait` → `drainingWait` 중 `status` CLI 종료 코드 0과 상태 payload를 확인했다. targeted 결과는 **1 passed, 0 failed, filtered 16, 종료 코드 0**이다. 이 수정 뒤 HEAD에서 아래 Codex adversarial `--wait` 4/4를 실행했다.
 
 ### 최종 Codex adversarial 재리뷰 (`--wait` 4/4)
 
@@ -433,9 +433,11 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | F4 | High | **유효** — unknown 직접 전송의 offline/notApplied 재시도가 원 key를 지워 reconnect 뒤 중복 가능 | notApplied는 앞 unknown marker/key를 유지하고 success/replayed 또는 확정 종료에서만 해소 | unknown → offline notApplied → reconnect 세 요청의 key 동일 |
 | F5 | High | **유효** — old-run pending HTTP completion이 cancel·replacement 뒤 새 draft/marker를 덮을 수 있음 | direct send completion의 모든 UI mutation을 active run + operation generation으로 제한 | old pending → cancel 확인 → replacement/new draft → old unknown 순서에서 draft 유지·새 전송 가능 |
 | F6 | Medium | **유효** — desktop 계약이 폐기된 same-run `promptSent` 적용 추정을 유지 | stable key + `replayed=true`만 확정 근거, unrelated lifecycle 배제, notApplied key 유지로 계약 교체 | 같은 run의 더 새 direct operation 뒤 이전 completion을 무시하는 경우 포함 패널 파일 **63/63**, rc 0; typecheck rc 0 |
-| F7 | Medium | **유효** — gate-20 뒤 CLI 변경이 있는데 T052가 `c4c8e0b`를 최종 tree 전체 gate로 표시 | T052를 미완료로 되돌리고 gate-20·앱 16건은 `c4c8e0b` 출처 증거로 보존 | 최종 수정 tree의 8단계 gate 대기 |
+| F7 | Medium | **유효** — gate-20 뒤 CLI 변경이 있는데 T052가 `c4c8e0b`를 최종 tree 전체 gate로 표시 | T052를 미완료로 되돌리고 gate-20·앱 16건은 `c4c8e0b` 출처 증거로 보존 | `2a64b06` gate-21 전체 8단계 rc 0 |
 
-7건은 모두 유효로 판정해 반영했지만, 위 표는 targeted 검증이다. T052·T053은 `2b6df4b` 이후 정본 기록까지 포함한 최종 tree의 전체 gate와 필요한 앱 회귀 범위를 확인하기 전까지 미완료다.
+7건은 모두 유효로 판정해 반영했다. targeted 검증 뒤 정본 기록까지 포함한 `2a64b06`(tree `c845defc2cd0f1c42fdae1c4646a6934eecb0553`)에서 `CARGO_INCREMENTAL=0` gate-21을 실행했다. fmt, clippy workspace all-targets `-D warnings`, Cargo workspace all-targets, `check-types`, 전체 `pnpm test`, build, workbench-client integration, AW integration의 **8단계 모두 종료 코드 0**이다. Cargo는 94 targets, 1019 passed, 0 failed, 7 ignored, filtered 0이고 두 integration은 7/7·14/14다. 전체 pnpm test 안에서 AW 패널 63/63, AW 전체 679/679도 통과했다. 원 로그와 단계별 종료 코드는 `/private/tmp/aw-044-final-gate-21/`에 있다. 이로써 T052·T053 구현/검증 기록은 완료지만 PR CI와 merge는 별도 외부 절차다. Gate20 개발·배포 앱 close/quit 16건은 최신 gate로 재분류하지 않고 원래 출처 `c4c8e0b` 증거로 보존한다.
+
+최신 변경의 앱 회귀 범위도 분리한다. `c4c8e0b..2a64b06`은 Tauri close menu, `window_close_intent`, desktop retire client 코드를 바꾸지 않았으므로 실제 앱 close/quit 16건을 새 tree 실행으로 표시하지 않고 `c4c8e0b` 증거로 유지한다. 이후 변경은 server status/stop preflight, notification·exchange 수명, panel direct-prompt 복구다. 전자는 실제 process 18/18과 Cargo 전체 gate, notification 8/8·exchange 11/11로 검증했고, panel은 요청된 세 순서(unknown→offline notApplied→reconnect 동일 key, old-run pending→확정 cancel→replacement draft→late completion, 같은 run의 이전 completion→새 operation)를 포함한 63/63과 실제 host AW integration 14/14로 검증했다.
 
 #### 수정 중 전체 suite에서 발견한 회귀
 
