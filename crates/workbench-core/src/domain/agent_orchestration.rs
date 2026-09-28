@@ -376,6 +376,18 @@ impl OrchestrationTask {
         self.revision += 1;
         Ok(())
     }
+
+    /// 끝나지 못한 기동의 되돌리기(Codex r7): 그 기동의 run이 만든 실행 중 상태(`Running`·`InputRequired`)를 다시 배정할 수
+    /// 있는 `Ready`로 돌린다. 기동 자체가 취소됐으므로 상태 전이 규칙(`Running→Ready` 없음)의 예외다 — 되돌린 run은 이
+    /// task의 시도로 남지 않는다. 다른 상태는 그대로 둔다.
+    pub fn revert_aborted_launch(&mut self, now: impl Into<String>) {
+        if !matches!(self.status, TaskStatus::Running | TaskStatus::InputRequired) {
+            return;
+        }
+        self.status = TaskStatus::Ready;
+        self.updated_at = now.into();
+        self.revision += 1;
+    }
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Eq, PartialEq, Serialize)]

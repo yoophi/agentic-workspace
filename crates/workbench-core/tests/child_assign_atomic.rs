@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use support::{scripted_run_engine::RunScript, BenchHarness};
 use tokio::sync::{mpsc, Semaphore};
 use workbench_core::application::orchestration::runtime::{
-    LaunchPoint, LaunchProbe, ReservePoint, ReserveProbe,
+    LaunchPoint, LaunchProbe, StorePoint, StoreProbe,
 };
 use workbench_protocol::{AuthenticatedPrincipal, OperationId, WorkbenchFault};
 
@@ -494,14 +494,14 @@ async fn aborting_the_assign_while_the_store_reservation_commits_rolls_it_back()
     let (reached_tx, mut reached) = mpsc::unbounded_channel();
     let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
     let release_rx = std::sync::Mutex::new(release_rx);
-    let probe: ReserveProbe = Arc::new(move |point| {
+    let probe: StoreProbe = Arc::new(move |point| {
         let _ = reached_tx.send(point);
-        if point == ReservePoint::BeforeCommit {
+        if point == StorePoint::ReserveBeforeCommit {
             // blocking 스레드에서 불린다: 시험이 abort를 마칠 때까지 커밋을 붙잡는다.
-            let _ = release_rx.lock().unwrap().recv();
+            let _ = release_rx.lock().unwrap().recv_timeout(WAIT);
         }
     });
-    h.rt.runtime.orchestration().set_reserve_probe(Some(probe));
+    h.rt.runtime.orchestration().set_store_probe(Some(probe));
     let assigning = {
         let (h, bench, task_id) = (Arc::clone(&h), bench.clone(), task_id.clone());
         tokio::spawn(async move {
@@ -513,17 +513,17 @@ async fn aborting_the_assign_while_the_store_reservation_commits_rolls_it_back()
     };
     assert_eq!(
         tokio::time::timeout(WAIT, reached.recv()).await.unwrap(),
-        Some(ReservePoint::BeforeCommit)
+        Some(StorePoint::ReserveBeforeCommit)
     );
     assigning.abort();
     assert!(assigning.await.unwrap_err().is_cancelled());
     release_tx.send(()).unwrap();
     assert_eq!(
         tokio::time::timeout(WAIT, reached.recv()).await.unwrap(),
-        Some(ReservePoint::AfterCommit),
+        Some(StorePoint::ReserveAfterCommit),
         "the reservation committed after the abort"
     );
-    h.rt.runtime.orchestration().set_reserve_probe(None);
+    h.rt.runtime.orchestration().set_store_probe(None);
     eventually("the planned run id is released from the node", || async {
         node_of(&session(&h, &bench).await, &task_id)["currentRunId"].is_null()
     })
@@ -616,4 +616,288 @@ async fn binding_a_run_to_a_cancelled_task_is_refused() {
     let after = session(&h, &bench).await;
     assert!(node_of(&after, &task_id)["currentRunId"].is_null());
     assert_eq!(task(&after, &task_id)["status"], "cancelled");
+}
+
+/// 저장소 지점 멈춤(blocking 스레드에서 동기로 불림): `point`에 닿으면 알리고, 시험이 풀 때까지 그 커밋 단계를 붙잡는다.
+/// 다른 지점은 알리기만 한다.
+struct StorePause {
+    reached: mpsc::UnboundedReceiver<StorePoint>,
+    release: std::sync::mpsc::Sender<()>,
+}
+
+fn pause_store_at(h: &BenchHarness, point: StorePoint) -> StorePause {
+    let (reached_tx, reached) = mpsc::unbounded_channel();
+    let (release, release_rx) = std::sync::mpsc::channel::<()>();
+    let release_rx = std::sync::Mutex::new(release_rx);
+    let probe: StoreProbe = Arc::new(move |at| {
+        let _ = reached_tx.send(at);
+        if at == point {
+            let _ = release_rx.lock().unwrap().recv_timeout(WAIT);
+        }
+    });
+    h.rt.runtime.orchestration().set_store_probe(Some(probe));
+    StorePause { reached, release }
+}
+
+impl StorePause {
+    async fn wait_for(&mut self, point: StorePoint) {
+        loop {
+            let at = tokio::time::timeout(WAIT, self.reached.recv())
+                .await
+                .unwrap_or_else(|_| panic!("never reached {point:?}"))
+                .expect("store probe alive");
+            if at == point {
+                return;
+            }
+        }
+    }
+}
+
+type LaunchJoin = tokio::task::JoinHandle<
+    workbench_core::application::orchestration::runtime::OrchestrationResult<
+        workbench_core::domain::agent_orchestration::OrchestrationSession,
+    >,
+>;
+
+/// 배정 future를 직접 띄운다(abort 대상 — HTTP 연결 단절 등으로 호출 future가 drop되는 경우와 같다).
+fn spawn_launch(h: &Arc<BenchHarness>, bench: &str, task_id: &str) -> LaunchJoin {
+    let (h, bench, task_id) = (Arc::clone(h), bench.to_owned(), task_id.to_owned());
+    tokio::spawn(async move {
+        h.rt.runtime
+            .orchestration()
+            .launch_task_for_ui(&bench, &task_id)
+            .await
+    })
+}
+
+/// abort 뒤 공통 끝 상태: 새 run 0(준비·실행한 run은 취소됨), 노드 run 해제, 관문 예약 0, scheduler 자리 반납, 정지 판정이
+/// 실행 중 task로 막히지 않음(`orchestration_tasks == 0`), task는 `expected_status`.
+async fn assert_launch_undone(
+    h: &BenchHarness,
+    bench: &str,
+    task_id: &str,
+    baseline: Baseline,
+    expected_status: &str,
+    label: &str,
+) {
+    eventually(&format!("{label}: the launched run is gone"), || async {
+        h.engine.run_count() == baseline.runs
+    })
+    .await;
+    eventually(&format!("{label}: node run released"), || async {
+        node_of(&session(h, bench).await, task_id)["currentRunId"].is_null()
+    })
+    .await;
+    let gate = Arc::clone(h.rt.runtime.work_gate());
+    eventually(&format!("{label}: gate reservations released"), || {
+        let gate = Arc::clone(&gate);
+        async move { gate.reservation_total() == 0 }
+    })
+    .await;
+    eventually(&format!("{label}: the scheduler slot is returned"), || async {
+        h.rt.runtime
+            .orchestration()
+            .scheduler()
+            .active_count()
+            .unwrap()
+            == 0
+    })
+    .await;
+    let current = session(h, bench).await;
+    assert_eq!(
+        task(&current, task_id)["status"],
+        expected_status,
+        "{label}: task and node agree (no run, no running task)"
+    );
+    assert!(
+        node_of(&current, task_id)["currentRunId"].is_null(),
+        "{label}: no late write re-binds the cancelled run"
+    );
+    assert_eq!(
+        h.rt.runtime.server_control().derive().await.orchestration_tasks,
+        0,
+        "{label}: no running task blocks a wait stop"
+    );
+}
+
+/// 재배정이 실제 run을 기동한다(`alreadyAssigned`로 막히지 않는다).
+async fn assert_reassign_starts_a_real_run(
+    h: &BenchHarness,
+    bench: &str,
+    task_id: &str,
+    baseline: Baseline,
+    label: &str,
+) {
+    let assigned = assign(h, task_id, &format!("reassign-{label}"))
+        .await
+        .unwrap();
+    assert!(
+        assigned.get("alreadyAssigned").is_none(),
+        "{label}: a stale launch blocks reassignment: {assigned}"
+    );
+    assert_eq!(assigned["executionStatus"], "active", "{label}: {assigned}");
+    let run_id = assigned["runId"].as_str().unwrap().to_owned();
+    let current = session(h, bench).await;
+    assert_eq!(node_of(&current, task_id)["currentRunId"], run_id.as_str());
+    assert_eq!(task(&current, task_id)["status"], "running");
+    let launched = format!("launch:{run_id}");
+    h.engine
+        .wait_applied(|label| label == launched, WAIT)
+        .await;
+    assert_eq!(
+        h.engine.run_count(),
+        baseline.runs + 1,
+        "{label}: exactly one live child run"
+    );
+}
+
+/// Codex r7 (a): 바인딩 커밋 **직전**에 배정 future를 abort. 바인딩은 blocking 작업이라 커밋을 이어 가므로, 정리는 그 결과를
+/// 기다린 뒤 run을 취소하고 task·노드를 한 트랜잭션에서 되돌려야 한다(늦은 바인딩이 취소된 run id를 다시 적지 않는다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_assign_just_before_the_bind_commit_undoes_the_launch() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let mut pause = pause_store_at(&h, StorePoint::BindBeforeCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::BindBeforeCommit).await;
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    pause.release.send(()).unwrap();
+    pause.wait_for(StorePoint::BindAfterCommit).await;
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "bind-before").await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "bind-before").await;
+}
+
+/// Codex r7 (b): 바인딩 커밋 **직후**·결과를 받기 전에 abort. task는 Running·노드는 새 run으로 커밋됐지만 배정은 끝나지 않았다
+/// — 정리가 run을 취소하고 task를 다시 배정할 수 있는 상태로 되돌린다(Running인데 run 없음을 남기지 않는다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_assign_right_after_the_bind_commit_undoes_the_launch() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let mut pause = pause_store_at(&h, StorePoint::BindAfterCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::BindAfterCommit).await;
+    assert_eq!(
+        task(&session(&h, &bench).await, &task_id)["status"],
+        "running",
+        "the bind committed"
+    );
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "bind-after").await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "bind-after").await;
+}
+
+/// Codex r7 (c): 실패 정리가 엔진 취소를 기다리는 동안 abort. 등록 전 취소로 기동이 실패하면 정리는 준비한 run을 취소하고
+/// 노드 예약을 푼다 — 그 await 중에 배정 future가 drop돼도 정리는 끝까지 간다(준비한 run·노드 예약이 남지 않는다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_assign_while_failure_cleanup_cancels_the_engine_run_finishes_it() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let mut launch_pause = pause_at(&h, LaunchPoint::AfterPrepare);
+    let (cancel_tx, mut cancel_reached) = mpsc::unbounded_channel();
+    let cancel_release = Arc::new(Semaphore::new(0));
+    {
+        let gate = Arc::clone(&cancel_release);
+        *h.engine.cancel_hook.lock().unwrap() = Some(Arc::new(move |_run| {
+            let (tx, gate) = (cancel_tx.clone(), Arc::clone(&gate));
+            Box::pin(async move {
+                let _ = tx.send(());
+                gate.acquire().await.expect("cancel gate").forget();
+            })
+        }));
+    }
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    tokio::time::timeout(WAIT, launch_pause.reached.recv())
+        .await
+        .expect("assign reached AfterPrepare");
+    cancel(&h, &task_id, "cancel").await.unwrap();
+    launch_pause.release.add_permits(1);
+    tokio::time::timeout(WAIT, cancel_reached.recv())
+        .await
+        .expect("failure cleanup is cancelling the prepared run");
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    cancel_release.add_permits(1);
+    assert_launch_undone(&h, &bench, &task_id, baseline, "cancelled", "fail-cancel").await;
+    *h.engine.cancel_hook.lock().unwrap() = None;
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    // 취소된 task는 다시 배정하지 않는다: 반납된 자리(동시 한도 1)로 새 과제가 실제 run을 기동한다.
+    let created = tool(
+        &h,
+        "coord",
+        OperationId::OrchestrationCreateChildTask,
+        json!({
+            "requestId": "c-after", "title": "after",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read again", "expectedResult": "summary"
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(created["executionStatus"], "active", "{created}");
+    let launched = format!("launch:{}", created["runId"].as_str().unwrap());
+    h.engine
+        .wait_applied(|label| label == launched, WAIT)
+        .await;
+}
+
+/// Codex r7 (d): 실패 정리가 저장소 예약 해제를 기다리는 동안 abort. 엔진 준비가 실패하면 정리는 노드 예약을 풀고 호출자는
+/// scheduler 자리를 반납한다 — 배정 future가 그 사이 drop되면 호출자가 없으므로 정리가 자리를 반납해야 한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_the_assign_while_failure_cleanup_releases_the_reservation_finishes_it() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    h.engine.fail_next_start.store(true, Ordering::SeqCst);
+    let mut pause = pause_store_at(&h, StorePoint::RevertBeforeCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::RevertBeforeCommit).await;
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "fail-release").await;
+    assert_eq!(child_executions(&h, baseline), Vec::<String>::new());
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "fail-release").await;
+}
+
+/// Codex r7 관련 전이: 되돌리기가 끝나기 전의 새 배정은 곧 취소될 예정 run id(`alreadyAssigned` 또는 `Started`)를 받지 않고
+/// 재시도 가능하게 거절된다. 되돌리기가 끝나면 같은 배정이 실제 run을 기동한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_assign_during_a_rollback_is_refused_retryably_instead_of_getting_the_doomed_run() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let mut pause = pause_store_at(&h, StorePoint::BindAfterCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::BindAfterCommit).await;
+    let doomed = node_of(&session(&h, &bench).await, &task_id)["currentRunId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    // 바인딩 커밋은 아직 붙잡혀 있다: 되돌리기가 그 결과를 기다리는 중이다.
+    // 상한(대기 상한, 기대값 아님): 되돌리기 중 배정은 붙잡힌 커밋을 기다리지 않고 곧바로 답해야 한다.
+    let during = tokio::time::timeout(WAIT, assign(&h, &task_id, "during-rollback"))
+        .await
+        .expect("the assign during the rollback answers without waiting for the held commit")
+        .expect("the assign call itself is answered");
+    assert!(
+        during["runId"].is_null(),
+        "an assign during the rollback got a run: {during} (doomed {doomed})"
+    );
+    assert_eq!(during["launch"]["status"], "failed", "{during}");
+    assert_eq!(during["launch"]["code"], "launchRollingBack", "{during}");
+    assert_eq!(during["launch"]["retryable"], true, "{during}");
+    assert_eq!(
+        h.rt.runtime
+            .orchestration()
+            .scheduler()
+            .active_count()
+            .unwrap(),
+        1,
+        "the refused assign does not return the slot the rollback still holds"
+    );
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "during-rollback").await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "during-rollback").await;
 }

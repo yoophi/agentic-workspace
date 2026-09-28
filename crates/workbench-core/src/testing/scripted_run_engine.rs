@@ -76,6 +76,10 @@ pub struct ScriptedRunEngine {
     pub start_hook: Mutex<Option<TurnHook>>,
     /// 준비 안(run을 registry에 예약하고 실행 task를 spawn한 뒤·attach 전)에서 실행한다(044 T038 시작 장벽 지점).
     pub prepare_hook: Mutex<Option<TurnHook>>,
+    /// `cancel`이 슬롯을 지우기 **전에** 실행한다(Codex r7: 실패 정리가 엔진 취소를 기다리는 동안의 abort 재현).
+    pub cancel_hook: Mutex<Option<TurnHook>>,
+    /// 다음 `start_gated` 한 번을 재시도 가능 오류로 실패시킨다(엔진 준비 실패 → 기동 실패 정리 재현).
+    pub fail_next_start: std::sync::atomic::AtomicBool,
     /// 효과 표지(`start:<run>`, `prompt:<run>:<text>`). 효과가 난 직후·settle 지연 전에 기록된다(042 R17 시험 동기화).
     applied: Arc<Mutex<Vec<String>>>,
     applied_notify: Arc<tokio::sync::Notify>,
@@ -283,6 +287,12 @@ impl RunEngine for ScriptedRunEngine {
     ) -> Result<AgentRun, RunEngineError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
         self.start_requests.lock().unwrap().push(request.clone());
+        if self.fail_next_start.swap(false, Ordering::SeqCst) {
+            return Err(RunEngineError::new(
+                RunErrorKind::Unavailable,
+                "scripted start failure",
+            ));
+        }
         let run_id = request.run_id.clone().expect("normalized run id");
         let initial_turn = self.reserve_turn(&run_id)?;
         {
@@ -519,6 +529,10 @@ impl RunEngine for ScriptedRunEngine {
     }
 
     async fn cancel(&self, run_id: &str, sink: WorkbenchRunSink) {
+        let hook = self.cancel_hook.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(run_id.to_owned()).await;
+        }
         let cancelled = self.runs.lock().unwrap().remove(run_id).is_some();
         sink.emit(
             run_id,

@@ -119,17 +119,41 @@ pub enum LaunchPoint {
     AfterOpen,
 }
 
-/// 자식 run 저장소 예약(`reserve_child_run`, blocking 스레드) 전후 지점(Codex r6 medium 재현).
+/// 자식 기동의 저장소 커밋 단계(blocking 스레드) 전후 지점(Codex r6·r7 abort 재현).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReservePoint {
-    /// 저장소 예약(RMW 커밋) 직전.
-    BeforeCommit,
-    /// 저장소 예약이 끝난 뒤.
-    AfterCommit,
+pub enum StorePoint {
+    /// 노드 예약(`reserve_child_run`, RMW 커밋) 직전.
+    ReserveBeforeCommit,
+    /// 노드 예약이 끝난 뒤.
+    ReserveAfterCommit,
+    /// run 바인딩(`bind_child_run`) 커밋 직전.
+    BindBeforeCommit,
+    /// run 바인딩이 끝난 뒤.
+    BindAfterCommit,
+    /// 기동 되돌리기(노드 예약 해제) 커밋 직전.
+    RevertBeforeCommit,
 }
 
 /// blocking 스레드에서 동기로 불린다(await 없음).
-pub type ReserveProbe = std::sync::Arc<dyn Fn(ReservePoint) + Send + Sync>;
+pub type StoreProbe = std::sync::Arc<dyn Fn(StorePoint) + Send + Sync>;
+
+/// 같은 task의 진행 중 기동(단일 비행 표 값).
+#[derive(Debug, Clone)]
+pub(crate) struct LaunchSlot {
+    token: u64,
+    planned_run_id: String,
+    /// 기동이 실패·abort로 되돌리는 중이다(되돌리기가 끝나면 자리를 지운다).
+    rolling_back: bool,
+}
+
+/// [`OrchestrationRuntime::begin_task_launch`]가 거절한 이유.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum LaunchInFlight {
+    /// 같은 task가 기동 중이다(그 예정 run id).
+    Launching(String),
+    /// 같은 task의 앞 기동을 되돌리는 중이다(재시도 가능).
+    RollingBack,
+}
 
 pub type LaunchProbe = std::sync::Arc<
     dyn Fn(LaunchPoint) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
@@ -149,7 +173,7 @@ pub struct OrchestrationRuntime {
     /// 도구를 불러도 자식 역할을 인정한다(research R7, 설계 리뷰 H6). 메모리 상태.
     launching: std::sync::Mutex<std::collections::HashMap<String, (String, String, String)>>,
     launch_probe: std::sync::Mutex<Option<LaunchProbe>>,
-    reserve_probe: std::sync::Mutex<Option<ReserveProbe>>,
+    store_probe: std::sync::Mutex<Option<StoreProbe>>,
     dispatch_probe: std::sync::Mutex<Option<super::notification_dispatcher::DispatchProbe>>,
     /// 마지막으로 띄운 알림 전달 한 바퀴(시험이 abort한다).
     last_notification_pass: std::sync::Mutex<Option<tokio::task::AbortHandle>>,
@@ -159,7 +183,7 @@ pub struct OrchestrationRuntime {
     weak_self: std::sync::OnceLock<std::sync::Weak<Self>>,
     /// 기동 중인 task → (기동 토큰, 예정 run id). 같은 task의 기동을 하나로 묶고(단일 비행), 취소가 토큰으로 기동을
     /// 막을 수 있게 한다(044 R14 표 4·5). 메모리 상태 — 토큰은 이 프로세스의 작업 관문에서만 뜻이 있다.
-    launch_tokens: std::sync::Mutex<std::collections::HashMap<String, (u64, String)>>,
+    launch_tokens: std::sync::Mutex<std::collections::HashMap<String, LaunchSlot>>,
     /// 작업대 서비스에 관문이 없을 때(관문 없는 조립) 쓰는 자체 관문.
     fallback_gate: std::sync::OnceLock<std::sync::Arc<crate::application::work_gate::WorkGate>>,
 }
@@ -182,7 +206,7 @@ impl OrchestrationRuntime {
             guards,
             launching: std::sync::Mutex::default(),
             launch_probe: std::sync::Mutex::default(),
-            reserve_probe: std::sync::Mutex::default(),
+            store_probe: std::sync::Mutex::default(),
             dispatch_probe: std::sync::Mutex::default(),
             last_notification_pass: std::sync::Mutex::default(),
             notification_retries: std::sync::Mutex::default(),
@@ -202,22 +226,55 @@ impl OrchestrationRuntime {
         }
     }
 
-    /// 같은 task의 기동이 진행 중이면 그 예정 run id를 돌려주고, 아니면 이 기동을 등록한다.
+    /// 같은 task의 기동이 진행 중이면 그 예정 run id를(되돌리는 중이면 [`LaunchInFlight::RollingBack`]) 돌려주고, 아니면
+    /// 이 기동을 등록한다.
     pub(crate) fn begin_task_launch(
         &self,
         task_id: &str,
         token: u64,
         planned_run_id: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), LaunchInFlight> {
         let mut tokens = self
             .launch_tokens
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if let Some((_, existing)) = tokens.get(task_id) {
-            return Err(existing.clone());
+        if let Some(slot) = tokens.get(task_id) {
+            return Err(if slot.rolling_back {
+                LaunchInFlight::RollingBack
+            } else {
+                LaunchInFlight::Launching(slot.planned_run_id.clone())
+            });
         }
-        tokens.insert(task_id.to_owned(), (token, planned_run_id.to_owned()));
+        tokens.insert(
+            task_id.to_owned(),
+            LaunchSlot {
+                token,
+                planned_run_id: planned_run_id.to_owned(),
+                rolling_back: false,
+            },
+        );
         Ok(())
+    }
+
+    /// 이 기동이 되돌리기에 들어갔다(Codex r7): 되돌리기가 끝날 때까지 단일 비행 자리를 쥔 채, 같은 task의 새 배정에는 곧
+    /// 취소될 예정 run id 대신 재시도 가능 거절을 준다.
+    pub(crate) fn mark_task_launch_rolling_back(&self, task_id: &str, token: u64) {
+        let mut tokens = self
+            .launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(slot) = tokens.get_mut(task_id).filter(|slot| slot.token == token) {
+            slot.rolling_back = true;
+        }
+    }
+
+    /// 같은 task의 앞 기동을 되돌리는 중인가.
+    pub(crate) fn task_launch_rolling_back(&self, task_id: &str) -> bool {
+        self.launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(task_id)
+            .is_some_and(|slot| slot.rolling_back)
     }
 
     pub(crate) fn end_task_launch(&self, task_id: &str, token: u64) {
@@ -225,7 +282,7 @@ impl OrchestrationRuntime {
             .launch_tokens
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        if tokens.get(task_id).is_some_and(|(held, _)| *held == token) {
+        if tokens.get(task_id).is_some_and(|slot| slot.token == token) {
             tokens.remove(task_id);
         }
     }
@@ -241,7 +298,7 @@ impl OrchestrationRuntime {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(task_id)
-            .map(|(token, _)| *token);
+            .map(|slot| slot.token);
         match token {
             Some(token) => self.work_gate().cancel_launch(token),
             None => crate::application::work_gate::LaunchCancel::Unknown,
@@ -257,17 +314,17 @@ impl OrchestrationRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
     }
 
-    /// 시험: 자식 run 저장소 예약 전후 지점 probe를 건다.
+    /// 시험: 자식 기동의 저장소 커밋 단계 전후 지점 probe를 건다.
     #[cfg(feature = "test-hooks")]
-    pub fn set_reserve_probe(&self, probe: Option<ReserveProbe>) {
+    pub fn set_store_probe(&self, probe: Option<StoreProbe>) {
         *self
-            .reserve_probe
+            .store_probe
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = probe;
     }
 
-    pub(crate) fn reserve_probe(&self) -> Option<ReserveProbe> {
-        self.reserve_probe
+    pub(crate) fn store_probe(&self) -> Option<StoreProbe> {
+        self.store_probe
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone()
@@ -996,8 +1053,11 @@ impl OrchestrationRuntime {
             .start_child(bench_id, &snapshot, task_id, &node_id)
             .await
         {
-            Ok(StartWorkerOutcome::Failed { message, .. }) => {
-                let _ = self.scheduler.release(task_id);
+            Ok(StartWorkerOutcome::Failed { code, message, .. }) => {
+                // 앞 기동을 되돌리는 중이면 그 자리는 되돌리는 쪽이 반납한다(Codex r7).
+                if code != super::agent_tools::LAUNCH_ROLLING_BACK {
+                    let _ = self.scheduler.release(task_id);
+                }
                 Err(OrchestrationFailure::Plain(message))
             }
             Ok(_) => {

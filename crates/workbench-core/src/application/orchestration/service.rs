@@ -807,7 +807,7 @@ where
     }
 
     /// 자식 기동 전에 예정 run을 노드의 현재 run으로 예약한다(041 Codex 리뷰): 엔진이 run을 등록한 직후·결과 저장
-    /// 전에 온 첫 턴 보고도 현재 run의 보고로 반영된다. 기동이 실패하면 `release_child_run_reservation`으로 되돌린다.
+    /// 전에 온 첫 턴 보고도 현재 run의 보고로 반영된다. 기동이 끝나지 못하면 `revert_child_launch`로 되돌린다.
     ///
     /// 044 R14 표 4: 저장소 RMW 비교 후 변경이다. task가 기동할 수 있는 상태(`ready`·`running`)이고 노드에 run이
     /// 없을 때만 예약한다. 이미 run이 있으면 그 run을 돌려주고(`Existing`) 바꾸지 않는다. 종료된(취소 포함) task는 거절한다.
@@ -848,10 +848,14 @@ where
         Ok(ChildRunReservation::Reserved)
     }
 
-    /// 기동이 실패한 예약을 되돌린다(그 사이 다른 run이 들어왔으면 그대로 둔다).
-    pub fn release_child_run_reservation(
+    /// 끝나지 못한 자식 기동을 한 트랜잭션에서 되돌린다(Codex r7). 노드의 현재 run이 이 기동의 run일 때만: 노드 run을
+    /// 비우고 `Idle`로, 그 run 때문에 실행 중(`Running`·`InputRequired`)이 된 task는 다시 배정할 수 있는 `Ready`로 돌린다
+    /// (run 없는 실행 중 task를 남기지 않는다). 종료·실패·막힘 상태는 그대로 둔다(그 run이 이미 결과를 냈다 — 종료 또는
+    /// 재시도로 다시 배정). 그 사이 다른 run이 노드에 들어왔으면 아무것도 바꾸지 않는다.
+    pub fn revert_child_launch(
         &self,
         bench_id: &str,
+        task_id: &str,
         node_id: &str,
         run_id: &str,
     ) -> Result<(), OrchestrationError> {
@@ -867,8 +871,14 @@ where
         };
         node.current_run_id = None;
         node.execution_status = ExecutionStatus::Idle;
+        let now = now();
+        if let Some(task) = session.tasks.iter_mut().find(|task| {
+            task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id)
+        }) {
+            task.revert_aborted_launch(now.clone());
+        }
         session.revision += 1;
-        session.updated_at = now();
+        session.updated_at = now;
         tx.commit()
     }
 

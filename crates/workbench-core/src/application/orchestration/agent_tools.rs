@@ -13,7 +13,10 @@ use serde_json::{json, Value};
 use crate::{
     application::orchestration::{
         command_service::DeliverTaskCommandRequest,
-        runtime::{LaunchPoint, OrchestrationFailure, OrchestrationRuntime, ReservePoint},
+        runtime::{
+            LaunchInFlight, LaunchPoint, OrchestrationFailure, OrchestrationResult,
+            OrchestrationRuntime, StorePoint, StoreProbe,
+        },
         scheduler::LeaseOutcome,
         service::{
             ChildRunReservation, CreateChildTaskRequest, ReportTaskRequest, TaskActionRequest,
@@ -756,6 +759,10 @@ async fn launch_existing_task(
                 "Assigned child node was not found.",
             ))
         })?;
+    // 앞 기동을 되돌리는 중이면(Codex r7) 노드에 아직 남은 run은 곧 취소된다: 그 id를 `alreadyAssigned`로 주지 않는다.
+    if runtime.task_launch_rolling_back(&task.id) {
+        return Ok(json!({ "taskId": task.id, "nodeId": node.id, "launch": rolling_back_launch() }));
+    }
     if let Some(run_id) = node.current_run_id.as_ref() {
         return Ok(json!({
             "taskId": task.id,
@@ -811,9 +818,15 @@ impl OrchestrationRuntime {
             .map_err(|_| ToolError::new("serverStopping", MESSAGE_STOPPING, true))?;
         let token = ticket.token();
         let planned_run_id = uuid::Uuid::new_v4().to_string();
-        if let Err(existing) = self.begin_task_launch(&task.id, token, &planned_run_id) {
+        match self.begin_task_launch(&task.id, token, &planned_run_id) {
+            Ok(()) => {}
             // 같은 task의 기동이 진행 중이다: 그 run을 돌려준다(이 토큰은 drop으로 `Failed`, T-start 해제).
-            return Ok(StartWorkerOutcome::Started { run_id: existing });
+            Err(LaunchInFlight::Launching(existing)) => {
+                return Ok(StartWorkerOutcome::Started { run_id: existing })
+            }
+            // 앞 기동을 되돌리는 중이다(Codex r7): 곧 취소될 run id를 주지 않고 다시 시도하게 한다. 오류가 아니라 실패
+            // 결과로 돌려준다 — scheduler 자리는 되돌리는 쪽이 끝에 반납하므로 호출자가 반납하지 않는다.
+            Err(LaunchInFlight::RollingBack) => return Ok(rolling_back_launch()),
         }
         let mut cleanup = LaunchCleanup {
             runtime: Arc::clone(self),
@@ -823,50 +836,45 @@ impl OrchestrationRuntime {
             planned_run_id: planned_run_id.clone(),
             token,
             state: CleanupState::Reserving,
-            reserving: None,
+            pending: None,
         };
         // 엔진을 부르기 전에 예정 run을 노드의 현재 run으로 예약한다(비교 후 변경) — 첫 턴 보고가 현재 run의 보고로
         // 반영된다. 다른 배정이 먼저 예약했으면 그 run을 돌려준다.
-        // Codex r6 medium: 예약은 blocking 작업이라 이 future가 await 중에 drop돼도 끝까지 커밋한다. 그래서 예약을 이
-        // future와 따로 도는 소유 task로 돌리고 그 handle을 guard가 쥔다: 완료를 여기서 받으면 guard 상태를 같은 poll에서
-        // 옮기고, 받기 전에 drop되면 guard가 handle을 넘겨받아 커밋을 기다린 뒤 되돌린다(조건부 해제 + scheduler 반납).
-        cleanup.reserving = Some({
+        // 저장소 커밋 단계(예약·바인딩)는 blocking 작업이라 이 future가 await 중에 drop돼도 끝까지 커밋한다(Codex r6·r7).
+        // 그래서 각 단계를 이 future와 따로 도는 소유 task로 돌리고 그 handle을 guard가 쥔다: 결과를 여기서 받으면 guard
+        // 상태를 같은 poll에서 옮기고, 받기 전에 drop되면 guard가 handle을 넘겨받아 커밋을 기다린 뒤 되돌린다.
+        cleanup.pending = Some(Pending::Reserve({
             let (b, t, n, r) = (
                 bench.to_owned(),
                 task.id.clone(),
                 node.id.clone(),
                 planned_run_id.clone(),
             );
-            let runtime = Arc::clone(self);
-            let probe = self.reserve_probe();
-            tokio::spawn(async move {
-                runtime
-                    .blocking(move |service| {
-                        if let Some(probe) = &probe {
-                            probe(ReservePoint::BeforeCommit);
-                        }
-                        let reserved = service.reserve_child_run(&b, &t, &n, &r);
-                        if let Some(probe) = &probe {
-                            probe(ReservePoint::AfterCommit);
-                        }
-                        reserved
-                    })
-                    .await
+            let probe = self.store_probe();
+            self.spawn_store(move |service| {
+                store_point(&probe, StorePoint::ReserveBeforeCommit);
+                let reserved = service.reserve_child_run(&b, &t, &n, &r);
+                store_point(&probe, StorePoint::ReserveAfterCommit);
+                reserved
             })
-        });
-        let joined = match cleanup.reserving.as_mut() {
-            Some(handle) => handle.await,
-            None => unreachable!("the reservation task was just spawned"),
+        }));
+        let joined = match cleanup.pending.as_mut() {
+            Some(Pending::Reserve(handle)) => handle.await,
+            _ => unreachable!("the reservation task was just spawned"),
         };
-        cleanup.reserving = None;
+        cleanup.pending = None;
         match joined {
             Ok(Ok(ChildRunReservation::Reserved)) => cleanup.state = CleanupState::Reserved,
             Ok(Ok(ChildRunReservation::Existing(run_id))) => {
-                return Ok(StartWorkerOutcome::Started { run_id })
+                cleanup.state = CleanupState::Done;
+                return Ok(StartWorkerOutcome::Started { run_id });
             }
-            Ok(Err(error)) => return Err(error.into()),
+            Ok(Err(error)) => {
+                cleanup.state = CleanupState::Done;
+                return Err(error.into());
+            }
             Err(error) => {
-                // 예약 task가 끝나지 못했다(panic 등): 커밋 여부를 모르니 조건부로 되돌린다(예정 run id일 때만 푼다).
+                // 예약 task가 끝나지 못했다(panic 등): 커밋 여부를 모르니 조건부로 되돌린다(이 기동의 run일 때만 푼다).
                 cleanup.state = CleanupState::Reserved;
                 cleanup.fail().await;
                 return Err(OrchestrationFailure::Plain(error.to_string()).into());
@@ -931,27 +939,76 @@ impl OrchestrationRuntime {
         let _ = open_gate.send(());
         drop(turn);
         self.launch_probe(LaunchPoint::AfterOpen).await;
-        let bound = {
+        // 바인딩(task `Running` + 노드 run)도 소유 task로 커밋한다(Codex r7): 결과를 받기 전에 drop되면 guard가 커밋을
+        // 기다린 뒤 run을 취소하고 task·노드를 한 트랜잭션에서 되돌린다.
+        cleanup.state = CleanupState::Binding;
+        cleanup.pending = Some(Pending::Bind({
             let (b, t, n, r) = (
                 bench.to_owned(),
                 task.id.clone(),
                 node.id.clone(),
                 run_id.clone(),
             );
-            self.blocking(move |service| service.bind_child_run(&b, &t, &n, &r))
-                .await
+            let probe = self.store_probe();
+            self.spawn_store(move |service| {
+                store_point(&probe, StorePoint::BindBeforeCommit);
+                let bound = service.bind_child_run(&b, &t, &n, &r);
+                store_point(&probe, StorePoint::BindAfterCommit);
+                bound
+            })
+        }));
+        let bound = match cleanup.pending.as_mut() {
+            Some(Pending::Bind(handle)) => handle.await,
+            _ => unreachable!("the bind task was just spawned"),
         };
+        cleanup.pending = None;
         match bound {
-            Ok(_) => {
+            Ok(Ok(_)) => {
                 cleanup.state = CleanupState::Done;
                 Ok(StartWorkerOutcome::Started { run_id })
             }
-            Err(error) => {
+            Ok(Err(error)) => {
                 // 6: 기동 중에 취소된 task(또는 사라진 작업 영역)에는 묶지 않고 run을 취소한다.
+                cleanup.state = CleanupState::Prepared;
                 cleanup.fail().await;
                 Err(error.into())
             }
+            Err(error) => {
+                // 바인딩 task가 끝나지 못했다: 커밋 여부를 모르니 run을 취소하고 조건부로 되돌린다.
+                cleanup.state = CleanupState::Prepared;
+                cleanup.fail().await;
+                Err(OrchestrationFailure::Plain(error.to_string()).into())
+            }
         }
+    }
+
+    /// 자식 기동의 저장소 커밋 한 단계를 이 호출 future와 따로 도는 소유 task로 돌린다(abort돼도 커밋은 끝까지 가고, 그
+    /// 결과는 handle을 쥔 쪽이 받는다).
+    fn spawn_store<T, F>(self: &Arc<Self>, f: F) -> tokio::task::JoinHandle<OrchestrationResult<T>>
+    where
+        T: Send + 'static,
+        F: FnOnce(super::runtime::Service) -> Result<T, OrchestrationError> + Send + 'static,
+    {
+        let runtime = Arc::clone(self);
+        tokio::spawn(async move { runtime.blocking(f).await })
+    }
+}
+
+fn store_point(probe: &Option<StoreProbe>, point: StorePoint) {
+    if let Some(probe) = probe {
+        probe(point);
+    }
+}
+
+/// 같은 task의 앞 기동을 되돌리는 중(재시도 가능). scheduler 자리는 되돌리는 쪽이 반납한다.
+pub(crate) const LAUNCH_ROLLING_BACK: &str = "launchRollingBack";
+
+fn rolling_back_launch() -> StartWorkerOutcome {
+    StartWorkerOutcome::Failed {
+        code: LAUNCH_ROLLING_BACK.into(),
+        message: "The previous launch of this task is being rolled back; retry the assignment."
+            .into(),
+        retryable: true,
     }
 }
 
@@ -963,20 +1020,33 @@ fn cancelled_launch() -> StartWorkerOutcome {
     }
 }
 
+/// 자식 기동의 수명 상태(Codex r7 — research R14 "기동 수명과 취소 책임" 표). 어느 상태에서 future가 drop돼도 되돌리기는
+/// [`LaunchCleanup`] 하나가 책임진다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CleanupState {
-    /// 저장소 예약 중(소유 task가 커밋할 수 있다 — drop되면 그 결과를 기다려 되돌린다).
+    /// 노드 예약 커밋 중(소유 task — drop되면 그 결과를 기다려 되돌린다).
     Reserving,
-    /// 저장소 예약 뒤·엔진 준비 전.
+    /// 노드 예약 뒤·엔진 준비 전.
     Reserved,
     /// 엔진 준비 뒤(registry에 run이 있다).
     Prepared,
-    /// 바인딩까지 끝났다.
+    /// 바인딩 커밋 중(소유 task — drop되면 커밋을 기다린 뒤 run 취소 + 한 트랜잭션 되돌리기).
+    Binding,
+    /// 실패 정리 중(소유 task — drop돼도 끝까지 가고, 끝나면 scheduler 자리를 반납한다).
+    RollingBack,
+    /// 끝났다(바인딩 성공, 되돌리기 완료, 또는 되돌릴 것 없음 — 결과를 받은 호출자가 오늘 규칙대로 자리를 다룬다).
     Done,
 }
 
-/// 자식 기동의 정리 guard(R14 표 4 취소·abort 열). 성공·실패 어느 쪽이든 단일 비행 표와 기동 중 기록을 지운다. 끝나지
-/// 않고 drop되면(future abort) 준비한 run 취소·저장소 예약 해제·scheduler 자리 반납을 뒤에서 한다.
+/// guard가 쥔 진행 중 소유 task.
+enum Pending {
+    Reserve(tokio::task::JoinHandle<OrchestrationResult<ChildRunReservation>>),
+    Bind(tokio::task::JoinHandle<OrchestrationResult<OrchestrationSession>>),
+    Rollback(tokio::task::JoinHandle<()>),
+}
+
+/// 자식 기동의 정리 guard(R14 표 4 취소·abort 열, Codex r6·r7). 끝나지 않고 drop되면(future abort) 진행 중 커밋을 기다려
+/// 준비한 run 취소·task·노드 되돌리기·scheduler 자리 반납을 뒤에서 하고, 그 동안 단일 비행 자리를 "되돌리는 중"으로 쥔다.
 struct LaunchCleanup {
     runtime: Arc<OrchestrationRuntime>,
     bench: String,
@@ -985,32 +1055,43 @@ struct LaunchCleanup {
     planned_run_id: String,
     token: u64,
     state: CleanupState,
-    /// 진행 중인 저장소 예약 task(`Reserving` 동안만). 완료를 받기 전에 drop되면 Drop이 넘겨받는다.
-    reserving: Option<
-        tokio::task::JoinHandle<
-            crate::application::orchestration::runtime::OrchestrationResult<ChildRunReservation>,
-        >,
-    >,
+    pending: Option<Pending>,
 }
 
 impl LaunchCleanup {
-    /// 기동 실패·취소: 준비한 run을 취소하고 저장소 예약을 되돌린다(scheduler 자리는 호출자가 오늘 규칙대로 반납한다).
+    /// 기동 실패·취소: 준비한 run을 취소하고 task·노드를 되돌린다(scheduler 자리는 결과를 받은 호출자가 오늘 규칙대로
+    /// 다룬다). 되돌리기는 소유 task로 돌리고 guard가 handle을 쥔다 — 그 await 중에 drop돼도 되돌리기는 끝까지 가고, guard가
+    /// 끝을 기다려 자리를 반납한다(호출자가 결과를 받지 못하므로).
     async fn fail(&mut self) {
-        let state = std::mem::replace(&mut self.state, CleanupState::Done);
-        rollback(
+        let state = std::mem::replace(&mut self.state, CleanupState::RollingBack);
+        if !matches!(state, CleanupState::Reserved | CleanupState::Prepared) {
+            self.state = CleanupState::Done;
+            return;
+        }
+        self.runtime
+            .mark_task_launch_rolling_back(&self.task_id, self.token);
+        let handle = tokio::spawn(rollback(
             Arc::clone(&self.runtime),
             self.bench.clone(),
+            self.task_id.clone(),
             self.node_id.clone(),
             self.planned_run_id.clone(),
             state,
-        )
-        .await;
+        ));
+        self.pending = Some(Pending::Rollback(handle));
+        if let Some(Pending::Rollback(handle)) = self.pending.as_mut() {
+            let _ = handle.await;
+        }
+        self.pending = None;
+        self.state = CleanupState::Done;
     }
 }
 
+/// 되돌리기: 준비한 run이면 엔진에서 취소하고, 노드가 아직 이 기동의 run을 가리키면 task·노드를 한 트랜잭션에서 되돌린다.
 async fn rollback(
     runtime: Arc<OrchestrationRuntime>,
     bench: String,
+    task_id: String,
     node_id: String,
     planned_run_id: String,
     state: CleanupState,
@@ -1027,9 +1108,11 @@ async fn rollback(
             .release_run_claim(&planned_run_id, &bench);
     }
     if matches!(state, CleanupState::Reserved | CleanupState::Prepared) {
+        let probe = runtime.store_probe();
         let _ = runtime
             .blocking(move |service| {
-                service.release_child_run_reservation(&bench, &node_id, &planned_run_id)
+                store_point(&probe, StorePoint::RevertBeforeCommit);
+                service.revert_child_launch(&bench, &task_id, &node_id, &planned_run_id)
             })
             .await;
     }
@@ -1037,61 +1120,80 @@ async fn rollback(
 
 impl Drop for LaunchCleanup {
     fn drop(&mut self) {
-        self.runtime.end_task_launch(&self.task_id, self.token);
-        self.runtime.forget_launching(&self.planned_run_id);
-        if self.state == CleanupState::Reserving {
-            // 예약 await 중에 drop됐다(Codex r6 medium): 예약 task는 끝까지 커밋하므로 그 결과를 기다려, 이 기동이 예약했으면
-            // 되돌리고(조건부 해제) scheduler 자리를 반납한다. 다른 배정의 run(`Existing`)이면 그 배정이 자리를 쓴다.
-            let Some(reserving) = self.reserving.take() else {
+        let pending = self.pending.take();
+        // 되돌릴 것이 없으면 자리를 바로 지운다(끝났거나, 예약 결과를 받아 끝남).
+        let nothing_to_undo = self.state == CleanupState::Done
+            || (self.state == CleanupState::Reserving && pending.is_none());
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(handle) if !nothing_to_undo => handle,
+            _ => {
+                self.runtime.end_task_launch(&self.task_id, self.token);
+                self.runtime.forget_launching(&self.planned_run_id);
                 return;
-            };
-            let Ok(handle) = tokio::runtime::Handle::try_current() else {
-                return;
-            };
-            let (runtime, bench, node_id, task_id, planned_run_id) = (
-                Arc::clone(&self.runtime),
-                self.bench.clone(),
-                self.node_id.clone(),
-                self.task_id.clone(),
-                self.planned_run_id.clone(),
-            );
-            handle.spawn(async move {
-                match reserving.await {
-                    Ok(Ok(ChildRunReservation::Existing(_))) => return,
-                    Ok(Ok(ChildRunReservation::Reserved)) | Err(_) => {
-                        rollback(
-                            Arc::clone(&runtime),
-                            bench,
-                            node_id,
-                            planned_run_id,
-                            CleanupState::Reserved,
-                        )
-                        .await;
-                    }
-                    Ok(Err(_)) => {}
-                }
-                let _ = runtime.scheduler().release(&task_id);
-            });
-            return;
-        }
-        if self.state == CleanupState::Done {
-            return;
-        }
-        // future가 끝나지 않고 drop됐다(abort). 장벽 sender는 이미 닫혀 실행은 없다. 나머지는 뒤에서 되돌린다.
-        let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            return;
+            }
         };
-        let (runtime, bench, node_id, task_id, planned_run_id, state) = (
+        // future가 끝나지 않고 drop됐다(abort). 시작 장벽 sender는 이미 닫혔거나(장벽 전) 실행이 시작됐다(바인딩 중).
+        // 진행 중 커밋을 기다려 되돌리고, 끝날 때까지 단일 비행 자리를 "되돌리는 중"으로 쥔다.
+        self.runtime
+            .mark_task_launch_rolling_back(&self.task_id, self.token);
+        let (runtime, bench, node_id, task_id, planned_run_id, token, state) = (
             Arc::clone(&self.runtime),
             self.bench.clone(),
             self.node_id.clone(),
             self.task_id.clone(),
             self.planned_run_id.clone(),
+            self.token,
             self.state,
         );
         handle.spawn(async move {
-            rollback(Arc::clone(&runtime), bench, node_id, planned_run_id, state).await;
-            let _ = runtime.scheduler().release(&task_id);
+            let undo = |state| {
+                rollback(
+                    Arc::clone(&runtime),
+                    bench.clone(),
+                    task_id.clone(),
+                    node_id.clone(),
+                    planned_run_id.clone(),
+                    state,
+                )
+            };
+            let release_slot = match (state, pending) {
+                (CleanupState::Reserving, Some(Pending::Reserve(reserving))) => {
+                    match reserving.await {
+                        // 다른 배정의 run이다: 그 배정이 자리를 쓴다.
+                        Ok(Ok(ChildRunReservation::Existing(_))) => false,
+                        Ok(Ok(ChildRunReservation::Reserved)) | Err(_) => {
+                            undo(CleanupState::Reserved).await;
+                            true
+                        }
+                        Ok(Err(_)) => true,
+                    }
+                }
+                (CleanupState::Binding, Some(Pending::Bind(binding))) => {
+                    // 바인딩이 커밋했든 아니든 이 배정은 끝나지 않았다: run을 취소하고 한 트랜잭션에서 되돌린다.
+                    let _ = binding.await;
+                    undo(CleanupState::Prepared).await;
+                    true
+                }
+                (CleanupState::RollingBack, Some(Pending::Rollback(rolling_back))) => {
+                    let _ = rolling_back.await;
+                    true
+                }
+                (CleanupState::Reserved | CleanupState::Prepared, _) => {
+                    undo(state).await;
+                    true
+                }
+                // 상태와 맞지 않는 소유 task는 없다(보수적으로 run 취소 + 조건부 되돌리기).
+                (CleanupState::Binding | CleanupState::RollingBack, _) => {
+                    undo(CleanupState::Prepared).await;
+                    true
+                }
+                (CleanupState::Reserving | CleanupState::Done, _) => false,
+            };
+            runtime.forget_launching(&planned_run_id);
+            runtime.end_task_launch(&task_id, token);
+            if release_slot {
+                let _ = runtime.scheduler().release(&task_id);
+            }
         });
     }
 }
