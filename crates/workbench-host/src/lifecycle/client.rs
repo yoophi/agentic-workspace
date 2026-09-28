@@ -249,15 +249,31 @@ pub fn request_by(
         .map_err(|error| error.to_string())?;
     let mut stream =
         TcpStream::connect_timeout(&address, remaining(deadline)?).map_err(|e| e.to_string())?;
-    stream
-        .set_write_timeout(Some(remaining(deadline)?))
-        .map_err(|e| e.to_string())?;
     head.push_str(&payload);
-    stream
-        .write_all(head.as_bytes())
-        .map_err(|e| e.to_string())?;
+    write_message(&mut stream, head.as_bytes(), deadline)?;
     let raw = read_message(&mut stream, deadline, MAX_RESPONSE_BYTES)?;
     parse_response(&raw)
+}
+
+/// 요청 하나를 쓴다(Codex r11): 부분 쓰기마다 대기 상한을 `deadline`까지 남은 시간으로 다시 잡는다 — 끝점이 천천히 읽어
+/// 쓰기가 조금씩만 진행돼도(backpressure) 전체가 `deadline` 안에서 끝난다. 0바이트 쓰기는 끝점이 닫힌 것이다.
+fn write_message(stream: &mut TcpStream, bytes: &[u8], deadline: Instant) -> Result<(), String> {
+    let mut written = 0;
+    while written < bytes.len() {
+        stream
+            .set_write_timeout(Some(remaining(deadline)?))
+            .map_err(|e| e.to_string())?;
+        match stream.write(&bytes[written..]) {
+            Ok(0) => return Err("the server closed the connection during the request".to_owned()),
+            Ok(count) => written += count,
+            Err(error) if error.kind() == ErrorKind::Interrupted => {}
+            Err(error) if matches!(error.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut) => {
+                return Err(MESSAGE_TIMED_OUT.to_owned());
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(())
 }
 
 const MESSAGE_TIMED_OUT: &str = "timed out waiting for the server response";
