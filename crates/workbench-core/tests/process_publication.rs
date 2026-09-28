@@ -9,7 +9,7 @@ use workbench_core::{
         operation_ledger::OperationLedger,
         process_publication_store::{
             ProcessPublicationStore, PublicationState, PublicationStoreError, PublishOutcome,
-            PublishRequest, WithdrawOutcome,
+            PublishRequest, ReserveOutcome, WithdrawOutcome,
         },
     },
 };
@@ -36,12 +36,21 @@ fn request(attempt: &str) -> PublishRequest {
 #[test]
 fn publish_transaction_replays_exactly_and_rejects_changed_payload() {
     let (_dir, store) = store();
-    store.reserve("attempt-1").unwrap();
+    assert_eq!(
+        store.reserve("attempt-1").unwrap(),
+        ReserveOutcome::Reserved
+    );
     let first = store.publish(&request("attempt-1")).unwrap();
     assert!(matches!(first, PublishOutcome::Published(_)));
     assert!(matches!(
         store.publish(&request("attempt-1")).unwrap(),
         PublishOutcome::Replayed(_)
+    ));
+    assert!(matches!(
+        store.reserve("attempt-1").unwrap(),
+        ReserveOutcome::Existing(record)
+            if record.state == PublicationState::Published
+                && record.result == Some(json!({"runId": "run-1"}))
     ));
     assert_eq!(store.pending_events(10).unwrap().len(), 1);
     assert_eq!(
@@ -83,7 +92,7 @@ fn withdraw_and_publish_have_one_stable_winner_in_both_orders() {
 }
 
 #[test]
-fn send_and_ack_loss_replays_to_one_live_projection_instance() {
+fn ambiguous_send_replays_to_one_live_projection_instance() {
     let (_dir, store) = store();
     let service = ProcessPublicationService::new(&store);
     service.reserve("attempt-replay").unwrap();
@@ -92,7 +101,7 @@ fn send_and_ack_loss_replays_to_one_live_projection_instance() {
     let mut projection = PublicationProjection::default();
     let first = service.deliver_pending(10, |event| {
         assert!(projection.apply_once(event));
-        Err("simulated acknowledgement loss".into())
+        Err("simulated ambiguous transport completion".into())
     });
     assert!(matches!(first, Err(PublicationDeliveryError::Send(_))));
     assert_eq!(store.pending_events(10).unwrap().len(), 1);
@@ -165,6 +174,12 @@ fn committed_outbox_survives_store_close_and_reopen_before_send() {
 
     let reopened = SqliteOperationLedger::open(&paths).unwrap();
     reopened.migrate().unwrap();
+    assert!(matches!(
+        reopened.reserve("attempt-reopen").unwrap(),
+        ReserveOutcome::Existing(record)
+            if record.state == PublicationState::Published
+                && record.result == Some(json!({"runId": "run-1"}))
+    ));
     assert!(matches!(
         reopened.publish(&request("attempt-reopen")).unwrap(),
         PublishOutcome::Replayed(_)

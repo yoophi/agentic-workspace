@@ -110,3 +110,16 @@ foundation 구현 검증은 다음처럼 구분한다.
 - pushed reducer HEAD `9672bb7c340d62db851149818026b0fff9e6b2ec`: GitHub Actions run `36431941843` 전체 success. 이 run은 이후의 미커밋 publication 변경 증거가 아니다.
 - publication/result/outbox 구현 snapshot: `CARGO_INCREMENTAL=0 cargo test -p workbench-core --all-targets --all-features` exit 0, 576 passed / 0 failed / 7 ignored. 이후 typed delivery error와 file-backed ack 양쪽 fixture를 추가했다.
 - 현재 publication 변경: integration 6/6, SQLite ledger unit 12/12, `cargo clippy -p workbench-core --all-targets --all-features -- -D warnings` exit 0, `git diff --check` exit 0. 전체 workspace/final gate는 구현 리뷰와 후속 045 작업 뒤 별도 실행한다.
+
+## T012–T015 OCR delegate 구현 리뷰
+
+- reviewed range: `9672bb7c340d62db851149818026b0fff9e6b2ec..752929b`
+- OCR 자동 분류: total 11, reviewable Rust 6, Markdown 5개 `unsupported_ext` excluded
+- host 실제 검토: Rust 6/6 + Markdown 5/5 = 11/11, skipped 0
+- verdict: `needs-attention` (High 1, Medium 1)
+- 결과: `/private/tmp/aw-045-foundation-ocr/result.md`
+
+| ID | Severity | 판정 | 반영 |
+|---|---|---|---|
+| OI1 | High | 유효 | restart/retry의 `reserve → publish` 흐름이 기존 attempt에서 `DuplicateAttempt`로 막히지 않도록 `ReserveOutcome::Existing(record)`을 반환하고, Published result를 읽은 뒤 동일 publish가 replay되는 회귀시험 추가 |
+| OI2 | Medium | 유효 | 현재 v3는 attempt당 logical publication 하나와 delivery ack만 저장한다고 data model을 정정하고, WS `stream_sequence`와 실제 reconnect/process-restart projection은 T020 경계로 명시 |

@@ -104,17 +104,18 @@ stateDiagram-v2
 
 ## ProcessPublicationOutbox (SQLite schema v3)
 
-- `event_id`: `(attempt_id, event_kind)`에서 결정되는 primary key
-- `attempt_id` foreign key
+- `event_id`: attempt와 공개 종류에서 결정되는 primary key
+- `attempt_id`: `ProcessPublicationRecord` foreign key이자 v3에서는 unique. 현재 계약은 attempt마다 accepted/started 중 하나의 logical publication을 만든다.
 - `event_kind`: `accepted | started`
 - `payload_json`: 비밀값이 없는 idempotent projection
-- `stream_sequence`, `created_at`, optional `delivered_at`
+- `created_at`, optional `delivered_at`
 
 규칙:
 - durable domain result, `ProcessPublicationRecord=Published`, outbox insert는 하나의 transaction이다. T016에서 containment anchor를 추가한 뒤에는 publication winner와 anchor lifecycle의 원자적 연결을 별도 migration/transaction 계약으로 확장한다.
 - unique event id로 logical publication을 한 번만 만든다. dispatcher 재전송과 reconnect replay는 허용하지만 projection은 중복 적용하지 않는다.
 - `Aborting` winner에는 outbox가 없고, 이미 Published인 행에 cleanup CAS를 적용할 수 없다.
 - 현재 foundation 시험의 메모리 projection은 한 live instance의 중복 억제만 증명한다. 실제 WS reconnect와 client process restart 뒤 중복 억제는 T020에서 durable cursor/projection 경계에 연결해 검증한다.
+- WS `stream_sequence`는 v3 publication transaction의 필드가 아니다. T020 dispatcher가 durable event id를 기존 event hub sequence/replay에 연결한다.
 
 ## TransientAttempt
 

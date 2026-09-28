@@ -20,7 +20,7 @@ use crate::{
     ports::process_publication_store::{
         ProcessPublicationStore, PublicationEvent, PublicationRecord, PublicationState,
         PublicationStoreError, PublicationStoreResult, PublishOutcome, PublishRequest,
-        WithdrawOutcome,
+        ReserveOutcome, WithdrawOutcome,
     },
 };
 
@@ -632,7 +632,7 @@ const SELECT_PUBLICATION: &str =
     "SELECT attempt_id, state, result_json, created_at, updated_at FROM process_publication";
 
 impl ProcessPublicationStore for SqliteOperationLedger {
-    fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<()> {
+    fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<ReserveOutcome> {
         let now = now_rfc3339();
         let conn = self
             .connection
@@ -643,11 +643,23 @@ impl ProcessPublicationStore for SqliteOperationLedger {
              VALUES (?1, 'pending', ?2, ?2)",
             params![attempt_id, now],
         ) {
-            Ok(_) => Ok(()),
+            Ok(_) => Ok(ReserveOutcome::Reserved),
             Err(rusqlite::Error::SqliteFailure(error, _))
                 if error.code == ErrorCode::ConstraintViolation =>
             {
-                Err(PublicationStoreError::DuplicateAttempt(attempt_id.into()))
+                conn.query_row(
+                    &format!("{SELECT_PUBLICATION} WHERE attempt_id = ?1"),
+                    params![attempt_id],
+                    read_publication_record,
+                )
+                .optional()
+                .map_err(publication_storage)?
+                .map(ReserveOutcome::Existing)
+                .ok_or_else(|| {
+                    PublicationStoreError::Storage(
+                        "publication reservation constraint without existing attempt".into(),
+                    )
+                })
             }
             Err(error) => Err(publication_storage(error)),
         }

@@ -55,6 +55,12 @@ pub struct PublishRequest {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum ReserveOutcome {
+    Reserved,
+    Existing(PublicationRecord),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum PublishOutcome {
     Published(PublicationRecord),
     Replayed(PublicationRecord),
@@ -72,8 +78,6 @@ pub enum WithdrawOutcome {
 pub enum PublicationStoreError {
     #[error("publication storage unavailable: {0}")]
     Storage(String),
-    #[error("publication attempt already exists: {0}")]
-    DuplicateAttempt(String),
     #[error("publication attempt not found: {0}")]
     NotFound(String),
     #[error("publication replay payload differs for attempt: {0}")]
@@ -83,7 +87,7 @@ pub enum PublicationStoreError {
 pub type PublicationStoreResult<T> = Result<T, PublicationStoreError>;
 
 pub trait ProcessPublicationStore: Send + Sync {
-    fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<()>;
+    fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<ReserveOutcome>;
     fn find_publication(
         &self,
         attempt_id: &str,

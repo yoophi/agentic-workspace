@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use crate::ports::process_publication_store::{
     ProcessPublicationStore, PublicationEvent, PublicationStoreError, PublicationStoreResult,
-    PublishOutcome, PublishRequest, WithdrawOutcome,
+    PublishOutcome, PublishRequest, ReserveOutcome, WithdrawOutcome,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -22,7 +22,7 @@ impl<'a, S: ProcessPublicationStore> ProcessPublicationService<'a, S> {
         Self { store }
     }
 
-    pub fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<()> {
+    pub fn reserve(&self, attempt_id: &str) -> PublicationStoreResult<ReserveOutcome> {
         self.store.reserve(attempt_id)
     }
 
