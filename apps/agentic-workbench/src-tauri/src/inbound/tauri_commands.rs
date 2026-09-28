@@ -1410,13 +1410,16 @@ pub async fn ensure_window_bench(
     hint: Option<String>,
 ) -> Result<Option<String>, String> {
     if let Some(server) = external_server(&app) {
-        if !open {
-            return Ok(desktop_benches::lookup(window.label()));
-        }
         let incarnation = crate::infrastructure::window_principals::incarnation(window.label())
             .ok_or_else(|| {
                 crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
             })?;
+        if !open {
+            return Ok(desktop_benches::lookup_external(
+                window.label(),
+                &incarnation,
+            ));
+        }
         let origin = window_origin(&window)?;
         return desktop_benches::ensure_external(
             &server,

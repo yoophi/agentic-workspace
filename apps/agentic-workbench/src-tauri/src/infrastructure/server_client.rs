@@ -12,7 +12,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -21,8 +21,10 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, Notify};
 use workbench_host::lifecycle::{
     calls::{CallError, call},
-    descriptor::Descriptor,
+    client::verify,
+    descriptor::{Descriptor, read_descriptor},
     ensure::{EnsureOptions, ensure},
+    lock::server_dir,
 };
 
 pub const SERVER_EXECUTABLE: &str = "agentic-workbench-server";
@@ -85,11 +87,37 @@ struct Connected {
     lease_id: Option<String>,
 }
 
+/// 임대 갱신 한 번의 결과에 따른 다음 단계(OCR H1). 한 번의 실패로 연결을 잊지 않는다 — 잊으면 창 폐기가 조용히 빠지고
+/// 임대가 끊겨 서버가 유휴 종료할 수 있다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenewalStep {
+    Renewed,
+    /// 전송 오류·일시 거절: 다음 주기에 다시 갱신한다.
+    Retry,
+    /// 서버가 임대를 모른다(TTL 만료 등): 새로 잡는다.
+    Reacquire,
+}
+
+fn renewal_step(result: &Result<Value, CallError>) -> RenewalStep {
+    match result {
+        Ok(_) => RenewalStep::Renewed,
+        Err(CallError::Fault { code, .. }) if code == "notFound" => RenewalStep::Reacquire,
+        Err(_) => RenewalStep::Retry,
+    }
+}
+
 pub struct ExternalServer {
     data_dir: PathBuf,
     executable: PathBuf,
     client_id: String,
+    /// 확인된 연결. `ensure`(최대 수십 초) 동안 쥐지 않는다 — 종료 경로가 짧은 상한 안에 읽어야 한다(OCR M1).
     connected: Mutex<Option<Connected>>,
+    /// `connect`의 단일 실행(동시에 불러도 `ensure`는 한 번).
+    connecting: Mutex<()>,
+    /// 한 번이라도 붙었는지. 붙은 적이 있으면 연결을 잃은 뒤의 창 폐기가 떠 있는 서버에 다시 붙는다(OCR H1).
+    ever_connected: AtomicBool,
+    /// 종료 경로가 시작됐다. 이후 폐기는 다시 붙지 않는다.
+    exiting: AtomicBool,
     pending: AtomicUsize,
     settled: Notify,
 }
@@ -101,6 +129,9 @@ impl ExternalServer {
             executable,
             client_id: uuid::Uuid::new_v4().to_string(),
             connected: Mutex::new(None),
+            connecting: Mutex::new(()),
+            ever_connected: AtomicBool::new(false),
+            exiting: AtomicBool::new(false),
             pending: AtomicUsize::new(0),
             settled: Notify::new(),
         })
@@ -108,9 +139,12 @@ impl ExternalServer {
 
     /// 확인된 서버의 안내. 없으면 `ensure`(서버 기동 포함)하고 임대를 잡는다. 동시에 부르면 한 번만 `ensure`한다.
     pub async fn connect(self: &Arc<Self>) -> Result<Descriptor, String> {
-        let mut connected = self.connected.lock().await;
-        if let Some(existing) = connected.as_ref() {
-            return Ok(existing.descriptor.clone());
+        if let Some(existing) = self.snapshot().await {
+            return Ok(existing);
+        }
+        let _flight = self.connecting.lock().await;
+        if let Some(existing) = self.snapshot().await {
+            return Ok(existing);
         }
         let data_dir = self.data_dir.clone();
         let executable = self.executable.clone();
@@ -130,18 +164,34 @@ impl ExternalServer {
             .await
             .map_err(|error| error.to_string())?;
         let lease_id = lease["leaseId"].as_str().map(str::to_owned);
-        *connected = Some(Connected {
+        *self.connected.lock().await = Some(Connected {
             descriptor: descriptor.clone(),
             lease_id: lease_id.clone(),
         });
-        drop(connected);
-        if let Some(lease_id) = lease_id {
-            self.spawn_renewal(descriptor.instance_id.clone(), lease_id);
+        self.ever_connected.store(true, Ordering::SeqCst);
+        if lease_id.is_some() {
+            self.spawn_renewal(descriptor.instance_id.clone());
         }
         Ok(descriptor)
     }
 
-    fn spawn_renewal(self: &Arc<Self>, instance_id: String, lease_id: String) {
+    async fn snapshot(&self) -> Option<Descriptor> {
+        self.connected
+            .lock()
+            .await
+            .as_ref()
+            .map(|state| state.descriptor.clone())
+    }
+
+    /// 현재 붙은 서버 인스턴스(없으면 `None`).
+    #[cfg(test)]
+    pub async fn current_instance(&self) -> Option<String> {
+        self.snapshot()
+            .await
+            .map(|descriptor| descriptor.instance_id)
+    }
+
+    fn spawn_renewal(self: &Arc<Self>, instance_id: String) {
         let server = Arc::downgrade(self);
         tauri::async_runtime::spawn(async move {
             loop {
@@ -149,35 +199,66 @@ impl ExternalServer {
                 let Some(server) = server.upgrade() else {
                     return;
                 };
-                let Some(descriptor) = server.current(&instance_id).await else {
-                    return; // 다른 서버로 바뀌었거나 연결을 잊었다
-                };
-                match server
-                    .owner_call(
-                        &descriptor,
-                        "lease.renew",
-                        json!({ "leaseId": lease_id }),
-                        true,
-                    )
-                    .await
-                {
-                    Ok(_) => {}
-                    Err(error) => {
-                        eprintln!("[workbench-server] lease renewal failed: {error}");
-                        server.forget(&instance_id).await;
-                        return;
-                    }
+                // 다른 서버로 바뀌었거나 연결을 잊었으면 끝낸다(다음 `connect`가 새 갱신을 띄운다).
+                if server.renew_once(&instance_id).await.is_none() {
+                    return;
                 }
             }
         });
     }
 
-    async fn current(&self, instance_id: &str) -> Option<Descriptor> {
-        let connected = self.connected.lock().await;
-        connected
-            .as_ref()
-            .filter(|state| state.descriptor.instance_id == instance_id)
-            .map(|state| state.descriptor.clone())
+    /// 임대 갱신 한 번. 그 인스턴스에 더는 붙어 있지 않으면 `None`. 실패는 연결을 잊지 않고 다음 주기에 다시 한다. 서버가
+    /// 임대를 모르면(만료) 새로 잡아 연결 상태에 적는다.
+    async fn renew_once(&self, instance_id: &str) -> Option<RenewalStep> {
+        let (descriptor, lease_id) = {
+            let connected = self.connected.lock().await;
+            let state = connected
+                .as_ref()
+                .filter(|state| state.descriptor.instance_id == instance_id)?;
+            (state.descriptor.clone(), state.lease_id.clone()?)
+        };
+        let result = self
+            .owner_call(
+                &descriptor,
+                "lease.renew",
+                json!({ "leaseId": lease_id }),
+                true,
+            )
+            .await;
+        let step = renewal_step(&result);
+        match step {
+            RenewalStep::Renewed => {}
+            RenewalStep::Retry => {
+                if let Err(error) = &result {
+                    eprintln!("[workbench-server] lease renewal failed (retrying): {error}");
+                }
+            }
+            RenewalStep::Reacquire => {
+                match self
+                    .owner_call(
+                        &descriptor,
+                        "lease.acquire",
+                        json!({ "clientKind": "desktop", "clientId": self.client_id }),
+                        true,
+                    )
+                    .await
+                {
+                    Ok(lease) => {
+                        let mut connected = self.connected.lock().await;
+                        if let Some(state) = connected
+                            .as_mut()
+                            .filter(|state| state.descriptor.instance_id == instance_id)
+                        {
+                            state.lease_id = lease["leaseId"].as_str().map(str::to_owned);
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("[workbench-server] lease re-acquire failed (retrying): {error}");
+                    }
+                }
+            }
+        }
+        Some(step)
     }
 
     /// 그 인스턴스와의 연결을 잊는다(다음 호출이 다시 `ensure`한다).
@@ -253,6 +334,7 @@ impl ExternalServer {
     }
 
     /// 창 주체로 작업대를 연다(창 토큰 + 출처).
+    #[cfg(test)]
     pub async fn open_bench(
         self: &Arc<Self>,
         label: &str,
@@ -260,7 +342,32 @@ impl ExternalServer {
         origin: &str,
         working_directory: &str,
     ) -> Result<String, String> {
-        let (base, token, _) = self.issue_window_token(label, incarnation, origin).await?;
+        self.open_bench_on(label, incarnation, origin, working_directory)
+            .await
+            .map(|(bench, _)| bench)
+    }
+
+    /// `open_bench`와 같되 작업대를 연 서버 인스턴스도 돌려준다(데스크톱 대응 표가 인스턴스에 묶는다, OCR H2).
+    pub async fn open_bench_on(
+        self: &Arc<Self>,
+        label: &str,
+        incarnation: &str,
+        origin: &str,
+        working_directory: &str,
+    ) -> Result<(String, String), String> {
+        let (descriptor, output) = self
+            .owner_call_reconnecting(
+                "desktop.issueWindowToken",
+                json!({ "label": label, "incarnation": incarnation, "origin": origin }),
+                true,
+            )
+            .await?;
+        let instance = descriptor.instance_id.clone();
+        let base = descriptor.base_url;
+        let token = output["token"]
+            .as_str()
+            .ok_or("the server returned no window token")?
+            .to_owned();
         let origin = origin.to_owned();
         let input = json!({ "workingDirectory": working_directory });
         let output = tokio::task::spawn_blocking(move || {
@@ -271,7 +378,7 @@ impl ExternalServer {
         .map_err(|error| error.to_string())?;
         output["benchId"]
             .as_str()
-            .map(str::to_owned)
+            .map(|bench| (bench.to_owned(), instance))
             .ok_or_else(|| "the server returned no bench id".to_owned())
     }
 
@@ -296,12 +403,12 @@ impl ExternalServer {
         incarnation: &str,
         close_bench: bool,
     ) -> Result<Value, String> {
-        let descriptor = {
-            let connected = self.connected.lock().await;
-            connected.as_ref().map(|state| state.descriptor.clone())
-        };
-        let Some(descriptor) = descriptor else {
-            return Ok(Value::Null);
+        let descriptor = match self.snapshot().await {
+            Some(descriptor) => descriptor,
+            None => match self.reattach().await {
+                Some(descriptor) => descriptor,
+                None => return Ok(Value::Null),
+            },
         };
         self.owner_call(
             &descriptor,
@@ -313,8 +420,26 @@ impl ExternalServer {
         .map_err(|error| error.to_string())
     }
 
+    /// 연결을 잃은 뒤 떠 있는 서버에 다시 붙는다(창 폐기용). 서버를 띄우지 않는다: 붙은 적이 없거나 종료 중이면, 또는
+    /// 안내 파일의 서버가 확인을 통과하지 않으면(서버가 끝났으면 그 작업대도 없다) `None`.
+    async fn reattach(&self) -> Option<Descriptor> {
+        if !self.ever_connected.load(Ordering::SeqCst) || self.exiting.load(Ordering::SeqCst) {
+            return None;
+        }
+        let dir = server_dir(&self.data_dir);
+        tokio::task::spawn_blocking(move || {
+            let descriptor = read_descriptor(&dir).ok().flatten()?;
+            verify(&descriptor).ok().map(|_| descriptor)
+        })
+        .await
+        .ok()
+        .flatten()
+    }
+
     /// 종료 경로: 진행 중 폐기를 상한 안에서 기다리고 임대를 푼다. `close_all_benches`는 부르지 않는다(앱 종료 ≠ 창 닫기).
+    /// 연결 상태 잠금도 상한 안에서만 기다린다(OCR M1).
     pub async fn release_for_exit(self: &Arc<Self>, limit: Duration) {
+        self.exiting.store(true, Ordering::SeqCst);
         let deadline = tokio::time::Instant::now() + limit;
         let _ = tokio::time::timeout_at(deadline, async {
             loop {
@@ -328,9 +453,9 @@ impl ExternalServer {
             }
         })
         .await;
-        let state = {
-            let mut connected = self.connected.lock().await;
-            connected.take()
+        let state = match tokio::time::timeout_at(deadline, self.connected.lock()).await {
+            Ok(mut connected) => connected.take(),
+            Err(_) => None,
         };
         if let Some(Connected {
             descriptor,
@@ -547,6 +672,155 @@ mod tests {
             assert!(
                 !listed.to_string().contains(&bench),
                 "the retired window's bench is closed: {listed}"
+            );
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// OCR M1: 종료 경로는 연결 상태 잠금이 붙잡혀 있어도(느린 `ensure`가 쥐고 있는 경우) 상한 안에 끝난다.
+    #[test]
+    fn an_exit_is_bounded_while_the_connection_lock_is_held() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = ExternalServer::new(
+            dir.path().to_path_buf(),
+            PathBuf::from("/nonexistent/server"),
+        );
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        runtime.block_on(async {
+            let held = client.connected.lock().await;
+            let started = std::time::Instant::now();
+            let finished = tokio::time::timeout(
+                Duration::from_secs(5),
+                client.release_for_exit(Duration::from_millis(200)),
+            )
+            .await;
+            drop(held);
+            assert!(
+                finished.is_ok(),
+                "the exit waited on the connection lock beyond its cap"
+            );
+            assert!(started.elapsed() < Duration::from_secs(2));
+        });
+    }
+
+    /// OCR H1: 연결 상태를 잃은 뒤(갱신 실패·전송 오류)에도 창 폐기는 떠 있는 서버에 다시 붙어 작업대를 닫는다.
+    #[test]
+    fn a_retire_after_a_lost_connection_reattaches_to_the_running_server() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let bench = client
+                .open_bench("session-c", "i1", ORIGIN, &server.work)
+                .await
+                .unwrap();
+            client.forget(&descriptor.instance_id).await;
+            let retired = client.retire_window("session-c", "i1", true).await.unwrap();
+            assert_eq!(retired["closedBenches"], json!([bench]), "{retired}");
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// 종료 뒤 늦게 온 폐기는 서버에 다시 붙지 않는다(종료 중 서버 기동·재연결 없음).
+    #[test]
+    fn a_retire_after_the_exit_does_not_reconnect() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            client.connect().await.unwrap();
+            client.release_for_exit(EXIT_FLUSH_LIMIT).await;
+            let retired = client.retire_window("session-d", "i1", true).await;
+            assert_eq!(retired, Ok(Value::Null));
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// OCR H1: 갱신 한 번의 실패는 연결을 잊지 않는다. 임대가 없어졌으면(`notFound`) 다시 잡는다.
+    #[test]
+    fn a_renewal_failure_is_retried_and_an_expired_lease_is_reacquired() {
+        assert_eq!(
+            renewal_step(&Ok(json!({ "ttlSeconds": 30 }))),
+            RenewalStep::Renewed
+        );
+        assert_eq!(
+            renewal_step(&Err(CallError::Transport("timed out".into()))),
+            RenewalStep::Retry
+        );
+        assert_eq!(
+            renewal_step(&Err(CallError::Fault {
+                status: 503,
+                code: "draining".into(),
+                message: String::new(),
+            })),
+            RenewalStep::Retry
+        );
+        assert_eq!(
+            renewal_step(&Err(CallError::Fault {
+                status: 404,
+                code: "notFound".into(),
+                message: String::new(),
+            })),
+            RenewalStep::Reacquire
+        );
+    }
+
+    #[test]
+    fn a_lost_lease_is_acquired_again_by_the_renewal() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let lease = client
+                .connected
+                .lock()
+                .await
+                .as_ref()
+                .and_then(|state| state.lease_id.clone())
+                .unwrap();
+            // 서버가 임대를 거둔 상태(TTL 만료와 같다).
+            call(
+                &descriptor.base_url,
+                &descriptor.owner_token,
+                None,
+                "lease.release",
+                json!({ "leaseId": lease }),
+                true,
+            )
+            .unwrap();
+            let step = client.renew_once(&descriptor.instance_id).await;
+            assert_eq!(step, Some(RenewalStep::Reacquire));
+            let status = call(
+                &descriptor.base_url,
+                &descriptor.owner_token,
+                None,
+                "server.status",
+                json!({}),
+                false,
+            )
+            .unwrap();
+            assert_eq!(
+                status["leases"],
+                json!(1),
+                "the lease is held again: {status}"
+            );
+            assert_eq!(
+                client.current_instance().await,
+                Some(descriptor.instance_id.clone()),
+                "the connection is kept"
+            );
+            // 다시 잡은 임대가 이어서 갱신된다.
+            assert_eq!(
+                client.renew_once(&descriptor.instance_id).await,
+                Some(RenewalStep::Renewed)
             );
         });
         server.runtime.block_on(server.host.shutdown());

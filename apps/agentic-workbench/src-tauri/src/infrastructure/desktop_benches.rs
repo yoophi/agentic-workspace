@@ -28,6 +28,74 @@ struct Table {
     by_bench: HashMap<String, String>,
     closed_labels: HashSet<String>,
     locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>,
+    external: ExternalTable,
+}
+
+/// 외부 서버 모드의 대응(044, OCR H2·M2). 작업대는 창 주체(label + incarnation) 소유이고 서버 메모리에만 있으므로, 대응을
+/// **서버 인스턴스와 창 incarnation**에 묶는다: 서버가 다시 떴거나 같은 label로 창을 다시 열었으면 다시 연다. 닫힌 창도
+/// incarnation별로 적는다 — 옛 창의 늦은 정리가 같은 label로 다시 연 창(`settings`·`main`)을 지우거나 막지 않는다.
+#[derive(Default)]
+struct ExternalTable {
+    entries: HashMap<String, ExternalEntry>,
+    closed: HashSet<(String, String)>,
+}
+
+struct ExternalEntry {
+    incarnation: String,
+    instance: String,
+    bench: String,
+}
+
+impl ExternalTable {
+    fn hit(&self, label: &str, incarnation: &str, instance: &str) -> Option<String> {
+        self.entries
+            .get(label)
+            .filter(|entry| entry.incarnation == incarnation && entry.instance == instance)
+            .map(|entry| entry.bench.clone())
+    }
+
+    fn record(&mut self, label: &str, incarnation: &str, instance: &str, bench: &str) {
+        self.entries.insert(
+            label.to_owned(),
+            ExternalEntry {
+                incarnation: incarnation.to_owned(),
+                instance: instance.to_owned(),
+                bench: bench.to_owned(),
+            },
+        );
+    }
+
+    fn label_for(&self, bench: &str) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|(_, entry)| entry.bench == bench)
+            .map(|(label, _)| label.clone())
+    }
+
+    fn lookup(&self, label: &str, incarnation: &str) -> Option<String> {
+        self.entries
+            .get(label)
+            .filter(|entry| entry.incarnation == incarnation)
+            .map(|entry| entry.bench.clone())
+    }
+
+    fn is_closed(&self, label: &str, incarnation: &str) -> bool {
+        self.closed
+            .contains(&(label.to_owned(), incarnation.to_owned()))
+    }
+
+    /// 그 incarnation의 창이 닫혔다. 대응은 같은 incarnation일 때만 지운다.
+    fn forget(&mut self, label: &str, incarnation: &str) {
+        self.closed
+            .insert((label.to_owned(), incarnation.to_owned()));
+        if self
+            .entries
+            .get(label)
+            .is_some_and(|entry| entry.incarnation == incarnation)
+        {
+            self.entries.remove(label);
+        }
+    }
 }
 
 fn table() -> MutexGuard<'static, Table> {
@@ -43,13 +111,32 @@ fn label_lock(label: &str) -> Arc<tokio::sync::Mutex<()>> {
 }
 
 /// 창의 작업대. 없으면 `None`(그 창이 소유한 run·교환도 없다).
+/// 외부 서버 모드의 대응도 본다(호환 command가 작업대를 찾으면 "외부 서버 모드에서는 쓸 수 없음"으로 끝난다 — 조용히
+/// 성공하지 않는다).
 pub fn lookup(label: &str) -> Option<String> {
-    table().by_label.get(label).cloned()
+    let table = table();
+    table.by_label.get(label).cloned().or_else(|| {
+        table
+            .external
+            .entries
+            .get(label)
+            .map(|entry| entry.bench.clone())
+    })
+}
+
+/// 외부 서버 모드: 그 창 incarnation이 연 작업대(열지 않는다).
+pub fn lookup_external(label: &str, incarnation: &str) -> Option<String> {
+    table().external.lookup(label, incarnation)
 }
 
 /// 작업대를 연 창.
 pub fn label_for(bench_id: &str) -> Option<String> {
-    table().by_bench.get(bench_id).cloned()
+    let table = table();
+    table
+        .by_bench
+        .get(bench_id)
+        .cloned()
+        .or_else(|| table.external.label_for(bench_id))
 }
 
 /// 창의 작업대를 돌려주고, 없으면 연다. 경로는 창의 Worktree(없으면 `hint`: run 요청 `cwd`·교환 `worktreePath`).
@@ -99,37 +186,35 @@ pub async fn ensure_external(
 ) -> Result<String, String> {
     let lock = label_lock(label);
     let _guard = lock.lock().await;
-    {
-        let table = table();
-        if table.closed_labels.contains(label) {
-            return Err(MESSAGE_WINDOW_UNAVAILABLE.to_owned());
-        }
-        if let Some(bench) = table.by_label.get(label) {
-            return Ok(bench.clone());
-        }
+    if table().external.is_closed(label, incarnation) {
+        return Err(MESSAGE_WINDOW_UNAVAILABLE.to_owned());
+    }
+    // 지금 붙은 서버 인스턴스(끊겼으면 다시 붙는다). 다른 인스턴스가 연 대응은 쓰지 않는다 — 서버가 다시 뜨면 작업대는
+    // 사라졌다.
+    let instance = server.connect().await?.instance_id;
+    if let Some(bench) = table().external.hit(label, incarnation, &instance) {
+        return Ok(bench);
     }
     let path = crate::infrastructure::window_manager::session_worktree_path(label)
         .or_else(|| hint.map(str::to_owned))
         .filter(|path| !path.trim().is_empty())
         .ok_or_else(|| "A working directory is required to start agent work.".to_owned())?;
-    let bench = server.open_bench(label, incarnation, origin, &path).await?;
-    let mut table = table();
-    table.by_label.insert(label.to_owned(), bench.clone());
-    table.by_bench.insert(bench.clone(), label.to_owned());
+    let (bench, instance) = server
+        .open_bench_on(label, incarnation, origin, &path)
+        .await?;
+    // 열기와 닫힘 정리는 같은 label 잠금으로 직렬화된다 — 닫힘은 이 기록 뒤에 와서 지운다.
+    table()
+        .external
+        .record(label, incarnation, &instance, &bench);
     Ok(bench)
 }
 
-/// 외부 서버 모드의 창 `Destroyed`(044 T031): 닫힌 창으로 표시하고 대응만 지운다. 작업대 닫기 여부는 서버의
-/// `desktop.retireWindow{closeBench}`가 정한다(창 닫기 의도, R8).
-pub async fn forget_window(label: &str) {
+/// 외부 서버 모드의 창 `Destroyed`(044 T031): 그 incarnation의 창을 닫힌 것으로 표시하고 대응만 지운다. 작업대 닫기 여부는
+/// 서버의 `desktop.retireWindow{closeBench}`가 정한다(창 닫기 의도, R8). 같은 label로 다시 연 창은 건드리지 않는다.
+pub async fn forget_window(label: &str, incarnation: &str) {
     let lock = label_lock(label);
     let _guard = lock.lock().await;
-    let mut table = table();
-    table.closed_labels.insert(label.to_owned());
-    if let Some(bench) = table.by_label.remove(label) {
-        table.by_bench.remove(&bench);
-    }
-    table.locks.remove(label);
+    table().external.forget(label, incarnation);
 }
 
 /// 창이 `Destroyed`될 때: 닫힌 창으로 표시 → 작업대 닫기(소유 run 취소·교환 삭제) → 대응 제거. `principal`은 작업대를
@@ -243,6 +328,58 @@ mod tests {
             assert!(lookup(&label).is_none(), "round {round}");
         }
         assert!(runtime.benches().registry.is_empty());
+    }
+
+    /// OCR H2: 외부 모드의 대응은 서버 인스턴스와 창 incarnation에 묶인다. 서버가 바뀌면(재기동) 다시 연다.
+    #[test]
+    fn an_external_bench_is_reused_only_for_the_same_incarnation_and_server() {
+        let mut table = ExternalTable::default();
+        table.record("session-x", "i1", "server-a", "bench-1");
+        assert_eq!(
+            table.hit("session-x", "i1", "server-a"),
+            Some("bench-1".into())
+        );
+        assert_eq!(
+            table.hit("session-x", "i1", "server-b"),
+            None,
+            "a new server instance"
+        );
+        assert_eq!(
+            table.hit("session-x", "i2", "server-a"),
+            None,
+            "a new window incarnation"
+        );
+        table.record("session-x", "i1", "server-b", "bench-2");
+        assert_eq!(
+            table.hit("session-x", "i1", "server-b"),
+            Some("bench-2".into())
+        );
+        assert_eq!(table.label_for("bench-2").as_deref(), Some("session-x"));
+        assert_eq!(
+            table.label_for("bench-1"),
+            None,
+            "the replaced bench is unmapped"
+        );
+    }
+
+    /// OCR M2: 옛 incarnation의 늦은 정리는 같은 label로 다시 연 창을 지우거나 막지 않는다.
+    #[test]
+    fn forgetting_an_old_incarnation_keeps_the_reopened_window() {
+        let mut table = ExternalTable::default();
+        table.record("settings", "i2", "server-a", "bench-new");
+        table.forget("settings", "i1");
+        assert_eq!(
+            table.hit("settings", "i2", "server-a"),
+            Some("bench-new".into())
+        );
+        assert!(!table.is_closed("settings", "i2"));
+        assert!(table.is_closed("settings", "i1"));
+        table.forget("settings", "i2");
+        assert_eq!(table.hit("settings", "i2", "server-a"), None);
+        assert!(
+            table.is_closed("settings", "i2"),
+            "a closed window stays closed"
+        );
     }
 
     #[tokio::test]

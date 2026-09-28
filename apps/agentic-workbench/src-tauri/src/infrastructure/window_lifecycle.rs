@@ -138,8 +138,10 @@ fn on_destroyed_external(app: &AppHandle, label: &str, incarnation: &str, decisi
             decision == CloseDecision::CloseBench,
         );
     }
-    let label = label.to_owned();
-    tauri::async_runtime::spawn(async move { desktop_benches::forget_window(&label).await });
+    let (label, incarnation) = (label.to_owned(), incarnation.to_owned());
+    tauri::async_runtime::spawn(async move {
+        desktop_benches::forget_window(&label, &incarnation).await
+    });
 }
 
 fn on_destroyed(
