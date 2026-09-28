@@ -1324,4 +1324,157 @@ mod tests {
             "nothing found: report the sibling path"
         );
     }
+
+    /// Codex r5(apps high) 종단 시나리오: 비우는 서버에서 창 토큰 응답 하나를 잃어도, 데스크톱은 같은 인스턴스와 임대를
+    /// 유지하고 **다시 받은 창 토큰**으로 대기 교환을 이어 가기(K)로 전달하며, 서버는 감시 루프로 멈춘다.
+    ///
+    /// 실제: host 조립(런타임 + HTTP) + 감시 루프(`run_until_stopped`), 가짜 ACP agent 두 run(r2는 turn 문으로 바쁨),
+    /// 교환 원장(동기화·보내기·확인), 소유자 `server.stop{wait}`, 임대 갱신, 창 토큰으로 `run.sendPrompt`.
+    /// 주입: 클라이언트가 `desktop.issueWindowToken`의 응답 하나를 **서버가 처리한 뒤** 버린다(응답 유실 모양, 네트워크 단절 아님).
+    /// 대신하는 것: 패널 대기열의 라우팅·전송은 시험이 한다(키·continuation은 043 화면 계약 그대로).
+    mod exchange_after_a_lost_token {
+        use std::time::{Duration, Instant};
+
+        use workbench_host::lifecycle::monitor::{MonitorOptions, run_until_stopped};
+
+        use super::*;
+
+        const BOUND: Duration = Duration::from_secs(20);
+
+        fn agent_command(log: &std::path::Path, extra: &str) -> String {
+            format!(
+                "python3 {} --log {} {extra}",
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../crates/workbench-core/tests/support/agents/fake_acp_permission_agent.py")
+                    .display(),
+                log.display()
+            )
+        }
+
+        async fn owner(
+            client: &ExternalServer,
+            descriptor: &Descriptor,
+            operation: &'static str,
+            input: Value,
+            command: bool,
+        ) -> Value {
+            client
+                .owner_call(descriptor, operation, input, command)
+                .await
+                .unwrap_or_else(|error| panic!("{operation}: {error:?}"))
+        }
+
+        async fn until(what: &str, mut ready: impl AsyncFnMut() -> bool) {
+            let deadline = Instant::now() + BOUND;
+            while !ready().await {
+                assert!(Instant::now() < deadline, "timed out waiting for {what}");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        }
+
+        #[test]
+        fn a_lost_token_response_during_a_wait_stop_still_delivers_the_exchange_and_stops() {
+            let server = running_server();
+            let client = ExternalServer::new(
+                server.dir.path().join("data"),
+                PathBuf::from("/nonexistent/agentic-workbench-server"),
+            );
+            let control = std::sync::Arc::clone(server.host.runtime.server_control());
+            server.runtime.spawn(run_until_stopped(
+                std::sync::Arc::clone(&control),
+                MonitorOptions {
+                    idle_timeout: Duration::from_secs(3600),
+                    tick: Duration::from_millis(20),
+                },
+            ));
+            let gate = server.dir.path().join("r2-end-turn");
+            let (log1, log2) = (
+                server.dir.path().join("agent-r1.log"),
+                server.dir.path().join("agent-r2.log"),
+            );
+            server.runtime.block_on(async {
+                // 1. 연결(데스크톱 임대) + 창 토큰으로 작업대 열기 + run 둘(r2는 첫 turn이 문에서 바쁨).
+                let descriptor = client.connect().await.unwrap();
+                let (bench, _) = client.open_bench_on("session-e2e", "i1", ORIGIN, &server.work).await.unwrap();
+                for (run, log, extra) in [("r1", &log1, String::new()), ("r2", &log2, format!("--end-turn-gate {}", gate.display()))] {
+                    owner(&client, &descriptor, "run.start", json!({ "benchId": bench, "request": {
+                        "goal": "g", "agentId": "fake-acp", "runId": run, "autoAllow": true,
+                        "agentCommand": agent_command(log, &extra), "cwd": server.work } }), true).await;
+                }
+                let gate_state = control.work_gate();
+                until("r2 busy in its first turn", async || gate_state.busy_run_count("r2") > 0).await;
+
+                // 2. 교환: 동기화 → 보내기(queue) → 확인(화면 원장처럼 확인이 전송보다 먼저).
+                owner(&client, &descriptor, "exchange.syncWorkspace", json!({ "benchId": bench, "request": {
+                    "worktreePath": server.work, "revision": 1, "focusedPanelId": "main",
+                    "panels": [
+                        {"panelId": "main", "title": "Main", "runId": "r1", "status": "running"},
+                        {"panelId": "extra", "title": "Extra", "runId": "r2", "status": "running"} ] } }), true).await;
+                owner(&client, &descriptor, "exchange.send", json!({ "benchId": bench, "request": {
+                    "requestId": "q1", "sourcePanelId": "main", "sourceRunId": "r1",
+                    "targetPanelId": "extra", "targetRunId": "r2", "message": "hello peer", "delivery": "queue" } }), true).await;
+                owner(&client, &descriptor, "exchange.acknowledge", json!({ "benchId": bench, "request": {
+                    "requestId": "q1", "targetPanelId": "extra", "outcome": "delivered", "reason": null } }), true).await;
+
+                // 3. wait 비우기: 데스크톱 임대가 있어 미소비 교환이 활동 작업이다.
+                let drained = owner(&client, &descriptor, "server.stop", json!({ "mode": "wait" }), true).await;
+                assert_eq!(drained["state"], "drainingWait", "{drained}");
+                let status = owner(&client, &descriptor, "server.status", json!({}), false).await;
+                assert_eq!(status["activeWork"]["pendingExchanges"], 1, "{status}");
+                assert!(!*control.stopped().borrow(), "not stopping while the exchange is pending");
+
+                // 4. 주입: 창 토큰 응답 하나 유실 → 같은 인스턴스에서 다시 받고, 임대도 갱신된다.
+                client.drop_next_response_of("desktop.issueWindowToken");
+                let (base, token, _) = client
+                    .issue_window_token("session-e2e", "i1", ORIGIN)
+                    .await
+                    .expect("the window token is reissued on the same instance");
+                assert!(!client.response_drop_pending(), "the injected loss happened");
+                assert_eq!(client.current_instance().await, Some(descriptor.instance_id.clone()));
+                assert_eq!(client.renew_once(&descriptor.instance_id).await, Some(RenewalStep::Renewed));
+
+                // 5. 권한·turn 끝(제어) → 다시 받은 창 토큰으로 이어 가기 전달(K, 전달 키 + continuation).
+                std::fs::write(&gate, b"").unwrap();
+                let log2_view = log2.clone();
+                let deadline = Instant::now() + BOUND;
+                while gate_state.busy_run_count("r2") != 0 {
+                    assert!(
+                        Instant::now() < deadline,
+                        "timed out waiting for r2 to finish its turn; agent log: {}",
+                        std::fs::read_to_string(&log2_view).unwrap_or_default()
+                    );
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+                assert!(!*control.stopped().borrow(), "the exchange still holds the stop");
+                let (base2, token2) = (base.clone(), token.clone());
+                let bench2 = bench.clone();
+                let delivered = tokio::task::spawn_blocking(move || {
+                    let envelope = json!({
+                        "protocolVersion": workbench_protocol::PROTOCOL_VERSION,
+                        "operation": "run.sendPrompt", "requestId": "req-delivery-q1",
+                        "idempotencyKey": "exchange-delivery:q1",
+                        "input": { "benchId": bench2, "runId": "r2", "prompt": "hello peer",
+                            "continuation": { "exchangeRequestId": "q1" } } });
+                    workbench_host::lifecycle::client::request_with_origin(&base2, "POST", "/v1/calls", Some(&envelope), Some(&token2), Some(ORIGIN))
+                })
+                .await
+                .unwrap()
+                .expect("reachable");
+                assert_eq!(delivered.0, 200, "the continuation is accepted during the drain: {}", delivered.1);
+
+                // 6. 소비 → 활동 0 → 감시 루프가 멈춘다.
+                let mut stopped = control.stopped();
+                tokio::time::timeout(BOUND, stopped.wait_for(|stopped| *stopped))
+                    .await
+                    .expect("the monitor stops the server after the delivery")
+                    .unwrap();
+            });
+            let lines = std::fs::read_to_string(&log2).unwrap_or_default();
+            assert!(
+                lines.contains("hello peer"),
+                "the exchange prompt reached the agent: {lines}"
+            );
+            server.runtime.block_on(server.host.shutdown());
+        }
+    }
 }
