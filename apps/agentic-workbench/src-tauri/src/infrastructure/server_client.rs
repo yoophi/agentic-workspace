@@ -232,6 +232,16 @@ impl ExternalServer {
                 if let Err(error) = &result {
                     eprintln!("[workbench-server] lease renewal failed (retrying): {error}");
                 }
+                // OCR 2차 H1: 재시도는 **같은 살아 있는 인스턴스**에 대해서만 한다. 안내 파일이 없거나, 다른 인스턴스이거나,
+                // 확인을 통과하지 않으면 그 서버는 끝났다 — 잊고 멈춘다(다음 `connect`가 다시 붙는다). 잊지 않으면 낡은
+                // 인스턴스의 작업대 대응과 폐기 경로가 계속 쓰인다.
+                if !self.instance_is_live(instance_id).await {
+                    eprintln!(
+                        "[workbench-server] server instance {instance_id} is gone; forgetting it"
+                    );
+                    self.forget(instance_id).await;
+                    return None;
+                }
             }
             RenewalStep::Reacquire => {
                 match self
@@ -259,6 +269,21 @@ impl ExternalServer {
             }
         }
         Some(step)
+    }
+
+    /// 안내 파일이 그 인스턴스를 가리키고 확인(신원 증명·서빙)을 통과하는가.
+    async fn instance_is_live(&self, instance_id: &str) -> bool {
+        let dir = server_dir(&self.data_dir);
+        let instance = instance_id.to_owned();
+        tokio::task::spawn_blocking(move || {
+            read_descriptor(&dir)
+                .ok()
+                .flatten()
+                .filter(|descriptor| descriptor.instance_id == instance)
+                .is_some_and(|descriptor| verify(&descriptor).is_ok())
+        })
+        .await
+        .unwrap_or(false)
     }
 
     /// 그 인스턴스와의 연결을 잊는다(다음 호출이 다시 `ensure`한다).
@@ -410,8 +435,19 @@ impl ExternalServer {
                 None => return Ok(Value::Null),
             },
         };
+        self.retire_on(&descriptor, label, incarnation, close_bench)
+            .await
+    }
+
+    async fn retire_on(
+        &self,
+        descriptor: &Descriptor,
+        label: &str,
+        incarnation: &str,
+        close_bench: bool,
+    ) -> Result<Value, String> {
         self.owner_call(
-            &descriptor,
+            descriptor,
             "desktop.retireWindow",
             json!({ "label": label, "incarnation": incarnation, "closeBench": close_bench }),
             true,
@@ -423,7 +459,15 @@ impl ExternalServer {
     /// 연결을 잃은 뒤 떠 있는 서버에 다시 붙는다(창 폐기용). 서버를 띄우지 않는다: 붙은 적이 없거나 종료 중이면, 또는
     /// 안내 파일의 서버가 확인을 통과하지 않으면(서버가 끝났으면 그 작업대도 없다) `None`.
     async fn reattach(&self) -> Option<Descriptor> {
-        if !self.ever_connected.load(Ordering::SeqCst) || self.exiting.load(Ordering::SeqCst) {
+        if self.exiting.load(Ordering::SeqCst) {
+            return None;
+        }
+        self.reattach_for_retire().await
+    }
+
+    /// `reattach`와 같되 종료 표시를 보지 않는다 — 종료 **전에** 맡은 종료 폐기가 쓴다(OCR 2차 M1). 서버를 띄우지 않는다.
+    async fn reattach_for_retire(&self) -> Option<Descriptor> {
+        if !self.ever_connected.load(Ordering::SeqCst) {
             return None;
         }
         let dir = server_dir(&self.data_dir);
@@ -496,10 +540,34 @@ impl ExternalServer {
 
     /// 종료 경로(Codex 코드 리뷰): 살아 있는 창을 모두 `closeBench:false`로 폐기해 둔다(`release_for_exit`가 상한 안에서
     /// 기다린다). 정상 Quit은 `Destroyed` 없이 `Exit`만 오므로(R8) 이것이 없으면 창 토큰이 만료까지 유효하다.
+    ///
+    /// OCR 2차 M1: 이미 연결을 잃었어도 거두도록, 안내를 한 번(스냅샷 또는 다시 붙기, 서버 기동 없음) 구하고 그 서버에 모든
+    /// 창을 폐기한다. 진행 중 수는 곧바로 올려 `release_for_exit`가 기다리게 하고, 종료 표시는 이 폐기를 막지 않는다.
     pub fn retire_windows_for_exit(self: &Arc<Self>, windows: Vec<(String, String)>) {
-        for (label, incarnation) in windows {
-            self.retire_window_detached(label, incarnation, false);
+        if windows.is_empty() {
+            return;
         }
+        let count = windows.len();
+        self.pending.fetch_add(count, Ordering::SeqCst);
+        let server = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let descriptor = match server.snapshot().await {
+                Some(descriptor) => Some(descriptor),
+                None => server.reattach_for_retire().await,
+            };
+            for (label, incarnation) in windows {
+                if let Some(descriptor) = &descriptor
+                    && let Err(error) = server
+                        .retire_on(descriptor, &label, &incarnation, false)
+                        .await
+                {
+                    eprintln!(
+                        "[workbench-server] failed to retire window {label} at exit: {error}"
+                    );
+                }
+                server.settle_one();
+            }
+        });
     }
 
     fn settle_one(&self) {
@@ -794,6 +862,113 @@ mod tests {
                 benches.to_string().contains(&bench),
                 "the bench stays on the server: {benches}"
             );
+        });
+        server.runtime.block_on(server.host.shutdown());
+    }
+
+    /// OCR 2차 H1: 서버가 끝났거나 다른 인스턴스가 안내 파일을 차지했으면, 갱신의 재시도 단계가 안내 파일을 다시 확인해
+    /// 옛 인스턴스를 잊는다. 다음 `connect`는 새 인스턴스에 붙는다(낡은 작업대 대응을 쓰지 않게).
+    #[test]
+    fn a_renewal_against_a_replaced_server_forgets_the_old_instance() {
+        let old = running_server();
+        let data = old.dir.path().join("data");
+        let client = ExternalServer::new(
+            data.clone(),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        let old_instance = old
+            .runtime
+            .block_on(async { client.connect().await.unwrap().instance_id });
+        old.runtime.block_on(old.host.shutdown());
+        // 다른 서버가 같은 데이터 디렉터리의 안내 파일을 차지한다(새 인스턴스).
+        let new = running_server();
+        let replaced = read_descriptor(&server_dir(&new.dir.path().join("data")))
+            .unwrap()
+            .unwrap();
+        write_descriptor(&ensure_server_dir(&data).unwrap(), &replaced).unwrap();
+        new.runtime.block_on(async {
+            let step = client.renew_once(&old_instance).await;
+            assert_eq!(step, None, "the renewal stops for the replaced instance");
+            assert_eq!(
+                client.current_instance().await,
+                None,
+                "the old instance is forgotten"
+            );
+            let attached = client.connect().await.unwrap();
+            assert_eq!(attached.instance_id, replaced.instance_id);
+        });
+        new.runtime.block_on(new.host.shutdown());
+    }
+
+    /// OCR 2차 H1: 안내 파일이 없어졌으면(서버가 끝남) 옛 인스턴스를 잊는다.
+    #[test]
+    fn a_renewal_after_the_server_is_gone_forgets_the_instance() {
+        let server = running_server();
+        let data = server.dir.path().join("data");
+        let client = ExternalServer::new(
+            data.clone(),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let instance = client.connect().await.unwrap().instance_id;
+            server.host.shutdown().await;
+            std::fs::remove_file(server_dir(&data).join("server.json")).unwrap();
+            assert_eq!(client.renew_once(&instance).await, None);
+            assert_eq!(client.current_instance().await, None);
+        });
+    }
+
+    /// OCR 2차 M1: 종료 때 이미 연결을 잃었어도(갱신 실패 등) 종료 폐기는 떠 있는 서버에 다시 붙어 창 토큰을 거둔다.
+    /// 서버를 띄우지는 않는다. 작업대는 남는다.
+    #[test]
+    fn an_exit_after_a_lost_connection_still_retires_the_open_windows() {
+        let server = running_server();
+        let client = ExternalServer::new(
+            server.dir.path().join("data"),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        server.runtime.block_on(async {
+            let descriptor = client.connect().await.unwrap();
+            let bench = client
+                .open_bench("session-x", "i1", ORIGIN, &server.work)
+                .await
+                .unwrap();
+            let (base, token, _) = client
+                .issue_window_token("session-x", "i1", ORIGIN)
+                .await
+                .unwrap();
+            client.forget(&descriptor.instance_id).await;
+            client.retire_windows_for_exit(vec![("session-x".to_owned(), "i1".to_owned())]);
+            client.release_for_exit(EXIT_FLUSH_LIMIT).await;
+            let status = tokio::task::spawn_blocking(move || {
+                workbench_host::lifecycle::client::request_with_origin(
+                    &base,
+                    "POST",
+                    "/v1/system/handshake",
+                    Some(&json!({ "supportedProtocolVersions": [1], "client": { "name": "t", "version": "0" } })),
+                    Some(&token),
+                    Some(ORIGIN),
+                )
+                .unwrap()
+                .0
+            })
+            .await
+            .unwrap();
+            assert_eq!(status, 401, "the window token is rejected after the exit");
+            let benches = tokio::task::spawn_blocking(move || {
+                workbench_host::lifecycle::calls::call(
+                    &descriptor.base_url,
+                    &descriptor.owner_token,
+                    None,
+                    "bench.list",
+                    json!({}),
+                    false,
+                )
+                .unwrap()
+            })
+            .await
+            .unwrap();
+            assert!(benches.to_string().contains(&bench), "{benches}");
         });
         server.runtime.block_on(server.host.shutdown());
     }

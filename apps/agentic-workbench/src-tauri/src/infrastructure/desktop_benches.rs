@@ -55,6 +55,10 @@ impl ExternalTable {
     }
 
     fn record(&mut self, label: &str, incarnation: &str, instance: &str, bench: &str) {
+        // OCR 2차 M4: 같은 label의 새 창이 작업대를 열면 그 label의 옛 닫힘 기록을 거둔다(표가 끝없이 자라지 않게). 옛
+        // incarnation의 늦은 호출은 서버가 막는다 — 폐기한 창 주체는 서버 tombstone으로 거절된다(Codex 코드 리뷰 수정).
+        self.closed
+            .retain(|(closed_label, closed)| closed_label != label || closed == incarnation);
         self.entries.insert(
             label.to_owned(),
             ExternalEntry {
@@ -214,7 +218,12 @@ pub async fn ensure_external(
 pub async fn forget_window(label: &str, incarnation: &str) {
     let lock = label_lock(label);
     let _guard = lock.lock().await;
-    table().external.forget(label, incarnation);
+    let mut table = table();
+    table.external.forget(label, incarnation);
+    // OCR 2차 M4: 그 label의 대응이 남지 않으면 잠금도 거둔다. 늦게 온 같은 incarnation의 `ensure`는 닫힘 기록으로 거절된다.
+    if !table.external.entries.contains_key(label) && !table.by_label.contains_key(label) {
+        table.locks.remove(label);
+    }
 }
 
 /// 창이 `Destroyed`될 때: 닫힌 창으로 표시 → 작업대 닫기(소유 run 취소·교환 삭제) → 대응 제거. `principal`은 작업대를
@@ -379,6 +388,40 @@ mod tests {
         assert!(
             table.is_closed("settings", "i2"),
             "a closed window stays closed"
+        );
+    }
+
+    /// OCR 2차 M4: 닫힌 창 표가 끝없이 자라지 않는다 — 같은 label에 새 incarnation이 기록되면 그 label의 옛 닫힘 기록을
+    /// 거둔다(옛 incarnation의 늦은 호출은 서버의 폐기 tombstone이 막는다).
+    #[test]
+    fn a_newer_incarnation_prunes_the_closed_records_of_its_label() {
+        let mut table = ExternalTable::default();
+        table.record("settings", "i1", "server-a", "bench-1");
+        table.forget("settings", "i1");
+        assert!(table.is_closed("settings", "i1"));
+        table.record("settings", "i2", "server-a", "bench-2");
+        assert!(!table.is_closed("settings", "i1"));
+        assert!(
+            table.closed.is_empty(),
+            "the old closed record of the label is pruned"
+        );
+        assert_eq!(
+            table.hit("settings", "i2", "server-a"),
+            Some("bench-2".into())
+        );
+    }
+
+    /// OCR 2차 M4: 창을 잊고 대응이 남지 않으면 그 label의 잠금도 거둔다.
+    #[tokio::test]
+    async fn forgetting_the_last_entry_of_a_label_drops_its_lock() {
+        let label = format!("session-lock-{}", uuid::Uuid::new_v4());
+        table().external.record(&label, "i1", "server-a", "bench-1");
+        let _ = label_lock(&label);
+        assert!(table().locks.contains_key(&label));
+        forget_window(&label, "i1").await;
+        assert!(
+            !table().locks.contains_key(&label),
+            "the label lock is dropped"
         );
     }
 
