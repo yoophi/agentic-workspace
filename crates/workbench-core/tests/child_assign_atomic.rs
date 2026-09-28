@@ -948,12 +948,14 @@ async fn a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot() {
     );
     store.release.send(()).unwrap();
     h.rt.runtime.orchestration().set_store_probe(None);
+    // A의 정리가 끝났다: run 취소·노드 해제, 그리고 A가 자기 보유를 놓았다(보유가 2 미만).
     eventually("A's rollback finished", || async {
         h.engine.run_count() == baseline.runs
             && node_of(&session(&h, &bench).await, &task_id)["currentRunId"].is_null()
-            && scheduler.hold_count(&task_id) == 1
+            && scheduler.hold_count(&task_id) < 2
     })
     .await;
+    assert_eq!(scheduler.hold_count(&task_id), 1, "only B's hold is left");
     assert_eq!(
         scheduler.active_count().unwrap(),
         1,
