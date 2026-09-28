@@ -52,6 +52,11 @@ pub struct RunScript {
     /// 동시 실행 상한.
     #[serde(default)]
     pub max_runs: Option<usize>,
+    /// turn마다 실제 ACP runner처럼 `PromptSent`(turn 시작)·`PromptCompleted`(turn 끝) lifecycle을 낸다(044 Codex r7: 화면이
+    /// turn 경계로 대기열을 보내는 시험). 기본은 끔 — prompt마다 run 이벤트 하나라는 보관 시험의 가정을 지킨다. 초기 turn은
+    /// 권한 대기가 있으면 마지막 권한 응답에서 끝난다.
+    #[serde(default)]
+    pub prompt_lifecycle: bool,
 }
 
 struct Slot {
@@ -59,6 +64,18 @@ struct Slot {
     permissions: HashSet<String>,
     /// 044 A-turn 계약: 초기 turn이 권한 응답을 기다리는 동안 run은 바쁘다. 마지막 권한 응답·취소·종료로 놓는다.
     initial_turn: Option<Reservation>,
+    /// `prompt_lifecycle`이고 초기 turn이 권한을 기다리면, 마지막 권한 응답에서 `PromptCompleted`를 낼 sink.
+    lifecycle_sink: Option<WorkbenchRunSink>,
+}
+
+fn emit_lifecycle(sink: &WorkbenchRunSink, run_id: &str, status: LifecycleStatus, message: &str) {
+    sink.emit(
+        run_id,
+        RunEvent::Lifecycle {
+            status,
+            message: message.into(),
+        },
+    );
 }
 
 #[derive(Default)]
@@ -139,6 +156,17 @@ impl ScriptedRunEngine {
                 message: "done".into(),
             },
         );
+    }
+
+    /// prompt 한 turn의 이벤트: 기본은 agent 응답 하나, `prompt_lifecycle`이면 앞뒤로 turn 경계 lifecycle.
+    fn emit_turn(&self, run_id: &str, prompt: String, sink: &WorkbenchRunSink) {
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(sink, run_id, LifecycleStatus::PromptSent, "prompt submitted");
+        }
+        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(sink, run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+        }
     }
 
     fn mark_applied(&self, label: String) {
@@ -230,6 +258,8 @@ impl RunEngine for ScriptedRunEngine {
                     } else {
                         initial_turn
                     },
+                    lifecycle_sink: (self.script.prompt_lifecycle && !permissions.is_empty())
+                        .then(|| sink.clone()),
                     permissions,
                 },
             );
@@ -244,8 +274,14 @@ impl RunEngine for ScriptedRunEngine {
             },
         );
         self.mark_applied(format!("start:{run_id}"));
+        if self.script.prompt_lifecycle {
+            emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptSent, "prompt submitted");
+        }
         if self.script.start_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.start_settle_ms)).await;
+        }
+        if self.script.prompt_lifecycle && self.script.permission_id.is_none() {
+            emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptCompleted, "prompt completed");
         }
         if let Some(permission) = &self.script.permission_id {
             sink.emit(
@@ -317,6 +353,7 @@ impl RunEngine for ScriptedRunEngine {
                     owner: owner.to_owned(),
                     permissions: HashSet::new(),
                     initial_turn: None,
+                    lifecycle_sink: None,
                 },
             );
         }
@@ -327,6 +364,7 @@ impl RunEngine for ScriptedRunEngine {
             Arc::clone(&self.applied_notify),
         );
         let permission = self.script.permission_id.clone();
+        let prompt_lifecycle = self.script.prompt_lifecycle;
         let start_hook = self.start_hook.lock().unwrap().clone();
         let task_run = run_id.clone();
         tokio::spawn(async move {
@@ -345,6 +383,9 @@ impl RunEngine for ScriptedRunEngine {
                 if let Some(permission) = &permission {
                     slot.permissions.insert(permission.clone());
                     slot.initial_turn = turn;
+                    if prompt_lifecycle {
+                        slot.lifecycle_sink = Some(sink.clone());
+                    }
                 }
             }
             launches.fetch_add(1, Ordering::SeqCst);
@@ -357,6 +398,12 @@ impl RunEngine for ScriptedRunEngine {
                 },
             );
             mark(&applied, &notify, format!("start:{run_id}"));
+            if prompt_lifecycle {
+                emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptSent, "prompt submitted");
+                if permission.is_none() {
+                    emit_lifecycle(&sink, &run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+                }
+            }
             if let Some(permission) = &permission {
                 sink.emit(
                     &run_id,
@@ -410,7 +457,7 @@ impl RunEngine for ScriptedRunEngine {
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.mark_applied(format!("prompt:{run_id}:{prompt}"));
-        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        self.emit_turn(run_id, prompt, &sink);
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
         }
@@ -450,7 +497,7 @@ impl RunEngine for ScriptedRunEngine {
         }
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.mark_applied(format!("prompt:{run_id}:{prompt}"));
-        sink.emit(run_id, RunEvent::AgentMessage { text: prompt });
+        self.emit_turn(run_id, prompt, &sink);
         if self.script.prompt_settle_ms > 0 {
             tokio::time::sleep(Duration::from_millis(self.script.prompt_settle_ms)).await;
         }
@@ -553,17 +600,24 @@ impl RunEngine for ScriptedRunEngine {
         permission_id: &str,
         _option_id: &str,
     ) -> Result<(), RunEngineError> {
-        let mut runs = self.runs.lock().unwrap();
-        let removed = runs
-            .get_mut(run_id)
-            .map(|slot| {
-                let removed = slot.permissions.remove(permission_id);
-                if slot.permissions.is_empty() {
-                    slot.initial_turn = None;
-                }
-                removed
-            })
-            .unwrap_or(false);
+        let (removed, finished_turn) = {
+            let mut runs = self.runs.lock().unwrap();
+            runs.get_mut(run_id)
+                .map(|slot| {
+                    let removed = slot.permissions.remove(permission_id);
+                    let mut finished = None;
+                    if slot.permissions.is_empty() {
+                        slot.initial_turn = None;
+                        finished = slot.lifecycle_sink.take();
+                    }
+                    (removed, finished)
+                })
+                .unwrap_or((false, None))
+        };
+        // 초기 turn이 끝났다(`prompt_lifecycle`): 실제 runner처럼 turn 끝을 알린다(잠금 밖에서).
+        if let Some(sink) = finished_turn {
+            emit_lifecycle(&sink, run_id, LifecycleStatus::PromptCompleted, "prompt completed");
+        }
         if removed {
             Ok(())
         } else {

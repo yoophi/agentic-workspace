@@ -7,6 +7,7 @@
 //! `HOST_PROMPT_SETTLE_MS`(prompt 효과 뒤 응답 전 지연 — 응답 유실 시험), `HOST_PERMISSION_ID`(있으면 run 첫 turn이 그 id의
 //! 권한 응답을 기다린다 — 바쁜 run, 044 T043).
 //! `HOST_ALLOWED_ORIGINS`(쉼표 구분 허용 출처 — 브라우저 환경 화면 시험, 044 Codex r7).
+//! `HOST_PROMPT_LIFECYCLE=1`(turn마다 실제 ACP runner처럼 `promptSent`·`promptCompleted` lifecycle — 화면 대기열 시험, 044 Codex r7).
 //! 044 T043: 소유자 토큰(`tokens.owner`, 소유자 principal)과 서버 감시 루프(`monitor`, wait-stop 판정)를 더했다. 멈추면
 //! 새 호출은 `unavailable`이다(프로세스는 stdin EOF까지 산다).
 //! 출력: 준비되면 stdout에 JSON 한 줄 `{"baseUrl","epoch","dataDir","tokens":{"windowA","windowB","owner"},"workDir"}`.
@@ -68,6 +69,7 @@ async fn main() {
     let engine = Arc::new(ScriptedRunEngine::new(RunScript {
         prompt_settle_ms: env_usize("HOST_PROMPT_SETTLE_MS", 0) as u64,
         permission_id: std::env::var("HOST_PERMISSION_ID").ok(),
+        prompt_lifecycle: std::env::var("HOST_PROMPT_LIFECYCLE").as_deref() == Ok("1"),
         ..RunScript::default()
     }));
     let mut adapters = RuntimeAdapters::production();
