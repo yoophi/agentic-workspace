@@ -37,6 +37,16 @@ fn production() { let _ = std::process::Command::new("git"); }
         production = MODULE.without_cfg_test_items(source)
         self.assertEqual(MODULE.command_creation_count(production), 1)
 
+    def test_cfg_test_import_does_not_remove_following_production_function(self):
+        source = """
+#[cfg(test)]
+use crate::test_helpers;
+fn production() { let _ = std::process::Command::new("git"); }
+"""
+        production = MODULE.without_cfg_test_items(source)
+        self.assertNotIn("test_helpers", production)
+        self.assertEqual(MODULE.command_creation_count(production), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

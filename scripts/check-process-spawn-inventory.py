@@ -66,6 +66,10 @@ def without_cfg_test_items(source: str) -> str:
     while match := marker.search(source, cursor):
         output.append(source[cursor : match.start()])
         opening = source.find("{", match.end())
+        semicolon = source.find(";", match.end())
+        if semicolon >= 0 and (opening < 0 or semicolon < opening):
+            cursor = semicolon + 1
+            continue
         if opening < 0:
             cursor = match.end()
             continue
