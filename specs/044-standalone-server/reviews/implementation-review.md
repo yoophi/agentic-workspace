@@ -33,7 +33,19 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 ## 최종 게이트 (T052)
 
-(실행 뒤 기록)
+각 명령을 한 번 실행하고, 원 명령의 종료 코드를 `status.txt`에 적었다(`CARGO_INCREMENTAL=0`). 세션 scratchpad `044/final-gate-*`.
+
+| 실행 | HEAD | 결과 |
+|---|---|---|
+| gate-1 | `1d056bc` | cargo-test 101: **디스크 부족**(`No space left on device`, 환경 실패). `cargo clean`(31.9GiB) 뒤 다시 돌렸다 |
+| gate-2 | `51eac2b` | 리뷰 수정 전 경합을 피하려고 중단(fmt·clippy 0까지). 무효 |
+| gate-3 | `f7d4094` | 전부 0: fmt, clippy `-D warnings`, `cargo test --workspace --all-targets` 911 passed/87 targets/filtered 0, check-types, pnpm test, build, 두 itest(7, 2) |
+| gate-4 | `12101f0` | 전부 0: cargo 924 passed/89 targets/filtered 0, TS 73·642, itest 7·2 |
+| gate-5 | `283a0b8` | OCR 3차 수정 전에 중단(fmt·clippy 0까지). 무효 |
+| **gate-6** | **`03db661`** | **전부 0**: fmt, clippy `-D warnings`, cargo 936 passed/0 failed/89 targets/filtered 0(ask-code·hushline 포함 workspace), check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 패키지 전부), build, workbench-client itest 7, AW itest 2 |
+
+- gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
+- contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
 ## OCR 구현 리뷰
 
