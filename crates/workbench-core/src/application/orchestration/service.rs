@@ -872,9 +872,11 @@ where
         node.current_run_id = None;
         node.execution_status = ExecutionStatus::Idle;
         let now = now();
-        if let Some(task) = session.tasks.iter_mut().find(|task| {
-            task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id)
-        }) {
+        if let Some(task) = session
+            .tasks
+            .iter_mut()
+            .find(|task| task.id == task_id && task.assigned_node_id.as_deref() == Some(node_id))
+        {
             task.revert_aborted_launch(now.clone());
         }
         session.revision += 1;

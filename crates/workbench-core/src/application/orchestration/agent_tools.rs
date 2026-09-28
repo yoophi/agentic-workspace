@@ -761,7 +761,9 @@ async fn launch_existing_task(
         })?;
     // 앞 기동을 되돌리는 중이면(Codex r7) 노드에 아직 남은 run은 곧 취소된다: 그 id를 `alreadyAssigned`로 주지 않는다.
     if runtime.task_launch_rolling_back(&task.id) {
-        return Ok(json!({ "taskId": task.id, "nodeId": node.id, "launch": rolling_back_launch() }));
+        return Ok(
+            json!({ "taskId": task.id, "nodeId": node.id, "launch": rolling_back_launch() }),
+        );
     }
     if let Some(run_id) = node.current_run_id.as_ref() {
         return Ok(json!({

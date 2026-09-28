@@ -694,14 +694,17 @@ async fn assert_launch_undone(
         async move { gate.reservation_total() == 0 }
     })
     .await;
-    eventually(&format!("{label}: the scheduler slot is returned"), || async {
-        h.rt.runtime
-            .orchestration()
-            .scheduler()
-            .active_count()
-            .unwrap()
-            == 0
-    })
+    eventually(
+        &format!("{label}: the scheduler slot is returned"),
+        || async {
+            h.rt.runtime
+                .orchestration()
+                .scheduler()
+                .active_count()
+                .unwrap()
+                == 0
+        },
+    )
     .await;
     let current = session(h, bench).await;
     assert_eq!(
@@ -714,7 +717,11 @@ async fn assert_launch_undone(
         "{label}: no late write re-binds the cancelled run"
     );
     assert_eq!(
-        h.rt.runtime.server_control().derive().await.orchestration_tasks,
+        h.rt.runtime
+            .server_control()
+            .derive()
+            .await
+            .orchestration_tasks,
         0,
         "{label}: no running task blocks a wait stop"
     );
@@ -741,9 +748,7 @@ async fn assert_reassign_starts_a_real_run(
     assert_eq!(node_of(&current, task_id)["currentRunId"], run_id.as_str());
     assert_eq!(task(&current, task_id)["status"], "running");
     let launched = format!("launch:{run_id}");
-    h.engine
-        .wait_applied(|label| label == launched, WAIT)
-        .await;
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
     assert_eq!(
         h.engine.run_count(),
         baseline.runs + 1,
@@ -837,9 +842,7 @@ async fn aborting_the_assign_while_failure_cleanup_cancels_the_engine_run_finish
     .unwrap();
     assert_eq!(created["executionStatus"], "active", "{created}");
     let launched = format!("launch:{}", created["runId"].as_str().unwrap());
-    h.engine
-        .wait_applied(|label| label == launched, WAIT)
-        .await;
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
 }
 
 /// Codex r7 (d): 실패 정리가 저장소 예약 해제를 기다리는 동안 abort. 엔진 준비가 실패하면 정리는 노드 예약을 풀고 호출자는
