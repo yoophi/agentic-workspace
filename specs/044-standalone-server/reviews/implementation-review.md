@@ -227,6 +227,30 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - `exchange.discardDelivery`: 작업대 범위의 교환인지 확인하고, 닫힌 작업대 tombstone을 따른다. 패널은 먼저 대기열에서 뺀 뒤 서버에 알린다(자동 전송 경합 없음). steer는 버튼과 함수 모두에서 막았다.
   - Low(보고만): discard가 서버에 반영된 뒤 응답만 유실되면 패널은 항목을 되돌린다. 그 항목을 다시 보내면 서버는 이미 소비된 교환이라 conflict로 거절한다(wait-stop에는 영향 없음, 화면에 오류 표시).
 
+### 8차: 같은 HEAD `82eb3ff`(트리 `bb43eec`) 세 파티션 리뷰
+
+- 파티션: crates 107 / apps·packages·루트 63 / specs·docs 228. 합 398 = 전체, 겹침 0(`--no-renames`). 세 검토 커밋의 트리는 모두 `bb43eec`다. 검토 뒤 브랜치로 돌아왔다(status 0).
+- **세 파티션 모두 needs-attention**이었다. High 1, Medium 4.
+- 담당 경계: core fork는 `crates/workbench-core`, apps fork는 `apps/`, 메인은 스모크 스크립트·문서. 프로토콜 변경은 없었다(기존 선택 필드 null = 모름을 씀).
+- 조율:
+  - core의 첫 `compile-red`는 zsh가 파일 목록을 나누지 않아 소스가 한 바이트도 바뀌지 않은 채 돌았다(종료 코드 0). **증거 아님**으로 정정했다.
+  - apps의 `itest-dev-1…3`은 core 미커밋 파일로 빌드한 host라 비증거다.
+  - 최종 itest·변이는 core 커밋 host(`2b233f4`/`65989ba`)에서, crates가 깨끗하고 표지 0인 것을 확인한 잠금 아래에서 돌렸다.
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| V1 | high(crates) | 활동 파생 때 orchestration 저장소·ledger 읽기 실패를 0으로 취급해 Running task가 있어도 default/wait 정지가 성립(`host.shutdown`이 살아 있는 run 취소) | `2b233f4`: 파생 실패를 unknown 플래그로 전달한다. `active_total`에 +1(정지 차단), activeWork의 해당 필드와 `unresolvedOperations`는 null(모름). default·wait·유휴 모두 멈추지 않고, 복구되면 정상 판정한다 | `server_stop.rs` `a_store_read_failure_blocks_default_wait_and_idle_stops_until_it_recovers`: 보고 전 Running 자식 + 읽기 오류 주입 → default conflict, wait는 tick 반복에도 안 멈춤, 해제 뒤 실제 보고로 정지. compile red(`compile-red-2`) 뒤 수정만 되돌린 단일 변이 red: orchestration(`red-h1-orch`)·ledger(`red-h1-ledger`) |
+| V2 | medium(crates) | 같은 task가 active면 `acquire`가 Acquired를 돌려줘, 되돌리는 중인 A의 정리가 재배정 B의 scheduler 자리를 지움(동시 실행 한도 초과 가능) | 같은 커밋: task 자리 안에 시도별 보유(hold) 집합을 둔다. 기동 성공이면 실행 중으로 넘기고, 그 밖의 끝은 자기 보유만 놓는다. 보유는 기동 guard가 끝까지 책임진다(호출자 반납 제거). `65989ba`: 시험이 대기가 아니라 소유권 단정에서 실패하게 조정 | `child_assign_atomic.rs` `a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot`: A를 바인딩 커밋 뒤 붙잡고 abort → B는 보유 획득 뒤·snapshot 전에 멈춤 → A 되돌리기 완료 → B 재개. B 실제 기동, 보유 1, 한도 유지. 변이 red `red-m2`·`red-m2-b` |
+| V3 | medium(crates) | `revert_child_launch` 저장 실패를 버리고 완료 처리(노드가 취소된 run id를 계속 가리키고, 되돌리는 중 표시가 지워져 이후 `alreadyAssigned`로 고착, Running 잔존) | 같은 커밋·`48a5086`: rollback이 결과를 돌려준다. 실패면 `pending_reverts`로 넘겨 되돌리는 중 표시와 보유를 유지한다(새 배정은 `launchRollingBack`). 재시도는 서버 감시 tick과 같은 task의 새 배정 시도가 맡는다. 미완료 정리는 활동(`orchestrationTasks`)으로 세고 drain 중에도 돈다(C 성격). **재시작 복구**: 시작 시 노드가 가리키는 run이 엔진에 없으면 되돌린다 | `a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds`: 일시적 저장 실패 주입 → 유지·관측·재시도 → 회복 뒤 정리 완료·재배정 실제 기동. 변이 red `red-m3`·`red-m3-count`. force stop·재시작 경로: 저장 실패가 남은 채 런타임 재조립 → 회복 → 같은 작업대 재배정이 `alreadyAssigned` 없이 실제 기동. 변이 red `red-restart` |
+| V4 | medium(apps) | 거절된 steer 재시작의 `cancelAgentRun`이 적용 전에 실패(notApplied)하면 catch가 교환 항목을 뺀 대기열로 덮어써, delivered 미소비 교환이 고착(wait-stop 무기한) | `bb74f12`: `unsettledCall()`(notApplied·unknown). 성공한 취소만 교환 제거·discard·새 run을 한다. 취소 실패·notApplied면 원래 대기열·거절된 steer·응답 대기 상태를 복원한다. unknown이면 재시작을 보류하고, 복구된 run 이벤트로 판단한다(취소 끝 이벤트면 1회 재개, 새 turn이면 run이 살아 있으므로 보류 폐기·turn 끝에 교환 전달). 일반 취소 버튼도 같은 규칙 | 패널 vitest: red(4) → 옛 패널 red(7) → green 39, 변이 a–e red. **실제 host + 실제 AgentRunPanel itest**(화면 호출 클라이언트에 1회 결정적 주입): (A) 미적용(notApplied, unknown이지만 미적용) → 교환 보존·새 run 없음·turn 끝 1회 전달 → wait-stop 정지. (B) 적용 + 응답 유실, Serving → 취소 끝 복구 뒤 대체 run 정확히 1개·대기열 정리·discard·`pendingExchanges=0`·wait-stop 완료. 옛 패널 red(4), 변이 a·b·c red. (B) Draining(대체 run이 새 작업으로 거절되는 정상 동작, 우회 안 함)은 옛 패널에서도 통과해 수정의 증거가 아니다 |
+| V5 | medium(docs) | `quit-run.sh`가 owner-check 실패를 기록만 하고 종료 송신·PID 소멸만으로 0을 반환 | `218b060`: `OC=$?` 보존, `smoke_final`: 경로 무효 5, 유효 경로 + owner-check 실패 6, 둘 다 통과 0 | 자기 시험이 실제 `quit-run.sh`의 판정 이후 구간(`gone=no`부터 끝)을 그대로 떼어 모의 입력으로 돌린다. 옛 스크립트 red → green 30 → owner-check 무시 변이 red(owner-check 검사 2개로만 분리). 변이는 scratch 사본에만 적용했다. 과거 실제 앱 실행 31개는 원자료 `owner-check-exit=`로만 재판정했다(모두 0, app-smoke.md) |
+
+- 한계:
+  - V1·V3: 재시도는 서버 tick·새 배정 시도에 기대며, 저장소가 계속 실패하면 정리 미완료로 정지가 계속 막힌다(의도, status에 보임). OS 프로세스 재시작 뒤 재할당은 기존 후속 항목이다.
+  - V4: 실패는 화면 호출 클라이언트에서 주입했고 실제 네트워크 단절이 아니다. 시험 host는 scripted engine이다. unknown이지만 미적용인 취소 뒤 run이 새 turn도 끝 이벤트도 없이 쉬면 보류가 그대로 남는다. 실제 앱 스모크는 7·8차 수정 뒤 돌리지 않았다.
+  - OCR 7차 Low(discard 응답 유실 뒤 복원 항목의 conflict 거절)는 그대로 유지한다.
+- 8차 수정으로 코드가 바뀌었으므로 T052는 gate-11 전까지 다시 미완료로 둔다.
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
