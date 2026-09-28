@@ -15,7 +15,12 @@ import { afterEach, describe, expect, it, onTestFailed, vi } from "vitest";
 
 import { createExchangeReconciler } from "@/features/agent-run/model/exchange-reconciler";
 import { createHttpTransport } from "@/shared/api/transport/http-transport";
-import { compatTransport, setTransport } from "@/shared/api/transport";
+import {
+  compatTransport,
+  MESSAGE_NOT_APPLIED,
+  MESSAGE_RESULT_UNKNOWN,
+  setTransport,
+} from "@/shared/api/transport";
 import type { Transport } from "@/shared/api/transport/transport";
 import {
   createNetworkEvents,
@@ -44,7 +49,15 @@ function queuedPromptButton(position: number, action: "제거" | "즉시 전송"
   return document.querySelector<HTMLButtonElement>(`button[aria-label='${position}번 대기 prompt ${action}']`);
 }
 
-async function scenario() {
+/** 화면의 다음 `run.cancel` 한 번의 호출 결과(Codex r8): `notApplied`는 보내지 않고 "보내지 않음", `unknownNotApplied`는
+ *  보내지 않고 "결과 모름", `unknownApplied`는 실제 서버에 보낸 뒤 답을 버리고 "결과 모름"(응답 유실). 그 밖의 호출과
+ *  이벤트 스트림은 그대로 실제 서버로 간다. */
+type CancelInjection = "notApplied" | "unknownNotApplied" | "unknownApplied";
+
+async function scenario({
+  drainFirst = true,
+  rejectSteerFirst = false,
+}: { drainFirst?: boolean; rejectSteerFirst?: boolean } = {}) {
   // 화면은 브라우저 환경(happy-dom)의 fetch·WebSocket으로 붙는다 — 데스크톱 webview처럼 출처를 싣고, 서버 허용 출처에 있다.
   // turn 경계 lifecycle(`promptSent`·`promptCompleted`)은 실제 ACP runner처럼 낸다 — 시험 host의 엔진은 scripted engine이다.
   const host = await startHost({
@@ -65,6 +78,27 @@ async function scenario() {
   const ownerConnection = await connectTo(target, "owner");
   cleanup.push(() => ownerConnection.close());
   const client = createWorkbenchClient({ connection: windowConnection });
+  let nextCancel: CancelInjection | undefined;
+  const cancelsReachingServer: unknown[] = [];
+  const screenClient: typeof client = {
+    call: async (operation, input, options) => {
+      if (operation === ("run.cancel" as OperationId) && nextCancel) {
+        const mode = nextCancel;
+        nextCancel = undefined;
+        if (mode === "notApplied") {
+          return { kind: "notApplied", reason: "offline" };
+        }
+        if (mode === "unknownApplied") {
+          cancelsReachingServer.push(await client.call(operation, input, options));
+        }
+        return { kind: "unknown", reason: "lost" };
+      }
+      if (operation === ("run.cancel" as OperationId)) {
+        cancelsReachingServer.push(input);
+      }
+      return client.call(operation, input, options);
+    },
+  };
   const ownerClient = createWorkbenchClient({ connection: ownerConnection });
   const callWith =
     (via: typeof client) =>
@@ -84,7 +118,7 @@ async function scenario() {
   cleanup.push(() => events.close());
   const network = createNetworkEvents({ events, client });
   network.noteBench(bench);
-  const http = createHttpTransport({ client, ensureWindowBench: async () => bench, windowLabel: "session-a", events: network });
+  const http = createHttpTransport({ client: screenClient, ensureWindowBench: async () => bench, windowLabel: "session-a", events: network });
   // 패널이 보낸 command를 기록한다(전송은 그대로 실제 서버로).
   const recorded: Recorded[] = [];
   const recording: Transport = {
@@ -156,14 +190,32 @@ async function scenario() {
   await vi.waitFor(() => expect(acked).toEqual(["x-1"]), { timeout: 15_000, interval: 20 });
   await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") !== null, 15_000);
 
-  const draining = await owner<{ state: string }>("server.stop", { mode: "wait" });
-  expect(draining.state).toBe("drainingWait");
-  const before = await status();
-  expect(before.activeWork.busyRuns).toBe(1);
-  expect(before.activeWork.pendingExchanges).toBe(1);
+  if (rejectSteerFirst) {
+    // 일반 대기 prompt를 steer로 보내 거절되게 한다(시험 host 엔진은 active-turn steer를 지원하지 않는다) — 비우기 전이라
+    // 거절 이유는 "steer 미지원"이다(비우는 중이면 새 작업으로 거절된다).
+    await panel.rerender({ externalPromptRequest: { id: "manual-2", text: "Change direction", delivery: "queue" } });
+    await waitForAgentRunPanel(() => queuedPromptButton(2, "즉시 전송") !== null, 15_000);
+    await act(async () => {
+      queuedPromptButton(2, "즉시 전송")?.click();
+    });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Steer rejected #1") ?? false, 15_000);
+    await waitForAgentRunPanel(() => findButton("Full restart") !== null, 15_000);
+    expect(panel.container.textContent).toContain("steer unsupported");
+  }
+  const beginWaitStop = async () => {
+    const draining = await owner<{ state: string }>("server.stop", { mode: "wait" });
+    expect(draining.state).toBe("drainingWait");
+  };
+  if (drainFirst) {
+    await beginWaitStop();
+    const before = await status();
+    expect(before.activeWork.busyRuns).toBe(1);
+    expect(before.activeWork.pendingExchanges).toBe(1);
+  }
 
-  const finishTurn = () =>
-    call("run.respondPermission", { benchId: bench, runId: panelRun, permissionId: "p1", optionId: "allow" });
+  const respondPermission = (runId: string) =>
+    call("run.respondPermission", { benchId: bench, runId, permissionId: "p1", optionId: "allow" });
+  const finishTurn = () => respondPermission(panelRun);
   const stopped = () =>
     vi.waitFor(
       async () => {
@@ -178,10 +230,142 @@ async function scenario() {
         item.command === "send_prompt_to_run" &&
         (item.args.continuation as { exchangeRequestId?: string } | undefined)?.exchangeRequestId === "x-1",
     );
-  return { panelRun, recorded, status, finishTurn, stopped, exchangeSends };
+  const injectNextCancel = (mode: CancelInjection) => {
+    nextCancel = mode;
+  };
+  return {
+    panel,
+    panelRun,
+    recorded,
+    status,
+    finishTurn,
+    stopped,
+    exchangeSends,
+    injectNextCancel,
+    cancelsReachingServer,
+    respondPermission,
+    beginWaitStop,
+  };
+}
+
+function findButton(name: string) {
+  return [...document.querySelectorAll("button")].find((button) => button.textContent?.trim() === name) ?? null;
+}
+
+async function press(name: string) {
+  await act(async () => {
+    findButton(name)?.click();
+  });
 }
 
 describe("real server: AgentRunPanel queue actions on an acknowledged exchange during a wait-stop", () => {
+  // Codex r8(apps medium): 거절된 steer의 "Full restart"와 "Cancel"이 취소를 서버에 닿게 하지 못했거나(notApplied) 결과를 모를 때
+  // (unknown) 패널은 교환 항목을 버리지도, 새 run을 시작하지도 않는다. run이 살아 있으면 turn 끝에 교환이 이어 가기 표지로
+  // 전달되고 wait-stop이 끝난다. 실제로 취소가 적용됐으면(응답만 유실) run 끝 이벤트가 오고 서버는 대상 run이 없는 교환을
+  // 세지 않아 역시 wait-stop이 끝난다.
+  it.each(["notApplied", "unknownNotApplied"] as const)(
+    "full restart whose cancel is %s keeps the exchange, which is delivered after the turn, and the server stops",
+    async (mode) => {
+      const s = await scenario({ rejectSteerFirst: true });
+      s.injectNextCancel(mode);
+      await press("Full restart");
+      const shown = mode === "notApplied" ? MESSAGE_NOT_APPLIED : MESSAGE_RESULT_UNKNOWN;
+      await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(shown) ?? false, 15_000);
+
+      expect(s.cancelsReachingServer, "the injected cancel never reached the server").toEqual([]);
+      expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
+      expect(s.recorded.filter((item) => item.command === "discard_agent_exchange_delivery")).toEqual([]);
+      expect(queuedPromptButton(1, "제거"), "the exchange item is still queued").not.toBeNull();
+      const held = await s.status();
+      expect(held.activeWork.busyRuns).toBe(1);
+      expect(held.activeWork.pendingExchanges).toBe(1);
+
+      // turn이 끝나면 패널이 교환을 이어 가기 표지로 보낸다 → 교환 소비(pendingExchanges 0)·바쁜 run 없음 → 서버 정지.
+      await s.finishTurn();
+      await s.stopped();
+      expect(s.exchangeSends(), "the exchange was delivered once with its continuation").toHaveLength(1);
+    },
+  );
+
+  // (B) 취소는 적용됐고 응답만 유실됐다. 이미 wait-stop 중이면 취소로 대상 run이 끝나는 순간 활동이 0이 되어 서버가 멈추므로
+  // (새 run 시작은 비우는 중 거절되는 새 작업이다), 재시작이 새 run을 정확히 하나 만드는지는 wait-stop을 재시작 뒤에 시작해
+  // 확인한다. wait-stop이 먼저인 경우는 아래 다음 시험이다.
+  it("full restart whose cancel applied but whose reply was lost restarts exactly once after the recovered run end", async () => {
+    const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
+    s.injectNextCancel("unknownApplied");
+    await press("Full restart");
+    await waitForAgentRunPanel(
+      () =>
+        (s.panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false) ||
+        s.recorded.filter((item) => item.command === "start_agent_run").length === 2,
+      15_000,
+    );
+    expect(s.cancelsReachingServer, "the cancel reached the server").toHaveLength(1);
+
+    // 복구된 run 이벤트(취소 끝)가 재시작을 한 번 잇는다: 새 run 정확히 1개, 교환 항목은 버리고 서버에서도 끝낸다.
+    await waitForAgentRunPanel(
+      () => s.recorded.filter((item) => item.command === "start_agent_run").length === 2,
+      15_000,
+    );
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") === null, 15_000);
+    const starts = s.recorded.filter((item) => item.command === "start_agent_run");
+    const replacement = starts[1].args.request as { runId: string; goal: string };
+    expect(replacement.goal).toContain("Change direction");
+    await vi.waitFor(
+      () =>
+        expect(s.recorded.filter((item) => item.command === "discard_agent_exchange_delivery")).toEqual([
+          { command: "discard_agent_exchange_delivery", args: { requestId: "x-1" } },
+        ]),
+      { timeout: 15_000, interval: 20 },
+    );
+    expect(s.exchangeSends(), "nothing was sent to the cancelled run").toEqual([]);
+
+    // 새 run의 첫 turn도 권한을 기다린다(시험 host 규칙). wait-stop을 시작하면 교환은 이미 세지 않고, 응답해 turn이 끝나면
+    // 바쁜 run이 없어 서버가 멈춘다.
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(1), { timeout: 15_000, interval: 20 });
+    await s.beginWaitStop();
+    expect((await s.status()).activeWork.pendingExchanges).toBe(0);
+    await s.respondPermission(replacement.runId);
+    await s.stopped();
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "still exactly one replacement").toHaveLength(2);
+  });
+
+  it("full restart whose cancel applied during a wait-stop lets the server stop without a duplicate run", async () => {
+    const s = await scenario({ rejectSteerFirst: true });
+    s.injectNextCancel("unknownApplied");
+    await press("Full restart");
+    await vi.waitFor(() => expect(s.cancelsReachingServer, "the cancel reached the server").toHaveLength(1), {
+      timeout: 15_000,
+      interval: 20,
+    });
+    // 취소로 대상 run이 끝나 교환은 세지 않고 바쁜 run도 없다: 서버가 멈춘다. 재시작의 새 run은 비우는 중 새 작업이라 서버가
+    // 만들지 않는다(정상 — 우회하지 않는다). 패널: 끝 이벤트가 대기열(교환 항목)을 정리하고, 재시작 시도는 많아야 한 번이며
+    // 서버가 거절하면 오류와 거절된 steer가 남는다.
+    await s.stopped();
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") === null, 15_000);
+    expect(s.exchangeSends(), "nothing was sent to the cancelled run").toEqual([]);
+    const starts = s.recorded.filter((item) => item.command === "start_agent_run");
+    expect(starts.length, "at most one restart attempt").toBeLessThanOrEqual(2);
+    if (starts.length === 2) {
+      await waitForAgentRunPanel(() => s.panel.container.textContent?.includes("Steer rejected #1") ?? false, 15_000);
+    }
+  });
+
+  it("cancel whose request was not applied keeps the run and its exchange; the exchange is delivered and the server stops", async () => {
+    const s = await scenario();
+    s.injectNextCancel("notApplied");
+    await press("Cancel");
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_NOT_APPLIED) ?? false, 15_000);
+    expect(s.cancelsReachingServer).toEqual([]);
+    expect(s.recorded.filter((item) => item.command === "discard_agent_exchange_delivery")).toEqual([]);
+    expect(queuedPromptButton(1, "제거")).not.toBeNull();
+    expect((await s.status()).activeWork.pendingExchanges).toBe(1);
+
+    await s.finishTurn();
+    await s.stopped();
+    expect(s.exchangeSends()).toHaveLength(1);
+  });
+
   it("removing the queued exchange discards it on the server, so the wait-stop completes after the turn", async () => {
     const s = await scenario();
     await act(async () => {

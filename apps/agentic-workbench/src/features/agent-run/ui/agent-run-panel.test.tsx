@@ -16,7 +16,12 @@ import {
   setRunEventEmitter,
   waitForAgentRunPanel,
 } from "./agent-run-panel.test-harness";
-import { compatTransport, setTransport } from "@/shared/api/transport";
+import {
+  compatTransport,
+  MESSAGE_NOT_APPLIED,
+  MESSAGE_RESULT_UNKNOWN,
+  setTransport,
+} from "@/shared/api/transport";
 import {
   startCompatSimulatingServer,
   type CompatSimulatingServer,
@@ -618,6 +623,192 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
         "The additional panel received the agent response.",
       ) ?? false,
     );
+  });
+});
+
+// Codex r8(apps medium): 취소가 서버에서 끝났는지 모르는 결과(네트워크 경로의 notApplied·unknown)는 "취소됨"이 아니다.
+// run은 살아 있을 수 있으므로 패널은 대기열(서버가 이미 전달 확인한 교환 항목 포함)을 버리지 않고, 새 run을 시작하지
+// 않는다. 실제 run 상태는 복구된 run 이벤트가 맞춘다: 살아 있으면 turn 끝에 교환이 이어 가기 표지로 전달되고, 실제로
+// 취소됐으면 run 끝 이벤트가 패널을 정리한다(대상 run이 없는 교환은 서버가 세지 않는다). 결과 분류는 네트워크 경로에만
+// 있으므로 여기서는 호환 transport 앞에 `cancel_agent_run` 결과만 1회 바꾸는 transport를 둔다(나머지는 그대로 통과).
+describe("AgentRunPanel when a cancel is not known to have reached the server (Codex r8)", () => {
+  let cancelOutcome: string | undefined;
+  /** 결과를 돌려주기 전에 할 일(서버가 취소를 적용해 끝 이벤트를 먼저 보낸 경우). */
+  let beforeCancelReply: (() => Promise<void>) | undefined;
+
+  beforeEach(() => {
+    cancelOutcome = undefined;
+    beforeCancelReply = undefined;
+    setTransport({
+      kind: "http",
+      invoke: async (command, args, options) => {
+        if (command === "cancel_agent_run" && cancelOutcome !== undefined) {
+          const thrown = cancelOutcome;
+          cancelOutcome = undefined;
+          await beforeCancelReply?.();
+          throw thrown;
+        }
+        return compatTransport.invoke(command, args, options);
+      },
+      listen: (event, callback) => compatTransport.listen(event, callback),
+    });
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "steer_prompt_to_run") {
+        throw "steer unsupported: active-turn steer is not supported by this ACP agent; choose Cancel & send or Queue";
+      }
+      if (command === "cancel_agent_run") {
+        return null;
+      }
+      return base?.(command, args);
+    });
+  });
+
+  afterAll(() => {
+    setTransport(compatTransport);
+  });
+
+  async function busyRunWithAQueuedExchange() {
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-main",
+      externalPromptRequest: { id: "start-1", text: "Work on the task", delivery: "send" },
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);
+    const runId = (invocationsFor("start_agent_run")[0] as { request: { runId: string } }).request.runId;
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.rerender({
+      externalPromptRequest: { id: "x-7", text: "Handle the peer request", delivery: "queue", exchangeRequestId: "x-7" },
+    });
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") !== null);
+    return { panel, runId };
+  }
+
+  async function rejectASteer(panel: Awaited<ReturnType<typeof renderAgentRunPanel>>) {
+    await panel.rerender({ externalPromptRequest: { id: "manual-2", text: "Change direction", delivery: "queue" } });
+    await waitForAgentRunPanel(() => queuedPromptButton(2, "즉시 전송") !== null);
+    await act(async () => {
+      queuedPromptButton(2, "즉시 전송")?.click();
+    });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Steer rejected #1") ?? false);
+  }
+
+  function exchangeDeliveries() {
+    return invocationsFor("send_prompt_to_run").filter(
+      (args) => (args as { continuation?: { exchangeRequestId?: string } }).continuation?.exchangeRequestId === "x-7",
+    );
+  }
+
+  it.each([
+    ["notApplied", MESSAGE_NOT_APPLIED],
+    ["unknown", MESSAGE_RESULT_UNKNOWN],
+  ])("keeps the queued exchange when a full restart's cancel is %s, and delivers it after the turn", async (_kind, error) => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = error;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+    expect(invocationsFor("start_agent_run"), "no new run replaces a run that may still be alive").toHaveLength(1);
+    expect(invocationsFor("discard_agent_exchange_delivery"), "the exchange is not abandoned").toEqual([]);
+    expect(panel.container.textContent).toContain("Handle the peer request");
+    expect(panel.container.textContent, "the rejected steer stays for another try").toContain("Steer rejected #1");
+    expect(exchangeDeliveries(), "nothing is sent while the turn is still running").toEqual([]);
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => exchangeDeliveries().length === 1);
+    expect(exchangeDeliveries()[0]).toMatchObject({ runId, prompt: "Handle the peer request" });
+  });
+
+  it("continues an unknown full restart exactly once when the recovered events show the cancel applied", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+    expect(invocationsFor("start_agent_run")).toHaveLength(1);
+    expect(exchangeDeliveries(), "nothing is sent while the result is unknown and the turn runs").toEqual([]);
+
+    // 서버는 실제로 취소했다(응답만 유실): 복구된 스트림에 그 run의 취소 끝이 온다 → 재시작을 한 번 잇는다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([{ requestId: "x-7" }]);
+    const restarted = invocationsFor("start_agent_run")[1] as { request: { goal: string } };
+    expect(restarted.request.goal).toContain("Change direction");
+    expect(exchangeDeliveries(), "the exchange never goes to the replacement run").toEqual([]);
+
+    // 같은 run의 늦은 끝 이벤트가 다시 와도 두 번째 재시작은 없다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    expect(invocationsFor("start_agent_run")).toHaveLength(2);
+  });
+
+  it("continues an unknown full restart when the run's cancel end arrived before the result", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    beforeCancelReply = () =>
+      panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    expect(exchangeDeliveries()).toEqual([]);
+    expect(panel.container.textContent, "the ended run's queue is not revived").not.toContain("Handle the peer request");
+  });
+
+  it("drops an unknown full restart once the run accepts a new turn (the cancel did not apply)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => exchangeDeliveries().length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    // 나중에 이 run이 끝나도(예: 사용자가 취소) 버린 재시작은 되살아나지 않는다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    expect(invocationsFor("start_agent_run")).toHaveLength(1);
+  });
+
+  it.each([
+    ["notApplied", MESSAGE_NOT_APPLIED],
+    ["unknown", MESSAGE_RESULT_UNKNOWN],
+  ])("keeps the run and its queued exchange when a cancel is %s", async (_kind, error) => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+
+    cancelOutcome = error;
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([]);
+    expect(panel.container.textContent).toContain("Handle the peer request");
+    expect(exchangeDeliveries(), "nothing is sent while the turn is still running").toEqual([]);
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => exchangeDeliveries().length === 1);
+  });
+
+  it("lets the recovered run events settle a cancel that did apply: the run ends and nothing is delivered", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+    // 서버는 실제로 취소했다: 복구된 스트림에 run 끝이 온다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await waitForAgentRunPanel(() => !(panel.container.textContent?.includes("Handle the peer request") ?? true));
+    expect(exchangeDeliveries()).toEqual([]);
+  });
+
+  it("still abandons the queued exchange when the cancel succeeds", async () => {
+    const { panel } = await busyRunWithAQueuedExchange();
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([{ requestId: "x-7" }]);
   });
 });
 

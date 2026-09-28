@@ -46,6 +46,7 @@ import {
   steerPromptToRun,
 } from "@/entities/agent-run/api/agent-run-repository";
 import { discardAgentExchangeDelivery } from "@/entities/agent-run/api/agent-exchange-repository";
+import { unsettledCall } from "@/shared/api/transport";
 import {
   clearGoal,
   createGoal,
@@ -471,6 +472,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const pendingSteersRef = useRef<SteerInput[]>([]);
   const rejectedSteersRef = useRef<SteerInput[]>([]);
+  /** 취소 결과를 모르는(unknown) 재시작(Codex r8): 그 run의 취소 끝 이벤트가 오면 한 번 이어 간다. 그 run이 새 turn을 받으면
+   *  (살아 있다 — 취소가 적용되지 않았다) 버린다. */
+  const unsettledRestartRef = useRef<{ runId: string; resume: () => void } | null>(null);
+  /** 마지막으로 끝난 run과 그 끝(Codex r8): 취소 호출의 결과보다 run 끝 이벤트가 먼저 올 수 있다(서버가 취소를 적용하면 끝
+   *  이벤트를 먼저 보내고 답한다). 결과를 받은 쪽이 이 기록으로 run이 이미 끝났는지 본다. */
+  const lastRunEndRef = useRef<{ runId: string; status: string } | null>(null);
   const steerSequenceRef = useRef(0);
   const runStartedAtRef = useRef<number | null>(null);
   const usageContextRef = useRef<UsageContext | null>(null);
@@ -969,6 +976,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       if (timelineEvent.type === "lifecycle") {
         if (timelineEvent.status === "promptSent") {
           activePromptSentRef.current = true;
+          if (unsettledRestartRef.current?.runId === envelope.runId) {
+            // 새 turn을 받았다: run은 살아 있고 취소는 적용되지 않았다 — 재시작을 잇지 않는다.
+            unsettledRestartRef.current = null;
+          }
           const activated = activateRunStartQueuedPrompt({
             queue: queuedPromptsRef.current,
             items,
@@ -1028,6 +1039,15 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           setActiveRunId(null);
           onRunSettled?.();
           void recordRunGoalProgress();
+          lastRunEndRef.current = { runId: envelope.runId, status: timelineEvent.status };
+          const unsettledRestart = unsettledRestartRef.current;
+          if (unsettledRestart?.runId === envelope.runId) {
+            unsettledRestartRef.current = null;
+            // 결과를 몰랐던 취소가 실제로 적용됐다(취소 끝): 재시작을 한 번 이어 간다. 스스로 끝난 run은 잇지 않는다.
+            if (timelineEvent.status === "cancelled") {
+              unsettledRestart.resume();
+            }
+          }
         }
       }
     });
@@ -1884,28 +1904,33 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       return;
     }
 
-    // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 취소가 실패해 run이 살아 있으면 확인된 미소비 교환이 남아
+    // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 서버가 거절해 run이 살아 있으면 확인된 미소비 교환이 남아
     // wait-stop을 막는다(Codex r7).
     const droppedExchanges = exchangeRequestIdsOf(queuedPromptsRef.current);
     try {
       await cancelAgentRun(activeRunId);
     } catch (caughtError) {
       setError(String(caughtError));
-    } finally {
-      await recordRunGoalProgress();
-      queuedPromptsRef.current = [];
-      setQueuedPrompts([]);
-      void discardExchangeDeliveries(droppedExchanges);
-      pendingSteersRef.current = [];
-      rejectedSteersRef.current = [];
-      setPendingSteers([]);
-      setRejectedSteers([]);
-      setDirectPrompt(null);
-      setIsAwaitingPromptResponse(false);
-      setIsRunning(false);
-      activeRunIdRef.current = null;
-      setActiveRunId(null);
+      // 취소가 서버에 닿았는지 모른다(Codex r8): 보내지 않았거나(notApplied) 답을 못 받았다(unknown). run은 살아 있을 수
+      // 있으므로 대기열(교환 항목 포함)과 run을 그대로 둔다 — 살아 있으면 turn 끝에 교환이 전달되고, 실제로 취소됐으면
+      // 복구된 run 끝 이벤트가 패널을 정리한다(대상 run이 없는 교환은 서버가 세지 않는다).
+      if (unsettledCall(caughtError)) {
+        return;
+      }
     }
+    await recordRunGoalProgress();
+    queuedPromptsRef.current = [];
+    setQueuedPrompts([]);
+    void discardExchangeDeliveries(droppedExchanges);
+    pendingSteersRef.current = [];
+    rejectedSteersRef.current = [];
+    setPendingSteers([]);
+    setRejectedSteers([]);
+    setDirectPrompt(null);
+    setIsAwaitingPromptResponse(false);
+    setIsRunning(false);
+    activeRunIdRef.current = null;
+    setActiveRunId(null);
   }
 
   async function changePermissionMode(nextMode: PermissionMode) {
@@ -2184,10 +2209,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   async function fullRestartWithRejectedSteer(steerInput: SteerInput) {
     const originalPrompt = directPrompt?.trim();
     const runIdToCancel = activeRunId;
-    // 교환 항목은 취소하는 run이 대상이라 새 run으로 옮기지 않는다(서버가 다른 run으로의 전달을 거절한다). 버리고 서버에서도
-    // 끝낸다(Codex r7).
-    const queuedPromptsToKeep = queuedPromptsRef.current.filter((item) => !item.exchangeRequestId);
-    const droppedExchanges = exchangeRequestIdsOf(queuedPromptsRef.current);
+    // 교환 항목은 취소하는 run이 대상이라 새 run으로 옮기지 않는다(서버가 다른 run으로의 전달을 거절한다). 취소가 끝난
+    // 뒤에만 버리고 서버에서도 끝낸다(Codex r7·r8).
+    const originalQueue = queuedPromptsRef.current;
+    const queuedPromptsToKeep = originalQueue.filter((item) => !item.exchangeRequestId);
+    const droppedExchanges = exchangeRequestIdsOf(originalQueue);
     if (!runIdToCancel || !originalPrompt) {
       return;
     }
@@ -2197,27 +2223,73 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     rejectedSteersRef.current = nextRejected;
     setRejectedSteers(nextRejected);
     setError(null);
+    // 취소가 끝나지 않으면 run은 그대로다: 그때 되돌릴 응답 대기 상태(진행 중 turn이면 자동 전송이 대기열을 보내지 않는다).
+    const wasAwaitingPromptResponse = isAwaitingPromptResponse;
     setIsAwaitingPromptResponse(true);
 
-    try {
-      await cancelAgentRun(runIdToCancel);
+    // 취소가 끝난 뒤: 버린 교환을 서버에서도 끝내고 새 run을 시작한다.
+    async function restartAfterCancel() {
       void discardExchangeDeliveries(droppedExchanges);
-      const started = await startRun(nextGoal, {
-        queuedPrompts: queuedPromptsToKeep,
-        displayPrompt: steerInput.text,
-      });
-      if (!started) {
+      try {
+        const started = await startRun(nextGoal, {
+          queuedPrompts: queuedPromptsToKeep,
+          displayPrompt: steerInput.text,
+        });
+        if (!started) {
+          rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
+          setRejectedSteers(rejectedSteersRef.current);
+          setQueuedPrompts(queuedPromptsToKeep);
+        }
+      } catch (caughtError) {
         rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
         setRejectedSteers(rejectedSteersRef.current);
         setQueuedPrompts(queuedPromptsToKeep);
+        setError(String(caughtError));
+        setIsAwaitingPromptResponse(false);
       }
+    }
+
+    try {
+      await cancelAgentRun(runIdToCancel);
     } catch (caughtError) {
+      // 취소가 적용되지 않았거나(서버가 거절, 보내지 않음) 결과를 모른다(Codex r8): 원래 run이 살아 있을 수 있으므로 지금은
+      // 새 run을 시작하지 않고 원래 대기열(교환 항목 포함)과 거절된 steer를 되돌린다. 결과를 모르면 실제 run 상태를 복구된
+      // run 이벤트로 맞춘다: 그 run의 취소 끝이 오면 재시작을 한 번 잇고, 새 turn을 받으면(살아 있다) 버린다 — 그때는 turn
+      // 끝에 교환이 전달된다.
+      const unsettled = unsettledCall(caughtError);
+      const endedMeanwhile =
+        lastRunEndRef.current?.runId === runIdToCancel ? lastRunEndRef.current.status : null;
+      if (unsettled === "unknown" && endedMeanwhile === "cancelled") {
+        // 결과는 몰랐지만 그 run의 취소 끝이 이미 왔다: 취소가 적용됐다 — 재시작을 잇는다.
+        await restartAfterCancel();
+        return;
+      }
       rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
       setRejectedSteers(rejectedSteersRef.current);
-      setQueuedPrompts(queuedPromptsToKeep);
       setError(String(caughtError));
-      setIsAwaitingPromptResponse(false);
+      if (endedMeanwhile) {
+        // run은 이미 끝났다(끝 이벤트가 패널을 정리했다): 대기열을 되살리지 않는다.
+        return;
+      }
+      queuedPromptsRef.current = originalQueue;
+      setQueuedPrompts(originalQueue);
+      setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
+      if (unsettled === "unknown") {
+        unsettledRestartRef.current = {
+          runId: runIdToCancel,
+          resume: () => {
+            const next = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);
+            rejectedSteersRef.current = next;
+            setRejectedSteers(next);
+            setError(null);
+            void restartAfterCancel();
+          },
+        };
+      }
+      return;
     }
+
+    await restartAfterCancel();
   }
 
   async function respondToPermission(permissionId: string, optionId: string) {

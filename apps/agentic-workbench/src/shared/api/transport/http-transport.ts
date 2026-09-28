@@ -2,12 +2,12 @@
 // 모양으로 돌려준다. 작업대 id는 데스크톱 앱이 창 주체로 연 것을 `ensure_window_bench`로 받는다.
 import { faultToString, type WorkbenchClient } from "@yoophi/workbench-client";
 
+import { MESSAGE_NOT_APPLIED, MESSAGE_RESULT_UNKNOWN } from "./call-outcome";
 import { COMMANDS } from "./command-table";
 import { collectRunIds, type NetworkEvents } from "./network-events";
 import type { InvokeOptions, Transport } from "./transport";
 
-export const MESSAGE_NOT_APPLIED = "Workbench 서버에 연결되어 있지 않아 요청을 보내지 않았습니다.";
-export const MESSAGE_RESULT_UNKNOWN = "Workbench 서버 연결이 끊겨 요청 결과를 알 수 없습니다. 상태를 다시 불러옵니다.";
+export { MESSAGE_NOT_APPLIED, MESSAGE_RESULT_UNKNOWN };
 
 export interface HttpTransportOptions {
   client: WorkbenchClient;
