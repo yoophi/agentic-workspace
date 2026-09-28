@@ -174,7 +174,9 @@
   - **OCR 구현 리뷰 반영(정지 계약 변경, 구현 리뷰 대상)**:
     - 비우기가 시작된 뒤 만든 준비 task(비우기 전에 받은 호출이 비우기 안에서 만든 것)는 이어 가기로 배정받지 못한다(`ensure_assign_continues`). 활동으로 세지 않고 `deferredTasks`로 보고한다. 이전에는 보고에서 빠졌다. 입구 판정과 C-call 예약도 관문의 한 잠금 아래에서 한다(`WorkGate::admit`).
     - **알림 재시도 상한**: coordinator turn이 계속 실패하면(인증·할당량 등) 재시도 가능한 실패 알림이 영원히 활동이라 wait·유휴 정지가 끝나지 않았다(재시도는 50ms부터 두 배, 최대 5초 간격, 횟수 제한 없음). 결정:
-      - 재시도를 **기다리는** 재시도 가능 실패 알림은 `attemptCount < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`(3)일 때만 활동으로 센다. 넘으면 `stalledNotifications`로 보고만 한다.
+      - 재시도를 **기다리는** 재시도 가능 실패 알림은 **실제 전달 실패 수** `deliveryFailureCount < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`(3)일 때만 활동으로 센다. 넘으면 `stalledNotifications`로 보고만 한다.
+      - 실제 전달 실패 = 전달 오류(`send_and_wait` 실패 등)와 회수된(중단된) 시도. coordinator가 바빠 **거절한** 시도(`CoordinatorBusy`)는 세지 않는다 — turn이 끝나면 전달될 수 있다(OCR 2차). 마지막 실패가 바쁨 거절이면 수와 무관하게 활동이다. `attemptCount`는 전체 시도 수로 남는다(상한에 쓰지 않음). 이전 저장소는 `deliveryFailureCount`가 없으면 0으로 읽는다.
+      - 운영 전달기(`EngineAgentWorker`)는 바쁜 coordinator에게 거절하지 않고 엔진 대기열에 넣어 기다린다(그동안 `dispatching`, N-notify 예약). 바쁨 거절은 거절 영수증(`accepted: false`)을 돌려주는 전달 포트의 계약이다. 시험은 probe(`DeclineAsBusy`)로 그 경로를 만든다.
       - `pending`·`dispatching`(진행 중인 시도, N-notify 예약)은 시도 수와 무관하게 활동이다. 상한은 진행 중 시도에 적용하지 않는다.
       - 시도 수는 "전달됨"이 아니다. 알림은 `failed`·재시도 가능 그대로 저장되고 거두지도 지우지도 않는다. 배경 재시도는 서빙 중 계속된다.
     - 증명 범위(`crates/workbench-core/tests/server_stop.rs`):
@@ -372,6 +374,7 @@ R7에 흩어져 있던 조건(활동 예약, 교환 전달 수락, task 기동 �
     - 상태 전이(비우기 시작·유휴 비우기 취소)도 활동 세대를 바꾼다. 그래서 전이 전에 시작한 판정은 거절된다.
     - 비우기 정지 판정은 판정 시작 때 이미 서빙이면 멈추지 않는다.
     - 증거: 관문 수준의 끼어들기 시험(세대 읽기 → 서빙 복귀 → 판정)과 ServerControl 수준 시험(임대 뒤 판정). `derive` 도중의 실제 thread 끼어들기를 강제하는 시험은 아니다.
+    - 임대 획득 순서(OCR 2차): 서빙 복귀 → 임대 넣기 → 서빙 복귀 → 이미 `stopping`이면 임대를 되돌리고 `unavailable`. 넣기 전에 읽은 세대로 진행 중인 판정은 두 번째 복귀의 세대 올림으로 거절되고, 멈추는 서버는 임대를 내주지 않는다. 시험은 `stopping` 서버가 임대를 거절하고 남기지 않음(입구 거절 경로)이다. 입구 통과와 넣기 사이 창은 결정적으로 강제하지 못한다.
 - **Rationale**: 앱이 강제로 죽으면 임대를 풀 수 없다. TTL로 결국 거둔다(FR-021).
 
 ## R10. 정지 요청

@@ -2287,6 +2287,11 @@ export interface components {
             status: components["schemas"]["CoordinatorNotificationStatusDto"];
             /** Format: int32 */
             attemptCount: number;
+            /**
+             * Format: int32
+             * @description 실제 전달 실패 수(전달 오류·중단된 시도). coordinator가 바빠 거절한 시도는 세지 않는다.
+             */
+            deliveryFailureCount?: number;
             failure?: null | components["schemas"]["CommandFailureDto"];
             collectedAt?: string | null;
             /** @description 마지막 전달 시도의 id(044). `dispatching`이면 그 시도가 소유한다. */

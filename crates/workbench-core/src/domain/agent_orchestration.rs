@@ -643,6 +643,10 @@ pub struct CoordinatorNotification {
     pub main_run_id: Option<String>,
     pub status: CoordinatorNotificationStatus,
     pub attempt_count: u32,
+    /// 실제 전달 실패 수(OCR 2차): 전달 오류와 회수된(중단된) 시도만 센다. coordinator가 바빠 거절한 시도
+    /// (`CoordinatorBusy`)는 세지 않는다. 정지 판정의 시도 상한은 이 수로 본다(`attempt_count`는 전체 시도 수).
+    #[serde(default)]
+    pub delivery_failure_count: u32,
     pub failure: Option<CommandFailure>,
     #[serde(default)]
     pub collected_at: Option<String>,
@@ -1077,6 +1081,7 @@ mod tests {
             main_run_id: Some("main-run".into()),
             status: CoordinatorNotificationStatus::Pending,
             attempt_count: 0,
+            delivery_failure_count: 0,
             failure: None,
             collected_at: None,
             attempt_id: None,

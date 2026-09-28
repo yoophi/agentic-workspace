@@ -966,3 +966,195 @@ async fn a_stalled_notification_survives_the_stop_and_its_report_is_collected_af
         tokio::task::yield_now().await;
     }
 }
+
+/// OCR 구현 리뷰 2차(core 1): coordinator가 바빠 **거절한**(`CoordinatorBusy`) 알림은 시도 수가 상한을 넘어도 보류
+/// (`stalledNotifications`)가 아니다 — turn이 끝나면 전달될 수 있는 알림이다. 상한은 회복되지 않는 실패(인증·할당량 등)에만
+/// 적용된다. 거절은 probe가 전달기 대신 `accepted: false` 영수증을 만든다(운영 전달기는 대기열에 넣고 기다리므로 거절하지
+/// 않는다 — 이 시험은 거절 경로의 계약만 본다).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_busy_decline_past_the_attempt_cap_still_blocks_the_stop_and_is_delivered_later() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use workbench_core::application::server_control::MAX_NOTIFICATION_ATTEMPTS_FOR_STOP;
+    let decline = std::sync::Arc::new(AtomicBool::new(true));
+    let probe: DispatchProbe = {
+        let decline = std::sync::Arc::clone(&decline);
+        std::sync::Arc::new(move |at| {
+            let decline = std::sync::Arc::clone(&decline);
+            Box::pin(async move {
+                if at == DispatchPoint::AfterDispatchingSaved && decline.load(Ordering::SeqCst) {
+                    DispatchAction::DeclineAsBusy
+                } else {
+                    DispatchAction::Continue
+                }
+            })
+        })
+    };
+    let (h, bench, _task) = with_ready_task(Some(probe)).await;
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    let note = loop {
+        let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+        if note["status"] == "failed"
+            && note["attemptCount"].as_u64().unwrap_or(0)
+                >= MAX_NOTIFICATION_ATTEMPTS_FOR_STOP as u64
+        {
+            break note;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "busy declines pass the cap: {note}"
+        );
+        tokio::task::yield_now().await;
+    };
+    assert_eq!(note["failure"]["code"], "coordinatorBusy", "{note}");
+    let current = status(&h).await;
+    assert_eq!(current["stalledNotifications"], json!([]), "{current}");
+    assert!(
+        current["activeWork"]["pendingNotifications"]
+            .as_u64()
+            .unwrap()
+            >= 1,
+        "a busy-declined notification is still active work: {current}"
+    );
+    assert!(
+        !h.rt.runtime.server_control().tick(Duration::ZERO).await,
+        "the stop is blocked while the notification can still be delivered"
+    );
+
+    decline.store(false, Ordering::SeqCst);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+        if note["status"] == "delivered" {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "delivered once the coordinator accepts: {note}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+/// OCR 구현 리뷰 2차(core 1, 섞인 이력): 바쁨 거절이 상한만큼 쌓인 뒤 **실제 실패 한 번**이 와도 보류가 아니다 — 상한은
+/// 실제 전달 실패 수(`deliveryFailureCount`)로 센다(전체 시도 수 `attemptCount`가 아님). 실제 실패가 상한까지 쌓이면
+/// 그때 보류다. 실제 실패 직후 상태는 다음 전달 한 바퀴의 첫 poll을 붙잡아 관찰한다(시간에 기대지 않음).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn busy_declines_do_not_consume_the_real_failure_budget() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use workbench_core::application::server_control::MAX_NOTIFICATION_ATTEMPTS_FOR_STOP;
+    let cap = MAX_NOTIFICATION_ATTEMPTS_FOR_STOP as usize;
+    let attempts = std::sync::Arc::new(AtomicUsize::new(0));
+    let hold_next_poll = std::sync::Arc::new(AtomicBool::new(false));
+    let release = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let (held_tx, mut held) = tokio::sync::mpsc::unbounded_channel();
+    let probe: DispatchProbe = {
+        let (attempts, hold_next_poll, release) = (
+            std::sync::Arc::clone(&attempts),
+            std::sync::Arc::clone(&hold_next_poll),
+            std::sync::Arc::clone(&release),
+        );
+        std::sync::Arc::new(move |at| {
+            let (attempts, hold_next_poll, release, held_tx) = (
+                std::sync::Arc::clone(&attempts),
+                std::sync::Arc::clone(&hold_next_poll),
+                std::sync::Arc::clone(&release),
+                held_tx.clone(),
+            );
+            Box::pin(async move {
+                match at {
+                    DispatchPoint::AfterDispatchingSaved => {
+                        let n = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                        if n <= cap {
+                            return DispatchAction::DeclineAsBusy;
+                        }
+                        if n == cap + 1 {
+                            // 이 시도는 실제로 실패한다(엔진 주입). 다음 한 바퀴의 첫 poll을 붙잡는다.
+                            hold_next_poll.store(true, Ordering::SeqCst);
+                        }
+                        DispatchAction::Continue
+                    }
+                    DispatchPoint::FirstPoll if hold_next_poll.swap(false, Ordering::SeqCst) => {
+                        let _ = held_tx.send(());
+                        release.acquire().await.expect("probe gate").forget();
+                        DispatchAction::Continue
+                    }
+                    _ => DispatchAction::Continue,
+                }
+            })
+        })
+    };
+    // 실제 전달 한 번만 실패시킨다(바쁨 거절 시도는 엔진을 부르지 않으므로 이 수를 쓰지 않는다).
+    let (h, bench, _task) = with_ready_task_failing(Some(probe), 1).await;
+    tokio::time::timeout(Duration::from_secs(20), held.recv())
+        .await
+        .expect("the pass after the real failure is held")
+        .unwrap();
+    let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+    assert_eq!(note["status"], "failed", "{note}");
+    assert!(
+        note["attemptCount"].as_u64().unwrap() > cap as u64,
+        "{note}"
+    );
+    assert_eq!(note["deliveryFailureCount"], 1, "{note}");
+    assert_ne!(note["failure"]["code"], "coordinatorBusy", "{note}");
+    let current = status(&h).await;
+    assert_eq!(
+        current["stalledNotifications"],
+        json!([]),
+        "one real failure after busy declines is not stalled: {current}"
+    );
+    assert!(
+        current["activeWork"]["pendingNotifications"]
+            .as_u64()
+            .unwrap()
+            >= 1,
+        "{current}"
+    );
+
+    // 이제 실제 실패만 계속된다 — 실제 실패가 상한에 이르면 보류다.
+    h.engine
+        .fail_send_and_wait
+        .store(10_000, std::sync::atomic::Ordering::SeqCst);
+    release.add_permits(1);
+    let deadline = std::time::Instant::now() + Duration::from_secs(20);
+    loop {
+        let current = status(&h).await;
+        let stalled: Vec<String> =
+            serde_json::from_value(current["stalledNotifications"].clone()).unwrap_or_default();
+        let note = session_of(&h, &bench).await["coordinatorNotifications"][0].clone();
+        if !stalled.is_empty() {
+            assert!(
+                note["deliveryFailureCount"].as_u64().unwrap() >= cap as u64,
+                "stalled only once real failures reach the cap: {note}"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "real failures reach the cap: {note}"
+        );
+        tokio::task::yield_now().await;
+    }
+}
+
+/// OCR 구현 리뷰 2차(core 2): 멈추는(`stopping`) 서버는 임대를 내주지 않는다 — 거절하고 임대를 남기지 않는다.
+/// 한계: 이 시험은 입구 판정(`admit`)이 거절하는 경로를 본다. handler 안의 "넣은 뒤 `stopping`이면 되돌림"은 입구 통과와
+/// 넣기 사이의 창을 강제할 수단이 없어 결정적으로 재현하지 못한다(순서: 서빙 복귀 → 넣기 → 서빙 복귀 → `stopping` 확인).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_stopping_server_hands_out_no_lease() {
+    let h = BenchHarness::new(RunScript::default());
+    h.rt.runtime.work_gate().force_stop();
+    let refused = owner(
+        &h,
+        OperationId::LeaseAcquire,
+        json!({"clientKind": "desktop", "clientId": "late"}),
+    )
+    .await
+    .expect_err("a stopping server refuses a lease");
+    assert_eq!(refused.code, FaultCode::Unavailable, "{refused:?}");
+    assert_eq!(
+        h.rt.runtime.server_control().leases().count(),
+        0,
+        "no lease is left behind"
+    );
+}

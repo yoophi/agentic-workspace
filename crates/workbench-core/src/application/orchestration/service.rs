@@ -1088,6 +1088,7 @@ where
                     main_run_id,
                     status: CoordinatorNotificationStatus::Pending,
                     attempt_count: 0,
+                    delivery_failure_count: 0,
                     failure: None,
                     collected_at: None,
                     attempt_id: None,

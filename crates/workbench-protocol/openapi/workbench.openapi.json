@@ -8056,6 +8056,12 @@
             "format": "int32",
             "minimum": 0
           },
+          "deliveryFailureCount": {
+            "type": "integer",
+            "format": "int32",
+            "description": "실제 전달 실패 수(전달 오류·중단된 시도). coordinator가 바빠 거절한 시도는 세지 않는다.",
+            "minimum": 0
+          },
           "failure": {
             "oneOf": [
               {

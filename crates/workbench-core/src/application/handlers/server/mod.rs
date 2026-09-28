@@ -255,13 +255,23 @@ pub fn register(registry: &mut Registry, control: &Arc<ServerControl>) {
             OperationId::LeaseAcquire,
             services,
             |_: &LeaseAcquireInput| Scope::None,
-            move |_, _ctx, input: LeaseAcquireInput| {
+            move |_, ctx, input: LeaseAcquireInput| {
                 let control = Arc::clone(&c);
                 async move {
                     let leases = control.leases();
-                    let lease_id = leases.acquire(input.client_kind, input.client_id);
-                    // 유휴 비우기 중이면 서빙으로 돌아간다(R9). wait 비우기는 돌아가지 않는다.
+                    // 유휴 비우기 중이면 서빙으로 돌아간다(R9). wait 비우기는 돌아가지 않는다. OCR 2차: 넣기 **전과 뒤** 모두
+                    // 서빙 복귀(세대 올림)를 한다 — 넣기 전에 읽은 세대로 진행 중인 정지 판정이 넣은 임대를 건너뛰지 못하고,
+                    // 넣은 뒤 이미 `stopping`이면 임대를 되돌리고 거절한다(멈추는 서버의 임대를 내주지 않는다).
                     control.lease_acquired();
+                    let lease_id = leases.acquire(input.client_kind, input.client_id);
+                    control.lease_acquired();
+                    if control.work_gate().is_stopping() {
+                        leases.release(&lease_id);
+                        return Err(WorkbenchFault::unavailable(
+                            ctx.request_id.clone(),
+                            crate::application::work_gate::MESSAGE_STOPPING,
+                        ));
+                    }
                     Ok(to_json(LeaseAcquireOutput {
                         lease_id,
                         ttl_seconds: leases.ttl().as_secs(),

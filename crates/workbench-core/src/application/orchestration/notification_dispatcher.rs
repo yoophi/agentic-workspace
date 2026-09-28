@@ -33,6 +33,8 @@ pub enum DispatchAction {
     Continue,
     /// 결과 저장이 실패한 것처럼 저장하지 않고 오류로 끝낸다.
     FailResultSave,
+    /// (`AfterDispatchingSaved`에서) 전달기를 부르지 않고 coordinator가 바빠 거절한 영수증(`accepted: false`)으로 처리한다.
+    DeclineAsBusy,
 }
 
 pub type DispatchProbe = std::sync::Arc<
@@ -230,8 +232,18 @@ where
                 guard.saved = true;
                 (notification_id, binding, snapshot)
             };
-            self.probe(DispatchPoint::AfterDispatchingSaved).await;
-            let receipt = self.notifier.notify_coordinator(&binding, &snapshot).await;
+            let receipt = if self.probe(DispatchPoint::AfterDispatchingSaved).await
+                == DispatchAction::DeclineAsBusy
+            {
+                Ok(
+                    crate::ports::coordinator_notification::CoordinatorNotificationReceipt {
+                        accepted: false,
+                        reason: Some("Injected busy decline.".into()),
+                    },
+                )
+            } else {
+                self.notifier.notify_coordinator(&binding, &snapshot).await
+            };
             if self.probe(DispatchPoint::BeforeResultSave).await == DispatchAction::FailResultSave {
                 return Err(OrchestrationError::new(
                     OrchestrationErrorCode::WorkerUnavailable,
@@ -280,6 +292,8 @@ where
                             }
                             Err(error) => {
                                 retryable_failures |= error.retryable;
+                                // 실제 전달 실패(바쁨 거절이 아님) — 정지 판정의 시도 상한이 센다.
+                                notification.delivery_failure_count += 1;
                                 notification.failure = Some(CommandFailure {
                                     code: error.code,
                                     message: error.message,
@@ -356,6 +370,8 @@ where
                 *id == notification.id && notification.attempt_id.as_deref() == Some(attempt)
             });
             if same_attempt && notification.status == CoordinatorNotificationStatus::Dispatching {
+                // 중단된 시도(회수)도 실제 전달 실패다.
+                notification.delivery_failure_count += 1;
                 notification.failure = Some(CommandFailure {
                     code: OrchestrationErrorCode::RuntimeLost,
                     message: "Main notification delivery was interrupted.".into(),
@@ -384,6 +400,8 @@ where
             if notification.status == CoordinatorNotificationStatus::Dispatching {
                 notification.status = CoordinatorNotificationStatus::Pending;
                 notification.attempt_id = None;
+                // 중단된 시도(회수)도 실제 전달 실패다.
+                notification.delivery_failure_count += 1;
                 notification.failure = Some(CommandFailure {
                     code: OrchestrationErrorCode::RuntimeLost,
                     message: "Main notification delivery was interrupted.".into(),
@@ -591,6 +609,7 @@ mod tests {
                 main_run_id: main_available.then(|| "main-run".into()),
                 status: CoordinatorNotificationStatus::Pending,
                 attempt_count: 0,
+                delivery_failure_count: 0,
                 failure: None,
                 collected_at: None,
                 attempt_id: None,

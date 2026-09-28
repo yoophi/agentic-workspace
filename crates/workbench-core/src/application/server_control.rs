@@ -32,7 +32,8 @@ use crate::{
 
 /// 재시도 가능한 실패 coordinator 알림을 활동 작업으로 세는 전달 시도 상한(OCR 구현 리뷰). coordinator turn이 계속 실패하면
 /// (인증·할당량 등) 재시도가 끝나지 않아 정지가 영원히 막힌다. 이 수만큼 시도한 뒤의 실패 알림은 `stalled_notifications`로
-/// 보고만 한다(배경 재시도는 계속될 수 있고, 시도 중에는 그 시도가 활동이다).
+/// 보고만 한다(배경 재시도는 계속될 수 있고, 시도 중에는 그 시도가 활동이다). coordinator가 바빠 거절한 실패
+/// (`CoordinatorBusy`)에는 적용하지 않는다(OCR 2차 — turn이 끝나면 전달될 수 있다).
 pub const MAX_NOTIFICATION_ATTEMPTS_FOR_STOP: u32 = 3;
 
 /// 파생 값(G 밖에서 읽음). `ActiveWorkDto`·`server.status`의 재료.
@@ -222,7 +223,16 @@ impl ServerControl {
                                     .as_ref()
                                     .is_some_and(|failure| failure.retryable) =>
                             {
-                                if notification.attempt_count < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP {
+                                // coordinator가 바빠 거절한 알림(`CoordinatorBusy`)은 turn이 끝나면 전달될 수 있다 — 시도 수와
+                                // 무관하게 활동이다. 상한은 회복되지 않는 실패에만 적용한다(OCR 2차).
+                                let busy_decline = notification.failure.as_ref().is_some_and(|failure| {
+                                    failure.code
+                                        == crate::domain::agent_orchestration::OrchestrationErrorCode::CoordinatorBusy
+                                });
+                                if busy_decline
+                                    || notification.delivery_failure_count
+                                        < MAX_NOTIFICATION_ATTEMPTS_FOR_STOP
+                                {
                                     undelivered += 1;
                                 } else {
                                     derived.stalled_notifications.push(notification.id.clone());
