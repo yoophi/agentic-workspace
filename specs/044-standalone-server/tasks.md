@@ -113,7 +113,7 @@
 - [X] T049 [P] ADR 두 건: `docs/adr/0009-standalone-server-and-owner-principal.md`, `docs/adr/0010-app-quit-is-not-window-close.md`
 - [X] T050 [P] `docs/workbench-seam.md` "독립 서버(044)" 절, `crates/workbench-core/CONTEXT.md` 용어(서버 인스턴스·소유자 주체·임대·비우기 분류·작업 관문)
 - [X] T051 5단계 완료 기준 추적 표를 `specs/044-standalone-server/reviews/implementation-review.md`에 옮기고, 044 완료 항목과 **후속 미완료**((d) 프로세스 트리 가두기, (e) 백업·복원·단계적 이전, (f) 설치본 포함·서명·공증·버전별 캐시·업데이트 preflight, CLI(6단계), 재부착 화면, 교환 전달 서버 소유, 관측 불가 종료 경로, Windows·Linux)를 구분해 적는다
-- [ ] T052 (gate-12 `051c63a`는 Codex 10차 수정 전 — gate-13 대기) 최종 게이트 1회 실행·기록(`implementation-review.md`): fmt, clippy `-D warnings`, `cargo test --workspace --all-targets`(ask-code·hushline 포함), `check-types`, `pnpm test`, `build`, 두 `test:integration`
+- [X] T052 (gate-13 `656fea1`, Codex 10차 수정 포함) 최종 게이트 1회 실행·기록(`implementation-review.md`): fmt, clippy `-D warnings`, `cargo test --workspace --all-targets`(ask-code·hushline 포함), `check-types`, `pnpm test`, `build`, 두 `test:integration`
 - [ ] T053 OCR 구현 리뷰 → Codex `--wait` 구현 리뷰 → 반영·재검증 기록(`implementation-review.md`) 후 PR
 
 ---

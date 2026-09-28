@@ -50,8 +50,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | **gate-10** | **`07d60c7`** | **전부 0**(Codex 7차 수정 뒤): fmt, clippy `-D warnings`, cargo 960 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 646·기타 전부), build, workbench-client itest 7, AW itest 4(실제 host 패널 교환 2 포함) |
 | **gate-11** | **`17bbd11`** | **전부 0**(Codex 8차 수정 뒤): fmt, clippy `-D warnings`, cargo 968 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 655·기타 전부), build, workbench-client itest 7, AW itest 9 |
 | **gate-12** | **`051c63a`** | **전부 0**(Codex 9차 수정 뒤): fmt, clippy `-D warnings`, cargo 976 passed/0 failed/7 ignored/92 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 660·기타 전부), build, workbench-client itest 7, AW itest 11 |
+| **gate-13** | **`656fea1`** | **전부 0**(Codex 10차 수정 뒤): fmt, clippy `-D warnings`, cargo 992 passed/0 failed/7 ignored/93 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 664·기타 전부), build, workbench-client itest 7, AW itest 12 |
 
-- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-11은 Codex 9차 수정 전 코드다. **최신 게이트는 gate-12(`051c63a`)이다.** gate-12 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-12는 Codex 10차 수정 전 코드다. **최신 게이트는 gate-13(`656fea1`)이다.** gate-13 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -307,6 +308,10 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - T3: 취소 대기 중에도 수동 직접 전송은 막지 않는다(자동 전송만 막음). 직접 전송·Cancel & send·자동 전송 실패 경로의 순번 규칙에는 전용 시험이 없다. 실패는 화면 호출 클라이언트에서 주입했고, 시험 host는 scripted engine이다.
   - 실제 앱 스모크는 7–10차 수정 뒤 돌리지 않았다.
 - 10차 수정으로 코드가 바뀌었으므로 T052는 gate-13 전까지 다시 미완료로 둔다.
+- gate-13(`656fea1`)이 10차 수정을 모두 포함해 전부 통과했다.
+- **OCR 10차 재리뷰**(`b849283..656fea1`): High·Medium 없음.
+  - 확인: `reconcile_preserving`은 이전 자리의 보유를 옮기고, 기동 중 task를 실행 중으로 확정하지 않으며, 보유가 있으면 자리를 남기고 대기열에 넣지 않는다(단위 시험 2 + 순서 시험 4). 패널은 취소 진행(`cancelsInFlight`)을 응답 대기와 분리하고 lifecycle 순번으로 되돌리기를 판정한다. 틀 해석은 검사한 산술만 쓴다.
+  - Low(보고만): 기동 중 목록에 있으나 이전 자리가 없는 task는 보유·실행 중 표시가 없는 자리로 남는다(기동 중이면 보유가 있어야 하므로 실제로는 생기지 않을 것으로 본다).
 
 ### 최종 HEAD 재검토
 
