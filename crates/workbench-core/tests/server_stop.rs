@@ -1294,3 +1294,135 @@ async fn an_idle_stop_decision_counts_a_lease_inserted_before_the_resume() {
     );
     assert!(!control.work_gate().is_stopping());
 }
+
+/// Codex r8 (high): 작업 영역 저장소를 읽지 못하면 활동 작업을 **모른다** — 0으로 보고 정지하면 안 된다. 실행 중(`Running`)
+/// task의 turn이 끝났지만 결과 보고 전인 상태(바쁜 run·관문 예약 없음 — task 수만이 정지를 막는다)에서 읽기 오류를 주입한다:
+/// `default`는 거절되고 활동 작업의 task·알림 수는 `null`(모름), `wait`는 감시 바퀴를 되풀이해도 멈추지 않는다. 오류가 풀려도
+/// 실행 중 task가 정지를 막고, 그 task가 결과를 보고한 뒤에야 정지한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_store_read_failure_blocks_default_and_wait_stops_until_the_store_recovers() {
+    let (h, _bench, task_id) = with_ready_task(None).await;
+    settled(&h).await;
+    let assigned = h
+        .call(
+            &AuthenticatedPrincipal::agent("coord"),
+            OperationId::OrchestrationAssignChildTask,
+            json!({ "runId": "coord", "arguments": { "taskId": task_id, "requestId": "assign-r8" } }),
+        )
+        .await
+        .unwrap();
+    let child = assigned["runId"].as_str().expect("launched").to_owned();
+    let running = settled(&h).await;
+    assert_eq!(
+        running["activeWork"]["busyRuns"], 0,
+        "the child turn ended: {running}"
+    );
+    assert_eq!(running["activeWork"]["orchestrationTasks"], 1, "{running}");
+
+    let orchestration = h.rt.runtime.orchestration();
+    orchestration.set_read_fault(true);
+    let fault = stop(&h, "default")
+        .await
+        .expect_err("an unreadable store blocks the default stop");
+    assert_eq!(fault.code, FaultCode::Conflict, "{fault:?}");
+    let blockers: ActiveWorkDto =
+        serde_json::from_value(fault.details.as_ref().unwrap()["activeWork"].clone()).unwrap();
+    assert_eq!(
+        blockers.orchestration_tasks, None,
+        "unknown, not zero: {blockers:?}"
+    );
+    assert_eq!(blockers.pending_notifications, None, "{blockers:?}");
+    assert!(blockers.blocks_stop());
+    let unknown = status(&h).await;
+    assert!(
+        unknown["activeWork"]["orchestrationTasks"].is_null(),
+        "{unknown}"
+    );
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Serving);
+
+    let draining = stop(&h, "wait").await.unwrap();
+    assert_eq!(draining["state"], "drainingWait", "{draining}");
+    let control = h.rt.runtime.server_control();
+    for round in 0..20 {
+        assert!(
+            !control.tick(Duration::ZERO).await,
+            "round {round}: an unknown activity keeps the wait drain"
+        );
+    }
+    assert_eq!(
+        h.rt.runtime.work_gate().state(),
+        GateState::Draining(DrainMode::Wait)
+    );
+    assert!(
+        h.rt.runtime
+            .run_engine()
+            .active_owner_of(&child)
+            .await
+            .is_some(),
+        "the live child run was not cancelled"
+    );
+
+    // 저장소가 회복돼도 실행 중 task가 막는다. 결과 보고(C) 뒤에 정지한다.
+    orchestration.set_read_fault(false);
+    assert!(
+        !control.tick(Duration::ZERO).await,
+        "the running task still blocks"
+    );
+    h.call(
+        &AuthenticatedPrincipal::agent(&child),
+        OperationId::OrchestrationReportResult,
+        json!({ "runId": child, "arguments": { "requestId": "r-child", "summary": "done" } }),
+    )
+    .await
+    .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !control.tick(Duration::ZERO).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "wait completes once the task reported: {}",
+            status(&h).await
+        );
+        tokio::task::yield_now().await;
+    }
+    assert_eq!(h.rt.runtime.work_gate().state(), GateState::Stopping);
+}
+
+/// Codex r8 (high): ledger `pending` 수를 읽지 못하면 적용 중인 변경이 있는지 모른다 — `default`·유휴 정지 모두 멈추지
+/// 않고 `pendingOperations`·`unresolvedOperations`는 `null`(모름)이다. 읽기가 회복되면 유휴 정지가 진행한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_ledger_read_failure_blocks_default_and_idle_stops_until_it_recovers() {
+    let h = BenchHarness::new(RunScript::default());
+    let ledger = h.rt.runtime.ledger();
+    ledger.set_count_fault(true);
+    let fault = stop(&h, "default")
+        .await
+        .expect_err("an unreadable ledger blocks the default stop");
+    assert_eq!(fault.code, FaultCode::Conflict, "{fault:?}");
+    let blockers: ActiveWorkDto =
+        serde_json::from_value(fault.details.as_ref().unwrap()["activeWork"].clone()).unwrap();
+    assert_eq!(blockers.pending_operations, None, "{blockers:?}");
+    let unknown = status(&h).await;
+    assert!(
+        unknown["activeWork"]["pendingOperations"].is_null(),
+        "{unknown}"
+    );
+    assert!(unknown["unresolvedOperations"].is_null(), "{unknown}");
+    let control = h.rt.runtime.server_control();
+    for round in 0..5 {
+        assert!(
+            !control.tick(Duration::ZERO).await,
+            "round {round}: the idle stop waits for a readable ledger"
+        );
+    }
+    assert!(!h.rt.runtime.work_gate().is_stopping());
+    ledger.set_count_fault(false);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !control.tick(Duration::ZERO).await {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "idle stops once the ledger is readable: {}",
+            status(&h).await
+        );
+        tokio::task::yield_now().await;
+    }
+}

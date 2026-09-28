@@ -1802,6 +1802,20 @@ fn reconcile_session_runtime(session: &mut OrchestrationSession, live_run_ids: &
         let Some(run_id) = node.current_run_id.as_ref() else {
             continue;
         };
+        // Codex r8: 예약만 하고(`Starting`) 실행되지 않은 기동이 남긴 run(되돌리기가 저장되지 못한 채 서버가 멈춤 등). 그
+        // run은 엔진에 없고 기동 중도 아니다 — 끝나지 못한 기동과 같이 되돌린다(노드 run 비움, 그 기동이 만든 실행 중
+        // task는 다시 배정할 수 있는 `Ready`). 남기면 다음 배정이 죽은 run id를 `alreadyAssigned`로 받는다.
+        if node.execution_status == ExecutionStatus::Starting && !live_run_ids.contains(run_id) {
+            node.current_run_id = None;
+            node.execution_status = ExecutionStatus::Idle;
+            node.last_activity_at = Some(now.clone());
+            if let Some(task_id) = node.assigned_task_id.as_ref() {
+                if let Some(task) = session.tasks.iter_mut().find(|task| task.id == *task_id) {
+                    task.revert_aborted_launch(now.clone());
+                }
+            }
+            continue;
+        }
         if node.execution_status == ExecutionStatus::Active && !live_run_ids.contains(run_id) {
             node.execution_status = ExecutionStatus::Stopped;
             node.last_activity_at = Some(now.clone());

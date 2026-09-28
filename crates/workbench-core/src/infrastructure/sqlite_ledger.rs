@@ -113,6 +113,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS operation_ledger_reserved_pending
 pub struct SqliteOperationLedger {
     path: PathBuf,
     connection: Mutex<Connection>,
+    /// 시험: 켜져 있으면 상태별 수 읽기(`count_by_state`)가 저장소 오류로 끝난다(Codex r8).
+    count_fault: std::sync::atomic::AtomicBool,
 }
 
 pub fn now_rfc3339() -> String {
@@ -173,6 +175,7 @@ impl SqliteOperationLedger {
         Ok(Self {
             path,
             connection: Mutex::new(connection),
+            count_fault: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -204,7 +207,17 @@ impl SqliteOperationLedger {
     }
 
     /// 상태별 건수. `server.status`가 `pendingOperations`(`pending`)·`unresolvedOperations`(`unknown`)를 파생한다(044).
+    /// 시험: 상태별 수 읽기 오류를 켜고 끈다(Codex r8 — 활동을 모르는 정지 판정).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_count_fault(&self, failing: bool) {
+        self.count_fault
+            .store(failing, std::sync::atomic::Ordering::SeqCst);
+    }
+
     pub fn count_by_state(&self, state: LedgerState) -> LedgerResult<usize> {
+        if self.count_fault.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(LedgerError::Storage("injected ledger read failure".into()));
+        }
         self.with_connection(|conn| {
             conn.query_row(
                 "SELECT COUNT(*) FROM operation_ledger WHERE state = ?1",

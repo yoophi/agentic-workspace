@@ -13,7 +13,7 @@ use crate::{
             binding::OrchestrationBindings,
             command_service::{DeliverTaskCommandRequest, OrchestrationCommandService},
             notification_dispatcher::CoordinatorNotificationDispatcher,
-            scheduler::{LeaseOutcome, OrchestrationScheduler},
+            scheduler::OrchestrationScheduler,
             service::{
                 BindMainRunRequest, CoordinatorHandoffRequest, DelegateGoalOutcome,
                 DelegateGoalRequest, DispatchPromptRequest, MainRunBindingState,
@@ -102,6 +102,16 @@ impl From<OrchestrationError> for OrchestrationFailure {
 
 pub type OrchestrationResult<T> = Result<T, OrchestrationFailure>;
 
+impl OrchestrationFailure {
+    /// 사람이 읽는 오류 문구(기록·관측용).
+    pub fn text(&self) -> String {
+        match self {
+            Self::Domain(error) => error.message.clone(),
+            Self::Plain(message) | Self::Forbidden(message) => message.clone(),
+        }
+    }
+}
+
 /// 알림 재전달 backoff(첫 대기와 상한).
 const NOTIFICATION_RETRY_BASE: std::time::Duration = std::time::Duration::from_millis(50);
 const NOTIFICATION_RETRY_MAX: std::time::Duration = std::time::Duration::from_secs(5);
@@ -117,6 +127,9 @@ pub enum LaunchPoint {
     AfterRegister,
     /// 시작 장벽을 연 뒤·바인딩 전(자식 첫 턴이 바인딩 전에 도구를 부르는 경우를 결정적으로 재현).
     AfterOpen,
+    /// 기존 task 배정(`assignChildTask` 등)이 scheduler 보유를 얻은 뒤·작업 영역을 읽기 전(Codex r8 — 앞 기동 되돌리기와
+    /// 교차 재현).
+    BeforeAssignSnapshot,
 }
 
 /// 자식 기동의 저장소 커밋 단계(blocking 스레드) 전후 지점(Codex r6·r7 abort 재현).
@@ -186,6 +199,24 @@ pub struct OrchestrationRuntime {
     launch_tokens: std::sync::Mutex<std::collections::HashMap<String, LaunchSlot>>,
     /// 작업대 서비스에 관문이 없을 때(관문 없는 조립) 쓰는 자체 관문.
     fallback_gate: std::sync::OnceLock<std::sync::Arc<crate::application::work_gate::WorkGate>>,
+    /// 저장소 되돌리기가 실패한 기동(Codex r8): task → 다시 시도할 되돌리기. 끝날 때까지 그 task의 단일 비행 자리는
+    /// "되돌리는 중"으로 남고 scheduler 보유도 놓지 않는다. 정지 판정에서 활동 작업으로 센다.
+    pending_reverts: std::sync::Mutex<std::collections::HashMap<String, PendingRevert>>,
+    /// 시험: 다음 되돌리기 커밋 몇 번을 저장소 오류로 끝낸다.
+    revert_faults: std::sync::atomic::AtomicU32,
+    /// 시험: 켜져 있으면 작업 영역 읽기(`get`)가 저장소 오류로 끝난다.
+    read_fault: std::sync::atomic::AtomicBool,
+}
+
+/// 저장소 되돌리기가 실패해 다시 시도할 기동 정리(Codex r8). 엔진 run 취소는 이미 끝났고 task·노드 되돌리기만 남았다.
+pub(crate) struct PendingRevert {
+    pub(crate) bench: String,
+    pub(crate) node_id: String,
+    pub(crate) planned_run_id: String,
+    pub(crate) token: u64,
+    pub(crate) hold: Option<super::scheduler::SlotHold>,
+    pub(crate) attempts: u32,
+    pub(crate) last_error: String,
 }
 
 impl OrchestrationRuntime {
@@ -213,6 +244,9 @@ impl OrchestrationRuntime {
             weak_self: std::sync::OnceLock::new(),
             launch_tokens: std::sync::Mutex::default(),
             fallback_gate: std::sync::OnceLock::new(),
+            pending_reverts: std::sync::Mutex::default(),
+            revert_faults: std::sync::atomic::AtomicU32::new(0),
+            read_fault: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -275,6 +309,119 @@ impl OrchestrationRuntime {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(task_id)
             .is_some_and(|slot| slot.rolling_back)
+    }
+
+    /// 시험: 작업 영역 읽기 오류를 켜고 끈다(Codex r8 — 활동을 모르는 정지 판정).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_read_fault(&self, failing: bool) {
+        self.read_fault
+            .store(failing, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// 시험: 다음 되돌리기 커밋 `count`번을 저장소 오류로 끝낸다(Codex r8).
+    #[cfg(feature = "test-hooks")]
+    pub fn fail_next_reverts(&self, count: u32) {
+        self.revert_faults
+            .store(count, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// 주입된 되돌리기 오류를 하나 쓴다(있으면 true).
+    pub(crate) fn take_revert_fault(&self) -> bool {
+        self.revert_faults
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |left| left.checked_sub(1),
+            )
+            .is_ok()
+    }
+
+    /// 저장소 되돌리기가 실패한 기동을 넘겨받는다: 단일 비행 자리는 "되돌리는 중"으로 남긴다(끝나야 지운다).
+    pub(crate) fn defer_revert(&self, task_id: &str, revert: PendingRevert) {
+        eprintln!(
+            "[workbench] child launch rollback for task {task_id} (run {}) could not be stored after {} attempt(s): {}; it stays rolling back and is retried",
+            revert.planned_run_id, revert.attempts, revert.last_error
+        );
+        self.pending_reverts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(task_id.to_owned(), revert);
+    }
+
+    /// 되돌리기가 저장되지 않은 기동 task(관측·정지 판정).
+    pub fn pending_revert_tasks(&self) -> Vec<String> {
+        let mut tasks: Vec<String> = self
+            .pending_reverts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        tasks.sort();
+        tasks
+    }
+
+    /// 넘겨받은 되돌리기를 한 번씩 다시 시도한다(감시 한 바퀴·같은 task의 새 배정이 부른다). 성공하면 단일 비행 자리를
+    /// 지우고 scheduler 보유를 놓는다. 실패하면 시도 수·오류를 갱신해 다시 넘겨받는다.
+    pub async fn retry_pending_reverts(self: &Arc<Self>) {
+        for task_id in self.pending_revert_tasks() {
+            self.retry_pending_revert(&task_id).await;
+        }
+    }
+
+    pub(crate) async fn retry_pending_revert(self: &Arc<Self>, task_id: &str) {
+        // 꺼내서 시도한다(같은 task의 동시 재시도를 하나로).
+        let Some(mut revert) = self
+            .pending_reverts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(task_id)
+        else {
+            return;
+        };
+        let (bench, task, node, run) = (
+            revert.bench.clone(),
+            task_id.to_owned(),
+            revert.node_id.clone(),
+            revert.planned_run_id.clone(),
+        );
+        let runtime = Arc::clone(self);
+        let stored = self
+            .blocking(move |service| {
+                if runtime.take_revert_fault() {
+                    return Err(OrchestrationError::new(
+                        crate::domain::agent_orchestration::OrchestrationErrorCode::WorkerUnavailable,
+                        "injected rollback store failure",
+                    ));
+                }
+                service.revert_child_launch(&bench, &task, &node, &run)
+            })
+            .await;
+        match stored {
+            Ok(()) => {
+                self.forget_launching(&revert.planned_run_id);
+                self.end_task_launch(task_id, revert.token);
+                if let Some(hold) = revert.hold.take() {
+                    let _ = self.scheduler.release_hold(hold);
+                }
+            }
+            Err(error) => {
+                revert.attempts += 1;
+                revert.last_error = error.text();
+                self.defer_revert(task_id, revert);
+            }
+        }
+    }
+
+    /// 진행 중인(되돌리는 중이 아닌) 기동의 예정 run id.
+    fn in_flight_launch_runs(&self) -> Vec<String> {
+        self.launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .values()
+            .filter(|slot| !slot.rolling_back)
+            .map(|slot| slot.planned_run_id.clone())
+            .collect()
     }
 
     pub(crate) fn end_task_launch(&self, task_id: &str, token: u64) {
@@ -749,6 +896,11 @@ impl OrchestrationRuntime {
     }
 
     pub async fn get(&self, bench_id: &str) -> OrchestrationResult<Option<OrchestrationSession>> {
+        if self.read_fault.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(OrchestrationFailure::Plain(
+                "injected orchestration store read failure".into(),
+            ));
+        }
         let bench_id = bench_id.to_owned();
         self.blocking(move |service| service.get_for_bench(&bench_id))
             .await
@@ -1024,40 +1176,52 @@ impl OrchestrationRuntime {
         Ok(())
     }
 
-    /// 과제 하나를 scheduler 자리를 얻어 기동한다(오늘 `launch_orchestration_task_for_ui`).
+    /// 과제 하나를 scheduler 자리를 얻어 기동한다(오늘 `launch_orchestration_task_for_ui`). 이 시도의 자리 보유는
+    /// `start_child`(기동 guard)가 끝까지 책임진다 — 그 전에 끝나면 여기서 놓는다(Codex r8).
     pub async fn launch_task_for_ui(
         self: &Arc<Self>,
         bench_id: &str,
         task_id: &str,
     ) -> OrchestrationResult<OrchestrationSession> {
-        if let LeaseOutcome::Queued { .. } = self.scheduler.acquire(task_id)? {
-            return self
+        let hold = match self.scheduler.acquire_hold(task_id)? {
+            super::scheduler::HoldOutcome::Queued { .. } => {
+                return self
+                    .snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
+                    .await;
+            }
+            super::scheduler::HoldOutcome::Acquired(hold) => hold,
+        };
+        let located = async {
+            let snapshot = self
                 .snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
-                .await;
+                .await?;
+            let node_id = snapshot
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id)
+                .ok_or_else(|| OrchestrationFailure::Plain("Task is unavailable.".into()))?
+                .assigned_node_id
+                .as_ref()
+                .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
+                .map(|node| node.id.clone())
+                .ok_or_else(|| {
+                    OrchestrationFailure::Plain("Assigned Child is unavailable.".into())
+                })?;
+            Ok::<_, OrchestrationFailure>((snapshot, node_id))
         }
-        let snapshot = self
-            .snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
-            .await?;
-        let task = snapshot
-            .tasks
-            .iter()
-            .find(|task| task.id == task_id)
-            .ok_or_else(|| OrchestrationFailure::Plain("Task is unavailable.".into()))?;
-        let node_id = task
-            .assigned_node_id
-            .as_ref()
-            .and_then(|node_id| snapshot.nodes.iter().find(|node| node.id == *node_id))
-            .map(|node| node.id.clone())
-            .ok_or_else(|| OrchestrationFailure::Plain("Assigned Child is unavailable.".into()))?;
+        .await;
+        let (snapshot, node_id) = match located {
+            Ok(located) => located,
+            Err(error) => {
+                let _ = self.scheduler.release_hold(hold);
+                return Err(error);
+            }
+        };
         match self
-            .start_child(bench_id, &snapshot, task_id, &node_id)
+            .start_child(bench_id, &snapshot, task_id, &node_id, hold)
             .await
         {
-            Ok(StartWorkerOutcome::Failed { code, message, .. }) => {
-                // 앞 기동을 되돌리는 중이면 그 자리는 되돌리는 쪽이 반납한다(Codex r7).
-                if code != super::agent_tools::LAUNCH_ROLLING_BACK {
-                    let _ = self.scheduler.release(task_id);
-                }
+            Ok(StartWorkerOutcome::Failed { message, .. }) => {
                 Err(OrchestrationFailure::Plain(message))
             }
             Ok(_) => {
@@ -1231,8 +1395,11 @@ impl OrchestrationRuntime {
                 live_run_ids.push(run_id.clone());
             }
         }
+        // 이 프로세스에서 기동 중인 run(엔진 등록 전일 수 있다)은 살아 있는 것으로 넘긴다 — 재조정이 진행 중인 기동의 예약을
+        // 되돌리지 않게(Codex r8). 되돌리기가 저장되지 않은 기동은 여기 없다(재조정이 되돌린다).
+        let mut live = live_run_ids.clone();
+        live.extend(self.in_flight_launch_runs());
         let bench = bench_id.to_owned();
-        let live = live_run_ids.clone();
         let reconciled = self
             .blocking(move |service| service.reconcile_runtime(&bench, &live))
             .await?;

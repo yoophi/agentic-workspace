@@ -54,16 +54,29 @@ pub struct DerivedWork {
     /// 전달 시도 상한([`MAX_NOTIFICATION_ATTEMPTS_FOR_STOP`])을 넘어 재시도를 기다리는 실패 알림(보고만). 저장된 채
     /// 재시도 가능한 실패로 남는다 — 전달된 것으로 보지 않는다.
     pub stalled_notifications: Vec<String>,
+    /// 저장소 되돌리기가 저장되지 않아 재시도를 기다리는 자식 기동(Codex r8). 정리가 끝나지 않았으므로 활동 작업이다
+    /// (`orchestrationTasks`에 더해 보고한다).
+    pub pending_launch_reverts: u64,
+    /// 작업 영역(task·알림) 읽기가 실패한 작업대가 있다(Codex r8): 그 수들은 모른다 — 정지를 막는다.
+    pub orchestration_unknown: bool,
+    /// ledger `pending` 수를 읽지 못했다: 모른다 — 정지를 막는다.
+    pub pending_operations_unknown: bool,
+    /// ledger `unknown` 수를 읽지 못했다(보고만 — `unresolvedOperations`가 `null`).
+    pub unresolved_operations_unknown: bool,
 }
 
 impl DerivedWork {
-    /// 정지를 막는 파생 합계. `unresolved_operations`·`undeliverable_exchanges`는 넣지 않는다.
+    /// 정지를 막는 파생 합계. `unresolved_operations`·`undeliverable_exchanges`는 넣지 않는다. 읽지 못한(모르는) 활동
+    /// 원천이 있으면 0이 되지 않는다(Codex r8 — 모름을 안전한 정지로 판정하지 않는다).
     pub fn active_total(&self) -> u64 {
         self.orchestration_tasks
+            + self.pending_launch_reverts
             + self.queued_tasks
             + self.pending_exchanges
             + self.pending_notifications
             + self.pending_operations
+            + u64::from(self.orchestration_unknown)
+            + u64::from(self.pending_operations_unknown)
     }
 }
 
@@ -203,23 +216,33 @@ impl ServerControl {
         let drain_started_at = gate.drain_started_at();
         let desktop_leased = self.leases.count_kind(LeaseClientKindDto::Desktop) > 0;
         let mut derived = DerivedWork {
-            pending_operations: self
-                .ledger
-                .count_by_state(LedgerState::Pending)
-                .unwrap_or(0) as u64,
-            unresolved_operations: self
-                .ledger
-                .count_by_state(LedgerState::Unknown)
-                .unwrap_or(0) as u64,
+            pending_launch_reverts: self.orchestration.pending_revert_tasks().len() as u64,
             ..DerivedWork::default()
         };
+        // 읽기 실패는 0이 아니라 "모름"이다(Codex r8).
+        match self.ledger.count_by_state(LedgerState::Pending) {
+            Ok(count) => derived.pending_operations = count as u64,
+            Err(_) => derived.pending_operations_unknown = true,
+        }
+        match self.ledger.count_by_state(LedgerState::Unknown) {
+            Ok(count) => derived.unresolved_operations = count as u64,
+            Err(_) => derived.unresolved_operations_unknown = true,
+        }
         let engine = &self.benches.engine;
         for (bench_id, _) in self.benches.registry.open_benches() {
             let alive = |run_id: String| {
                 let bench_id = bench_id.clone();
                 async move { engine.active_owner_of(&run_id).await.as_deref() == Some(&bench_id) }
             };
-            if let Ok(Some(session)) = self.orchestration.get(&bench_id).await {
+            let session = match self.orchestration.get(&bench_id).await {
+                Ok(session) => session,
+                Err(_) => {
+                    // 이 작업대의 task·알림을 모른다: 활동 작업이 없다고 보지 않는다(Codex r8).
+                    derived.orchestration_unknown = true;
+                    None
+                }
+            };
+            if let Some(session) = session {
                 let coordinator_run = session
                     .nodes
                     .iter()
@@ -342,13 +365,22 @@ impl ServerControl {
     /// 판정하는 호출 자신을 포함하므로 쓰지 않는다(정지 뒤 host가 받은 호출을 drain한다).
     pub fn active_work(&self, derived: &DerivedWork) -> ActiveWorkDto {
         let gate = self.work_gate.active_work();
+        // 읽지 못한 원천의 수는 `null`(모름)로 싣는다 — `blocks_stop`이 모름을 활동으로 본다(Codex r8).
+        let known = |unknown: bool, count: u64| (!unknown).then_some(count);
+        let orchestration_unknown = derived.orchestration_unknown;
         ActiveWorkDto {
             busy_runs: gate.busy_runs as u64,
-            orchestration_tasks: Some(derived.orchestration_tasks),
-            queued_tasks: Some(derived.queued_tasks),
+            orchestration_tasks: known(
+                orchestration_unknown,
+                derived.orchestration_tasks + derived.pending_launch_reverts,
+            ),
+            queued_tasks: known(orchestration_unknown, derived.queued_tasks),
             pending_exchanges: Some(derived.pending_exchanges),
-            pending_notifications: Some(derived.pending_notifications),
-            pending_operations: Some(derived.pending_operations),
+            pending_notifications: known(orchestration_unknown, derived.pending_notifications),
+            pending_operations: known(
+                derived.pending_operations_unknown,
+                derived.pending_operations,
+            ),
             accepted_calls: gate.accepted_calls as u64,
             reservations: self.work_gate.reservation_total() as u64,
         }
@@ -446,6 +478,11 @@ impl ServerControl {
 
     /// 감시 한 바퀴(host가 주기적으로 부른다): 유휴 시계·유휴 비우기·wait 비우기의 정지 판정. 멈췄으면 true.
     pub async fn tick(&self, idle_timeout: Duration) -> bool {
+        // 저장되지 않은 자식 기동 되돌리기를 다시 시도한다(Codex r8). 서버 자신의 정리라 비우는 중에도 돈다 — 끝나기 전에는
+        // 정지 판정이 그것을 활동으로 센다.
+        if !self.orchestration.pending_revert_tasks().is_empty() {
+            self.orchestration.retry_pending_reverts().await;
+        }
         match self.work_gate.state() {
             GateState::Stopping => {
                 self.mark_stopped();

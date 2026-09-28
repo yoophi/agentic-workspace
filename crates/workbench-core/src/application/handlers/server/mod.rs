@@ -161,7 +161,9 @@ async fn server_status(control: &ServerControl) -> ServerStatusOutput {
         idle_runs,
         leases: control.leases().count() as u64,
         // ledger `unknown`은 활동 작업이 아니다(R7) — 여기에만 보고한다.
-        unresolved_operations: Some(derived.unresolved_operations),
+        // 읽지 못했으면 `null`(모름)이다(Codex r8).
+        unresolved_operations: (!derived.unresolved_operations_unknown)
+            .then_some(derived.unresolved_operations),
         undeliverable_exchanges: Some(derived.undeliverable_exchanges),
         failed_exchange_deliveries: Some(gate.failed_deliveries()),
         deferred_tasks: Some(derived.deferred_tasks),

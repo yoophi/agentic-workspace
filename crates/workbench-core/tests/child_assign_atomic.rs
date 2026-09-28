@@ -904,3 +904,250 @@ async fn an_assign_during_a_rollback_is_refused_retryably_instead_of_getting_the
     assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "during-rollback").await;
     assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "during-rollback").await;
 }
+
+/// 동시 한도 1에서 새 과제를 만든다(자리를 이미 누가 쥐고 있으면 대기열에 든다).
+async fn create_extra(h: &BenchHarness, key: &str) -> Value {
+    tool(
+        h,
+        "coord",
+        OperationId::OrchestrationCreateChildTask,
+        json!({
+            "requestId": key, "title": format!("extra {key}"),
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read again", "expectedResult": "summary"
+        }),
+    )
+    .await
+    .unwrap()
+}
+
+/// Codex r8 (medium): 같은 task의 자리를 여러 배정 시도가 함께 쥔다. 되돌리는 중인 앞 기동 A가 있을 때 새 배정 B가 자리
+/// 보유를 얻고 작업 영역을 읽기 전에 멈춘다 → A의 되돌리기가 끝난다(A는 자기 보유만 놓는다) → B가 재개해 실제 run을
+/// 기동한다. B의 run은 자리를 쥔 채 실행되고, 동시 한도(1)는 넘지 않는다 — 새 과제는 대기열에 든다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_reassign_holding_the_slot_across_a_rollback_keeps_its_slot() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut store = pause_store_at(&h, StorePoint::BindAfterCommit);
+    let a = spawn_launch(&h, &bench, &task_id);
+    store.wait_for(StorePoint::BindAfterCommit).await;
+    a.abort();
+    assert!(a.await.unwrap_err().is_cancelled());
+    let mut b_pause = pause_at(&h, LaunchPoint::BeforeAssignSnapshot);
+    let b = {
+        let (h, task_id) = (Arc::clone(&h), task_id.clone());
+        tokio::spawn(async move { assign(&h, &task_id, "b-across-rollback").await })
+    };
+    tokio::time::timeout(WAIT, b_pause.reached.recv())
+        .await
+        .expect("B holds the slot and is about to read the workspace");
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        2,
+        "A (rolling back) and B hold it"
+    );
+    store.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    eventually("A's rollback finished", || async {
+        h.engine.run_count() == baseline.runs
+            && node_of(&session(&h, &bench).await, &task_id)["currentRunId"].is_null()
+            && scheduler.hold_count(&task_id) == 1
+    })
+    .await;
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "A's cleanup kept the slot B still holds"
+    );
+    b_pause.release.add_permits(1);
+    let assigned = tokio::time::timeout(WAIT, b)
+        .await
+        .expect("B answers")
+        .unwrap()
+        .unwrap();
+    assert_eq!(assigned["executionStatus"], "active", "{assigned}");
+    let run_id = assigned["runId"].as_str().unwrap().to_owned();
+    let launched = format!("launch:{run_id}");
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(h.engine.run_count(), baseline.runs + 1);
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "B's run owns the slot"
+    );
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        0,
+        "B's hold became the running slot"
+    );
+    let extra = create_extra(&h, "extra-after-b").await;
+    assert_eq!(
+        extra["queued"], true,
+        "the concurrency limit (1) holds while B runs: {extra}"
+    );
+    assert_eq!(scheduler.active_count().unwrap(), 1);
+}
+
+/// Codex r8 (medium): 되돌리기가 저장소에 저장되지 못하면 완료로 보지 않는다. 바인딩 커밋 뒤 abort된 기동의 되돌리기 커밋을
+/// 실패시킨다: 엔진 run은 취소됐지만 저장소는 그 run을 가리킨다. 그 동안 (1) 단일 비행 자리는 "되돌리는 중"으로 남아 새
+/// 배정은 죽은 run id(`alreadyAssigned`)가 아니라 재시도 가능한 `launchRollingBack`을 받고, (2) 이 시도의 scheduler 보유가
+/// 남으며, (3) 정리 미완료가 활동 작업으로 보여 `default` 정지가 거절되고 감시 바퀴는 멈추지 않는다. 저장소가 회복되면
+/// 감시 바퀴의 재시도가 정리를 끝내고 재배정이 실제 run을 기동한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_rollback_that_cannot_be_stored_is_kept_and_retried_until_it_succeeds() {
+    use workbench_core::application::server_control::StopOutcome;
+    use workbench_protocol::operations::server::StopModeDto;
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let orchestration = h.rt.runtime.orchestration();
+    orchestration.fail_next_reverts(1_000);
+    let mut store = pause_store_at(&h, StorePoint::BindAfterCommit);
+    let a = spawn_launch(&h, &bench, &task_id);
+    store.wait_for(StorePoint::BindAfterCommit).await;
+    a.abort();
+    assert!(a.await.unwrap_err().is_cancelled());
+    store.release.send(()).unwrap();
+    orchestration.set_store_probe(None);
+    eventually("the unstored rollback is kept for a retry", || async {
+        orchestration.pending_revert_tasks() == vec![task_id.clone()]
+            && h.engine.run_count() == baseline.runs
+    })
+    .await;
+    let stored = session(&h, &bench).await;
+    let doomed = node_of(&stored, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the store still points at the cancelled run")
+        .to_owned();
+    assert_eq!(task(&stored, &task_id)["status"], "running");
+
+    let during = tokio::time::timeout(WAIT, assign(&h, &task_id, "during-unstored"))
+        .await
+        .expect("answers")
+        .expect("answered");
+    assert!(
+        during.get("alreadyAssigned").is_none(),
+        "{during} (doomed {doomed})"
+    );
+    assert!(during["runId"].is_null(), "{during}");
+    assert_eq!(during["launch"]["code"], "launchRollingBack", "{during}");
+    assert_eq!(during["launch"]["retryable"], true, "{during}");
+    let scheduler = orchestration.scheduler();
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the rolling-back hold is kept"
+    );
+    let control = h.rt.runtime.server_control();
+    for round in 0..3 {
+        assert!(
+            !control.tick(Duration::from_secs(600)).await,
+            "round {round}: the retry fails again"
+        );
+        assert_eq!(orchestration.pending_revert_tasks(), vec![task_id.clone()]);
+    }
+    match control.request_stop(StopModeDto::Default).await {
+        StopOutcome::Blocked(active) => assert!(
+            active.orchestration_tasks.is_some_and(|count| count >= 1),
+            "the unfinished cleanup is active work: {active:?}"
+        ),
+        other => panic!("an unfinished rollback must block the default stop: {other:?}"),
+    }
+
+    orchestration.fail_next_reverts(0);
+    assert!(!control.tick(Duration::from_secs(600)).await);
+    assert!(
+        orchestration.pending_revert_tasks().is_empty(),
+        "the watch-loop retry stored the rollback"
+    );
+    assert_launch_undone(&h, &bench, &task_id, baseline, "ready", "unstored").await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "unstored").await;
+}
+
+/// Codex r8 + 사용자 요구: 저장되지 않은 되돌리기가 남은 채 서버가 멈추면(메모리의 재시도 목록은 사라진다) 저장소에는
+/// 예약만 된(`Starting`) 노드가 죽은 run을 가리킨다. 같은 저장소로 다시 시작해 작업 영역을 복구(`recover`)하면 그 예약을
+/// 되돌린다 — 다음 기동은 죽은 run id를 돌려받지 않고 실제 run을 기동한다. 실패 정리(`fail`) 경로: 엔진 준비 실패 뒤
+/// 되돌리기 커밋 실패.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn an_unstored_rollback_left_by_a_stop_is_undone_by_the_restart_recovery() {
+    let (h, bench, task_id, _baseline) = ready_task_with_baseline().await;
+    let orchestration = h.rt.runtime.orchestration();
+    orchestration.fail_next_reverts(1_000);
+    h.engine.fail_next_start.store(true, Ordering::SeqCst);
+    let failed = orchestration.launch_task_for_ui(&bench, &task_id).await;
+    assert!(failed.is_err(), "the launch failed: {failed:?}");
+    assert_eq!(orchestration.pending_revert_tasks(), vec![task_id.clone()]);
+    let stored = session(&h, &bench).await;
+    let doomed = node_of(&stored, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the reservation is still stored")
+        .to_owned();
+    assert_eq!(node_of(&stored, &task_id)["executionStatus"], "starting");
+    let workspace_id = stored["id"].as_str().unwrap().to_owned();
+    // 정리가 저장되지 않은 동안은 활동 작업이다: task는 `Ready`라 task 수로는 막히지 않지만 정지는 거절된다.
+    {
+        use workbench_core::application::server_control::StopOutcome;
+        use workbench_protocol::operations::server::StopModeDto;
+        match h
+            .rt
+            .runtime
+            .server_control()
+            .request_stop(StopModeDto::Default)
+            .await
+        {
+            StopOutcome::Blocked(active) => assert!(
+                active.orchestration_tasks.is_some_and(|count| count >= 1),
+                "{active:?}"
+            ),
+            other => panic!("an unstored rollback must block the default stop: {other:?}"),
+        }
+    }
+
+    // 멈춤: 작업대를 닫고(강제 정지와 같음) 같은 저장소로 새 런타임을 조립한다(재시도 목록은 메모리라 사라진다).
+    h.rt.runtime.close_all_benches().await;
+    let h = Arc::try_unwrap(h).ok().expect("sole harness owner");
+    let h = h.restart_runtime(
+        |adapters| adapters.orchestration.max_concurrent_children = 1,
+        RunScript::default(),
+    );
+    let bench = h.open().await;
+    let desktop = desktop();
+    h.call(
+        &desktop,
+        OperationId::OrchestrationBootstrap,
+        json!({ "benchId": bench, "worktreePath": h.dir, "resumeWorkspaceId": workspace_id }),
+    )
+    .await
+    .unwrap();
+    let orchestration = h.rt.runtime.orchestration();
+    assert!(
+        orchestration.pending_revert_tasks().is_empty(),
+        "a new process"
+    );
+    h.call(
+        &desktop,
+        OperationId::OrchestrationRecover,
+        json!({ "benchId": bench }),
+    )
+    .await
+    .unwrap();
+    let recovered = session(&h, &bench).await;
+    assert!(
+        node_of(&recovered, &task_id)["currentRunId"].is_null(),
+        "the recovery undid the stale reservation of {doomed}: {recovered}"
+    );
+    assert_eq!(task(&recovered, &task_id)["status"], "ready");
+
+    orchestration
+        .launch_task_for_ui(&bench, &task_id)
+        .await
+        .expect("the task launches again");
+    let relaunched = session(&h, &bench).await;
+    let run_id = node_of(&relaunched, &task_id)["currentRunId"]
+        .as_str()
+        .expect("a new run")
+        .to_owned();
+    assert_ne!(run_id, doomed, "not the dead run");
+    assert_eq!(task(&relaunched, &task_id)["status"], "running");
+    let launched = format!("launch:{run_id}");
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
+}
