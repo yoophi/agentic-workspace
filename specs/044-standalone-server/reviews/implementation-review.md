@@ -46,8 +46,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 | gate-7 | `8865589` | OCR 4차 수정 전에 중단(fmt·clippy 0까지). 무효 |
 | **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
+| **gate-9** | **`a94372e`** | **전부 0**(Codex 6차 수정 뒤): fmt, clippy `-D warnings`, cargo 950 passed/0 failed/7 ignored/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 
-- **gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. 최신 게이트는 gate-9로 다시 돌린다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- **gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. **최신 게이트는 gate-9(`a94372e`)**다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -188,6 +189,8 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | Z4 | medium(docs) | quit-run (g) SIGTERM이 신원 확인 없는 `kill` | `02831fe`: (g)가 `kill_exact`(rc 반환)만 거치고, 불일치·소멸이면 `sigterm-not-sent`(시도 무효). 커밋본 lib.sh 작업 디렉터리는 `AW_SMOKE_DIR` | 모의 자기 시험 `selftest-signal.sh` 9/9. 실제 스모크·사용자 프로세스에는 신호를 보내지 않았다 |
 
 - 6차 수정으로 코드가 바뀌었으므로 gate-8은 최신 게이트가 아니다. T052는 gate-9 전까지 다시 미완료로 둔다.
+- gate-9(`a94372e`)가 6차 수정을 모두 포함해 전부 통과했다.
+- **OCR 6차 재리뷰**(`2d08d34..a94372e`, 코드·스크립트 11개 파일): High·Medium 없음. 확인한 점: 예약 task handle은 정상 경로에서 같은 poll 안에 비워져 Drop이 넘겨받지 않음(`Existing`·`Err`의 scheduler 반납은 기존대로 호출자 몫), abort 경로만 커밋 결과를 기다려 조건부 해제·반납, `note_lease_acquired`의 유휴 복귀 필드가 `resume_serving`과 같음, default 정지의 세대 불일치 재파생 보고, `descriptor_is_absent`는 `NotFound`만 부재로 봄, `kill_exact` rc 전파와 (g) 무효 표시. Low(보고만): 커밋본 lib.sh는 `AW_SMOKE_DIR`가 없으면 스크립트 디렉터리에 결과를 쓴다(실행 문서에서 환경 변수를 지정).
 
 ### 최종 HEAD 재검토
 
