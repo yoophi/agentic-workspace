@@ -116,9 +116,11 @@ pub trait RunEngine: Send + Sync {
         run_id: &str,
         prompt: String,
         sink: WorkbenchRunSink,
-        _completion: QueuePromptCompletion,
+        completion: QueuePromptCompletion,
     ) -> Result<(), RunEngineError> {
-        self.queue_prompt(run_id, prompt, sink).await
+        let result = self.queue_prompt(run_id, prompt, sink).await;
+        completion(result.clone());
+        result
     }
 
     /// orchestration(041): 턴이 끝날 때까지 기다린다(coordinator 알림 전달). `queue`면 지금 턴 뒤에 이어 붙인다.

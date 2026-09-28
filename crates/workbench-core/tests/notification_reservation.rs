@@ -356,6 +356,38 @@ async fn reclaiming_before_the_result_transaction_leaves_a_live_attempt_alone() 
     assert_eq!(coordinator_prompts(&f, &report_id), 1, "no redelivery");
 }
 
+/// 최종 Codex 재리뷰: public recover는 command reconciliation도 거치므로 direct reclaim만 통과해서는 부족하다.
+/// 살아 있는 notification attempt를 둔 채 전체 복구를 실행해도 그 attempt id와 단일 전달을 보존한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn public_recovery_leaves_a_live_notification_attempt_alone() {
+    let f = fixture().await;
+    let mut pause = pause_once(
+        &f,
+        DispatchPoint::BeforeResultSave,
+        DispatchAction::Continue,
+    );
+    let report_id = report(&f).await;
+    reached(&mut pause, "the result transaction").await;
+    let before = notification(&f, &report_id).await;
+    assert_eq!(before["status"], "dispatching");
+    assert_eq!(coordinator_prompts(&f, &report_id), 1);
+
+    f.h.call(
+        &desktop(),
+        OperationId::OrchestrationRecover,
+        json!({ "benchId": f.bench }),
+    )
+    .await
+    .expect("public recovery succeeds while delivery is live");
+    assert_eq!(notification(&f, &report_id).await, before, "no change");
+
+    pause.release.add_permits(1);
+    let delivered = wait_status(&f, &report_id, "delivered").await;
+    assert_eq!(delivered["attemptCount"], 1, "{delivered}");
+    assert_eq!(delivered["attemptId"], before["attemptId"]);
+    assert_eq!(coordinator_prompts(&f, &report_id), 1, "no redelivery");
+}
+
 /// G2: 같은 지점(결과 transaction 직전)에서 abort → 회수되어 재전달 1회.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn aborting_before_the_result_transaction_is_reclaimed_and_redelivered_once() {

@@ -113,7 +113,7 @@
 - [X] T049 [P] ADR 두 건: `docs/adr/0009-standalone-server-and-owner-principal.md`, `docs/adr/0010-app-quit-is-not-window-close.md`
 - [X] T050 [P] `docs/workbench-seam.md` "독립 서버(044)" 절, `crates/workbench-core/CONTEXT.md` 용어(서버 인스턴스·소유자 주체·임대·비우기 분류·작업 관문)
 - [X] T051 5단계 완료 기준 추적 표를 `specs/044-standalone-server/reviews/implementation-review.md`에 옮기고, 044 완료 항목과 **후속 미완료**((d) 프로세스 트리 가두기, (e) 백업·복원·단계적 이전, (f) 설치본 포함·서명·공증·버전별 캐시·업데이트 preflight, CLI(6단계), 재부착 화면, 교환 전달 서버 소유, 관측 불가 종료 경로, Windows·Linux)를 구분해 적는다
-- [X] T052 gate-15 중단을 무효로 기록하고, 모든 리뷰 수정과 실제 앱 스모크가 끝난 **최종 코드 tree** `c4c8e0b`에서 gate-20 전체 8단계 종료 코드 0을 기록(`implementation-review.md`): fmt, clippy `-D warnings`, `cargo test --workspace --all-targets`(ask-code·hushline 포함), `check-types`, `pnpm test`, `build`, 두 `test:integration`
+- [ ] T052 gate-15 중단을 무효로 기록하고, 최종 재리뷰 수정까지 포함한 **최종 코드 tree**에서 전체 8단계 종료 코드 0을 기록(`implementation-review.md`): gate-20(`c4c8e0b`)은 그 출처의 기존 증거이며 post-gate CLI·재리뷰 수정 뒤 최종 gate 대기
 - [ ] T053 r13 18건 반영 뒤 **최종 코드**에서 OCR delegate 재리뷰 → 지적 판정·반영 → Codex adversarial `--wait` 4/4 재리뷰 → 지적 판정·반영·검증 기록(`implementation-review.md`) 후 merge
 
 ---

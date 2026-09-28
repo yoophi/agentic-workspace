@@ -452,6 +452,8 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     text: string;
     idempotencyKey: string;
   } | null>(null);
+  /** 같은 run에서도 앞 HTTP completion이 다음 prompt 뒤에 도착할 수 있으므로 직접 전송별 세대로 UI mutation을 가른다. */
+  const directPromptOperationSeqRef = useRef(0);
   const [isPreparingRun, setIsPreparingRun] = useState(false);
   const [agentThreadStatus, setAgentThreadStatus] = useState<AgentThreadStatus>({
     type: "unknown",
@@ -2176,6 +2178,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       unsettled?.runId === runId && unsettled.text === nextPrompt
         ? unsettled.idempotencyKey
         : `prompt-send:${crypto.randomUUID()}`;
+    const operationSeq = ++directPromptOperationSeqRef.current;
     let replayed = false;
     setIsAwaitingPromptResponse(true);
     setDirectPrompt(nextPrompt);
@@ -2188,6 +2191,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           replayed = reply.replayed;
         },
       });
+      if (activeRunIdRef.current !== runId || directPromptOperationSeqRef.current !== operationSeq) {
+        return;
+      }
       if (unsettledDirectPromptRef.current?.idempotencyKey === idempotencyKey) {
         unsettledDirectPromptRef.current = null;
       }
@@ -2196,9 +2202,17 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       }
       recordPromptHistory(nextPrompt);
     } catch (caughtError) {
-      if (unsettledCall(caughtError) === "unknown") {
+      // Cancel/terminal 뒤 replacement가 시작된 동안 old request가 늦게 settle돼도 현재 composer와 복구 표지를 건드리지 않는다.
+      if (activeRunIdRef.current !== runId || directPromptOperationSeqRef.current !== operationSeq) {
+        return;
+      }
+      const unsettledResult = unsettledCall(caughtError);
+      if (unsettledResult === "unknown") {
         unsettledDirectPromptRef.current = { runId, text: nextPrompt, idempotencyKey };
-      } else if (unsettledDirectPromptRef.current?.idempotencyKey === idempotencyKey) {
+      } else if (
+        unsettledResult !== "notApplied" &&
+        unsettledDirectPromptRef.current?.idempotencyKey === idempotencyKey
+      ) {
         unsettledDirectPromptRef.current = null;
       }
       setPrompt(nextPrompt);

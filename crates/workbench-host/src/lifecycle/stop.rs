@@ -7,7 +7,11 @@ use std::{path::Path, time::Duration};
 
 use serde_json::{Value, json};
 
-use super::{client::request, client::verify, descriptor::read_descriptor, lock::server_dir};
+use super::{
+    client::{request, verify_instance},
+    descriptor::read_descriptor,
+    lock::server_dir,
+};
 
 pub const EXIT_ACTIVE_WORK: i32 = 5;
 /// 안내 파일 삭제를 확인하는 주기.
@@ -60,7 +64,7 @@ pub fn stop(data_dir: &Path, mode: StopMode) -> StopResult {
         }
         Err(error) => return failed(error.to_string()),
     };
-    if let Err(error) = verify(&descriptor) {
+    if let Err(error) = verify_instance(&descriptor) {
         return failed(error.to_string());
     }
     let envelope = json!({

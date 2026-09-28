@@ -568,6 +568,32 @@ fn force_stops_a_server_with_active_work() {
 }
 
 #[test]
+fn force_escalates_a_wait_stop_that_is_already_draining() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let (mut child, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &work.join("never"));
+
+    let mut waiting = Command::new(BIN)
+        .args(["stop", "--data-dir"])
+        .arg(&data)
+        .arg("--wait")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    cleanup.track_child(&waiting);
+    wait_until(STOP_DEADLINE, "draining before force escalation", || {
+        status(&descriptor)["state"] == "drainingWait"
+    });
+
+    let (code, stdout) = stop_cli(&data, &["--force"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert_eq!(wait_exit(&mut child, "the force-escalated server"), 0);
+    assert_eq!(wait_exit(&mut waiting, "the original wait stop"), 0);
+}
+
+#[test]
 fn new_work_is_refused_while_draining() {
     let cleanup = Cleanup::default();
     let (_dir, data, work) = workspace();

@@ -287,6 +287,61 @@ async fn a_rejection_store_failure_releases_its_claim_without_consuming() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelling_before_queue_ownership_records_failure_while_normal_completion_does_not() {
+    let h = Arc::new(BenchHarness::new(RunScript::default()));
+    let bench = prepare(&h).await;
+    for request_id in ["cancelled-registration", "normal-registration"] {
+        send_exchange(&h, &bench, request_id, "send").await;
+    }
+
+    let queue_gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *h.engine.queue_gate.lock().unwrap() = Some(Arc::clone(&queue_gate));
+    let entered = h.engine.queue_entered.notified();
+    let cancelled_h = Arc::clone(&h);
+    let cancelled_bench = bench.clone();
+    let delivery = tokio::spawn(async move {
+        deliver(
+            &cancelled_h,
+            "exchange-delivery:cancelled-registration",
+            delivery_input(
+                &cancelled_bench,
+                "r2",
+                "cancel before registration",
+                "cancelled-registration",
+            ),
+        )
+        .await
+    });
+    entered.await;
+    delivery.abort();
+    let _ = delivery.await;
+    assert!(h
+        .rt
+        .runtime
+        .work_gate()
+        .exchange_consumed(&bench, "cancelled-registration"));
+    assert_eq!(
+        h.rt.runtime.work_gate().failed_deliveries(),
+        vec![format!("{bench}/cancelled-registration")],
+        "dropping the queue-registration future records the consumed delivery as failed"
+    );
+
+    *h.engine.queue_gate.lock().unwrap() = None;
+    deliver(
+        &h,
+        "exchange-delivery:normal-registration",
+        delivery_input(&bench, "r2", "normal completion", "normal-registration"),
+    )
+    .await
+    .expect("normal queue registration completes");
+    assert_eq!(
+        h.rt.runtime.work_gate().failed_deliveries(),
+        vec![format!("{bench}/cancelled-registration")],
+        "successful ownership transfer disarms the failure guard"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrent_same_key_deliveries_with_different_prompts_have_a_single_effect() {
     let h = Arc::new(BenchHarness::new(RunScript::default()));
     let bench = prepare(&h).await;

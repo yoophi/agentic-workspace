@@ -20,7 +20,7 @@ use crate::{
         agent_run_settings_service,
         bench_service::BenchServices,
         drain::{draining_fault, is_draining},
-        work_gate::DeliveryRefused,
+        work_gate::{DeliveryRefused, WorkGate},
     },
     domain::{
         agent_exchange::{AgentExchangeDelivery, AgentExchangeStatus},
@@ -313,9 +313,30 @@ pub async fn deliver_exchange(
     };
     // HTTP 응답은 queue 등록 뒤 바로 돌려주되, production engine의 detached queue/RPC 실패도 소비 뒤 잃지 않는다.
     // A-turn 예약은 engine task가 실제 turn 끝까지 쥐고, completion은 실패 표지만 기록한다.
-    let failed_gate = gate.clone();
-    let failed_bench = bench_id.to_owned();
-    let failed_exchange = exchange_request_id.to_owned();
+    struct DeliveryOutcomeGuard {
+        gate: Option<Arc<WorkGate>>,
+        bench: String,
+        exchange: String,
+    }
+    impl DeliveryOutcomeGuard {
+        fn complete(mut self, result: &Result<(), RunEngineError>) {
+            if result.is_ok() {
+                self.gate = None;
+            }
+        }
+    }
+    impl Drop for DeliveryOutcomeGuard {
+        fn drop(&mut self) {
+            if let Some(gate) = self.gate.take() {
+                gate.record_failed_delivery(&self.bench, &self.exchange);
+            }
+        }
+    }
+    let outcome_guard = DeliveryOutcomeGuard {
+        gate: gate.clone(),
+        bench: bench_id.to_owned(),
+        exchange: exchange_request_id.to_owned(),
+    };
     let result = services
         .engine
         .queue_prompt_with_completion(
@@ -323,11 +344,7 @@ pub async fn deliver_exchange(
             prompt,
             services.run_sink(bench_id),
             Box::new(move |result| {
-                if result.is_err() {
-                    if let Some(gate) = failed_gate {
-                        gate.record_failed_delivery(&failed_bench, &failed_exchange);
-                    }
-                }
+                outcome_guard.complete(&result);
             }),
         )
         .await;

@@ -1310,6 +1310,51 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     ).toHaveLength(2);
   });
 
+  it("keeps the original key when an unknown direct prompt is retried offline, then replays it after reconnect", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+
+    const unknown = holdNextSend(
+      (args) => (args as { prompt?: string } | undefined)?.prompt === "Recover with one key",
+      MESSAGE_RESULT_UNKNOWN,
+    );
+    await panel.enterPrompt("Recover with one key");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await unknown.sent;
+      unknown.release();
+    });
+    await waitForAgentRunPanel(() => panel.promptValue() === "Recover with one key");
+
+    const offline = holdNextSend(
+      (args) => (args as { prompt?: string } | undefined)?.prompt === "Recover with one key",
+      MESSAGE_NOT_APPLIED,
+    );
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await offline.sent;
+      offline.release();
+    });
+    await waitForAgentRunPanel(() => panel.promptValue() === "Recover with one key");
+
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(
+      () =>
+        invocationsFor("send_prompt_to_run").filter(
+          (args) => (args as { prompt?: string }).prompt === "Recover with one key",
+        ).length === 3,
+    );
+    const keys = sendOptions
+      .filter(({ args }) => (args as { prompt?: string }).prompt === "Recover with one key")
+      .map(({ options }) => (options as { idempotencyKey?: string } | undefined)?.idempotencyKey);
+    expect(keys[0]).toMatch(/^prompt-send:/);
+    expect(keys).toEqual([keys[0], keys[0], keys[0]]);
+  });
+
   it("keeps a new draft and blocks it while an earlier direct result is unresolved", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     await act(async () => {
@@ -1390,6 +1435,99 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
         (args) =>
           (args as { runId?: string; prompt?: string }).runId === replacementRunId &&
           (args as { prompt?: string }).prompt === "New-run draft",
+      ),
+    );
+  });
+
+  it("ignores an old run's pending send completion after confirmed cancel and replacement draft", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const oldSend = holdNextSend(
+      (args) => (args as { prompt?: string } | undefined)?.prompt === "Old pending work",
+      MESSAGE_RESULT_UNKNOWN,
+    );
+
+    await panel.enterPrompt("Old pending work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await oldSend.sent;
+    });
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => !(panel.container.textContent?.includes("Running") ?? false));
+
+    await panel.enterPrompt("Replacement run work");
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+    const replacementRunId = (invocationsFor("start_agent_run")[1] as { request: { runId: string } }).request.runId;
+    await panel.emitRunEvent({
+      runId: replacementRunId,
+      event: { type: "lifecycle", status: "promptSent", message: "sent" },
+    });
+    await panel.enterPrompt("New-run draft");
+
+    await act(async () => {
+      oldSend.release();
+    });
+    expect(panel.promptValue(), "the old HTTP completion cannot overwrite the replacement composer").toBe(
+      "New-run draft",
+    );
+    await panel.emitRunEvent({
+      runId: replacementRunId,
+      event: { type: "lifecycle", status: "promptCompleted", message: "done" },
+    });
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some(
+        (args) =>
+          (args as { runId?: string; prompt?: string }).runId === replacementRunId &&
+          (args as { prompt?: string }).prompt === "New-run draft",
+      ),
+    );
+  });
+
+  it("ignores an earlier HTTP completion after a newer direct operation on the same run", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const oldSend = holdNextSend(
+      (args) => (args as { prompt?: string } | undefined)?.prompt === "First pending work",
+      MESSAGE_RESULT_UNKNOWN,
+    );
+
+    await panel.enterPrompt("First pending work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await oldSend.sent;
+    });
+    // Agent lifecycle can finish before the HTTP reply arrives, allowing a newer same-run operation.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await panel.enterPrompt("Second same-run work");
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some(
+        (args) => (args as { prompt?: string }).prompt === "Second same-run work",
+      ),
+    );
+    await panel.enterPrompt("Draft after second operation");
+
+    await act(async () => {
+      oldSend.release();
+    });
+    expect(panel.promptValue(), "the older completion cannot restore its text over the newer draft").toBe(
+      "Draft after second operation",
+    );
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some(
+        (args) => (args as { prompt?: string }).prompt === "Draft after second operation",
       ),
     );
   });

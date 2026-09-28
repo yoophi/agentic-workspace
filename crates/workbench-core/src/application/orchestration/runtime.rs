@@ -1504,13 +1504,11 @@ impl OrchestrationRuntime {
         tokio::task::spawn_blocking(move || commands.reconcile_pending(&bench))
             .await
             .map_err(|error| OrchestrationFailure::Plain(error.to_string()))??;
-        let dispatcher = self.dispatcher();
         let bench = bench_id.to_owned();
         let recovering = self.dispatcher();
-        tokio::task::spawn_blocking(move || recovering.recover_interrupted(&bench))
+        tokio::task::spawn_blocking(move || recovering.reclaim_orphaned(&bench))
             .await
             .map_err(|error| OrchestrationFailure::Plain(error.to_string()))??;
-        drop(dispatcher);
         self.spawn_notification_pass(bench_id, "notificationRecovery");
         self.snapshot_for(bench_id, MESSAGE_NOT_BOOTSTRAPPED).await
     }

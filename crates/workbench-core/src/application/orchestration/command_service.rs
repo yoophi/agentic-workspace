@@ -5,10 +5,9 @@ use uuid::Uuid;
 
 use crate::{
     domain::agent_orchestration::{
-        full_payload_fingerprint, CommandFailure, CoordinatorNotificationStatus,
-        OrchestrationError, OrchestrationErrorCode, OrchestrationSession, PresentationStatus,
-        PromptDelivery, TaskCommand, TaskCommandKind, TaskCommandSource, TaskCommandStatus,
-        TaskReportType, TaskStatus,
+        full_payload_fingerprint, CommandFailure, OrchestrationError, OrchestrationErrorCode,
+        OrchestrationSession, PresentationStatus, PromptDelivery, TaskCommand, TaskCommandKind,
+        TaskCommandSource, TaskCommandStatus, TaskReportType, TaskStatus,
     },
     ports::{
         agent_worker::{AgentWorkerPort, WorkerBinding, WorkerCommandOutcome},
@@ -243,13 +242,6 @@ where
                 });
                 command.updated_at = now();
                 recovered.push(command.clone());
-                changed = true;
-            }
-        }
-        for notification in &mut session.coordinator_notifications {
-            if notification.status == CoordinatorNotificationStatus::Dispatching {
-                notification.status = CoordinatorNotificationStatus::Pending;
-                notification.updated_at = now();
                 changed = true;
             }
         }
