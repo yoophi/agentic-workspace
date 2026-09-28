@@ -47,7 +47,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | gate-7 | `8865589` | OCR 4차 수정 전에 중단(fmt·clippy 0까지). 무효 |
 | **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 
-- gate-6은 Codex 5차·OCR 4차 수정 전 코드다. **최신 게이트는 gate-8**이다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- **gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. 최신 게이트는 gate-9로 다시 돌린다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -174,6 +174,20 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 |---|---|---|---|---|
 | P1 | Medium | 진행 중 교환 전달(작업대 입장권을 쥐지 않음)이 작업대 닫기 뒤 완료되면서 닫힌 작업대의 기록을 되살림(`failedExchangeDeliveries`에 남음) | 관문에 닫힌 작업대 tombstone. `forget_bench_exchanges`가 세우고, `begin_exchange_delivery`는 `BenchClosed`(→ notFound)로 거절, `record_failed_delivery`는 적지 않음(모두 관문 잠금 아래) | 단위 시험 `a_delivery_arriving_after_the_bench_closed_leaves_no_record`: compile red(`closed-red-1`) → 동작 red(`closed-red-2`, 변형만 추가) → green(`closed-green-1`, `work_gate` 10 passed). **결정적 순서 시험**(`exchange_bench_scope.rs`): 가짜 엔진 `queue_prompt` 문(`queue_gate`·`queue_entered`)으로 전달을 엔진 안에서 붙잡음 → 작업대 A 닫기 완료 → 문 열기. 성공 완료·실패 완료(`fail_next_queue_prompt`) 두 경우 모두 A의 소비·실패 기록이 되살아나지 않고, B의 같은 id 교환은 그대로 1회 전달된다(`late-green-1`, 6 passed). 실패 기록 건너뛰기를 뺀 변이: 실패 완료 시험 red(`late-mut-record`). 순서 시험은 수정 뒤 작성했으므로 수정 전 실패는 변이로 보였다 |
 | P2 | Medium | 스모크 `invalid_stop`이 번들 id로 quit(같은 번들의 다른 인스턴스를 끌 수 있음) | `invalid_stop`과 close-run 최종 정리가 기록한 신원(pid·시작 시각·명령줄) 확인을 거친 `kill_exact`만 쓴다. quit-run의 (e) AppleScript quit은 시험 대상 경로라 번들 id로 보내되, 그 번들의 실행 중 인스턴스가 정확히 APID 하나일 때만 보낸다(`apps-named --bundle`) | 스크립트. `kill_exact` 신원 확인은 앞선 자기 시험으로 검증됨 |
+
+### 6차: 같은 HEAD `2d08d34` 세 파티션 리뷰
+
+- 파티션과 커버리지 확인 방식은 5차와 같다(`--no-renames`로 합 = 전체, 겹침 0). 세 검토 커밋의 트리는 HEAD 트리와 같고, 검토가 끝난 뒤 브랜치로 돌아왔다.
+- **세 파티션 모두 needs-attention**이었다. 지적은 4건이다. 수정은 파일별 병렬 fork로 했고, 공유 `verify.lock` 아래에서 cargo 실행·변이(옛 동작 복원) 구간을 직렬화했다. 변이는 잠금을 풀기 전에 모두 복원했고, 커밋 트리의 `MUTATION:` 표지는 0개다.
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| Z1 | high(crates) | 서빙 중이나 wait 비우기 중 임대 획득이 세대를 올리지 않아, 임대 없이 파생한 낡은 판정(미소비 교환 0)으로 default/wait 정지가 성립 | `bf1d65d`: `WorkGate::note_lease_acquired`가 stopping이 아닌 모든 상태에서 G 잠금 아래 세대를 올린다(유휴 비우기는 서빙 복귀, stopping이면 임대 거절은 그대로). 임대 삽입 전후에 호출한다. default가 세대 불일치로 거절되면 activeWork를 다시 파생해 보고한다 | `server_stop.rs`: test-hooks `set_stop_probe`로 파생 뒤·판정 전에 멈추고 실제 `LeaseAcquire`. compile red → **동작 red**(wait는 `stopping`, default는 서버 정지) → green(27 passed). 세대 올림 제거 변이: 2개 red |
+| Z2 | medium(crates) | `reserve_child_run` 저장소 예약 중 assign future가 abort되면 커밋된 예약과 scheduler 자리가 새어 재배정 불가 | `bf1d65d`: 예약을 소유 task(`tokio::spawn`)로 옮기고 `LaunchCleanup`이 handle을 쥔다. 결과 전 drop이면 커밋을 기다린 뒤, 노드의 현재 run이 예정 run id일 때만 조건부 해제하고 자리를 반납한다(`Existing`은 건드리지 않음) | `child_assign_atomic.rs`: `ReserveProbe(BeforeCommit)`에서 멈춤 → abort → 커밋 완료 → 해제·`active_count==0` → 재배정이 실제 run 기동. compile red → 동작 red → green(8 passed). 변이 b(rollback 무효화)·c(자리 반납 생략) red, 변이 a는 컴파일 오류라 증거 제외. 한계: 되돌리기 완료 전의 짧은 창에 다른 배정이 곧 해제될 예정 id를 받을 수 있음(기존 Reserved/Prepared abort 경로와 같은 동작, 이번 범위 밖) |
+| Z3 | high(apps) | descriptor 읽기 오류(EACCES 등)를 부재로 보고 살아 있는 서버 연결을 잊음 | `436b563`: `descriptor_is_absent`(실제 NotFound만 부재). 읽기 오류는 불확실로 보고 연결 유지 | 실제 OS EACCES 주입. 잠금 없이 돈 red-1은 비증거, 잠금 아래 red-2 동작 red → green, 변이 red, AW lib 124 passed. 한계: 주입은 EACCES만, `Ok(None)` 전용 시험 없음 |
+| Z4 | medium(docs) | quit-run (g) SIGTERM이 신원 확인 없는 `kill` | `02831fe`: (g)가 `kill_exact`(rc 반환)만 거치고, 불일치·소멸이면 `sigterm-not-sent`(시도 무효). 커밋본 lib.sh 작업 디렉터리는 `AW_SMOKE_DIR` | 모의 자기 시험 `selftest-signal.sh` 9/9. 실제 스모크·사용자 프로세스에는 신호를 보내지 않았다 |
+
+- 6차 수정으로 코드가 바뀌었으므로 gate-8은 최신 게이트가 아니다. T052는 gate-9 전까지 다시 미완료로 둔다.
 
 ### 최종 HEAD 재검토
 
