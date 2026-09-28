@@ -18,19 +18,56 @@ use workbench_host::lifecycle::{client::verify, descriptor::read_descriptor};
 
 const BIN: &str = env!("CARGO_BIN_EXE_agentic-workbench-server");
 
-/// 이 시험이 시작한 PID만 끝낸다(실패해도 drop에서).
+/// 이 시험이 시작한 프로세스만 끝낸다(실패해도 drop에서). PID 재사용으로 남의 프로세스를 죽이지 않게(044 OCR 구현 리뷰):
+/// - 직접 띄운 자식은 `waitpid(WNOHANG)`로 아직 거두지 않은 내 자식일 때만 끝낸다(이미 거뒀으면 `ECHILD`라 건너뛴다).
+/// - `ensure`가 띄운 서버(내 자식 아님)는 살아 있고 명령줄이 이 시험의 서버 실행 파일 + 데이터 디렉터리일 때만 끝낸다.
 #[derive(Default)]
-struct Cleanup(Mutex<Vec<u32>>);
+struct Cleanup(Mutex<Vec<Tracked>>);
+
+enum Tracked {
+    Child(u32),
+    Server { pid: u32, data: PathBuf },
+}
 
 impl Cleanup {
-    fn track(&self, pid: u32) {
-        self.0.lock().unwrap().push(pid);
+    fn track_child(&self, child: &Child) {
+        self.0.lock().unwrap().push(Tracked::Child(child.id()));
     }
+
+    fn track_server(&self, pid: u32, data: &Path) {
+        self.0.lock().unwrap().push(Tracked::Server {
+            pid,
+            data: data.to_path_buf(),
+        });
+    }
+}
+
+/// 아직 거두지 않은 내 자식인지(거뒀거나 내 자식이 아니면 false, 방금 끝났으면 거두고 false).
+fn unreaped_child(pid: u32) -> bool {
+    let mut status = 0;
+    unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) == 0 }
+}
+
+/// 살아 있고 이 시험의 서버(`serve --data-dir <data>`)인지.
+fn is_test_server(pid: u32, data: &Path) -> bool {
+    let Ok(output) = Command::new("ps")
+        .args(["-ww", "-o", "command=", "-p", &pid.to_string()])
+        .output()
+    else {
+        return false;
+    };
+    let command = String::from_utf8_lossy(&output.stdout);
+    command.starts_with(BIN) && command.contains(&format!("--data-dir {}", data.display()))
 }
 
 impl Drop for Cleanup {
     fn drop(&mut self) {
-        for pid in self.0.lock().unwrap().drain(..) {
+        for tracked in self.0.lock().unwrap().drain(..) {
+            let pid = match tracked {
+                Tracked::Child(pid) if unreaped_child(pid) => pid,
+                Tracked::Server { pid, data } if alive(pid) && is_test_server(pid, &data) => pid,
+                _ => continue,
+            };
             unsafe {
                 libc::kill(pid as i32, libc::SIGKILL);
             }
@@ -89,7 +126,7 @@ fn only_one_of_ten_concurrent_servers_opens_the_data_dir() {
     let data = fs::canonicalize(dir.path()).unwrap();
     let mut children: Vec<Child> = (0..10).map(|_| serve(&data)).collect();
     for child in &children {
-        cleanup.track(child.id());
+        cleanup.track_child(child);
     }
     let mut exits: Vec<Option<i32>> = vec![None; 10];
     wait_until(Duration::from_secs(60), "nine servers to give up", || {
@@ -139,7 +176,7 @@ fn ensure_recovers_within_five_seconds_after_the_server_is_killed() {
     let (code, _) = ensure(&data);
     assert_eq!(code, 0, "first ensure starts a server");
     let first = read_descriptor(&server_dir(&data)).unwrap().unwrap();
-    cleanup.track(first.pid);
+    cleanup.track_server(first.pid, &data);
 
     unsafe {
         libc::kill(first.pid as i32, libc::SIGKILL);
@@ -159,7 +196,7 @@ fn ensure_recovers_within_five_seconds_after_the_server_is_killed() {
     let elapsed = started.elapsed();
     assert_eq!(code, 0, "{stdout}");
     let second = read_descriptor(&server_dir(&data)).unwrap().unwrap();
-    cleanup.track(second.pid);
+    cleanup.track_server(second.pid, &data);
     assert_ne!(
         second.instance_id, first.instance_id,
         "a new server instance"
@@ -179,7 +216,7 @@ fn server_files_are_owner_only() {
     let data = fs::canonicalize(dir.path()).unwrap();
     assert_eq!(ensure(&data).0, 0);
     let descriptor = read_descriptor(&server_dir(&data)).unwrap().unwrap();
-    cleanup.track(descriptor.pid);
+    cleanup.track_server(descriptor.pid, &data);
     let mode = |path: PathBuf| fs::metadata(&path).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode(server_dir(&data)), 0o700);
     for file in ["server.json", "owner.lock", "startup.lock"] {
@@ -198,8 +235,8 @@ fn separate_data_dirs_get_separate_servers() {
     assert_eq!(ensure(&two).0, 0);
     let first = read_descriptor(&server_dir(&one)).unwrap().unwrap();
     let second = read_descriptor(&server_dir(&two)).unwrap().unwrap();
-    cleanup.track(first.pid);
-    cleanup.track(second.pid);
+    cleanup.track_server(first.pid, &one);
+    cleanup.track_server(second.pid, &two);
     assert_ne!(first.instance_id, second.instance_id);
     assert_ne!(first.base_url, second.base_url);
     assert!(verify(&first).is_ok() && verify(&second).is_ok());
@@ -250,6 +287,9 @@ use workbench_host::lifecycle::{calls::call, descriptor::Descriptor};
 
 /// 이만큼 기다려도 멈추지 않으면 "멈추지 않는다"로 본다(`--idle-timeout 1`의 몇 배).
 const NOT_STOPPING_FOR: Duration = Duration::from_secs(3);
+/// 기동 뒤 준비 작업(작업대 열기·run 시작·상태 조회)을 해야 하는 유휴 시험의 유휴 시간(초). 1초면 부하 아래 준비가 끝나기
+/// 전에 유휴 정지가 올 수 있다(044 OCR 구현 리뷰). "멈추지 않음" 구간은 이 값의 두 배로 잡아 단정의 뜻을 지킨다.
+const SETUP_IDLE_TIMEOUT_SECS: u64 = 3;
 const STOP_DEADLINE: Duration = Duration::from_secs(30);
 
 fn repo_path(relative: &str) -> PathBuf {
@@ -275,7 +315,7 @@ fn serve_with(data: &Path, extra: &[&str]) -> Child {
 /// 서버를 띄우고 준비(안내 파일 + 신원 확인)까지 기다린다.
 fn start_server(cleanup: &Cleanup, data: &Path, extra: &[&str]) -> (Child, Descriptor) {
     let child = serve_with(data, extra);
-    cleanup.track(child.id());
+    cleanup.track_child(&child);
     let mut ready = None;
     wait_until(STOP_DEADLINE, "the server to be ready", || {
         ready = read_descriptor(&server_dir(data))
@@ -332,7 +372,11 @@ fn wait_exit(child: &mut Child, what: &str) -> i32 {
 
 /// 상한 동안 서버가 살아 있고 안내 파일이 남아 있음을 단정한다.
 fn assert_keeps_serving(child: &mut Child, data: &Path, why: &str) {
-    let until = Instant::now() + NOT_STOPPING_FOR;
+    assert_keeps_serving_for(child, data, why, NOT_STOPPING_FOR);
+}
+
+fn assert_keeps_serving_for(child: &mut Child, data: &Path, why: &str, window: Duration) {
+    let until = Instant::now() + window;
     while Instant::now() < until {
         assert!(
             child.try_wait().unwrap().is_none(),
@@ -403,9 +447,15 @@ fn active_work_prevents_the_idle_stop_until_it_ends() {
     let cleanup = Cleanup::default();
     let (_dir, data, work) = workspace();
     let gate = work.join("end-turn");
-    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", "1"]);
+    let idle = SETUP_IDLE_TIMEOUT_SECS.to_string();
+    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", &idle]);
     start_gated_run(&descriptor, &work, &gate);
-    assert_keeps_serving(&mut child, &data, "a turn is in progress");
+    assert_keeps_serving_for(
+        &mut child,
+        &data,
+        "a turn is in progress",
+        Duration::from_secs(2 * SETUP_IDLE_TIMEOUT_SECS),
+    );
     fs::write(&gate, b"").unwrap();
     // turn이 끝나면 세션은 살아 있어도(쉬는 세션) 유휴로 멈추고, 멈출 때 그 세션을 취소한다.
     assert_eq!(wait_exit(&mut child, "the idle stop after the turn"), 0);
@@ -438,7 +488,7 @@ fn default_stop_is_refused_with_exit_5_and_wait_stops_once_the_work_ends() {
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
-    cleanup.track(waiting.id());
+    cleanup.track_child(&waiting);
     wait_until(STOP_DEADLINE, "draining", || {
         status(&descriptor)["state"] == "drainingWait"
     });
@@ -516,7 +566,8 @@ fn a_server_with_only_unknown_ledger_records_stops_when_idle() {
     let cleanup = Cleanup::default();
     let (_dir, data, _work) = workspace();
     leave_interrupted_update(&cleanup, &data);
-    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", "1"]);
+    let idle = SETUP_IDLE_TIMEOUT_SECS.to_string();
+    let (mut child, descriptor) = start_server(&cleanup, &data, &["--idle-timeout", &idle]);
     let current = status(&descriptor);
     assert_eq!(current["unresolvedOperations"], 1, "{current}");
     assert_eq!(current["activeWork"]["pendingOperations"], 0, "{current}");
@@ -555,4 +606,91 @@ fn sigterm_is_a_forced_stop_even_with_active_work() {
     assert!(read_descriptor(&server_dir(&data)).unwrap().is_none());
     let log = fs::read_to_string(data.join("server.log")).unwrap();
     assert!(log.contains("SIGTERM: force stop"), "{log}");
+}
+
+// --- 044 OCR 구현 리뷰(host M2, contracts/server-lifecycle.md §3): ensure의 대기 루프 ---
+
+/// `ensure`를 자식 프로세스로 띄운다(끝날 때까지 기다리지 않음).
+fn spawn_ensure(cleanup: &Cleanup, data: &Path) -> Child {
+    let child = Command::new(BIN)
+        .args(["ensure", "--data-dir"])
+        .arg(data)
+        .env("AW_WORKBENCH_SERVER_PATH", BIN)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn ensure");
+    cleanup.track_child(&child);
+    child
+}
+
+/// `startup.lock`을 다른 프로세스(ensure)가 쥐고 있는지.
+fn startup_lock_held(data: &Path) -> bool {
+    workbench_host::lifecycle::lock::startup_lock(data, Duration::ZERO).is_err()
+}
+
+/// 서버가 소유 잠금을 잡고 안내 파일을 쓰기 전에 죽은 경우(또는 아직 준비 전): ensure는 그 잠금이 풀릴 때까지 기다렸다가
+/// 서버를 띄운다. 예전 루프는 잠금을 다시 시도하지 않아 상한까지 기다린 뒤 실패했다.
+#[test]
+fn ensure_starts_a_server_once_a_held_owner_lock_is_released() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, _work) = workspace();
+    workbench_host::lifecycle::lock::ensure_server_dir(&data).unwrap();
+    let held = workbench_host::lifecycle::lock::try_owner_lock(&data)
+        .unwrap()
+        .expect("the test holds owner.lock");
+    let mut ensuring = spawn_ensure(&cleanup, &data);
+    wait_until(STOP_DEADLINE, "ensure to be waiting", || {
+        startup_lock_held(&data)
+    });
+    assert!(
+        ensuring.try_wait().unwrap().is_none(),
+        "ensure waits while the owner lock is held"
+    );
+    drop(held);
+    assert_eq!(wait_exit(&mut ensuring, "ensure after the lock is free"), 0);
+    let descriptor = read_descriptor(&server_dir(&data)).unwrap().unwrap();
+    cleanup.track_server(descriptor.pid, &data);
+    assert!(verify(&descriptor).is_ok());
+}
+
+/// 비우는 서버는 붙을 대상이 아니다: ensure는 그 서버를 돌려주지 않고, 그 서버가 끝나면 새 서버를 띄운다.
+#[test]
+fn ensure_does_not_attach_to_a_draining_server_and_starts_a_new_one_after_it_stops() {
+    let cleanup = Cleanup::default();
+    let (_dir, data, work) = workspace();
+    let gate = work.join("end-turn");
+    let (mut old, descriptor) = start_server(&cleanup, &data, &[]);
+    start_gated_run(&descriptor, &work, &gate);
+    let drained = owner(&descriptor, "server.stop", json!({ "mode": "wait" }), true);
+    assert_eq!(drained["state"], "drainingWait");
+
+    let mut ensuring = spawn_ensure(&cleanup, &data);
+    // ensure가 시작 잠금을 잡았거나(대기 중) 이미 끝났을 때까지 — 끝났다면 비우는 서버를 돌려준 것이다.
+    wait_until(STOP_DEADLINE, "ensure to start", || {
+        startup_lock_held(&data) || ensuring.try_wait().unwrap().is_some()
+    });
+    let until = Instant::now() + NOT_STOPPING_FOR;
+    while Instant::now() < until {
+        assert!(
+            ensuring.try_wait().unwrap().is_none(),
+            "ensure returned a draining server"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    fs::write(&gate, b"").unwrap();
+    assert_eq!(wait_exit(&mut old, "the draining server to stop"), 0);
+    assert_eq!(
+        wait_exit(&mut ensuring, "ensure after the old server stopped"),
+        0
+    );
+    let fresh = read_descriptor(&server_dir(&data)).unwrap().unwrap();
+    cleanup.track_server(fresh.pid, &data);
+    assert_ne!(
+        fresh.instance_id, descriptor.instance_id,
+        "a new server instance"
+    );
+    assert!(verify(&fresh).is_ok());
+    assert_eq!(status(&fresh)["state"], "serving");
 }

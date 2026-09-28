@@ -27,6 +27,8 @@ pub enum VerifyError {
     Incompatible(String),
     /// 준비 상태가 아니다.
     NotReady(String),
+    /// 신원·호환은 맞지만 서빙 중이 아니다(비우는 중·정지 중) — 붙을 대상이 아니다(contracts §3).
+    NotServing(String),
 }
 
 impl std::fmt::Display for VerifyError {
@@ -36,6 +38,7 @@ impl std::fmt::Display for VerifyError {
             Self::Identity(reason) => write!(f, "server identity proof failed: {reason}"),
             Self::Incompatible(reason) => write!(f, "server is incompatible: {reason}"),
             Self::NotReady(reason) => write!(f, "server is not ready: {reason}"),
+            Self::NotServing(state) => write!(f, "server is not serving (state {state})"),
         }
     }
 }
@@ -122,6 +125,26 @@ pub fn verify(descriptor: &Descriptor) -> Result<Verified, VerifyError> {
             .to_owned(),
         base_url: descriptor.base_url.clone(),
     })
+}
+
+/// 확인된 서버가 서빙 중인지(contracts/server-lifecycle.md §3 — 소유자 토큰으로 `server.status`). `verify`를 통과한 안내에만
+/// 부른다(신원 증명 뒤에만 자격 증명을 보낸다).
+pub fn require_serving(descriptor: &Descriptor) -> Result<(), VerifyError> {
+    let status = super::calls::call(
+        &descriptor.base_url,
+        &descriptor.owner_token,
+        None,
+        "server.status",
+        json!({}),
+        false,
+    )
+    .map_err(|error| VerifyError::Unreachable(error.to_string()))?;
+    match status["state"].as_str() {
+        Some("serving") => Ok(()),
+        other => Err(VerifyError::NotServing(
+            other.unwrap_or("unknown").to_owned(),
+        )),
+    }
 }
 
 /// 루프백 JSON 요청. `(status, body)`. body가 JSON이 아니면 `Null`.
