@@ -1508,3 +1508,156 @@ async fn a_recovery_during_an_unstored_rollback_keeps_its_hold_until_the_retry_f
     .await;
     assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "recover-pending").await;
 }
+
+/// 복구를 scheduler 재구성 직전(저장소 스냅샷·재조정 뒤)에 붙잡는다.
+fn pause_recover(h: &BenchHarness) -> Pause {
+    pause_at(h, LaunchPoint::RecoverBeforeSchedulerApply)
+}
+
+/// 복구를 끝까지 돌리는 task(붙잡힌 복구를 시험 본문이 풀어 준다).
+fn spawn_recover(h: &Arc<BenchHarness>, bench: &str) -> tokio::task::JoinHandle<()> {
+    let (h, bench) = (Arc::clone(h), bench.to_owned());
+    tokio::spawn(async move { recover(&h, &bench).await })
+}
+
+/// Codex r11 (medium): 복구가 task를 `Ready`로 읽고(스냅샷) scheduler 재구성 전에 멈춘 사이 그 task의 기동이 끝나 보유가 실행 중
+/// 자리로 넘어간다(`transfer`). 낡은 스냅샷으로 재구성하면 그 실행 중 자리(보유 0)를 버려 살아 있는 run이 한도 계산에서
+/// 빠진다(한도 1인데 다음 task가 실행). 스냅샷 뒤 바뀐 자리는 보존돼야 한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stale_recovery_snapshot_keeps_a_launch_that_succeeded_meanwhile() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut paused = pause_recover(&h);
+    let recovering = spawn_recover(&h, &bench);
+    tokio::time::timeout(WAIT, paused.reached.recv())
+        .await
+        .expect(
+            "the recovery took its snapshot (task ready) and is about to rebuild the scheduler",
+        );
+    assert_eq!(
+        task(&session(&h, &bench).await, &task_id)["status"],
+        "ready"
+    );
+    let launched = tokio::time::timeout(WAIT, spawn_launch(&h, &bench, &task_id))
+        .await
+        .expect("the launch finishes")
+        .unwrap()
+        .expect("the launch succeeds");
+    drop(launched);
+    let run_id = node_of(&session(&h, &bench).await, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the launched run is bound")
+        .to_owned();
+    let label = format!("launch:{run_id}");
+    h.engine
+        .wait_applied(|applied| applied == label, WAIT)
+        .await;
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the run owns the slot"
+    );
+    paused.release.add_permits(1);
+    tokio::time::timeout(WAIT, recovering)
+        .await
+        .expect("the recovery finishes")
+        .unwrap();
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(h.engine.run_count(), baseline.runs + 1);
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the stale snapshot did not drop the running slot"
+    );
+    let extra = create_extra(&h, "extra-after-stale-recover").await;
+    assert_eq!(
+        extra["queued"], true,
+        "the concurrency limit (1) holds while the launched run runs: {extra}"
+    );
+}
+
+/// Codex r11 (medium), 대칭 경우: 복구가 task를 `Running`으로 읽은 뒤 재구성 전에 그 task가 끝나 자리가 비었다(`release`). 낡은
+/// 스냅샷으로 실행 중 자리를 다시 세우면 실행 중 자식 없이 자리가 남는다(한도 1이면 다른 task가 계속 대기).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_stale_recovery_snapshot_does_not_revive_a_slot_released_meanwhile() {
+    let (h, bench, task_id, _baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let launched = tokio::time::timeout(WAIT, spawn_launch(&h, &bench, &task_id))
+        .await
+        .expect("the launch finishes")
+        .unwrap()
+        .expect("the launch succeeds");
+    drop(launched);
+    assert_eq!(scheduler.active_count().unwrap(), 1);
+    let mut paused = pause_recover(&h);
+    let recovering = spawn_recover(&h, &bench);
+    tokio::time::timeout(WAIT, paused.reached.recv())
+        .await
+        .expect("the recovery took its snapshot (task running)");
+    // 그 task가 끝났다: scheduler 자리가 통째로 비었다(결과 보고·취소 경로와 같은 `release`).
+    let _ = scheduler.release(&task_id).unwrap();
+    assert_eq!(scheduler.active_count().unwrap(), 0);
+    paused.release.add_permits(1);
+    tokio::time::timeout(WAIT, recovering)
+        .await
+        .expect("the recovery finishes")
+        .unwrap();
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        0,
+        "the stale snapshot did not revive the released slot"
+    );
+}
+
+/// Codex r11 (medium): 기존 task 배정이 scheduler 보유를 얻은 뒤 작업 영역을 읽는 중(기동 guard 전) 호출 future가 취소되면
+/// 그 보유가 남는다(guard가 없어 아무도 놓지 않음). 복구도 진행 중 보유로 보고 보존하므로 한도 1이면 영구 대기다. 보유는
+/// 얻은 순간부터 소유 guard가 쥐어야 한다: 취소되면 곧바로 놓이고, 복구 뒤에도 자리가 빈다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_an_assign_before_its_launch_guard_releases_the_hold() {
+    let (h, bench, task_id, _baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut paused = pause_at(&h, LaunchPoint::BeforeAssignSnapshot);
+    let assigning = {
+        let (h, task_id) = (Arc::clone(&h), task_id.clone());
+        tokio::spawn(async move { assign(&h, &task_id, "abort-before-guard").await })
+    };
+    tokio::time::timeout(WAIT, paused.reached.recv())
+        .await
+        .expect("the assign holds the slot and is about to read the workspace");
+    assert_eq!(scheduler.hold_count(&task_id), 1);
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        0,
+        "the cancelled assign released its hold"
+    );
+    recover(&h, &bench).await;
+    assert_eq!(scheduler.hold_count(&task_id), 0);
+    assert_capacity_is_free(&h, "extra-after-abort-before-guard").await;
+}
+
+/// 같은 구간의 화면 기동(`launch_task_for_ui`): 보유를 얻은 뒤 작업 영역을 읽는 중 취소되면 보유가 놓인다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn aborting_a_ui_launch_before_its_launch_guard_releases_the_hold() {
+    let (h, bench, task_id, _baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut paused = pause_at(&h, LaunchPoint::BeforeAssignSnapshot);
+    let launching = spawn_launch(&h, &bench, &task_id);
+    tokio::time::timeout(WAIT, paused.reached.recv())
+        .await
+        .expect("the UI launch holds the slot and is about to read the workspace");
+    assert_eq!(scheduler.hold_count(&task_id), 1);
+    launching.abort();
+    assert!(launching.await.unwrap_err().is_cancelled());
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        0,
+        "the cancelled UI launch released its hold"
+    );
+    recover(&h, &bench).await;
+    assert_capacity_is_free(&h, "extra-after-ui-abort-before-guard").await;
+}

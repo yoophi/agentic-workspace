@@ -128,8 +128,10 @@ pub enum LaunchPoint {
     /// 시작 장벽을 연 뒤·바인딩 전(자식 첫 턴이 바인딩 전에 도구를 부르는 경우를 결정적으로 재현).
     AfterOpen,
     /// 기존 task 배정(`assignChildTask` 등)이 scheduler 보유를 얻은 뒤·작업 영역을 읽기 전(Codex r8 — 앞 기동 되돌리기와
-    /// 교차 재현).
+    /// 교차 재현). 화면 기동(`launch_task_for_ui`)의 같은 구간도 이 지점이다.
     BeforeAssignSnapshot,
+    /// 복구(`recover`)가 저장소 스냅샷·재조정을 끝낸 뒤·scheduler를 다시 짓기 전(Codex r11 — 그 사이 기동·끝과 교차 재현).
+    RecoverBeforeSchedulerApply,
 }
 
 /// 자식 기동의 저장소 커밋 단계(blocking 스레드) 전후 지점(Codex r6·r7 abort 재현).
@@ -1248,6 +1250,7 @@ impl OrchestrationRuntime {
             }
             super::scheduler::HoldOutcome::Acquired(hold) => hold,
         };
+        self.launch_probe(LaunchPoint::BeforeAssignSnapshot).await;
         let located = async {
             let snapshot = self
                 .snapshot_for(bench_id, MESSAGE_WORKSPACE_UNAVAILABLE)
@@ -1439,6 +1442,8 @@ impl OrchestrationRuntime {
         self: &Arc<Self>,
         bench_id: &str,
     ) -> OrchestrationResult<OrchestrationSession> {
+        // 저장소 스냅샷을 읽기 **전**의 scheduler 세대(Codex r11): 재구성은 그 뒤 바뀐 task를 낡은 스냅샷으로 덮지 않는다.
+        let scheduler_since = self.scheduler.generation();
         let snapshot = self
             .snapshot_for(bench_id, MESSAGE_NOT_BOOTSTRAPPED)
             .await?;
@@ -1484,10 +1489,13 @@ impl OrchestrationRuntime {
             .collect::<Vec<_>>();
         // 진행 중 기동·되돌리기의 보유를 보존하고, 성공 인계 전인 기동은 실행 중으로 확정하지 않는다(Codex r10).
         let launching_task_ids = self.launching_task_ids();
-        self.scheduler.reconcile_preserving(
+        self.launch_probe(LaunchPoint::RecoverBeforeSchedulerApply)
+            .await;
+        self.scheduler.reconcile_since(
             &active_task_ids,
             &ready_task_ids,
             &launching_task_ids,
+            Some(scheduler_since),
         )?;
         let commands = self.command_service();
         let bench = bench_id.to_owned();
