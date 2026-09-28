@@ -270,6 +270,11 @@ fn compat_input(command: &str, args: &Value, bench: &str) -> (OperationId, Value
                 Some(json!({ "benchId": bench, "request": args["request"] })),
             )
         }
+        "discard_agent_exchange_delivery" => (
+            OperationId::ExchangeDiscardDelivery,
+            json!({ "benchId": bench, "requestId": s(args, "requestId") }),
+            None,
+        ),
         "list_agent_exchanges" => (OperationId::ExchangeList, json!({ "benchId": bench }), None),
         "bootstrap_orchestration_workspace" => {
             let input: BootstrapOrchestrationInput = arg(args, "input");
@@ -425,6 +430,6 @@ fn compat_parity_golden_matches_the_compat_input_builders() {
             panic!("compat parity golden is stale: rerun with UPDATE_GOLDEN=1 and review the diff");
         }
     }
-    // 서버 소유 command 전부를 덮는다(인벤토리 `reviews/command-inventory.md`의 S 표).
-    assert_eq!(commands.len(), 61, "commands covered: {commands:?}");
+    // 서버 소유 command 전부를 덮는다(인벤토리 `reviews/command-inventory.md`의 S 표, 044 Codex r7에서 교환 전달 포기 추가).
+    assert_eq!(commands.len(), 62, "commands covered: {commands:?}");
 }

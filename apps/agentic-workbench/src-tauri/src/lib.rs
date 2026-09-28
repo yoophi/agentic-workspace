@@ -7,6 +7,7 @@ pub mod ports;
 use application::appearance_preferences_service::AppearancePreferencesService;
 use inbound::tauri_commands::{
     WorktreeWatcherState, acknowledge_agent_exchange, adjust_font_size_step,
+    discard_agent_exchange_delivery,
     adopt_manual_orchestration_child, apply_window_title, bind_main_coordinator_run,
     bootstrap_orchestration_workspace, cancel_agent_run, cancel_current_prompt_and_send_to_run,
     cancel_orchestration_task, clear_goal, collect_orchestration_reports, create_git_worktree,
@@ -109,6 +110,7 @@ macro_rules! app_invoke_handler {
             sync_agent_workspace,
             send_agent_exchange,
             acknowledge_agent_exchange,
+            discard_agent_exchange_delivery,
             list_agent_exchanges,
             bootstrap_orchestration_workspace,
             list_recoverable_orchestration_workspaces,
@@ -197,6 +199,7 @@ macro_rules! app_invoke_handler {
             sync_agent_workspace,
             send_agent_exchange,
             acknowledge_agent_exchange,
+            discard_agent_exchange_delivery,
             list_agent_exchanges,
             bootstrap_orchestration_workspace,
             list_recoverable_orchestration_workspaces,

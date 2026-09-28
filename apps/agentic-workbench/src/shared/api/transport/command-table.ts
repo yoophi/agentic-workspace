@@ -264,6 +264,13 @@ export const COMMANDS: Record<string, CommandSpec> = {
     flavor: "exchange",
     input: (args, benchId) => ({ benchId, request: args.request }),
   },
+  // 화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7): 확인했지만 보내지 않은 교환을 서버에서 끝낸다.
+  discard_agent_exchange_delivery: {
+    operation: "exchange.discardDelivery",
+    bench: { kind: "lookup", missing: { error: () => exchangeError("unknownExchange", "Exchange was not found.") } },
+    flavor: "exchange",
+    input: (args, benchId) => ({ benchId, requestId: args.requestId }),
+  },
   list_agent_exchanges: {
     operation: "exchange.list",
     bench: { kind: "lookup", missing: { result: () => [] } },

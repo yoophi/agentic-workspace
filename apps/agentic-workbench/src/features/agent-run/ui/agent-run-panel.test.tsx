@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { act } from "react";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
@@ -96,6 +97,9 @@ beforeEach(() => {
         return [];
       case "save_agent_run_settings":
         return args?.settings;
+      case "discard_agent_exchange_delivery":
+      case "send_prompt_to_run":
+        return null;
       case "start_agent_run": {
         const request = args?.request as
           | { runId?: string; goal?: string; agentId?: string }
@@ -520,6 +524,61 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
     }
   });
 
+  // Codex r7(apps medium): 바쁜 run에 도착한 교환 prompt는 패널 대기열에 들어가고, 서버에는 이미 전달 확인(`delivered`)됐다.
+  // 그 항목을 지우면 서버에 전달 포기를 알려야 하고(아니면 미소비 교환이 wait-stop을 막는다), steer(즉시 전송)는 교환
+  // 소비를 싣지 못하므로 교환 항목에서는 막는다. 일반 대기 prompt의 제거는 서버를 부르지 않는다.
+  it("discards a removed exchange prompt on the server and does not steer it", async () => {
+    const panel = await renderAgentRunPanel({
+      panelId: "main-agent-run",
+      workingDirectory: "/tmp/agent-run-panel-main",
+      externalPromptRequest: { id: "start-1", text: "Work on the task", delivery: "send" },
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 1);
+    const runId = (invocationsFor("start_agent_run")[0] as { request: { runId: string } }).request.runId;
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+
+    await panel.rerender({
+      externalPromptRequest: {
+        id: "x-7",
+        text: "Handle the peer request",
+        delivery: "queue",
+        exchangeRequestId: "x-7",
+      },
+    });
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") !== null);
+    await panel.rerender({
+      externalPromptRequest: { id: "manual-2", text: "A plain follow-up", delivery: "queue" },
+    });
+    await waitForAgentRunPanel(() => queuedPromptButton(2, "제거") !== null);
+
+    // 교환 항목은 steer 불가, 일반 항목은 steer 가능.
+    expect(queuedPromptButton(1, "즉시 전송")?.disabled).toBe(true);
+    expect(queuedPromptButton(2, "즉시 전송")?.disabled).toBe(false);
+
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([{ requestId: "x-7" }]);
+    await waitForAgentRunPanel(() => !panel.container.textContent?.includes("Handle the peer request"));
+
+    // 남은 일반 항목의 제거는 서버를 부르지 않는다.
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") === null);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toHaveLength(1);
+    expect(invocationsFor("steer_prompt_to_run")).toEqual([]);
+
+    // turn이 끝나도 지운 교환은 보내지 않는다.
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    expect(
+      invocationsFor("send_prompt_to_run").filter(
+        (args) => (args as { continuation?: unknown }).continuation !== undefined,
+      ),
+    ).toEqual([]);
+  });
+
   it("drives the same prompt and run-event contract in an additional panel", async () => {
     const panel = await renderAgentRunPanel({
       panelId: "child-agent-run",
@@ -567,6 +626,10 @@ async function waitForLoadedSuggestions(container: HTMLElement) {
     const listbox = container.querySelector("[role='listbox']");
     return Boolean(listbox) && !(listbox?.textContent ?? "").includes("Loading commands...");
   });
+}
+
+function queuedPromptButton(position: number, action: "제거" | "즉시 전송") {
+  return document.querySelector<HTMLButtonElement>(`button[aria-label='${position}번 대기 prompt ${action}']`);
 }
 
 function invocationsFor(command: string) {

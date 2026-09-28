@@ -76,6 +76,7 @@ research R4–R6·R9·R10.
 - 소유자는 agent 전용 operation(orchestration 자식 보고 도구 등, 호출자 run이 필요한 것)에는 우회를 받지 않는다(`forbidden`).
 - `/v1/system/identify`(인증 없음): `{nonce}` → `{instanceId, proof}`. 자격 증명을 보내기 전 신원 확인용이다(§3).
 - `run.sendPrompt` 입력에 `continuation?: {exchangeRequestId}`를 더한다(`drain-classification.md` K).
+- `exchange.discardDelivery`(command, `exchange:write`, epoch 멱등, C): `{benchId, requestId}` → `null`. 화면이 대기열에서 지운 교환 prompt의 전달 포기(Codex r7). 이 작업대의 교환이 아니면 `notFound`. 관문 잠금 아래에서 (작업대, 요청 id)를 소비된 것으로 표시해 `pendingExchanges`에서 빼고, 이후 같은 교환의 전달(`run.sendPrompt` continuation)은 이미 소비됨(`conflict`, `notApplied`)으로 거절된다. 이미 전달·포기된 교환이면 효과 없이 성공한다. 닫힌 작업대에는 기록을 만들지 않는다. 교환 상태(`delivered`)는 바꾸지 않는다(도메인 전이상 종결 상태).
 
 ## 5. 상태 기계
 

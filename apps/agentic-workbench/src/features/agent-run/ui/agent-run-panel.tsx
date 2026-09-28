@@ -45,6 +45,7 @@ import {
   startAgentRun,
   steerPromptToRun,
 } from "@/entities/agent-run/api/agent-run-repository";
+import { discardAgentExchangeDelivery } from "@/entities/agent-run/api/agent-exchange-repository";
 import {
   clearGoal,
   createGoal,
@@ -1837,18 +1838,64 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     closeQueuedPromptEditor();
   }
 
+  /** 화면 대기열에서 버린 교환 prompt의 전달 포기(Codex r7). 서버에는 이미 확인(`delivered`)된 교환이라, 알리지 않으면
+   *  대상 run이 살아 있는 동안 미소비 교환으로 남아 wait-stop이 끝나지 않는다. 실패는 오류로 보이고 다시 시도하지 않는다. */
+  async function discardExchangeDeliveries(requestIds: string[]) {
+    for (const requestId of requestIds) {
+      try {
+        await discardAgentExchangeDelivery(requestId);
+      } catch (caughtError) {
+        setError(`에이전트 메시지 전달 포기 실패: ${String(caughtError)}`);
+      }
+    }
+  }
+
+  /** 대기 prompt 제거. 교환 항목이면 먼저 대기열에서 빼고(자동 전송이 집어 가지 못하게) 서버에 전달 포기를 알린다. 포기가
+   *  실패하면 서버에는 아직 전달할 교환이므로 항목을 제자리로 되돌린다. */
+  async function removeQueuedPrompt(queuedPromptId: string) {
+    const index = queuedPromptsRef.current.findIndex((item) => item.id === queuedPromptId);
+    if (index < 0) {
+      return;
+    }
+    const removed = queuedPromptsRef.current[index];
+    const next = queuedPromptsRef.current.filter((item) => item.id !== queuedPromptId);
+    queuedPromptsRef.current = next;
+    setQueuedPrompts(next);
+    if (editingPrompt?.id === queuedPromptId) {
+      closeQueuedPromptEditor();
+    }
+    if (!removed.exchangeRequestId) {
+      return;
+    }
+    try {
+      await discardAgentExchangeDelivery(removed.exchangeRequestId);
+    } catch (caughtError) {
+      setError(`에이전트 메시지 전달 포기 실패: ${String(caughtError)}`);
+      setQueuedPrompts((current) => {
+        const restored = [...current.slice(0, index), removed, ...current.slice(index)];
+        queuedPromptsRef.current = restored;
+        return restored;
+      });
+    }
+  }
+
   async function cancel() {
     if (!activeRunId) {
       return;
     }
 
+    // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 취소가 실패해 run이 살아 있으면 확인된 미소비 교환이 남아
+    // wait-stop을 막는다(Codex r7).
+    const droppedExchanges = exchangeRequestIdsOf(queuedPromptsRef.current);
     try {
       await cancelAgentRun(activeRunId);
     } catch (caughtError) {
       setError(String(caughtError));
     } finally {
       await recordRunGoalProgress();
+      queuedPromptsRef.current = [];
       setQueuedPrompts([]);
+      void discardExchangeDeliveries(droppedExchanges);
       pendingSteersRef.current = [];
       rejectedSteersRef.current = [];
       setPendingSteers([]);
@@ -1980,6 +2027,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   async function steerQueuedPrompt(queuedPrompt: QueuedPrompt) {
     const targetRunId = activeRunId;
     if (!targetRunId || !directPrompt?.trim()) {
+      return;
+    }
+    // 교환 prompt는 steer로 보내지 않는다: steer는 교환 소비(이어 가기 표지)를 싣지 못해, 서버에는 미소비 교환이 남는다
+    // (Codex r7). 대기열 전송(`run.sendPrompt` + continuation)으로만 전달한다.
+    if (queuedPrompt.exchangeRequestId) {
+      setError("에이전트 메시지는 즉시 전송할 수 없습니다. 차례가 되면 전달됩니다.");
       return;
     }
 
@@ -2131,7 +2184,10 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   async function fullRestartWithRejectedSteer(steerInput: SteerInput) {
     const originalPrompt = directPrompt?.trim();
     const runIdToCancel = activeRunId;
-    const queuedPromptsToKeep = queuedPromptsRef.current;
+    // 교환 항목은 취소하는 run이 대상이라 새 run으로 옮기지 않는다(서버가 다른 run으로의 전달을 거절한다). 버리고 서버에서도
+    // 끝낸다(Codex r7).
+    const queuedPromptsToKeep = queuedPromptsRef.current.filter((item) => !item.exchangeRequestId);
+    const droppedExchanges = exchangeRequestIdsOf(queuedPromptsRef.current);
     if (!runIdToCancel || !originalPrompt) {
       return;
     }
@@ -2145,6 +2201,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
     try {
       await cancelAgentRun(runIdToCancel);
+      void discardExchangeDeliveries(droppedExchanges);
       const started = await startRun(nextGoal, {
         queuedPrompts: queuedPromptsToKeep,
         displayPrompt: steerInput.text,
@@ -2551,11 +2608,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                     onSteerPrompt={(queuedPrompt) => void steerQueuedPrompt(queuedPrompt)}
                     onEditPrompt={openQueuedPromptEditor}
                     onMovePrompt={moveQueuedPrompt}
-                    onRemovePrompt={(queuedPromptId) => {
-                      setQueuedPrompts((current) =>
-                        current.filter((item) => item.id !== queuedPromptId),
-                      );
-                    }}
+                    onRemovePrompt={(queuedPromptId) => void removeQueuedPrompt(queuedPromptId)}
                   />
                 )}
               </div>
@@ -3810,6 +3863,10 @@ function RejectedSteerTimeline({
   );
 }
 
+function exchangeRequestIdsOf(queue: QueuedPrompt[]) {
+  return queue.flatMap((item) => (item.exchangeRequestId ? [item.exchangeRequestId] : []));
+}
+
 function QueuedPromptTimeline({
   queuedPrompts,
   activeRunId,
@@ -3843,7 +3900,7 @@ function QueuedPromptTimeline({
                   variant="ghost"
                   size="icon-xs"
                   className="text-background hover:bg-background/15 hover:text-background"
-                  disabled={!activeRunId || !directPrompt?.trim()}
+                  disabled={!activeRunId || !directPrompt?.trim() || Boolean(queuedPrompt.exchangeRequestId)}
                   aria-label={`${index + 1}번 대기 prompt 즉시 전송`}
                   onClick={() => onSteerPrompt(queuedPrompt)}
                 >

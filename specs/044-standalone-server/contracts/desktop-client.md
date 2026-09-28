@@ -40,3 +40,4 @@ research R3·R6·R8·R11.
 - 부팅(`bootstrapTransport`)에서 외부 모드는 호환 경로 대체가 없다. 실패하면 **연결 실패 화면**(이유 + 다시 시도)을 보여 준다. 이유 예시: 실행 파일 없음, 기동 시간 초과, 버전 불일치, 권한.
 - 제목 이벤트(`workspace://mcp-window-title`)를 받으면 `apply_window_title`을 부른다.
 - 교환 전달 `run.sendPrompt`에 `continuation.exchangeRequestId`를 싣는다.
+- 교환 prompt는 대기열 전송(`run.sendPrompt` + continuation)으로만 보낸다(Codex r7). 대기열에서 **지우면** 서버에 전달 포기(`exchange.discardDelivery`)를 알린다 — 먼저 대기열에서 빼(자동 전송이 집어 가지 못하게) 부르고, 실패하면 항목을 제자리로 되돌린다. 교환 항목은 **steer(즉시 전송)할 수 없다**(steer는 교환 소비를 싣지 못한다 — 버튼 비활성 + 함수 거부). run 취소로 버리는 대기열과, 거절된 steer로 run을 다시 시작할 때 옮기지 않는 교환 항목(취소한 run이 대상)도 전달 포기를 알린다. run이 끝나(완료·취소·오류) 비우는 대기열은 알리지 않는다(대상 run이 없으면 서버가 활동으로 세지 않는다).

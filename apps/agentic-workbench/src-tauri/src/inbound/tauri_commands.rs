@@ -567,6 +567,28 @@ pub async fn acknowledge_agent_exchange(
     .await
 }
 
+/// 화면 대기열에서 지운 교환 prompt의 전달 포기(044 Codex r7, `exchange.discardDelivery`).
+#[tauri::command]
+pub async fn discard_agent_exchange_delivery(
+    app: AppHandle,
+    window: tauri::Window,
+    request_id: String,
+) -> Result<(), String> {
+    let bench = desktop_benches::lookup(window.label()).ok_or_else(|| {
+        workbench_compat::exchange_error_string("unknownExchange", "Exchange was not found.")
+    })?;
+    call_exchange::<Option<serde_json::Value>>(
+        &app,
+        &window,
+        workbench_compat::command_request(
+            OperationId::ExchangeDiscardDelivery,
+            json!({ "benchId": bench, "requestId": request_id }),
+        ),
+    )
+    .await
+    .map(|_| ())
+}
+
 #[tauri::command]
 pub async fn list_agent_exchanges(
     app: AppHandle,
