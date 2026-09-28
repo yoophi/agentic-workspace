@@ -63,6 +63,38 @@
   - 경로로 끝나지 않은 실행은 `path-exercised=no`로 무효를 적는다.
 - `*-busy-1`(출력 표지 전 1차, 완료만 확인)은 scratchpad에 남기고, 이 표는 출력까지 확인한 `*-busyout-1`로 대체한다.
 
+### 정상 Quit 뒤 옛 창 토큰 거절 + 진행 중 turn 지속 (Codex 코드 리뷰)
+
+- 지적: 정상 Quit(Cmd+Q·Dock·AppleScript)은 `Exit`만 온다(R8). 그래서 창이 폐기되지 않아 종료한 앱의 창 토큰이 최대 15분 유효했다.
+- 수정: 종료 경로가 살아 있는 창을 모두 `retireWindow{closeBench:false}`로 폐기하고, 2초 상한 안에서 기다린다. 단위 시험 `an_exit_retires_the_open_windows_without_closing_their_benches`: compile red → 동작 red(200 ≠ 401) → green.
+- 실제 앱(`quit-busy-token` probe, `BUSY=1 TOKEN=1 quit-run.sh`)으로 한 실행에서 둘 다 본다.
+  - 시작 turn이 진행 중인 채로 그 창 토큰을 비밀 파일(0600)에 넘긴다. 종료 전 같은 토큰으로 handshake하면 200이다.
+  - 그 경로로 종료한다. 앱 PID가 사라진 뒤 같은 토큰(그 창 Origin)으로 handshake한다.
+  - `busyRuns=1`을 확인한다. owner-check가 새 prompt 없이 종료 뒤 출력과 완료를 live로 받는다. 그 뒤 취소한다.
+
+| 경로 | 배포 | 개발 | 종료 뒤 옛 창 토큰 |
+|---|---|---|---|
+| (d) Dock Quit | ok `t045-rel-d-busytok-1` | ok `t045-dev-d-busytok-1` | 401 `unauthenticated` |
+| (e) AppleScript `quit` | ok `t045-rel-e-busytok-1` | ok `t045-dev-e-busytok-1` | 401 |
+| (g) `SIGTERM`(대조) | `t045-rel-g-busytok-1` | `t045-dev-g-busytok-1` | **200**. 앱 처리가 없어 폐기되지 않는다. 토큰 TTL(15분)과 임대 TTL로만 거둔다(계약대로, 한계) |
+| (c) Cmd+Q | **미검증**(무효 2회 + 1회) | **미검증**(무효 1회) | — |
+
+- 모든 유효 실행에서 진행 중 turn은 이어졌다: `busyRuns=1`, 새 prompt 없이 `after-gate` 출력과 완료가 live로 왔고, 취소를 마쳤다. prompt는 1개다.
+- (c) 무효 이유:
+  - `t045-{rel,dev}-c-busytok-1`에서는 Cmd+Q 키 입력이 앱에 닿지 않았다. 앱 로그에 `exit:` 줄이 없어 `Exit` 자체가 없었다. 스크립트가 `path-exercised=no`로 적고 정확한 PID로 정리했다.
+  - 다시 시도한 `t045-rel-c-busytok-2`에서 앞 프로세스를 확인하게 했다. 앞 프로세스가 `loginwindow`, 즉 **Mac 세션이 잠긴 상태**였다(`frontmost-before-cmd-q=no`). 잠긴 동안에는 키 입력 자동화가 불가능하다. Dock·AppleScript 경로는 접근성·Apple Event라 동작했다.
+  - **안전 사고 기록**: 이 세 번의 (c) 시도는 대상 앱이 앞인지 확인하지 않은 채(`-2`는 확인이 실패했는데도) 전역 Cmd+Q 키 입력을 보냈다. 키 입력은 앞 프로세스로 가므로 다른 사용자 앱을 끌 수 있었다.
+    - 직후 확인: 보이는 프로세스 목록이 시도 전과 같고(ghostty·Aside·Finder·handy·agentic-workbench(설치본, 1일 이상 실행 중)·Chrome·mermaid-live·Safari·ChatGPT·Slack), 설치본 AW PID도 그대로다. 앞 프로세스가 `loginwindow`(잠금)라 키 입력이 앱에 닿지 않은 것으로 보인다.
+    - 스크립트 수정: 대상 APID가 앞 프로세스임을 조건 대기로 확인하고, 보내기 직전에 다시 확인한다. 둘 중 하나라도 실패하면 키 입력을 **보내지 않고** 그 시도를 무효로 기록한다(`cmd-q-not-sent`).
+  - 원인 진단(읽기 전용, UI 재시도 반복 전):
+    - `CGSessionCopyCurrentDictionary`: `onConsole=1`, `CGSSessionScreenIsLocked=1`, NSWorkspace 전면 앱 `loginwindow`(pid 179).
+    - 대상: `NSRunningApplication(pid=APID)` = `AW Quit 044`(bundle `…smoke044qr`), activationPolicy Regular, 숨김 아님, 기동 완료, `active=false`. System Events 프로세스(같은 unix id)는 `agentic-workbench`, visible, frontmost false, background only false.
+    - 따라서 APID↔GUI 프로세스는 일치하고, 숨김·백그라운드 전용도 아니다. 세션 잠금이 활성화를 막는다. 화면 잠금 우회나 다른 앱 키 입력은 하지 않았다.
+  - 안전 분기 뒤 재시도 `t045-rel-c-busytok-3·-4`, `t045-dev-c-busytok-2·-3`: 모두 `frontmost=no` → 키 미전송 → 무효.
+    - `-4`는 잠금 중 느린 osascript로 전면 대기가 2분을 넘었다. 가짜 agent의 문 대기 상한(120초)이 먼저 와 agent가 끝났고(`gate-abandoned`), 그래서 owner-check가 run을 찾지 못했다(`owner-check-exit=1`). 제품 실패가 아니라 무효 시도의 부작용이다.
+  - Cmd+Q도 (d)(e)와 같은 `Exit` 처리 경로를 쓴다. 하지만 이것을 검증으로 세지 않는다. **세션 잠금 해제 뒤 (c)를 다시 실행해야 한다.**
+- 이 수정 전의 (c) 증거(`t045-*-c-busyout-1`)는 진행 중 turn 지속만 보인다. 그때 토큰은 폐기되지 않았다.
+
 ### 쉬는 세션 지속 (보조 증거)
 
 흐름(`quit` probe): 에코 run 시작 → 시작 에코·완료 → `ready-to-quit`(run 살려 둠) → 그 경로로 종료 → **앱 PID 소멸** → 서버 PID 생존 → `server.status` → `owner-check.py`(identify 증명 → handshake → `bench.list`에서 같은 run → replay → 구독으로 소유자 prompt 에코를 live로 받음 → `run.cancel` → 목록에서 사라짐).

@@ -1,0 +1,14 @@
+app-pid=29427 quit-path=e
+probe-status=done
+run-id=quit-b97a5181 server-pid=29487
+server-verified=yes
+token-before-quit={"status": 200}
+app-gone=yes
+path-exercised=yes
+server-alive-after-quit=yes
+token-after-quit={"status": 401, "code": "unauthenticated"}
+status-after-quit={"result": "ok", "state": "serving", "leases": 0, "busyRuns": 1}
+busy-after-quit=yes
+gate-exists-before-observe=no
+owner-check-exit=0
+server-stopped=yes

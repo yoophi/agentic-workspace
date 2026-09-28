@@ -19,7 +19,9 @@ AGENT="python3 $WT/crates/workbench-core/tests/support/agents/fake_acp_permissio
 SCEN=quit; PHASE=ready-to-quit
 if [ "${BUSY:-}" = 1 ]; then AGENT="$AGENT --end-turn-gate $R/turn.gate --after-gate-chunk"; SCEN=quit-busy; PHASE=ready-to-quit-busy; fi
 # TOKEN=1(Codex 코드 리뷰): close-token probe가 이 창 토큰을 비밀 파일(0600)에 넘긴다. 종료 뒤 같은 토큰이 거절되는지 본다.
-if [ "${TOKEN:-}" = 1 ]; then SCEN=close-token; PHASE=ready-to-close; fi
+if [ "${TOKEN:-}" = 1 ]; then
+  if [ "${BUSY:-}" = 1 ]; then SCEN=quit-busy-token; PHASE=ready-to-quit-busy-token; else SCEN=close-token; PHASE=ready-to-close; fi
+fi
 CWD=$(cd "$R/work" && pwd -P)
 open -n "$APP" --env AW_APP_TRANSPORT_PROBE_FILE="$R/probe.json" --env AW_APP_PROBE_SCENARIO=$SCEN --env AW_APP_PROBE_SECRET_FILE="$R/secret.json" \
   --env AW_APP_PROBE_AGENT_COMMAND="$AGENT" --env AW_APP_PROBE_CWD="$CWD" --stdout "$R/app.log" --stderr "$R/app.log"
@@ -47,8 +49,23 @@ if [ -z "$RUN" ] || [ -z "$SPID" ]; then log "abort: no run or server"; kill_exa
 [ "${TOKEN:-}" = 1 ] && log "token-before-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 SERVER_LINES_BEFORE=$(wc -l < "$DATA/workbench/server/server.log")
 case "$QUIT" in
-  c) osascript -e "tell application id \"$BID\" to activate" >/dev/null 2>&1; sleep 1
-     osascript -e 'tell application "System Events" to keystroke "q" using command down' >> "$R/quit.txt" 2>&1 ;;
+  c) # 키 입력은 앞 프로세스로 간다 — 이 앱이 실제로 앞에 올 때까지 조건 대기(상한 10초) 뒤 보낸다.
+     front=no; for i in $(seq 1 40); do
+       osascript -e "tell application id \"$BID\" to activate" >/dev/null 2>&1
+       osascript -e "tell application \"System Events\" to set frontmost of (first process whose unix id is $APID) to true" >/dev/null 2>&1
+       [ "$(osascript -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null)" = "$APID" ] && { front=yes; break; }; sleep 0.25
+     done; log "frontmost-before-cmd-q=$front"
+     if [ "$front" != yes ]; then
+       # 키 입력은 앞 프로세스로 가는 전역 입력이다 — 대상 앱이 앞이 아니면 다른 앱을 끌 수 있으므로 보내지 않는다.
+       log "cmd-q-not-sent: the target app is not frontmost (attempt invalid)"
+     else
+       # 보내기 직전 한 번 더 확인한다(그 사이 앞 창이 바뀌면 보내지 않음).
+       if [ "$(osascript -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null)" = "$APID" ]; then
+         osascript -e 'tell application "System Events" to keystroke "q" using command down' >> "$R/quit.txt" 2>&1
+       else
+         log "cmd-q-not-sent: frontmost changed just before sending (attempt invalid)"
+       fi
+     fi ;;
   d) osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to perform action \"AXShowMenu\"" >> "$R/quit.txt" 2>&1
      # 메뉴가 열릴 때까지 조건 대기(상한 10초) 뒤 누른다. 열리지 않으면 경로를 시험하지 못한 것으로 기록한다.
      menu=no; for i in $(seq 1 40); do

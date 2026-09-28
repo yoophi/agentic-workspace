@@ -97,21 +97,31 @@ fn app_probe_template(scenario: &str) -> String {
         "refresh" => APP_REFRESH_PROBE_SCRIPT.to_owned(),
         "quit" => APP_QUIT_PROBE_SCRIPT.to_owned(),
         // T045(Codex 문서 리뷰): 시작 turn이 끝나기 전(agent가 문으로 붙잡음)에 종료 준비를 보고한다.
-        "quit-busy" => APP_QUIT_PROBE_SCRIPT
-            .replace("scenario: 'quit'", "scenario: 'quit-busy'")
-            .replace(
-                "    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');\n",
-                "    await waitFor(() => echoIndex() >= 0, 'start prompt echo');\n    report.steps.completedBeforeQuit = completedAfter(echoIndex());\n",
-            )
-            .replace(
-                "report.phase = 'ready-to-quit';",
-                "report.phase = 'ready-to-quit-busy';",
-            ),
+        "quit-busy" => quit_busy_script("quit-busy"),
+        // Codex 코드 리뷰: 진행 중 turn + 창 토큰 넘기기(정상 Quit 뒤 옛 창 토큰 거절과 turn 지속을 한 실행에서).
+        "quit-busy-token" => quit_busy_script("quit-busy-token").replace(
+            "    report.phase = 'ready-to-quit-busy-token';\n",
+            &CLOSE_TOKEN_STEP.replace("'ready-to-close'", "'ready-to-quit-busy-token'"),
+        ),
         "close-token" => APP_QUIT_PROBE_SCRIPT
             .replace("scenario: 'quit'", "scenario: 'close-token'")
             .replace("    report.phase = 'ready-to-quit';\n", CLOSE_TOKEN_STEP),
         _ => APP_PROBE_SCRIPT.to_owned(),
     }
+}
+
+/// 시작 prompt의 에코만 받고 완료를 기다리지 않는 `quit` 변형(시나리오 이름·단계 이름은 `name`).
+fn quit_busy_script(name: &str) -> String {
+    APP_QUIT_PROBE_SCRIPT
+        .replace("scenario: 'quit'", &format!("scenario: '{name}'"))
+        .replace(
+            "    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');\n",
+            "    await waitFor(() => echoIndex() >= 0, 'start prompt echo');\n    report.steps.completedBeforeQuit = completedAfter(echoIndex());\n",
+        )
+        .replace(
+            "report.phase = 'ready-to-quit';",
+            &format!("report.phase = 'ready-to-{name}';"),
+        )
 }
 
 /// T046: 이 창의 토큰을 비밀 파일로만 넘기고, 그 토큰(+ 창 Origin)으로 handshake한 상태 코드만 보고서에 싣는다.
@@ -486,6 +496,28 @@ mod tests {
             );
         }
         assert_eq!(app_probe_template("quit"), APP_QUIT_PROBE_SCRIPT);
+    }
+
+    /// Codex 코드 리뷰(정상 Quit 창 토큰 폐기): `quit-busy-token`은 `quit-busy`(시작 turn 진행 중 보고)에 창 토큰 넘기기를
+    /// 더한다. 앱 종료 뒤 같은 토큰이 거절되고 진행 중 turn은 이어지는지 한 실행에서 본다.
+    #[test]
+    fn quit_busy_token_probe_keeps_the_turn_in_flight_and_hands_the_token_to_the_secret_file() {
+        let script = app_probe_template("quit-busy-token")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'quit-busy-token'"));
+        assert!(script.contains("await waitFor(() => echoIndex() >= 0, 'start prompt echo');"));
+        assert!(!script.contains("'start prompt echo and completion'"));
+        assert!(script.contains("invoke('report_app_probe_secret', { secret: { baseUrl: c.baseUrl, token: c.token, origin: location.origin } })"));
+        assert!(script.contains("report.phase = 'ready-to-quit-busy-token'"));
+        for forbidden in [
+            "report.token",
+            "report.steps.token =",
+            "report.secret",
+            "cancel",
+        ] {
+            assert!(!script.contains(forbidden), "must not carry {forbidden}");
+        }
     }
 
     /// T046(SC-006): `close-token`은 `quit` 흐름에 "이 창 토큰을 비밀 파일로 넘기고, 닫기 전 그 토큰의 handshake 상태
