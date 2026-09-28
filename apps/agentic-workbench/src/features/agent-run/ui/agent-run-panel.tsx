@@ -1093,8 +1093,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
 
     const nextPrompt = queuedPrompts[0];
+    if (!queuedPromptBelongsToRun(nextPrompt, activeRunId)) {
+      // 다른 run이 대상인 교환(Codex r11): 이 run에 보내면 서버가 거절한다 — 보내지 않고 뺀다.
+      setQueuedPrompts((current) => current.filter((item) => item.id !== nextPrompt.id));
+      return;
+    }
     const previousDirectPrompt = directPrompt;
     const lifecycleSeq = promptLifecycleSeqRef.current;
+    const dispatchRunId = activeRunId;
     setIsAwaitingPromptResponse(true);
     setQueuedPrompts((current) => current.slice(1));
     setDirectPrompt(nextPrompt.text);
@@ -1111,7 +1117,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         recordPromptHistory(nextPrompt.text);
       })
       .catch((caughtError) => {
-        setQueuedPrompts((current) => [nextPrompt, ...current]);
+        // 교환 항목은 그 run에 묶인다(Codex r11): 서버가 거절했거나(서버의 답인 오류 — 다시 보내도 같다) 그 사이 run이 바뀌었으면
+        // 대기열에 다시 넣지 않는다(선두에서 계속 거절돼 뒤 prompt를 막는다). 서버에 닿지 않았거나 결과를 모르는 전달만 다시 넣는다.
+        const requeue =
+          !nextPrompt.exchangeRequestId ||
+          (unsettledCall(caughtError) !== null && activeRunIdRef.current === dispatchRunId);
+        if (requeue) {
+          setQueuedPrompts((current) => [nextPrompt, ...current]);
+        }
         setItems((currentItems) =>
           removeUserMessage(currentItems, activeRunId, nextPrompt.text),
         );
@@ -1696,6 +1709,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           source,
           idempotencyKey,
           exchangeRequestId,
+          exchangeRunId: exchangeRequestId ? (activeRunIdRef.current ?? undefined) : undefined,
         }),
       );
       queuedPromptsRef.current = next;
@@ -1899,6 +1913,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       return;
     }
     const removed = queuedPromptsRef.current[index];
+    const removalRunId = activeRunIdRef.current;
     const next = queuedPromptsRef.current.filter((item) => item.id !== queuedPromptId);
     queuedPromptsRef.current = next;
     setQueuedPrompts(next);
@@ -1912,6 +1927,11 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       await discardAgentExchangeDelivery(removed.exchangeRequestId);
     } catch (caughtError) {
       setError(`에이전트 메시지 전달 포기 실패: ${String(caughtError)}`);
+      // 되돌리기는 지울 때의 run이 아직 활성이고 그 교환이 그 run에 묶였을 때만(Codex r11). 그 사이 run이 끝나거나 바뀌었으면
+      // 그 교환은 끝난 run이 대상이다 — 새 run의 대기열에 넣지 않는다(서버는 대상 run이 없는 교환을 세지 않는다).
+      if (activeRunIdRef.current !== removalRunId || !queuedPromptBelongsToRun(removed, removalRunId)) {
+        return;
+      }
       setQueuedPrompts((current) => {
         const restored = [...current.slice(0, index), removed, ...current.slice(index)];
         queuedPromptsRef.current = restored;
@@ -4018,6 +4038,11 @@ function RejectedSteerTimeline({
       ))}
     </div>
   );
+}
+
+/** 대기열 항목이 그 run의 대기열에 있을 수 있는가(Codex r11): 교환 항목은 묶인 run에만 속한다(묶인 run이 없으면 제한 없음). */
+function queuedPromptBelongsToRun(item: QueuedPrompt, runId: string | null) {
+  return !item.exchangeRequestId || !item.exchangeRunId || item.exchangeRunId === runId;
 }
 
 function exchangeRequestIdsOf(queue: QueuedPrompt[]) {

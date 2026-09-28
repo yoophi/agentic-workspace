@@ -639,15 +639,32 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
   let cancelGate: Promise<void> | undefined;
   /** 화면이 보낸 취소 요청 수(답을 받기 전에 센다). */
   let cancelRequests = 0;
+  /** Codex r11: 다음 전달 포기 한 번의 답을 붙잡는 문과, 그 답을 실패로 바꾸는 오류. */
+  let discardGate: Promise<void> | undefined;
+  let discardOutcome: string | undefined;
 
   beforeEach(() => {
     cancelOutcome = undefined;
     beforeCancelReply = undefined;
     cancelGate = undefined;
     cancelRequests = 0;
+    discardGate = undefined;
+    discardOutcome = undefined;
     setTransport({
       kind: "http",
       invoke: async (command, args, options) => {
+        if (command === "discard_agent_exchange_delivery" && (discardGate || discardOutcome !== undefined)) {
+          const gate = discardGate;
+          const thrown = discardOutcome;
+          discardGate = undefined;
+          discardOutcome = undefined;
+          await gate;
+          if (thrown !== undefined) {
+            // 기록은 남긴다(요청은 보냈다).
+            await compatTransport.invoke(command, args, options);
+            throw thrown;
+          }
+        }
         if (command === "cancel_agent_run") {
           cancelRequests += 1;
           const gate = cancelGate;
@@ -1004,6 +1021,108 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
       await Promise.resolve();
     });
     expect(invocationsFor("start_agent_run"), "the cancelled restart does not come back").toHaveLength(1);
+  });
+
+  // Codex r11(apps medium): 교환 항목을 지우고 전달 포기의 답을 기다리는 동안 Full restart가 run을 바꿨다. 포기가 실패해도 그
+  // 교환은 끝난 run이 대상이라 새 run의 대기열에 되살리지 않는다(서버가 다른 run으로의 전달을 거절한다 — 되살리면 선두에서 계속
+  // 거절돼 뒤 prompt를 막는다). 끝난 run이 대상인 교환은 서버가 세지 않으므로 wait-stop에는 영향이 없다.
+  it.each([
+    ["refused by the server", "discard refused by the server"],
+    ["notApplied", MESSAGE_NOT_APPLIED],
+  ])(
+    "a discard that fails (%s) after a full restart replaced its run does not revive the exchange in the new run",
+    async (_kind, error) => {
+      const { panel } = await busyRunWithAQueuedExchange();
+      await rejectASteer(panel);
+
+      const gate = deferred();
+      discardGate = gate.promise;
+      discardOutcome = error;
+      await act(async () => {
+        queuedPromptButton(1, "제거")?.click();
+      });
+      await waitForAgentRunPanel(() => !(panel.container.textContent?.includes("Handle the peer request") ?? true));
+      await panel.clickButton("Full restart");
+      await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+      const replacement = (invocationsFor("start_agent_run")[1] as { request: { runId: string } }).request.runId;
+      await panel.rerender({ externalPromptRequest: { id: "manual-3", text: "Follow-up work", delivery: "queue" } });
+      await waitForAgentRunPanel(() => panel.container.textContent?.includes("Follow-up work") ?? false);
+      await act(async () => {
+        gate.release();
+      });
+      await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+      expect(panel.container.textContent, "the old run's exchange is not revived in the new run's queue").not.toContain(
+        "Handle the peer request",
+      );
+      await panel.emitRunEvent({ runId: replacement, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+      await panel.emitRunEvent({
+        runId: replacement,
+        event: { type: "lifecycle", status: "promptCompleted", message: "done" },
+      });
+      await waitForAgentRunPanel(() =>
+        invocationsFor("send_prompt_to_run").some((args) => (args as { prompt?: string }).prompt === "Follow-up work"),
+      );
+      expect(deliveriesOf("x-7"), "the old exchange never goes to the replacement run").toEqual([]);
+      expect(
+        invocationsFor("send_prompt_to_run").find((args) => (args as { prompt?: string }).prompt === "Follow-up work"),
+      ).toMatchObject({ runId: replacement });
+    },
+  );
+
+  // 같은 run이 살아 있는 동안의 포기 실패는 지금처럼 항목을 되돌린다(그 run에 전달할 교환이다).
+  it("a discard that fails while its run is still active puts the exchange back", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    discardOutcome = "discard refused by the server";
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("discard refused by the server") ?? false);
+    expect(panel.container.textContent).toContain("Handle the peer request");
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 1);
+  });
+
+  // Codex r11: 서버가 교환 전달을 거절하면(대상 run 불일치 등 — 서버의 답인 오류) 그 교환을 대기열 선두에 다시 넣지 않는다.
+  // 계속 거절돼 뒤 prompt를 막기 때문이다. 서버에 닿지 않은(notApplied) 전달만 다시 시도한다.
+  it("a queued exchange whose delivery the server refuses is dropped instead of blocking later prompts", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await panel.rerender({ externalPromptRequest: { id: "manual-3", text: "Follow-up work", delivery: "queue" } });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Follow-up work") ?? false);
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (
+        command === "send_prompt_to_run" &&
+        (args as { continuation?: { exchangeRequestId?: string } } | undefined)?.continuation?.exchangeRequestId === "x-7"
+      ) {
+        throw "exchange x-7 targets another run";
+      }
+      return base?.(command, args);
+    });
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("exchange x-7 targets another run") ?? false);
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some((args) => (args as { prompt?: string }).prompt === "Follow-up work"),
+    );
+    expect(deliveriesOf("x-7"), "the refused exchange is tried once, not re-queued").toHaveLength(1);
+    expect(panel.container.textContent).not.toContain("Handle the peer request");
+  });
+
+  it("a queued exchange whose delivery did not reach the server is retried", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    const base = invokeMock.getMockImplementation();
+    let failed = false;
+    invokeMock.mockImplementation(async (command: string, args?: Record<string, unknown>) => {
+      if (command === "send_prompt_to_run" && !failed) {
+        failed = true;
+        throw MESSAGE_NOT_APPLIED;
+      }
+      return base?.(command, args);
+    });
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 2);
   });
 
   it("still abandons the queued exchange when the cancel succeeds", async () => {
