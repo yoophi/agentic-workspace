@@ -2,7 +2,7 @@
 
 ## 판정
 
-production consumer migration prerequisite는 **PENDING**이다. 아래 macOS spike는 environment inventory/parser 가정 일부를 확인했지만, env-clear descendant discovery와 identity-check/signal 원자성을 해결하지 못했다. Linux와 Windows의 실제 target 실행 결과도 아직 없다. 이 상태는 045 전체 목표를 포기하거나 scope를 줄인다는 뜻이 아니며, 대안 API/권한 spike를 계속하기 위한 gate다.
+production consumer migration prerequisite는 **PENDING**이다. actual-target API probes는 세 OS에서 실행됐지만 macOS/Linux required containment와 Windows server-crash 경로는 아직 입증되지 않았다. 이 상태는 045 전체 목표를 포기하거나 scope를 줄인다는 뜻이 아니며, release-shaped 대안 spike를 계속하기 위한 gate다.
 
 ## 실행 환경
 
@@ -50,8 +50,8 @@ cargo test -p process-supervisor --test platform_feasibility -- --nocapture
 ## inventory gate evidence
 
 - `python3 scripts/check-process-spawn-inventory.py --json`: unknown 0, stale 0, undocumented 0, direct-count drift 0
-- `python3 -m unittest scripts/tests/test_process_spawn_inventory.py`: 3 passed, exit 0
-- negative fixtures는 aliased `Command`, 동일 파일의 추가 constructor, `#[cfg(test)]` 뒤 production constructor를 각각 검출한다.
+- `python3 -m unittest scripts/tests/test_process_spawn_inventory.py`: 현재 HEAD 5 passed, exit 0
+- negative fixtures는 aliased `Command`, 동일 파일의 추가 constructor, cfg(test) module/import 뒤 production constructor와 comment/string delimiter 우회를 검출한다.
 - 현재 ServerOwned direct spawn은 baseline으로 별도 출력되며, 최종 migration gate에서는 `--enforce-supervised`로 0을 요구한다.
 
 ## Actual-target CI
@@ -76,7 +76,7 @@ cargo test -p process-supervisor --test platform_feasibility -- --nocapture
 | Target | Actual executed tests | Result | Evidence status |
 |---|---:|---|---|
 | Linux x86_64 | 11 | job 108953038084 exit 0 | API 관측 성공, required containment 실패 |
-| Windows x86_64 | 4 | job 108953037849 exit 0 | feasibility PASS |
+| Windows x86_64 | 4 | job 108953037849 exit 0 | Job API probe PASS; platform prerequisite PENDING |
 
 Windows 실제 API 시험은 suspended create, assign-before-resume, primary thread resume 1회, active processes 2를 관측했다. explicit breakaway는 `ERROR_ACCESS_DENIED`였고 명시적 `drop(job)` 뒤 미리 확보한 direct/descendant process handle 양쪽이 bounded wait 안에 종료됐다. 별도 owner/server hard-kill fixture는 아직 없다. 2건 중 1건은 이 실제 API 시험이고 1건은 bool invariant이므로 서로 구분한다.
 
@@ -84,7 +84,7 @@ Windows 실제 API 시험은 suspended create, assign-before-resume, primary thr
 
 ## 다음 feasibility 작업
 
-1. macOS `proc_terminate`, Mach task/audit-token 계열 API가 ordinary signed app 권한에서 identity-safe signal 또는 descendant tracking을 제공하는지 격리 확인한다.
-2. 제공하지 못하면 Endpoint Security/system extension 같은 entitlement 요구 대안과 제품 배포 가능성을 별도 설계 입력으로 기록한다.
-3. Linux는 pidfd와 cgroup v2 delegation을 분리해 확인한다. pidfd가 known PID reuse만 막고 env-clear descendant discovery는 해결하지 못하는지 실제 fixture로 판정한다.
-4. Windows는 실제 Job Object API spike와 CI target 실행을 추가한다.
+1. macOS 15 release-shaped 표준 Endpoint Security system extension의 entitlement/signing/TCC/event/crash recovery를 검증한다.
+2. Linux installed systemd unit의 delegation과 birth-time cgroup placement, direct-launch fail-closed와 crash recovery를 검증한다.
+3. PID 재사용 경합을 결정적으로 유발해 safe handle과 unsafe PID check→signal을 대조한다.
+4. Windows owner/server hard-kill과 전체 containment matrix를 실제 target에서 검증한다.

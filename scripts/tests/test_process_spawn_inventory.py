@@ -47,6 +47,17 @@ fn production() { let _ = std::process::Command::new("git"); }
         self.assertNotIn("test_helpers", production)
         self.assertEqual(MODULE.command_creation_count(production), 1)
 
+    def test_cfg_test_import_ignores_delimiters_in_comments_and_literals(self):
+        for decoration in ('// misleading {', 'const _: &str = "{;";'):
+            source = f"""
+#[cfg(test)]
+{decoration}
+use crate::test_helpers;
+fn production() {{ let _ = std::process::Command::new("git"); }}
+"""
+            production = MODULE.without_cfg_test_items(source)
+            self.assertEqual(MODULE.command_creation_count(production), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -79,3 +79,19 @@ OCR delegate는 위 대안의 제품 배포 가능성, platform-neutral foundati
 | O1 High | 유효 | macOS 27+ descendant API와 별도로 현재 macOS 15에서 검증할 macOS 11+ 표준 Endpoint Security system extension 후보, 설치·entitlement·TCC 비용을 명시 |
 | O2 High | 유효 | Linux delegated cgroup에 `clone3(CLONE_INTO_CGROUP)` 또는 payload instruction 전 membership이 증명된 birth-time placement를 요구해 spawn→move escape를 금지 |
 | O3 Medium | 유효 | 독립 후보를 pure reducer/storage transaction/output parser로 제한하고 registry lease/adopt/recovery anchor/platform launcher는 계속 gate 뒤에 유지 |
+
+## OCR 반영 후 Codex adversarial 설계 재검토
+
+- job: `review-mulavxtd-8s2aqb`
+- range: `c3e292f91a39d522e38bfb1449c2d28c2d767324..6704ebd33c3def147c8b8b5460097bea841818ca`
+- 실제 범위: redesign Markdown 4개와 inventory Python 2개, 총 6/6
+- verdict: `needs-attention` (High 3, Medium 2)
+- 별도 선행 code review `review-mulatfy5-hx9c0l`의 cfg(test) import finding은 `6704ebd`에서 먼저 반영했다.
+
+| ID | 판정 | 반영 |
+|---|---|---|
+| C1 High | 유효 | comment/string delimiter를 lexical mask한 뒤 cfg(test) item 경계를 찾고 adversarial fixture를 추가 |
+| C2 High | 유효 | T007/T009를 다시 미완료로 두고 macOS 15 release artifact와 Linux delegated birth-time placement actual jobs를 명시 |
+| C3 High | 유효 | Windows를 Job API probe PASS/platform PENDING으로 하향하고 T006에 server hard-kill 등 남은 matrix를 명시 |
+| C4 Medium | 유효 | T012–T015를 pure publication/outbox로 분리하고 containment anchor/schema/lease를 T016과 T010 뒤에 유지 |
+| C5 Medium | 유효 | 최신 HEAD inventory 수를 5건으로 정정하고 새 exact HEAD matrix 재실행을 요구 |

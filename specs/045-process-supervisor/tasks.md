@@ -35,19 +35,19 @@ description: "독립 Workbench 서버의 모든 자식 프로세스를 공통 �
 **⚠️ CRITICAL GATE**: macOS/Linux/Windows target 중 하나라도 required containment를 입증하지 못하면 실패 근거와 대안을 설계 리뷰로 되돌린다. group kill, nonce 상속만의 통과, skip, threshold 완화로 다음 phase를 열지 않는다.
 
 - [ ] T005 `crates/process-supervisor/tests/platform_feasibility.rs`에 macOS/Linux의 process inventory 권한, env-clear+exec escape, keeper-only/server+keeper hard kill, safe identity-check-and-signal race를 재현하는 non-zero isolated tests를 먼저 작성한다. 현재 known-child pidfd/audit-token과 unsafe PID check→signal 한계는 확인했지만 PID 재사용 경합의 결정적 fixture는 미구현이다
-- [x] T006 [P] `crates/process-supervisor/tests/windows_job_feasibility.rs`에 suspended create, Job assign-before-resume, breakaway denial, kill-on-close와 direct wait fixture를 먼저 작성한다
-- [x] T007 `crates/process-supervisor/src/platform/unix/feasibility.rs`에서 macOS/Linux 실제 public API와 배포 권한으로 reusable identity handle·descendant acquisition·signal 원자성을 spike하고 T005의 각 case를 PASS 또는 구체적 blocker로 판정한다
+- [ ] T006 [P] `crates/process-supervisor/tests/windows_job_feasibility.rs`에 suspended create, Job assign-before-resume, breakaway denial, kill-on-close/direct+descendant wait에 더해 owner/server hard-kill, rapid-exit/adopt-cancel, graceful/force와 PID-reuse control fixture를 작성한다
+- [ ] T007 `crates/process-supervisor/src/platform/unix/feasibility.rs`와 release-shaped platform fixtures에서 macOS 15 표준 Endpoint Security system extension 및 Linux delegated systemd cgroup의 birth-time placement를 spike하고 event/crash gap, direct-launch fail-closed, recovery를 PASS 또는 구체적 blocker로 판정한다
 - [x] T008 [P] `crates/process-supervisor/src/platform/windows/feasibility.rs`에서 Windows Job Object spike를 구현하고 T006을 실제 Windows target에서 실행 가능하게 한다
-- [x] T009 `.github/workflows/quality.yml`에 macOS Apple Silicon, Linux x86_64, Windows x86_64 feasibility jobs를 추가하고 `specs/045-process-supervisor/platform-evidence.md`에 API, 권한, test 수, exit code, leak/identity 결과를 기록한다
+- [ ] T009 `.github/workflows/quality.yml`에 release-shaped macOS entitlement artifact, delegated Linux service/scope와 Windows server-crash feasibility jobs를 추가하고 exact HEAD의 API, 권한, test 수, exit code, leak/identity 결과를 기록한다
 - [ ] T010 `specs/045-process-supervisor/platform-evidence.md`의 prerequisite matrix를 판정해 모든 required target 증거가 있을 때만 T011 이후를 시작하고, 실패 target은 `specs/045-process-supervisor/review-ledger.md`에 새 설계 review input으로 기록한다
 - [ ] T011 `crates/process-supervisor/src/spec.rs`와 `crates/process-supervisor/src/state.rs`에 `ProcessSpec`, owner/attempt, stream policy, `Reserved/Spawning/Adopted/Published/Active/Aborting/Terminal` reducer를 구현한다
-- [ ] T012 [P] `crates/workbench-core/src/ports/process_attempt_store.rs`와 `crates/workbench-core/src/ports/mod.rs`에 domain publication과 containment recovery anchor를 분리한 store port 및 typed CAS result를 정의한다
-- [ ] T013 `crates/workbench-core/src/infrastructure/sqlite_ledger.rs`에 schema v2→v3 `process_attempt`/`process_publication_outbox` migration, conditional transition, unique event id, retention GC를 구현한다
-- [ ] T014 `crates/workbench-core/tests/process_publication.rs`에 publication-wins/cleanup-wins barrier, ambiguous commit, storage fault, commit/send/ack crash, reconnect replay와 projection dedupe 회귀시험을 먼저 작성해 T013/T015의 실패를 확인한다
-- [ ] T015 `crates/workbench-core/src/application/process_publication.rs`에 domain result + `Adopted→Published` + outbox atomic transaction과 `Adopted→Active/Aborting` resolver를 구현한다
-- [ ] T016 `crates/process-supervisor/src/registry.rs`에 cancellation-safe child ownership, `UnpublishedProcessLease`, no-ack resolver, quarantined readiness, terminal outcome arbitration을 구현한다
+- [ ] T012 [P] `crates/workbench-core/src/ports/process_publication_store.rs`와 `crates/workbench-core/src/ports/mod.rs`에 containment 의미가 없는 domain publication/outbox typed CAS port를 정의한다
+- [ ] T013 `crates/workbench-core/src/infrastructure/sqlite_ledger.rs`에 publication/outbox 전용 additive migration, conditional transition과 unique event id를 구현한다. containment anchor schema/retention은 T016 전까지 추가하지 않는다
+- [ ] T014 `crates/workbench-core/tests/process_publication.rs`에 publication CAS 양쪽 winner, ambiguous commit, storage fault, commit/send/ack crash, reconnect replay와 projection dedupe 회귀시험을 먼저 작성해 T013/T015의 실패를 확인한다
+- [ ] T015 `crates/workbench-core/src/application/process_publication.rs`에 domain result + publication state + outbox atomic transaction을 구현하되 process spawn/adopt/cleanup resolver를 참조하지 않는다
+- [ ] T016 `crates/workbench-core/src/ports/process_attempt_store.rs`, `crates/workbench-core/src/infrastructure/sqlite_ledger.rs`, `crates/process-supervisor/src/registry.rs`에 T010 뒤에만 containment recovery anchor schema/retention, cancellation-safe child ownership, `UnpublishedProcessLease`, no-ack resolver, quarantined readiness와 terminal arbitration을 구현한다
 
-**Checkpoint**: feasibility evidence와 CAS/outbox/lease foundation이 모두 실제 non-zero tests로 통과했다. 이제 production consumer migration을 시작할 수 있다.
+**Checkpoint**: T011–T015의 platform-neutral reducer/publication/outbox는 설계 재검토 뒤 T010과 독립 실행할 수 있다. T016 containment/lease와 production consumer migration은 T010 실제 증거 전 시작하지 않는다.
 
 ---
 
@@ -168,8 +168,8 @@ description: "독립 Workbench 서버의 모든 자식 프로세스를 공통 �
 ### Phase Dependencies
 
 - **Setup (Phase 1)**: 즉시 시작 가능
-- **Foundational (Phase 2)**: Setup 뒤 실행. T005/T006 red fixture → T007/T008 spike → T009 actual target jobs → T010 evidence 판정 순서다
-- **Hard gate**: T010 prerequisite 판정 전에는 T011 이후와 production consumer 파일을 변경하지 않는다
+- **Foundational (Phase 2)**: Setup 뒤 실행. T005/T006 fixture → T007/T008 spike → T009 actual target jobs → T010 evidence 판정 순서다. OS process를 생성·adopt하지 않는 T011–T015는 설계 재검토 반영 뒤 독립 진행할 수 있다
+- **Hard gate**: T010 prerequisite 판정 전에는 T016 containment/lease, platform launcher와 production consumer 파일을 변경하지 않는다
 - **User Story 1 (Phase 3)**: foundation 완료 뒤 시작
 - **User Story 2 (Phase 4)**: foundation 완료 뒤 시작하며 US1의 registry/publication core를 재사용한다
 - **User Story 3 (Phase 5)**: foundation 완료 뒤 시작하고 ACP 연결 T040은 T023 뒤다

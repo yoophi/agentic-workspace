@@ -60,13 +60,14 @@ CLASSIFICATION = {
 
 def without_cfg_test_items(source: str) -> str:
     """Remove brace-delimited items carrying a direct `#[cfg(test)]` attribute."""
+    masked = mask_rust_comments_and_literals(source)
     output: list[str] = []
     cursor = 0
     marker = re.compile(r"(?m)^\s*#\[cfg\(test\)\]\s*$")
     while match := marker.search(source, cursor):
         output.append(source[cursor : match.start()])
-        opening = source.find("{", match.end())
-        semicolon = source.find(";", match.end())
+        opening = masked.find("{", match.end())
+        semicolon = masked.find(";", match.end())
         if semicolon >= 0 and (opening < 0 or semicolon < opening):
             cursor = semicolon + 1
             continue
@@ -86,6 +87,56 @@ def without_cfg_test_items(source: str) -> str:
         cursor = closing
     output.append(source[cursor:])
     return "".join(output)
+
+
+def mask_rust_comments_and_literals(source: str) -> str:
+    """Preserve offsets while hiding delimiters that are not Rust syntax."""
+    chars = list(source)
+    i = 0
+    while i < len(source):
+        if source.startswith("//", i):
+            end = source.find("\n", i + 2)
+            end = len(source) if end < 0 else end
+            chars[i:end] = " " * (end - i)
+            i = end
+        elif source.startswith("/*", i):
+            start = i
+            depth = 1
+            i += 2
+            while i < len(source) and depth:
+                if source.startswith("/*", i):
+                    depth += 1
+                    i += 2
+                elif source.startswith("*/", i):
+                    depth -= 1
+                    i += 2
+                else:
+                    i += 1
+            chars[start:i] = " " * (i - start)
+        elif source[i] == '"':
+            start = i
+            i += 1
+            while i < len(source):
+                if source[i] == "\\":
+                    i += 2
+                elif source[i] == '"':
+                    i += 1
+                    break
+                else:
+                    i += 1
+            chars[start:i] = " " * (i - start)
+        else:
+            raw = re.match(r"(?:br|r)(?P<hashes>#{0,255})\"", source[i:])
+            if raw:
+                start = i
+                hashes = raw.group("hashes")
+                i += raw.end()
+                close = source.find('"' + hashes, i)
+                i = len(source) if close < 0 else close + 1 + len(hashes)
+                chars[start:i] = " " * (i - start)
+            else:
+                i += 1
+    return "".join(chars)
 
 
 def command_creation_count(source: str) -> int:
