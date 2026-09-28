@@ -48,8 +48,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 | **gate-9** | **`a94372e`** | **전부 0**(Codex 6차 수정 뒤): fmt, clippy `-D warnings`, cargo 950 passed/0 failed/7 ignored/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 | **gate-10** | **`07d60c7`** | **전부 0**(Codex 7차 수정 뒤): fmt, clippy `-D warnings`, cargo 960 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 646·기타 전부), build, workbench-client itest 7, AW itest 4(실제 host 패널 교환 2 포함) |
+| **gate-11** | **`17bbd11`** | **전부 0**(Codex 8차 수정 뒤): fmt, clippy `-D warnings`, cargo 968 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 655·기타 전부), build, workbench-client itest 7, AW itest 9 |
 
-- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-9는 Codex 7차 수정 전 코드다. **최신 게이트는 gate-10(`07d60c7`)이다.** gate-10 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-10은 Codex 8차 수정 전 코드다. **최신 게이트는 gate-11(`17bbd11`)이다.** gate-11 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -251,6 +252,8 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - OCR 7차 Low(discard 응답 유실 뒤 복원 항목의 conflict 거절)는 그대로 유지한다.
   - V1–V3 추가: 실행까지 간(`Active`) 노드가 재시작 뒤 run이 없으면 기존대로 task를 `Blocked(runtimeLost, 재시도 가능)`로 둔다(복구는 재시도 명령, `alreadyAssigned` 고착 없음). 이 경우의 전용 시험은 없다. 되돌리기 재시도에는 backoff가 없다. 오류 주입은 런타임·ledger test-hook으로 했고 실제 SQLite 장애가 아니다.
 - 8차 수정으로 코드가 바뀌었으므로 T052는 gate-11 전까지 다시 미완료로 둔다.
+- gate-11(`17bbd11`)이 8차 수정을 모두 포함해 전부 통과했다.
+- **OCR 8차 재리뷰**(`82eb3ff..17bbd11`): High·Medium 없음. 확인: scheduler 시도별 보유(자기 보유만 놓음, 실행 중 자리 보존, 옛 보유가 새 시도에 영향 없음 — 단위 시험 3), unknown 활동의 합계 +1과 `null` 표시, tick 재시도, 패널의 unsettled 취소 분기(notApplied·unknown이면 상태 보존, unknown은 복구된 run 이벤트로 판단, 끝 이벤트가 먼저 온 경우 포함). Low(보고만): `unsettledCall`은 transport의 공유 메시지 상수를 문자열로 비교해 분류한다(같은 상수를 쓰므로 일치하지만 결합이 느슨하다); 대기열 승격으로 생긴 보유 없는 자리가 배정 없이 남는 것은 기존 동작.
 
 ### 최종 HEAD 재검토
 
