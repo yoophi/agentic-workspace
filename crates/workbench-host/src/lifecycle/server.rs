@@ -141,6 +141,11 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
         http.base_url(),
         &options.server_version,
     );
+    // 신호 처리기를 안내 파일보다 먼저 건다: 안내 파일을 쓴 뒤 기본 처리로 죽으면 남은 안내 파일이 생긴다(044 OCR 구현 리뷰).
+    let mut signals = {
+        let _enter = runtime.enter();
+        StopSignals::install()?
+    };
     write_descriptor(&server_dir, &descriptor)?;
     log.line(format!(
         "ready: {}",
@@ -152,13 +157,23 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
         idle_timeout: options.idle_timeout,
         ..MonitorOptions::default()
     };
-    runtime.block_on(async {
+    let finish = runtime.block_on(async {
         tokio::select! {
             () = run_until_stopped(Arc::clone(&control), monitor) => {
                 log.line(format!("stopping: {:?}", control.work_gate().state()));
-                host.shutdown().await;
+                // 정상 정지 중에도 신호는 force다(R10): 받은 호출 drain이 멈춰도 상한 안에 끝난다.
+                finish_shutdown(
+                    host.shutdown(),
+                    signals.recv(),
+                    async {
+                        control.force_stop().await;
+                    },
+                    SIGNAL_STOP_CAP,
+                    |signal| log.line(format!("{signal} during shutdown: force stop (cap {}s)", SIGNAL_STOP_CAP.as_secs())),
+                )
+                .await
             }
-            signal = wait_for_stop_signal() => {
+            signal = signals.recv() => {
                 // SIGTERM·SIGINT = force(R10): 새 작업 차단 → 작업대 닫기(run 취소) → stopping → 받은 호출 drain. 상한을 넘으면
                 // 남은 호출을 버리고 끝낸다.
                 log.line(format!("{signal}: force stop (cap {}s)", SIGNAL_STOP_CAP.as_secs()));
@@ -167,15 +182,93 @@ fn run(options: ServeOptions) -> anyhow::Result<i32> {
                     host.shutdown().await;
                 };
                 if tokio::time::timeout(SIGNAL_STOP_CAP, forced).await.is_err() {
-                    control.work_gate().force_stop();
-                    log.line("warning: force stop exceeded its cap; abandoning the remaining calls");
+                    Finish::Abandoned
+                } else {
+                    Finish::Forced
                 }
             }
         }
     });
+    if finish == Finish::Abandoned {
+        control.work_gate().force_stop();
+        log.line("warning: stop exceeded its cap; abandoning the remaining calls");
+    }
+    // 단일 writer(R4): 소유 잠금은 런타임·저장소를 모두 내린 **뒤**에만 푼다. 먼저 풀면 남은 작업이 쓰는 동안 다음 서버가 같은
+    // 데이터 디렉터리를 연다(044 OCR 구현 리뷰).
+    drop(host);
+    let teardown = std::time::Instant::now();
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_CAP);
+    let abandoned = finish == Finish::Abandoned || teardown.elapsed() >= RUNTIME_SHUTDOWN_CAP;
     remove_descriptor_if(&server_dir, identity.instance_id())?;
+    if abandoned {
+        // 남은 blocking 작업이 아직 돌 수 있다 — 잠금을 쥔 채 프로세스를 끝내 그 스레드와 함께 잠금을 OS가 풀게 한다.
+        log.line(
+            "warning: leftover work after the runtime cap; exiting while holding the owner lock",
+        );
+        std::process::exit(0);
+    }
     drop(owner_lock);
     Ok(0)
+}
+
+/// 런타임 해체 상한. 넘으면 남은 작업을 버리고 잠금을 쥔 채 끝낸다.
+const RUNTIME_SHUTDOWN_CAP: Duration = Duration::from_secs(10);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Finish {
+    Graceful,
+    Forced,
+    Abandoned,
+}
+
+/// 진행 중인 정상 정지(`shutdown`)를 신호와 경주시킨다. 신호가 오면 `force`를 한 뒤 **같은** 정지를 상한 안에서 마저
+/// 기다린다(새로 시작하지 않음). 상한을 넘으면 `Abandoned`.
+async fn finish_shutdown(
+    shutdown: impl std::future::Future<Output = ()>,
+    signal: impl std::future::Future<Output = &'static str>,
+    force: impl std::future::Future<Output = ()>,
+    cap: Duration,
+    on_signal: impl FnOnce(&'static str),
+) -> Finish {
+    tokio::pin!(shutdown);
+    tokio::select! {
+        () = &mut shutdown => Finish::Graceful,
+        name = signal => {
+            on_signal(name);
+            let forced = async {
+                force.await;
+                (&mut shutdown).await;
+            };
+            if tokio::time::timeout(cap, forced).await.is_err() {
+                Finish::Abandoned
+            } else {
+                Finish::Forced
+            }
+        }
+    }
+}
+
+/// `SIGTERM`·`SIGINT` 수신기. 런타임 문맥에서 한 번 건다.
+struct StopSignals {
+    terminate: tokio::signal::unix::Signal,
+    interrupt: tokio::signal::unix::Signal,
+}
+
+impl StopSignals {
+    fn install() -> std::io::Result<Self> {
+        use tokio::signal::unix::{SignalKind, signal};
+        Ok(Self {
+            terminate: signal(SignalKind::terminate())?,
+            interrupt: signal(SignalKind::interrupt())?,
+        })
+    }
+
+    async fn recv(&mut self) -> &'static str {
+        tokio::select! {
+            _ = self.terminate.recv() => "SIGTERM",
+            _ = self.interrupt.recv() => "SIGINT",
+        }
+    }
 }
 
 /// 모르는(더 새) 저장 형식이면 데이터를 건드리지 않고 거절한다.
@@ -197,12 +290,70 @@ fn unsupported_schema(data_dir: &Path) -> anyhow::Result<Option<i32>> {
     }
 }
 
-async fn wait_for_stop_signal() -> &'static str {
-    use tokio::signal::unix::{SignalKind, signal};
-    let mut terminate = signal(SignalKind::terminate()).expect("SIGTERM handler");
-    let mut interrupt = signal(SignalKind::interrupt()).expect("SIGINT handler");
-    tokio::select! {
-        _ = terminate.recv() => "SIGTERM",
-        _ = interrupt.recv() => "SIGINT",
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    use super::*;
+
+    /// 정상 정지 중 신호가 오면 force가 진행 중 정지를 풀어 상한 안에 끝난다(signal 뒤 무시되던 문제, 044 OCR 구현 리뷰).
+    #[tokio::test(start_paused = true)]
+    async fn a_signal_during_a_stuck_graceful_shutdown_forces_it_within_the_cap() {
+        let released = Arc::new(tokio::sync::Notify::new());
+        let forced = Arc::new(AtomicBool::new(false));
+        let shutdown = {
+            let released = Arc::clone(&released);
+            async move { released.notified().await }
+        };
+        let force = {
+            let (released, forced) = (Arc::clone(&released), Arc::clone(&forced));
+            async move {
+                forced.store(true, Ordering::SeqCst);
+                released.notify_one();
+            }
+        };
+        let mut seen = None;
+        let finish = finish_shutdown(
+            shutdown,
+            async { "SIGTERM" },
+            force,
+            Duration::from_secs(30),
+            |signal| seen = Some(signal),
+        )
+        .await;
+        assert_eq!(finish, Finish::Forced);
+        assert!(forced.load(Ordering::SeqCst));
+        assert_eq!(seen, Some("SIGTERM"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_shutdown_that_ignores_the_force_is_abandoned_at_the_cap() {
+        let started = tokio::time::Instant::now();
+        let finish = finish_shutdown(
+            std::future::pending::<()>(),
+            async { "SIGINT" },
+            async {},
+            Duration::from_secs(30),
+            |_| {},
+        )
+        .await;
+        assert_eq!(finish, Finish::Abandoned);
+        assert_eq!(started.elapsed(), Duration::from_secs(30));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn without_a_signal_the_graceful_shutdown_completes() {
+        let finish = finish_shutdown(
+            async {},
+            std::future::pending::<&'static str>(),
+            async { panic!("no force without a signal") },
+            Duration::from_secs(30),
+            |_| panic!("no signal"),
+        )
+        .await;
+        assert_eq!(finish, Finish::Graceful);
     }
 }
