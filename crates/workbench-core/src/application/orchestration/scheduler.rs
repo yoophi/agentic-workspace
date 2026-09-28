@@ -184,17 +184,37 @@ impl OrchestrationScheduler {
         active_task_ids: &[String],
         ready_task_ids: &[String],
     ) -> Result<(), OrchestrationError> {
+        self.reconcile_preserving(active_task_ids, ready_task_ids, &[])
+    }
+
+    /// 복구의 재구성(Codex r10): 저장소가 본 실행 중 task(`active_task_ids`)와 준비 task(`ready_task_ids`)로 자리를 다시 짓되,
+    /// **진행 중인 기동 시도의 보유는 보존**한다 — 보유를 지우면 그 시도의 정리(`release_hold`)가 자리를 찾지 못해 자리가
+    /// 남고(누수), 성공 인계(`transfer`)가 자리를 찾지 못해 실행 중 run이 자리 없이 돈다(한도 초과). `launching_task_ids`
+    /// (이 프로세스에서 기동 중이거나 되돌리는 중인 task)는 저장소에 `Running`으로 보여도 성공 인계 전이라 실행 중으로 확정하지
+    /// 않는다(그 시도의 `transfer`가 확정한다). 보유를 쥔 자리는 대기열에 넣지 않는다.
+    pub fn reconcile_preserving(
+        &self,
+        active_task_ids: &[String],
+        ready_task_ids: &[String],
+        launching_task_ids: &[String],
+    ) -> Result<(), OrchestrationError> {
         let mut state = self.lock()?;
-        state.active.clear();
+        let mut previous = std::mem::take(&mut state.active);
         state.queued.clear();
         for task_id in active_task_ids {
-            state.active.insert(
-                task_id.clone(),
-                Slot {
-                    holds: HashSet::new(),
-                    running: true,
-                },
-            );
+            let mut slot = previous.remove(task_id).unwrap_or_default();
+            if !launching_task_ids.contains(task_id) {
+                slot.running = true;
+            }
+            state.active.insert(task_id.clone(), slot);
+        }
+        // 저장소가 실행 중으로 보지 않는 task라도 진행 중 시도의 보유가 있으면 자리를 남긴다(실행 중 표시는 내린다 — 그 시도가
+        // 성공하면 `transfer`가 다시 세운다).
+        for (task_id, mut slot) in previous {
+            if !slot.holds.is_empty() {
+                slot.running = false;
+                state.active.insert(task_id, slot);
+            }
         }
         for task_id in ready_task_ids {
             if !state.active.contains_key(task_id) && !state.queued.contains(task_id) {
@@ -313,6 +333,43 @@ mod tests {
         assert_eq!(scheduler.hold_count("task-a"), 0);
         assert_eq!(scheduler.active_count().unwrap(), 1, "running slot remains");
         assert_eq!(scheduler.release("task-a").unwrap(), Some("task-b".into()));
+    }
+
+    /// Codex r10: 복구의 재구성은 진행 중 시도의 보유를 지우지 않는다. 성공 인계 전인(기동 중) task는 저장소가 실행 중으로
+    /// 보여도 실행 중 자리로 확정하지 않으므로, 그 시도가 끝나 보유를 놓으면 자리가 빈다.
+    #[test]
+    fn a_recovery_keeps_an_in_flight_hold_and_does_not_confirm_it_running() {
+        let scheduler = OrchestrationScheduler::new(1);
+        let HoldOutcome::Acquired(hold) = scheduler.acquire_hold("task-a").unwrap() else {
+            panic!("acquires")
+        };
+        scheduler
+            .reconcile_preserving(&["task-a".into()], &[], &["task-a".into()])
+            .unwrap();
+        assert_eq!(scheduler.hold_count("task-a"), 1);
+        assert_eq!(scheduler.release_hold(hold), None);
+        assert_eq!(scheduler.active_count().unwrap(), 0, "no leaked slot");
+    }
+
+    /// 저장소가 준비(Ready)로 보는 task라도 진행 중 시도의 보유가 있으면 자리를 남기고 대기열에 넣지 않는다 — 그 시도가 성공하면
+    /// `transfer`가 실행 중 자리로 확정하고 한도가 지켜진다.
+    #[test]
+    fn a_recovery_keeps_the_slot_of_a_ready_task_with_an_in_flight_hold() {
+        let scheduler = OrchestrationScheduler::new(1);
+        let HoldOutcome::Acquired(hold) = scheduler.acquire_hold("task-a").unwrap() else {
+            panic!("acquires")
+        };
+        scheduler
+            .reconcile_preserving(&[], &["task-a".into()], &["task-a".into()])
+            .unwrap();
+        assert_eq!(scheduler.queued_count().unwrap(), 0);
+        assert_eq!(scheduler.active_count().unwrap(), 1);
+        scheduler.transfer(hold);
+        assert_eq!(
+            scheduler.acquire_hold("task-b").unwrap(),
+            HoldOutcome::Queued { position: 1 },
+            "the limit holds after the transfer"
+        );
     }
 
     /// 실행 중 자리(복구·성공한 기동)는 뒤늦은 시도가 보유를 얻었다 놓아도 비지 않는다.

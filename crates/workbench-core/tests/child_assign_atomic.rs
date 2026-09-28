@@ -1341,3 +1341,170 @@ async fn an_unstored_rollback_survives_a_bench_close_and_finishes_by_workspace()
     let launched = format!("launch:{run_id}");
     h.engine.wait_applied(|label| label == launched, WAIT).await;
 }
+
+/// 작업 영역 복구(`orchestration.recover`)를 한 번 부른다(상한 있음).
+async fn recover(h: &BenchHarness, bench: &str) {
+    tokio::time::timeout(
+        WAIT,
+        h.call(
+            &desktop(),
+            OperationId::OrchestrationRecover,
+            json!({ "benchId": bench }),
+        ),
+    )
+    .await
+    .expect("the recovery answers")
+    .expect("the recovery succeeds");
+}
+
+/// 동시 한도(1)가 비었다: 새 과제가 대기열에 들지 않고 곧바로 자리를 얻는다.
+async fn assert_capacity_is_free(h: &BenchHarness, key: &str) {
+    let extra = create_extra(h, key).await;
+    assert_ne!(
+        extra["queued"], true,
+        "{key}: a leaked slot keeps the concurrency limit full: {extra}"
+    );
+}
+
+/// Codex r10 (medium): 바인딩 커밋 **직후**·결과 수신 전에 복구가 돌면 task는 `Running`, run은 살아 있다. 복구가 그 자리를
+/// 실행 중 자리로 확정하면서 진행 중 기동 A의 보유를 지우면, 이어서 A가 abort돼 정리해도 자리가 남는다(한도 1이면 실행
+/// 중 자식이 없는데 다른 task가 계속 대기). 복구는 진행 중 기동의 보유를 보존하고 성공 인계 전에는 실행 중으로 확정하지
+/// 않는다 → A의 정리가 끝나면 자리가 비고 새 과제가 곧바로 자리를 얻는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovery_between_the_bind_commit_and_an_abort_does_not_leak_the_slot() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut pause = pause_store_at(&h, StorePoint::BindAfterCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::BindAfterCommit).await;
+    recover(&h, &bench).await;
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        1,
+        "the recovery keeps the in-flight launch's hold"
+    );
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(
+        &h,
+        &bench,
+        &task_id,
+        baseline,
+        "ready",
+        "bind-recover-abort",
+    )
+    .await;
+    assert_capacity_is_free(&h, "extra-after-bind-recover-abort").await;
+}
+
+/// Codex r10: 노드 예약 커밋 직후(task는 `Ready`, 노드는 `Starting`) 복구가 돌고 A가 abort된다. 복구는 A의 보유를 지우고 task를
+/// 대기열에 넣지 않는다(보유를 쥔 자리가 남는다) → A의 정리가 끝나면 자리가 비고 새 과제가 곧바로 자리를 얻는다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovery_between_the_reservation_and_an_abort_keeps_the_hold_then_frees_the_slot() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut pause = pause_store_at(&h, StorePoint::ReserveAfterCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::ReserveAfterCommit).await;
+    recover(&h, &bench).await;
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        1,
+        "the recovery keeps the in-flight launch's hold"
+    );
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the in-flight launch still counts against the limit"
+    );
+    assigning.abort();
+    assert!(assigning.await.unwrap_err().is_cancelled());
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    assert_launch_undone(
+        &h,
+        &bench,
+        &task_id,
+        baseline,
+        "ready",
+        "reserve-recover-abort",
+    )
+    .await;
+    assert_capacity_is_free(&h, "extra-after-reserve-recover-abort").await;
+}
+
+/// Codex r10: 노드 예약 커밋 직후 복구가 돌고 A가 **성공**한다. 복구가 A의 보유를 지우면 A의 성공 인계(`transfer`)가 자리를
+/// 찾지 못해 실행 중 run이 자리 없이 돈다(한도 초과). 보유가 보존되면 A의 run이 자리를 쥐고 한도(1)가 지켜진다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovery_crossing_a_successful_launch_keeps_the_concurrency_limit() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut pause = pause_store_at(&h, StorePoint::ReserveAfterCommit);
+    let assigning = spawn_launch(&h, &bench, &task_id);
+    pause.wait_for(StorePoint::ReserveAfterCommit).await;
+    recover(&h, &bench).await;
+    pause.release.send(()).unwrap();
+    h.rt.runtime.orchestration().set_store_probe(None);
+    tokio::time::timeout(WAIT, assigning)
+        .await
+        .expect("the launch finishes")
+        .unwrap()
+        .expect("the launch succeeds");
+    let run_id = node_of(&session(&h, &bench).await, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the launched run is bound")
+        .to_owned();
+    let launched = format!("launch:{run_id}");
+    h.engine.wait_applied(|label| label == launched, WAIT).await;
+    assert_eq!(h.engine.run_count(), baseline.runs + 1);
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "the launched run owns the slot"
+    );
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        0,
+        "the hold became the running slot"
+    );
+    let extra = create_extra(&h, "extra-after-recover-success").await;
+    assert_eq!(
+        extra["queued"], true,
+        "the concurrency limit (1) holds while the launched run runs: {extra}"
+    );
+}
+
+/// Codex r10: 저장되지 않은 되돌리기가 남은 동안 복구가 돌아도 그 정리의 보유는 남는다(정리가 끝날 때까지 자리를 쓴다). 재시도가
+/// 정리를 끝내면 자리가 비고, 재배정이 실제 run을 기동한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_recovery_during_an_unstored_rollback_keeps_its_hold_until_the_retry_finishes() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let orchestration = h.rt.runtime.orchestration();
+    let scheduler = orchestration.scheduler().clone();
+    leave_an_unstored_rollback(&h, &bench, &task_id).await;
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        1,
+        "the pending rollback holds the slot"
+    );
+    recover(&h, &bench).await;
+    assert_eq!(
+        scheduler.hold_count(&task_id),
+        1,
+        "the recovery keeps the pending rollback's hold"
+    );
+    tokio::time::timeout(WAIT, orchestration.retry_pending_reverts())
+        .await
+        .expect("the retry finishes");
+    assert!(
+        orchestration.pending_revert_tasks().is_empty(),
+        "the rollback is stored"
+    );
+    eventually("the slot is free after the rollback", || async {
+        scheduler.active_count().unwrap() == 0
+    })
+    .await;
+    assert_reassign_starts_a_real_run(&h, &bench, &task_id, baseline, "recover-pending").await;
+}

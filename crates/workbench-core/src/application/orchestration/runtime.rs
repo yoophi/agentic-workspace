@@ -460,6 +460,16 @@ impl OrchestrationRuntime {
         self.work_gate().note_activity_change();
     }
 
+    /// 이 프로세스에서 기동 중이거나 되돌리는 중(저장되지 않은 되돌리기 포함)인 task(Codex r10 — 복구가 그 보유를 보존한다).
+    fn launching_task_ids(&self) -> Vec<String> {
+        self.launch_tokens
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     /// 진행 중인(되돌리는 중이 아닌) 기동의 예정 run id.
     fn in_flight_launch_runs(&self) -> Vec<String> {
         self.launch_tokens
@@ -1472,8 +1482,13 @@ impl OrchestrationRuntime {
             .filter(|task| task.status == TaskStatus::Ready)
             .map(|task| task.id.clone())
             .collect::<Vec<_>>();
-        self.scheduler
-            .reconcile(&active_task_ids, &ready_task_ids)?;
+        // 진행 중 기동·되돌리기의 보유를 보존하고, 성공 인계 전인 기동은 실행 중으로 확정하지 않는다(Codex r10).
+        let launching_task_ids = self.launching_task_ids();
+        self.scheduler.reconcile_preserving(
+            &active_task_ids,
+            &ready_task_ids,
+            &launching_task_ids,
+        )?;
         let commands = self.command_service();
         let bench = bench_id.to_owned();
         tokio::task::spawn_blocking(move || commands.reconcile_pending(&bench))
