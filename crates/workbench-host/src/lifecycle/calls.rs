@@ -4,7 +4,9 @@
 
 use serde_json::{Value, json};
 
-use super::client::request_with_origin;
+use std::time::Instant;
+
+use super::client::request_by;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallError {
@@ -38,6 +40,19 @@ pub fn call(
     input: Value,
     command: bool,
 ) -> Result<Value, CallError> {
+    call_by(base_url, bearer, origin, operation, input, command, None)
+}
+
+/// [`call`]과 같되 요청이 `deadline`(있으면) 전에 끝난다(요청 자체 상한 `REQUEST_TIMEOUT`과 더 이른 쪽).
+pub fn call_by(
+    base_url: &str,
+    bearer: &str,
+    origin: Option<&str>,
+    operation: &str,
+    input: Value,
+    command: bool,
+    deadline: Option<Instant>,
+) -> Result<Value, CallError> {
     let mut envelope = json!({
         "protocolVersion": workbench_protocol::PROTOCOL_VERSION,
         "operation": operation,
@@ -47,13 +62,14 @@ pub fn call(
     if command {
         envelope["idempotencyKey"] = json!(format!("idem_{}", uuid::Uuid::new_v4().simple()));
     }
-    let (status, body) = request_with_origin(
+    let (status, body) = request_by(
         base_url,
         "POST",
         workbench_protocol::openapi::CALLS_PATH,
         Some(&envelope),
         Some(bearer),
         origin,
+        deadline,
     )
     .map_err(CallError::Transport)?;
     if status == 200 && body["kind"] == "complete" {

@@ -19,7 +19,7 @@ use std::{
 };
 
 use super::{
-    client::{VerifyError, require_serving, verify},
+    client::{VerifyError, require_serving_by, verify_by},
     descriptor::{Descriptor, read_descriptor, remove_stale_descriptor},
     lock::{ensure_server_dir, open_owner_only, startup_lock, try_owner_lock},
 };
@@ -79,10 +79,14 @@ impl From<std::io::Error> for EnsureError {
     }
 }
 
-fn verified_descriptor(server_dir: &Path) -> Result<Descriptor, Option<VerifyError>> {
+/// 안내 파일의 서버를 확인한다. 모든 요청이 `deadline` 전에 끝난다(Codex r9).
+fn verified_descriptor(
+    server_dir: &Path,
+    deadline: Instant,
+) -> Result<Descriptor, Option<VerifyError>> {
     match read_descriptor(server_dir) {
-        Ok(Some(descriptor)) => verify(&descriptor)
-            .and_then(|_| require_serving(&descriptor))
+        Ok(Some(descriptor)) => verify_by(&descriptor, Some(deadline))
+            .and_then(|_| require_serving_by(&descriptor, Some(deadline)))
             .map(|_| descriptor)
             .map_err(Some),
         _ => Err(None),
@@ -97,13 +101,15 @@ pub fn ensure(
 ) -> Result<Descriptor, EnsureError> {
     let server_dir = ensure_server_dir(data_dir)?;
     let _startup = startup_lock(data_dir, options.startup_lock_timeout)?;
-    if let Ok(descriptor) = verified_descriptor(&server_dir) {
+    // 전체 deadline은 최초 확인 **전에** 시작한다(Codex r9): 안내 파일의 끝점이 끝없이 조금씩 보내도 확인이 이 안에서 끝나고
+    // `startup.lock`을 쥔 채 멈추지 않는다.
+    let deadline = Instant::now() + options.ready_timeout;
+    if let Ok(descriptor) = verified_descriptor(&server_dir, deadline) {
         return Ok(descriptor);
     }
     let mut spawned = spawn_if_free(data_dir, &server_dir, server_exe)?;
-    let deadline = Instant::now() + options.ready_timeout;
     loop {
-        let last = match verified_descriptor(&server_dir) {
+        let last = match verified_descriptor(&server_dir, deadline) {
             Ok(descriptor) => return Ok(descriptor),
             Err(error) => error,
         };
