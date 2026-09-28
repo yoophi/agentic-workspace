@@ -22,7 +22,7 @@ use tokio::sync::{Mutex, Notify};
 use workbench_host::lifecycle::{
     calls::{CallError, call},
     client::verify,
-    descriptor::{Descriptor, read_descriptor},
+    descriptor::{Descriptor, descriptor_path, read_descriptor},
     ensure::{EnsureOptions, ensure},
     lock::server_dir,
 };
@@ -96,6 +96,14 @@ enum RenewalStep {
     Retry,
     /// 서버가 임대를 모른다(TTL 만료 등): 새로 잡는다.
     Reacquire,
+}
+
+/// 안내 파일이 정말 없는가(확실한 "없음"). 메타데이터조차 읽지 못하면 없다고 단정하지 않는다.
+fn descriptor_is_absent(server_dir: &std::path::Path) -> bool {
+    matches!(
+        std::fs::symlink_metadata(descriptor_path(server_dir)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound
+    )
 }
 
 fn renewal_step(result: &Result<Value, CallError>) -> RenewalStep {
@@ -286,14 +294,19 @@ impl ExternalServer {
         let data = self.data_dir.clone();
         let instance = instance_id.to_owned();
         tokio::task::spawn_blocking(move || {
-            let Some(descriptor) = read_descriptor(&dir).ok().flatten() else {
-                return false;
-            };
-            if descriptor.instance_id != instance {
-                return false;
-            }
-            if verify(&descriptor).is_ok() {
-                return true;
+            // 읽기 실패(권한·EMFILE·I/O)나 읽었지만 해석할 수 없는 파일은 "없음"의 증거가 아니다(Codex r6): 파일이 정말
+            // 없을 때만 확실하고, 나머지는 소유 잠금으로 판단한다.
+            match read_descriptor(&dir) {
+                Ok(Some(descriptor)) => {
+                    if descriptor.instance_id != instance {
+                        return false;
+                    }
+                    if verify(&descriptor).is_ok() {
+                        return true;
+                    }
+                }
+                Ok(None) if descriptor_is_absent(&dir) => return false,
+                Ok(None) | Err(_) => {}
             }
             // 잠금을 잡을 수 있으면 서버가 없다(잡은 잠금은 곧바로 놓는다).
             !matches!(
@@ -1087,6 +1100,49 @@ mod tests {
                 "a transient failure is retried"
             );
             assert_eq!(client.current_instance().await, Some(instance));
+        });
+    }
+
+    /// Codex r6(apps high): 안내 파일을 **읽지 못함**(권한·EMFILE·I/O 오류)은 서버 소멸의 증거가 아니다. 살아 있는 서버(소유
+    /// 잠금 보유)가 잠시 응답하지 않는데 안내 파일 읽기도 실패하면, 갱신과 토큰 재발급 경로 모두 같은 인스턴스를 유지하고
+    /// `ensure`로 가지 않는다. 주입: 안내 파일 권한을 000으로 바꿔 실제 OS 읽기 오류(EACCES)를 낸다.
+    #[test]
+    fn a_descriptor_read_error_on_a_live_server_keeps_the_connection() {
+        use std::os::unix::fs::PermissionsExt;
+        let server = running_server();
+        let data = server.dir.path().join("data");
+        let client = ExternalServer::new(
+            data.clone(),
+            PathBuf::from("/nonexistent/agentic-workbench-server"),
+        );
+        let descriptor_file = server_dir(&data).join("server.json");
+        server.runtime.block_on(async {
+            let instance = client.connect().await.unwrap().instance_id;
+            let _owner = workbench_host::lifecycle::lock::try_owner_lock(&data)
+                .unwrap()
+                .expect("owner lock");
+            server.host.shutdown().await;
+            std::fs::set_permissions(&descriptor_file, std::fs::Permissions::from_mode(0o000))
+                .unwrap();
+            assert!(
+                std::fs::read(&descriptor_file).is_err(),
+                "the injected read error is real"
+            );
+            let renewed = client.renew_once(&instance).await;
+            let issued = client.issue_window_token("session-r", "i1", ORIGIN).await;
+            std::fs::set_permissions(&descriptor_file, std::fs::Permissions::from_mode(0o600))
+                .unwrap();
+            assert_eq!(renewed, Some(RenewalStep::Retry), "renewal keeps retrying");
+            let error = issued.expect_err("the endpoint is down");
+            assert!(
+                !error.contains("agentic-workbench-server") && !error.contains("No such file"),
+                "the token path does not fall back to ensure: {error}"
+            );
+            assert_eq!(
+                client.current_instance().await,
+                Some(instance),
+                "the live instance is kept"
+            );
         });
     }
 
