@@ -48,6 +48,8 @@ case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) log "server-verified=yes"; r
 if [ -z "$RUN" ] || [ -z "$SPID" ]; then log "abort: no run or server"; kill_exact "$R/kills.txt" "$APID"; exit 3; fi
 [ "${TOKEN:-}" = 1 ] && log "token-before-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 SERVER_LINES_BEFORE=$(wc -l < "$DATA/workbench/server/server.log")
+# 종료 동작을 실제로 보냈는가(보낸 명령의 종료 코드 0). PID 소멸만으로는 그 경로의 증거가 아니다(Codex r7 docs).
+SENT=no
 case "$QUIT" in
   c) # 키 입력은 앞 프로세스로 간다 — 이 앱이 실제로 앞에 올 때까지 조건 대기(상한 10초) 뒤 보낸다.
      front=no; for i in $(seq 1 40); do
@@ -61,7 +63,7 @@ case "$QUIT" in
      else
        # 보내기 직전 한 번 더 확인한다(그 사이 앞 창이 바뀌면 보내지 않음).
        if [ "$(osascript -e 'tell application "System Events" to get unix id of first process whose frontmost is true' 2>/dev/null)" = "$APID" ]; then
-         osascript -e 'tell application "System Events" to keystroke "q" using command down' >> "$R/quit.txt" 2>&1
+         osascript -e 'tell application "System Events" to keystroke "q" using command down' >> "$R/quit.txt" 2>&1 && SENT=yes
        else
          log "cmd-q-not-sent: frontmost changed just before sending (attempt invalid)"
        fi
@@ -79,7 +81,7 @@ case "$QUIT" in
          [ "$(osascript -e "tell application \"System Events\" to tell process \"Dock\" to exists menu 1 of UI element \"$PRODUCT\" of list 1" 2>/dev/null)" = true ] && { menu=yes; break; }; sleep 0.25
        done; log "dock-menu-open=$menu"
        if [ "$menu" = yes ]; then
-         osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to click menu item \"Quit\" of menu 1" >> "$R/quit.txt" 2>&1
+         osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to click menu item \"Quit\" of menu 1" >> "$R/quit.txt" 2>&1 && SENT=yes
        else
          log "dock-quit-not-sent: the Dock menu did not open (attempt invalid)"
        fi
@@ -88,18 +90,21 @@ case "$QUIT" in
      same=$("$SMOKE/apps-named" --bundle "$BID" 2>/dev/null)
      log "bundle-pids=${same:-none}"
      if [ "$same" = "$APID" ]; then
-       osascript -e "tell application id \"$BID\" to quit" >> "$R/quit.txt" 2>&1
+       osascript -e "tell application id \"$BID\" to quit" >> "$R/quit.txt" 2>&1 && SENT=yes
      else
        log "applescript-quit-not-sent: the bundle id does not map to exactly this app (attempt invalid)"
      fi ;;
   g) # SIGTERM도 기록한 신원(시작 시각·명령줄)이 같을 때만 보낸다. 대상이 사라졌거나 신원이 다르면 보내지 않고 무효.
-     if ! kill_exact "$R/kills.txt" "$APID"; then log "sigterm-not-sent: the target identity is gone or changed (attempt invalid)"; fi ;;
+     if send_sigterm "$R/kills.txt" "$APID"; then SENT=yes; else log "sigterm-not-sent: the target identity is gone or changed (attempt invalid)"; fi ;;
   *) log "unknown path"; exit 4 ;;
 esac
 gone=no
 for i in $(seq 1 60); do kill -0 "$APID" 2>/dev/null || { gone=yes; break; }; sleep 0.5; done
 log "app-gone=$gone"
-if [ "$gone" != yes ]; then log "app still running after quit path; stopping exact pid"; log "path-exercised=no (this run is invalid evidence for path $QUIT)"; kill_exact "$R/kills.txt" "$APID"; else log "path-exercised=yes"; fi
+log "quit-action-sent=$SENT"
+# 판정: 종료 동작을 보냈고(SENT=yes) 그 뒤 PID가 사라졌을 때만 이 경로의 증거다. 아니면 정리한 뒤에도 무효이고 비정상 종료 코드로 끝난다.
+quit_verdict "$SENT" "$gone" "$QUIT" | tee -a "$R/meta.txt"; VERDICT=${PIPESTATUS[0]}
+[ "$gone" != yes ] && { log "app still running after quit path; stopping exact pid"; kill_exact "$R/kills.txt" "$APID"; }
 log "server-alive-after-quit=$(kill -0 "$SPID" 2>/dev/null && echo yes || echo no)"
 [ "${TOKEN:-}" = 1 ] && log "token-after-quit=$(python3 "$SMOKE/token-check.py" "$R/secret.json")"
 python3 "$SMOKE/status.py" "$DATA" > "$R/status-after-quit.json" 2>&1; log "status-after-quit=$(cat "$R/status-after-quit.json")"
@@ -117,3 +122,5 @@ cat "$R/owner-check.json"
 case "$SCMD" in "$SRV_EXE serve --data-dir $DATA"*) kill_exact "$R/kills.txt" "$SPID" ;; esac
 for i in $(seq 1 60); do kill -0 "$SPID" 2>/dev/null || break; sleep 0.5; done
 log "server-stopped=$(kill -0 "$SPID" 2>/dev/null && echo no || echo yes)"
+# 무효 실행은 정리를 모두 마친 뒤에도 비정상 종료 코드(5)로 끝난다.
+exit "$VERDICT"

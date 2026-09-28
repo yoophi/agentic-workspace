@@ -83,3 +83,21 @@ send_key_to() {
   front_is "$apid" || return 1
   osascript -e "tell application \"System Events\" to keystroke \"$key\" using command down" >/dev/null 2>&1
 }
+
+# quit 경로 (g): 기록한 신원이 같을 때만 SIGTERM. 보냈으면 0, 보내지 않았으면 1(`kill_exact`와 같음).
+send_sigterm() {
+  kill_exact "$1" "$2"
+}
+
+# quit 경로 판정: <sent yes|no> <gone yes|no> <path>. 종료 동작을 보냈고 그 뒤 PID가 사라졌을 때만 `path-exercised=yes`(0).
+# 아니면 `path-exercised=no`와 그 이유를 적고 5(무효).
+quit_verdict() {
+  local sent=$1 gone=$2 path=$3
+  if [ "$sent" = yes ] && [ "$gone" = yes ]; then echo "path-exercised=yes"; return 0; fi
+  if [ "$sent" != yes ]; then
+    echo "path-exercised=no (the quit action for path $path was not sent; app-gone=$gone is not evidence of this path)"
+  else
+    echo "path-exercised=no (the app is still running after path $path)"
+  fi
+  return 5
+}
