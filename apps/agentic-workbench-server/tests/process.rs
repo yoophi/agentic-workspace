@@ -534,6 +534,19 @@ fn default_stop_is_refused_with_exit_5_and_wait_stops_once_the_work_ends() {
     wait_until(STOP_DEADLINE, "draining", || {
         status(&descriptor)["state"] == "drainingWait"
     });
+    let draining_status = Command::new(BIN)
+        .args(["status", "--data-dir"])
+        .arg(&data)
+        .output()
+        .unwrap();
+    assert_eq!(
+        draining_status.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&draining_status.stderr)
+    );
+    let draining_body: Value = serde_json::from_slice(&draining_status.stdout).unwrap();
+    assert_eq!(draining_body["state"], "drainingWait", "{draining_body}");
     assert_keeps_serving(&mut child, &data, "the turn has not ended");
     assert!(waiting.try_wait().unwrap().is_none(), "stop --wait waits");
     fs::write(&gate, b"").unwrap();

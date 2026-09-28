@@ -411,7 +411,13 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 현재 결론은 **r13의 18건 모두 유효했고 반영·검증을 마쳤다.** targeted 결과만으로 끝내지 않고 코드 `c4c8e0b`에서 gate-20과 Gate20 개발·배포 앱 smoke를 통과했다. owner 원문 제거는 proof key를 bearer digest로 바꾸고 안내 파일 작성 뒤 원문과 token-bearing descriptor를 drop했으며, MCP는 terminal·실패뿐 아니라 발급 직후 future 취소에서도 guard가 회수한다. retire는 응답 유실과 서버 미도달을 별도 시험으로 구분한다.
 
-그러나 r13 뒤 `1a48e0c`·`c952011`·`89ebe49`·`c4c8e0b` 수정과 이 증거 문서까지 포함한 **최종 OCR delegate 재리뷰와 그 뒤 Codex adversarial `--wait` 4/4 재리뷰는 아직 실행 전**이다. 따라서 T053과 044 merge gate는 미완료이며, gate-20과 앱 smoke만으로 리뷰 완료 또는 044 전체 완료를 주장하지 않는다. 두 재리뷰 결과·유효 지적 반영·필요한 재검증을 이 문서에 추가한 뒤에만 완료로 바꾼다. 044를 완료하더라도 5단계 전체 로드맵 완료를 뜻하지 않는다.
+그러나 r13 뒤 `1a48e0c`·`c952011`·`89ebe49`·`c4c8e0b` 수정에는 아래의 **최종 OCR delegate 재리뷰와 그 뒤 Codex adversarial `--wait` 4/4 재리뷰**가 추가로 필요하다. OCR 재리뷰와 지적 반영은 아래처럼 끝났지만 Codex 재리뷰는 아직 실행 전이다. 따라서 T053과 044 merge gate는 미완료이며, gate-20과 앱 smoke만으로 리뷰 완료 또는 044 전체 완료를 주장하지 않는다. Codex 결과·유효 지적 반영·필요한 재검증을 이 문서에 추가한 뒤에만 완료로 바꾼다. 044를 완료하더라도 5단계 전체 로드맵 완료를 뜻하지 않는다.
+
+### 최종 OCR delegate 재리뷰
+
+- 순서·범위: Codex 최종 재리뷰보다 먼저 `cb0bd4c..f288d85`를 `ocr delegate preview --format json`으로 고정했다. Git 변경은 451개, OCR reviewable은 339개, 규칙상 제외는 112개다. reviewable 339개를 모두 검토했고(`reviewed=339`, `skipped=0`, coverage 100%), 제외 112개는 preview의 사유와 함께 별도 계수했다. 원 preview·규칙·파일별 coverage는 `/private/tmp/aw-044-final-rereview/`에 보존한다.
+- verdict: **needs-attention, Medium 1건**. `agentic-workbench-server status`가 `server.status` 전에 신규 연결용 `verify()`를 호출해 `/health/ready`가 503인 정상 `drainingWait` 서버의 query까지 실패했다. 계약은 draining 중에도 `server.status` 조회를 허용한다.
+- 반영·검증: CLI만 동일 인스턴스 신원·protocol/storage를 확인하는 `verify_instance()`를 사용하도록 바꾸고, 실제 process 시험에서 busy turn → `stop --wait` → `drainingWait` 중 `status` CLI 종료 코드 0과 상태 payload를 확인했다. targeted 결과는 **1 passed, 0 failed, filtered 16, 종료 코드 0**이다. 이 수정 뒤 HEAD에서 Codex adversarial `--wait` 4/4를 실행하며, 그 전까지 T053은 미완료다.
 
 #### 수정 중 전체 suite에서 발견한 회귀
 

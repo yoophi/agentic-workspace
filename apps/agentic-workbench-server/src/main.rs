@@ -11,7 +11,7 @@
 use std::{path::PathBuf, time::Duration};
 
 use workbench_host::lifecycle::{
-    client::{server_status, verify},
+    client::{server_status, verify_instance},
     descriptor::read_descriptor,
     ensure::{EnsureOptions, ensure, server_executable},
     lock::server_dir,
@@ -73,7 +73,7 @@ fn main() {
             }
         }
         "status" => match read_descriptor(&server_dir(&data_dir)) {
-            Ok(Some(descriptor)) => match verify(&descriptor) {
+            Ok(Some(descriptor)) => match verify_instance(&descriptor) {
                 Ok(verified) => match server_status(&descriptor) {
                     Ok(mut status) => {
                         if let Some(object) = status.as_object_mut() {
