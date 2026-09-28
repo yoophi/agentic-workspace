@@ -346,6 +346,9 @@ impl BenchServices {
         self.hub.remove_stream(StreamKind::Exchange, bench_id);
         self.hub.remove_stream(StreamKind::Bench, bench_id);
         self.idempotency.drop_bench(bench_id);
+        if let Some(gate) = self.work_gate.get() {
+            gate.forget_bench_exchanges(bench_id);
+        }
         self.idempotency
             .forget_open_of(&open_scope(&ticket.bench.opened_by), bench_id);
         drop(drained);

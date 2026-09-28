@@ -98,7 +98,7 @@ async fn a_valid_delivery_is_accepted_once_and_marks_the_exchange_consumed() {
     .await
     .expect("a valid continuation is accepted");
     assert_eq!(prompts(&h), before + 1);
-    assert!(h.rt.runtime.work_gate().exchange_consumed(EXCHANGE));
+    assert!(h.rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE));
 
     // 같은 키·같은 입력 재시도는 기존 멱등 결과(효과 없음).
     deliver(
@@ -262,7 +262,7 @@ async fn each_unsatisfied_condition_is_refused_without_consuming() {
 
     assert_eq!(prompts(&h), before, "no refused call had an effect");
     for id in [EXCHANGE, "nope", "q-draft", "q-rejected"] {
-        assert!(!gate.exchange_consumed(id), "{id} not consumed");
+        assert!(!gate.exchange_consumed(&bench, id), "{id} not consumed");
     }
     // 조건을 모두 만족하면 그대로 받는다.
     deliver(
@@ -496,7 +496,7 @@ async fn a_delivery_arriving_while_another_prompt_holds_the_turn_is_delivered_af
         delivery_input(&bench, "r2", "peer exchange body", EXCHANGE),
     )
     .await;
-    assert!(rt.runtime.work_gate().exchange_consumed(EXCHANGE));
+    assert!(rt.runtime.work_gate().exchange_consumed(&bench, EXCHANGE));
     assert!(
         rt.runtime.work_gate().busy_run_count("r2") >= 1,
         "the queued delivery keeps the run busy"

@@ -120,7 +120,7 @@
     - 따라서 확인이 실제 전송보다 **먼저** 도착한다. 교환 상태(`accepted`/`delivered`)로는 "아직 prompt가 안 갔다"를 알 수 없다.
   - 계약:
     - 서버는 교환마다 **전달 prompt 소비 여부**(`deliveryConsumed`)를 따로 관리한다.
-    - **소비는 엔진 대기열 수락과 묶는다(Codex 재검토 E2)**: `SendPromptUseCase`는 전송을 spawn하고 곧바로 성공을 돌려준다(`send_prompt.rs:46-58`). 그 사이 다른 prompt(예: coordinator 알림)가 먼저 turn을 잡으면 전송이 실패하고 Error 이벤트만 남는다(`runner.rs:787-790`). 소비를 이 성공에 묶으면 교환을 잃는다. 그래서 `continuation`이 붙은 `run.sendPrompt`는 **엔진 대기열 경로**(`queue_prompt`: 현재 turn 뒤 차례로 보냄, 바쁨으로 실패하지 않음)로 보낸다. 소비 표시와 대기열 등록을 한 번에 한다. 그 prompt의 활동 예약(아래 실행 수명 계약)이 전달이 끝날 때까지 활성 작업에 남는다. 대기열 전달이 run 종료로 실패하면 소비 표시는 남긴다(대상 run이 없어 교환의 뜻이 사라졌다). 이 경우 `server.status`의 `failedExchangeDeliveries`로 보고한다.
+    - **소비는 엔진 대기열 수락과 묶는다(Codex 재검토 E2)**: `SendPromptUseCase`는 전송을 spawn하고 곧바로 성공을 돌려준다(`send_prompt.rs:46-58`). 그 사이 다른 prompt(예: coordinator 알림)가 먼저 turn을 잡으면 전송이 실패하고 Error 이벤트만 남는다(`runner.rs:787-790`). 소비를 이 성공에 묶으면 교환을 잃는다. 그래서 `continuation`이 붙은 `run.sendPrompt`는 **엔진 대기열 경로**(`queue_prompt`: 현재 turn 뒤 차례로 보냄, 바쁨으로 실패하지 않음)로 보낸다. 소비 표시와 대기열 등록을 한 번에 한다. 그 prompt의 활동 예약(아래 실행 수명 계약)이 전달이 끝날 때까지 활성 작업에 남는다. 대기열 전달이 run 종료로 실패하면 소비 표시는 남긴다(대상 run이 없어 교환의 뜻이 사라졌다). 이 경우 `server.status`의 `failedExchangeDeliveries`로 보고한다. 소비·실패 기록의 키는 (작업대 id, 교환 요청 id)다. 요청 id는 호출자가 정해 작업대마다 겹칠 수 있고, 교환 저장소도 같은 키로 구별한다. 작업대 닫기는 교환과 함께 그 기록을 지운다(Codex r5 — 요청 id만 키로 쓰면 한 작업대의 소비가 다른 작업대의 같은 id 교환을 막고 정지 판정에서도 뺐다).
     - `run.sendPrompt` 입력에 선택 필드 `continuation: { exchangeRequestId }`를 더한다.
     - `draining` 중에는 다음을 **원자적으로** 모두 확인하고 `deliveryConsumed`를 세울 때만 받는다:
       - 그 교환이 호출자 작업대에 있다.

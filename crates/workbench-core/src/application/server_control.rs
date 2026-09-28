@@ -287,7 +287,7 @@ impl ServerControl {
                         exchange.status,
                         AgentExchangeStatus::Accepted | AgentExchangeStatus::Delivered
                     )
-                    || gate.exchange_consumed(&exchange.request_id)
+                    || gate.exchange_consumed(&bench_id, &exchange.request_id)
                 {
                     continue;
                 }

@@ -279,7 +279,7 @@ pub async fn deliver_exchange(
     }
     let reservation = match &gate {
         Some(gate) => Some(
-            gate.begin_exchange_delivery(exchange_request_id, run_id)
+            gate.begin_exchange_delivery(bench_id, exchange_request_id, run_id)
                 .map_err(|refused| match refused {
                     DeliveryRefused::AlreadyConsumed => refuse(WorkbenchFault::conflict(
                         request_id.clone(),
@@ -300,7 +300,7 @@ pub async fn deliver_exchange(
         .await;
     if result.is_err() {
         if let Some(gate) = &gate {
-            gate.record_failed_delivery(exchange_request_id);
+            gate.record_failed_delivery(bench_id, exchange_request_id);
         }
     }
     drop(reservation); // 대기열 등록 안에서 A-turn이 먼저 잡혔다(인계)
