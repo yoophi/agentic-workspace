@@ -51,8 +51,9 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | **gate-11** | **`17bbd11`** | **전부 0**(Codex 8차 수정 뒤): fmt, clippy `-D warnings`, cargo 968 passed/0 failed/7 ignored/91 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 655·기타 전부), build, workbench-client itest 7, AW itest 9 |
 | **gate-12** | **`051c63a`** | **전부 0**(Codex 9차 수정 뒤): fmt, clippy `-D warnings`, cargo 976 passed/0 failed/7 ignored/92 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 660·기타 전부), build, workbench-client itest 7, AW itest 11 |
 | **gate-13** | **`656fea1`** | **전부 0**(Codex 10차 수정 뒤): fmt, clippy `-D warnings`, cargo 992 passed/0 failed/7 ignored/93 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 664·기타 전부), build, workbench-client itest 7, AW itest 12 |
+| **gate-14** | **`5bfa82c`** | **전부 0**(Codex 11차 수정 뒤): fmt, clippy `-D warnings`, cargo 997 passed/0 failed/7 ignored/94 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 669·기타 전부), build, workbench-client itest 7, AW itest 13 |
 
-- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-12는 Codex 10차 수정 전 코드다. **최신 게이트는 gate-13(`656fea1`)이다.** gate-13 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-13은 Codex 11차 수정 전 코드다. **최신 게이트는 gate-14(`5bfa82c`)이다.** gate-14 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
@@ -336,6 +337,11 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - S4: 활성 run 없이 들어온 교환은 묶인 run이 없다(기존). 일반 prompt의 재삽입은 제한이 없다(영구 거절이면 반복될 수 있음). 실패는 화면 호출 클라이언트에서 주입했다.
   - 실제 앱 스모크는 7–11차 수정 뒤 돌리지 않았다.
 - 11차 수정으로 코드가 바뀌었으므로 T052는 gate-14 전까지 다시 미완료로 둔다.
+- 조율 추가: apps fork의 커밋 시도 한 번이 core 커밋의 `git index.lock`에 걸려 exit 128로 실패했다. 잠금 파일은 건드리지 않고, 풀린 뒤 잠금 아래에서 다시 커밋했다.
+- gate-14(`5bfa82c`)가 11차 수정을 모두 포함해 전부 통과했다.
+- **OCR 11차 재리뷰**(`827cc84..5bfa82c`): High·Medium 없음.
+  - 확인: `SlotHold` drop은 scheduler 잠금을 잡지만, `transfer`·`release_hold`는 소유를 해제한 뒤 잠근다(이중 잠금 없음). `reconcile_since`는 스냅샷 세대보다 늦게 바뀐 task의 자리·대기를 그대로 둔다. `write_message`는 부분 쓰기마다 남은 시간으로 상한을 다시 잡는다. 패널 교환 항목은 `exchangeRunId`로 run에 묶인다.
+  - Low(보고만): scheduler의 `touched` 맵은 다음 재구성 때까지 task id마다 한 항목씩 쌓인다(task 수만큼, 이벤트 수가 아님).
 
 ### 최종 HEAD 재검토
 
