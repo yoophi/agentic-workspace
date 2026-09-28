@@ -192,6 +192,35 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 - gate-9(`a94372e`)가 6차 수정을 모두 포함해 전부 통과했다.
 - **OCR 6차 재리뷰**(`2d08d34..a94372e`, 코드·스크립트 11개 파일): High·Medium 없음. 확인한 점: 예약 task handle은 정상 경로에서 같은 poll 안에 비워져 Drop이 넘겨받지 않음(`Existing`·`Err`의 scheduler 반납은 기존대로 호출자 몫), abort 경로만 커밋 결과를 기다려 조건부 해제·반납, `note_lease_acquired`의 유휴 복귀 필드가 `resume_serving`과 같음, default 정지의 세대 불일치 재파생 보고, `descriptor_is_absent`는 `NotFound`만 부재로 봄, `kill_exact` rc 전파와 (g) 무효 표시. Low(보고만): 커밋본 lib.sh는 `AW_SMOKE_DIR`가 없으면 스크립트 디렉터리에 결과를 쓴다(실행 문서에서 환경 변수를 지정).
 
+### 7차: 같은 HEAD `f35c58d`(트리 `8230775`) 세 파티션 리뷰
+
+- 파티션: crates 103 / apps·packages·루트 57 / specs·docs 227. 합 387 = 전체, 겹침 0(`--no-renames`). 세 검토 커밋의 트리는 HEAD 트리와 같고, merge-base는 의도한 base다. 검토가 끝난 뒤 브랜치로 돌아왔다(status 0).
+- **세 파티션 모두 needs-attention**이었다(companion `exit=0`은 통과가 아니다). Medium 4건.
+- 수정은 core·apps 병렬 fork와 메인(docs)이 나눠 맡았다. cargo·pnpm 실행, 변이, 커밋은 공유 `verify.lock` 아래에서 직렬화했다.
+  - protocol/core 공유 인터페이스 편집은 한 번에 완성해 컴파일을 확인한 뒤 바로 커밋했다.
+  - 조율 사고 1: core의 첫 compile red는 apps의 protocol 편집 중에 돌아 비증거로 표시했다.
+  - 조율 사고 2: core 변이 m1은 시험 안에 대기 상한이 없어 멈췄다. 메인이 신원 확인 뒤 그 시험 PID만 끝냈고 "hang, not counted"로 기록했다. 이후 시험에 `timeout`을 넣고 변이를 다시 돌렸다.
+  - 조율 사고 3: 두 fork가 서로의 파일 커밋을 기다려 교착에 빠졌다. 대기 조건을 전역 dirty가 아닌 특정 파일로 좁혀 풀었다(`5d7c08c` → `2273b54` → `c551f8a`).
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| W1 | medium(crates) | `bind_child_run` await 중 abort가 실행 없는 Running task·노드 불일치를 남김 | `2273b54`·`00ca830`: 기동 guard 하나가 모든 수명 단계를 소유한다. 예약·바인딩 커밋과 실패 되돌리기를 소유 task로 돌리고 guard가 handle을 쥔다. drop되면 커밋을 기다린 뒤 run 취소 → `revert_child_launch`(task·노드를 한 트랜잭션에서, 노드가 이 기동의 run일 때만) → scheduler 반납. 되돌리는 중 새 배정은 재시도 가능한 `launchRollingBack`을 받는다. R14에 수명 상태 × 소유 × drop 책임 표 | `child_assign_atomic.rs`: 결정적 저장소·엔진 취소 지점으로 (a) 바인딩 커밋 직전, (b) 직후·결과 수신 전 abort, (e) 되돌리는 중 새 배정. compile red → 동작 red((a)(b) task `running`) → green 13. 변이 m1-b·m3-b·m4-b 유한 시간 red(17–24초). 한계: m1-b는 (e)만 결정적으로 잡는다 |
+| W2 | medium(crates) | `fail()`이 rollback 전에 Done으로 바뀌어 abort 때 정리·scheduler 반납이 빠짐 | 같은 커밋: 되돌리기가 끝난 뒤에만 Done이 된다. await 중 drop되면 guard가 끝까지 기다린 뒤 반납한다 | (c) 엔진 취소 대기 중 abort, (d) 예약 해제 대기 중 abort: 동작 red((c) 노드 run 미해제, (d) 자리 미반납) → green. 변이 m2-b·m5 red. 각 시험은 run 소멸·노드 해제·task 일치·관문 예약 0·`active_count==0`·`orchestration_tasks==0`·재배정 실제 기동을 확인 |
+| W3 | medium(apps) | 패널에서 교환 대기 항목을 삭제하거나 steer하면 서버에 확인됐지만 미소비인 교환이 남아 wait-stop이 무기한 대기 | `6843997`: 새 연산 `exchange.discardDelivery`(C, `exchange:write`, epoch 멱등, 관문 잠금 아래 (작업대, 요청 id) 소비 표시, 닫힌 작업대는 기록 없음). `ec8e945`: 삭제는 항목을 먼저 빼고(자동 전송 방지) discard, 실패하면 되돌림. steer는 교환 항목에서 비활성(버튼·함수 모두). run 취소·거절된 steer 재시작 때 떨어지는 교환 항목도 discard | core: no-op handler 동작 red(`pendingExchanges` 1 유지) → green, 변이 red. 패널 vitest red(steer 가능) → green 177, 변이 a(삭제가 로컬만)·b(steer 허용) red. **실제 host + 실제 AgentRunPanel itest** `22338dc`(`agent-run-panel-exchange.itest.tsx`): 실제 패널 액션 → turn 완료 → `pendingExchanges` 0 → wait-stop 정지. 깨끗한 트리에서 green 2, 변이 a·b red. itest-green-1–4는 비통과(원인: 시험 host 허용 출처 없음 → WS 403, scripted engine에 prompt lifecycle 없음 → `5d7c08c`·`c551f8a` opt-in) |
+| W4 | medium(docs) | (g) SIGTERM 미전송(`attempt invalid`)이 뒤의 PID 소멸 판정으로 `path-exercised=yes`가 됨 | `c0afc54`: `quit-action-sent`(보낸 명령 종료 코드 0)와 PID 소멸을 모두 요구한다(`quit_verdict`). 아니면 정리 뒤에도 무효이고 스크립트는 5로 끝난다. `0ef1621`: 과거 (g) 실행은 송신 결과 기록 전 스크립트였다는 한계를 app-smoke.md에 기록(실제 앱 재실행 안 함, 후속) | `selftest-signal.sh` 20개: 신호 전 소멸 → `path-exercised=no`·하위 셸 종료 코드 5, 송신·소멸 → yes·0, 송신·잔존 → no·5, quit-run 구조 확인. 옛 quit-run 사본으로 red(구조 4개), 수정본 green, "sent 무시" 변이 red(3개). 모두 scratch 사본으로 돌려 공유 트리는 바꾸지 않았다 |
+
+- W3 한계:
+  - 시험 host는 실제 ACP runner가 아니라 scripted engine이다. lifecycle은 opt-in으로 흉내만 낸다.
+  - itest의 교환 라우팅은 043 원장 → 패널 `externalPromptRequest` 경로다. area 컴포넌트는 그리지 않았다.
+  - steer 함수 안의 거부는 방어 코드이고 시험이 없다.
+  - discard 뒤 교환 상태는 `delivered`로 남는다(도메인 종결 상태).
+  - 전송이 계속 실패하는 대기 prompt의 무한 재시도는 기존 동작이다.
+- W1/W2 한계:
+  - 되돌리는 중 표시를 보기 전에 스냅샷을 읽은 배정은 직후 abort가 취소할 run id를 받을 수 있다(반환 직후 취소와 같은 일반 경우).
+  - 소유 task의 join 오류(panic)는 조건부로 되돌린다.
+  - drop 경로는 `scheduler.release`가 돌려준 다음 task를 기동하지 않는다(기존 동작).
+- 7차 수정으로 코드가 바뀌었으므로 T052는 gate-10 전까지 다시 미완료로 둔다.
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
