@@ -48,7 +48,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 | **gate-9** | **`a94372e`** | **전부 0**(Codex 6차 수정 뒤): fmt, clippy `-D warnings`, cargo 950 passed/0 failed/7 ignored/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
 
-- **gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. **최신 게이트는 gate-9(`a94372e`)**다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. **최신 게이트는 gate-9(`a94372e`)다.** gate-9 뒤 커밋은 리뷰 기록 문서(`specs/`)만 바꾼다. (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
