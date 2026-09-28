@@ -374,6 +374,16 @@ pub async fn handle_tool(
                 .ok_or_else(|| {
                     ToolError::new("unknownNode", "Created child node is unavailable.", true)
                 })?;
+            // 같은 requestId의 재시도는 이미 첫 turn에서 끝난 task를 다시 기동하지 않는다. 첫 create 호출도
+            // bind 전에 terminal 보고가 끝난 경우 아래 start_child 정리 뒤 같은 성공 모양으로 돌아온다.
+            if task.status.is_terminal() {
+                return Ok(json!({
+                    "taskId": outcome.task_id,
+                    "nodeId": outcome.node_id,
+                    "status": task.status,
+                    "executionStatus": node.execution_status
+                }));
+            }
             let hold = match runtime.scheduler().acquire_hold(&task.id)? {
                 HoldOutcome::Queued { position } => {
                     return Ok(json!({
@@ -406,6 +416,26 @@ pub async fn handle_tool(
                     "executionStatus": "starting",
                     "launch": other
                 })),
+                Err(error) if error.code == "invalidTransition" => {
+                    // 시작 장벽 직후의 빠른 결과는 task·report·알림을 이미 커밋했다. terminal task에 늦게
+                    // bind하려던 worker는 start_child가 취소·정리했으므로, 적용된 create를 실패로 돌려
+                    // 호출자가 중복 task를 만들게 하지 말고 저장된 최종 상태를 성공으로 반환한다.
+                    let current = runtime
+                        .get(&bench)
+                        .await?
+                        .ok_or_else(unavailable_workspace)?;
+                    let task = current.tasks.iter().find(|task| task.id == outcome.task_id);
+                    let node = current.nodes.iter().find(|node| node.id == outcome.node_id);
+                    match (task, node) {
+                        (Some(task), Some(node)) if task.status.is_terminal() => Ok(json!({
+                            "taskId": outcome.task_id,
+                            "nodeId": outcome.node_id,
+                            "status": task.status,
+                            "executionStatus": node.execution_status
+                        })),
+                        _ => Err(error),
+                    }
+                }
                 Err(error) => Err(error),
             }
         }

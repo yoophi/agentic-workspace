@@ -520,7 +520,11 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
                         &h,
                         &run,
                         tool_op,
-                        json!({ "requestId": "first", "summary": "first turn", "question": "which?" }),
+                        json!({
+                            "requestId": format!("first-{run}"),
+                            "summary": "first turn",
+                            "question": "which?"
+                        }),
                     )
                     .await
                     .unwrap();
@@ -528,10 +532,29 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
                 })
             }));
         }
-        let (task, child) = create_child(&f, "c1").await;
+        let request = json!({
+            "requestId": "c1", "title": "task c1",
+            "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+            "objective": "read the repo", "expectedResult": "summary"
+        });
+        let created = tool(
+            &f.h,
+            &f.coordinator,
+            OperationId::OrchestrationCreateChildTask,
+            request.clone(),
+        )
+        .await
+        .expect("the applied child creation is reported as success");
         let session = session_of(&f.h, &f.bench).await;
+        let task = created["taskId"].as_str().expect("created task id");
+        let task_entry = session["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["id"] == task)
+            .expect("the task was committed before its worker started");
         assert_eq!(
-            task_status(&session, &task),
+            task_status(&session, task),
             expected_status,
             "{report_type}"
         );
@@ -539,18 +562,66 @@ async fn first_turn_result_and_input_request_update_the_task_and_notify() {
         assert!(
             notifications
                 .iter()
-                .any(|entry| entry["taskId"] == task.as_str() && entry["reportType"] == report_type),
+                .any(|entry| entry["taskId"] == task && entry["reportType"] == report_type),
             "{report_type}: {notifications:?}"
         );
         let node = session["nodes"]
             .as_array()
             .unwrap()
             .iter()
-            .find(|node| node["currentRunId"] == child.as_str())
-            .expect("reserved run became the node's run");
+            .find(|node| node["id"] == task_entry["assignedNodeId"])
+            .expect("the assigned child node remains available");
         if report_type == "result" {
+            assert_eq!(created["status"], "completed");
+            assert_eq!(created["executionStatus"], "idle");
+            assert_eq!(created["runId"], Value::Null);
+            assert_eq!(node["currentRunId"], Value::Null);
             assert_eq!(node["executionStatus"], "idle");
+
+            let repeated = tool(
+                &f.h,
+                &f.coordinator,
+                OperationId::OrchestrationCreateChildTask,
+                request,
+            )
+            .await
+            .expect("same-key retry returns the stored completed task");
+            assert_eq!(repeated["taskId"], task);
+            assert_eq!(repeated["status"], "completed");
+            assert_eq!(
+                session_of(&f.h, &f.bench).await["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1,
+                "same-key retry does not create duplicate work"
+            );
+
+            let distinct = tool(
+                &f.h,
+                &f.coordinator,
+                OperationId::OrchestrationCreateChildTask,
+                json!({
+                    "requestId": "c2", "title": "task c2",
+                    "role": { "name": "Reader", "responsibility": "read", "expectedOutput": "notes" },
+                    "objective": "read the repo", "expectedResult": "summary"
+                }),
+            )
+            .await
+            .expect("a new key intentionally creates a distinct completed task");
+            assert_ne!(distinct["taskId"], task);
+            assert_eq!(distinct["status"], "completed");
+            assert_eq!(
+                session_of(&f.h, &f.bench).await["tasks"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                2,
+                "new-key retry semantics remain a new operation"
+            );
         } else {
+            let child = created["runId"].as_str().expect("child started").to_owned();
+            assert_eq!(node["currentRunId"], child);
             assert_eq!(node["executionStatus"], "active");
         }
     }
