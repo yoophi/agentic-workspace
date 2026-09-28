@@ -343,6 +343,25 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
   - 확인: `SlotHold` drop은 scheduler 잠금을 잡지만, `transfer`·`release_hold`는 소유를 해제한 뒤 잠근다(이중 잠금 없음). `reconcile_since`는 스냅샷 세대보다 늦게 바뀐 task의 자리·대기를 그대로 둔다. `write_message`는 부분 쓰기마다 남은 시간으로 상한을 다시 잡는다. 패널 교환 항목은 `exchangeRunId`로 run에 묶인다.
   - Low(보고만): scheduler의 `touched` 맵은 다음 재구성 때까지 task id마다 한 항목씩 쌓인다(task 수만큼, 이벤트 수가 아님).
 
+### 12차: 같은 HEAD `7ba92ba`(트리 `133de34`) 네 파티션 리뷰
+
+- 파티션: core-src 31 / crates 나머지 79 / apps·packages·루트 66 / specs·docs 228. 합 404 = 전체, 누락 0. 네 검토 커밋 모두 트리 `133de34`, 검토 뒤 브랜치로 돌아왔다(status 0).
+- **네 파티션 모두 needs-attention**이었다. 서로 다른 지적 4건(High 1, Medium 3). crates-rest 파티션의 high는 core-src의 첫 medium과 같은 문제라 high로 처리했다.
+- 담당: core fork(`crates/workbench-core`), apps fork(`apps/`), 메인(스모크 스크립트·문서). host 지적은 없었다. git commit도 잠금 아래에서 했다(11차 `index.lock` 충돌 방지).
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| R1 | high(crates-rest·core-src) | 겹치는 복구: A가 Ready 스냅샷을 얻은 뒤 기동이 성공·transfer하고, B가 먼저 적용되면 B가 A에 필요한 변경 기록을 지워, A가 살아 있는 run의 자리를 버린다(한도 초과) | `80598c3`·`a1b01df`: 복구는 스냅샷 전에 `begin_reconcile`로 자기 세대를 창으로 등록하고 `reconcile_window`로 적용한다. 변경 기록은 진행 중 창 중 가장 오래된 세대보다 늦은 것을 모두 남긴다. 재구성이 바꾼 task도 변경으로 기록해, 뒤늦게 적용되는 낡은 복구가 새 결과를 덮지 않는다. 창이 모두 닫히면 기록을 지운다(OCR 11차 Low 해결) | `child_assign_atomic.rs` `overlapping_recoveries…`: A 스냅샷 → 기동 성공 → B 복구 완료 → A 적용 → 자리 유지, 추가 task 대기. 수정 전 소스에서 동작 red(`active 0≠1`) → green 28(scheduler 13). 변이 m1(다른 창 무시) 통합·단위 red, m3(재구성 기록 안 함) 단위만 red |
+| R2 | medium(core-src) | `transfer`가 자기 보유 제거 실패를 무시하고 실행 중으로 만들어, 옛 기동의 transfer가 새 시도의 자리를 실행 중으로 고정한다(용량 점유) | 같은 커밋: 자기 보유 id를 실제로 뺀 경우에만 실행 중으로 확정한다. R14에 scheduler 상태 변경 표(모든 변경이 자기 보유·자기 세대일 때만 효과) | scheduler 단위 시험 `a_stale_transfer…`(옛 보유 → release → 새 보유 → 옛 transfer → 새 보유 해제 → `active_count=0`). 변이 m2 단위 red(통합 시험은 이 순서를 만들지 않아 0) |
+| R3 | medium(apps) | 교환 전송이 서버에 적용되고 답만 unknown이면, turn을 이미 봤는데도 같은 키로 재전송하고 그 멱등 재생을 새 turn으로 보아 응답 대기가 풀리지 않는다(뒤 prompt·교환 고착, wait-stop 미완료) | `bbf82e6`·`7e741f6`·`ad3f69d`: 패널이 run별 관측 `promptSent` 수를 센다. unknown인데 그 사이 같은 run의 turn을 봤으면 적용된 것으로 보고 다시 넣지 않는다. 아직 못 봤으면 처음 기준을 남긴 채 같은 키로 다시 넣고, 다시 보내기 직전에 그 turn이 관측되면 보내지 않는다. 직접 전송도 turn을 봤으면 입력창에 되돌리지 않는다 | 패널 vitest: 옛 패널 동작 red 2 → green 229, 두 판정을 모두 뺀 변이 c red(각 판정만 뺀 a·b는 green — 같은 순서를 서로 막는 방어 중복), 직접 전송 red·변이 a2 red. **실제 host + 실제 AgentRunPanel itest**: x-1 서버 적용·답 보류 → turn 끝 관측 → unknown → x-2 도착·확인 → wait-stop 정지, x-1 1회(재생 없음)·x-2 1회. 옛 패널 red(wait-stop 미완료), 변이 c red |
+| R4 | medium(docs) | `close-run.sh`가 `bench-check.py` 종료 코드를 버려, b2(run 유지 기대)에서 조회가 모두 실패해도 통과할 수 있다 | `f181e92`: 조회 결과를 있음·없음·검사 실패로 나눈다(`run_state_of`: 종료 0 + `result=ok` + `runListed` 참/거짓만 성공). 성공한 조회가 없으면 7(`run-state-unknown`) | 자기 시험 75개: `identity-failed`·빈 출력·잘못된 JSON → 7, `run_state_of` 단위. 옛 스크립트 red 4 → green → 변이 red. 과거 b2 실행은 모두 성공한 조회의 `run-removed=yes`라 잘못 통과한 경우 없음(app-smoke.md) |
+
+- 한계:
+  - R1·R2: 옛 인계 순서와 재구성의 변경 기록은 단위 시험으로만 확인했다(변이 m2·m3은 통합 시험에서 red가 아님). 이미 결과를 보고한 task에 바인딩이 성공하면 그 run은 scheduler 자리 없이 끝까지 돈다(task는 이미 끝남).
+  - R3: 관측된 `promptSent`가 결과를 모르는 바로 그 전송의 것인지는 확인하지 않는다(그 사이 같은 run에 직접 전송·steer하면 오판 가능). 멱등 키 없는 일반 대기 prompt를 turn을 보기 전에 다시 보내면 중복 turn이 생길 수 있다(기존). 실패는 화면 호출 클라이언트에서 주입했다.
+  - 실제 앱 스모크는 7–12차 수정 뒤 돌리지 않았다.
+- 12차 수정으로 코드가 바뀌었으므로 T052는 gate-15 전까지 다시 미완료로 둔다.
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
