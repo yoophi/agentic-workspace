@@ -234,7 +234,6 @@ impl InMemoryBenchRegistry {
         let _ = ticket.done.send(true);
     }
 
-    /// 열린 작업대와 연 주체(042 서버 종료: 모두 닫기).
     /// 창 주체를 폐기로 표시한다(`desktop.retireWindow`가 닫기보다 **먼저** 부른다). `benches` 잠금 아래에서 표시해
     /// 진행 중인 열기와 겹치지 않는다.
     pub fn retire_subject(&self, subject: &PrincipalSubject) {
@@ -247,6 +246,7 @@ impl InMemoryBenchRegistry {
         lock(&self.retired).contains(subject)
     }
 
+    /// 열린 작업대와 연 주체(042 서버 종료: 모두 닫기).
     pub fn open_benches(&self) -> Vec<(String, PrincipalSubject)> {
         lock(&self.benches)
             .values()

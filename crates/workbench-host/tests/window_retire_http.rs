@@ -248,7 +248,8 @@ fn a_request_authenticated_before_the_retirement_is_refused_when_its_body_arrive
     );
 
     // 그 주체의 작업대가 없고, 저장된 prompt도 없다.
-    let (_, benches) = server.owner_call("bench.list", json!({}));
+    let (benches_status, benches) = server.owner_call("bench.list", json!({}));
+    assert_eq!(benches_status, 200, "bench.list answers: {benches}");
     let owned: Vec<&Value> = benches["output"]
         .as_array()
         .expect("bench.list is an array")
@@ -263,7 +264,13 @@ fn a_request_authenticated_before_the_retirement_is_refused_when_its_body_arrive
         owned.is_empty(),
         "no bench of the retired window: {benches}"
     );
-    let (_, prompts) = server.owner_call("savedPrompt.list", json!({}));
+    let (prompts_status, prompts) = server.owner_call("savedPrompt.list", json!({}));
+    // 호출이 실패해 `output`이 비면 "없음" 단정이 헛되이 통과한다 — 성공 응답과 배열을 먼저 확인한다(OCR 2차).
+    assert_eq!(prompts_status, 200, "savedPrompt.list answers: {prompts}");
+    assert!(
+        prompts["output"].is_array(),
+        "savedPrompt.list output is an array: {prompts}"
+    );
     assert!(
         !prompts["output"].to_string().contains(&label),
         "the late savedPrompt.create had no effect: {prompts}"
