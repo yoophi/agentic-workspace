@@ -436,9 +436,9 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
   });
 
-  // Codex r10(apps medium): 재시작 취소의 답을 붙잡은 사이 run의 turn이 끝난다(서버가 `promptCompleted`를 낸다). 취소가 적용되지
-  // 않고 결과를 모름으로 끝나면 패널은 호출 전 응답 대기 값으로 되돌리지 않는다 — 쉬는 run에 대기한 교환을 보내고, 그 뒤 도착해
-  // 확인된 교환도 보내며, wait-stop이 끝난다.
+  // Codex r10(apps medium): 재시작 취소의 답을 붙잡은 사이 run의 turn이 끝나고(서버가 `promptCompleted`를 낸다) 새 교환이 도착해
+  // 확인된다. 취소가 적용되지 않고 결과를 모름으로 끝나면 패널은 호출 전 응답 대기 값으로 되돌리지 않는다 — 쉬는 run에 두 교환을
+  // 이어 가기 표지로 보내고, wait-stop이 끝난다. 취소를 기다리는 동안에는 취소 중인 run에 보내지 않는다.
   it("a turn that ended while a full restart's cancel was pending does not block delivery after an unknown result", async () => {
     const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
     const hold = s.holdNextCancel("unknownNotApplied");
@@ -446,14 +446,17 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     await hold.held;
     await s.finishTurn();
     await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(0), { timeout: 15_000, interval: 20 });
+    await s.sendExchange("x-2", "second peer message");
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes("second peer message") ?? false, 15_000);
     expect(s.exchangeSendsOf("x-1"), "nothing is sent into the run while its cancel is pending").toEqual([]);
+    expect(s.exchangeSendsOf("x-2")).toEqual([]);
+    await s.beginWaitStop();
+    expect((await s.status()).activeWork.pendingExchanges, "both acknowledged exchanges wait for delivery").toBe(2);
     await act(async () => {
       hold.release();
     });
     await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false, 15_000);
 
-    await s.sendExchange("x-2", "second peer message");
-    await s.beginWaitStop();
     await s.stopped();
     expect(s.cancelsReachingServer, "the injected cancel never reached the server").toEqual([]);
     expect(s.exchangeSendsOf("x-1"), "the queued exchange was delivered once").toHaveLength(1);
