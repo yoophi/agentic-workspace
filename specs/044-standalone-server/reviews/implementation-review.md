@@ -151,6 +151,19 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | Q3 | Medium | 기다리는 작업이 쥔 label 잠금을 거둬 직렬화가 깨짐 | 표와 이 호출자 둘뿐일 때만 거둔다(`Arc::strong_count == 2`, 표 잠금 아래). 시험 `a_label_lock_held_by_a_waiting_task_is_not_dropped`: 동작 red(`lock-red-1`) → green(`desktop_benches` 8 passed) |
 | Q4 | 관찰 | Dock 경로는 `apps-named`가 빌드돼 있어야 동작(없으면 누르지 않음) | `app-smoke.md`에 빌드 절차 기록 |
 
+### 5차: 같은 HEAD `299cb3a`(트리 `5821d25`) 세 파티션 리뷰
+
+- 파티션: crates 101개 / apps·packages·루트 57개 / specs·docs 226개. rename 감지 없이 세면 합 385 = 전체 385, 겹침 0. 코드 한 파티션이 1,038,293B로 companion 버퍼 1MB에 가까워 둘로 나눴다.
+- 세 검토 커밋의 트리는 모두 HEAD 트리와 같다. merge-base는 의도한 base다. 검토 뒤 브랜치로 돌아왔다(`status 0`).
+- **세 파티션 모두 needs-attention.** companion의 `exit=0`은 실행 종료 코드이지 통과가 아니다.
+
+| # | 등급 | 지적 | 처리 | 근거 |
+|---|---|---|---|---|
+| Y1 | high(crates) | 교환 소비·실패 기록이 `request_id`만 키로 써서 작업대끼리 간섭(같은 id면 다른 작업대 전달 거절, 정지 판정에서 누락) | `21cdbbb`: `(bench_id, request_id)` 키, 작업대 닫기 때 그 작업대 기록 제거, `failedExchangeDeliveries`는 `<benchId>/<requestId>` | `exchange_bench_scope.rs`: 동작 red → green(두 작업대 같은 id 각 1회 전달, A 소비가 B의 `pendingExchanges`·wait 정지에 영향 없음, 닫기 정리). 변이 2건 red. 한계: `undeliverableExchanges`는 아직 요청 id만 보고(보고용, 정지 판정 무관) |
+| Y2 | high(apps) | 창 토큰 발급 전송 오류가 생존 확인 없이 연결을 잊음(비우는 서버라 재연결 불가 → 임대 만료 → 교환 전달 전 정지 가능) | `85cb7b6`: 오류 때 잊는 경로를 `renew_once`와 같은 확실한 증거 규칙으로 | 단위 시험 동작 red → green, 변이 red. **하나의 회귀 시나리오** `1c757e8`: 실제 host + 감시 루프. 데스크톱 임대 → 교환 대기 → `drainingWait`(`pendingExchanges=1`) → 토큰 응답 1회 유실 주입 → 같은 인스턴스 재발급·`renew_once` Renewed → turn 끝 → 재발급 토큰으로 continuation 전달 200 → 정지 완료. 5회 반복 green, 무조건 잊기 변이는 4단계에서 red. 주입 범위: 서버가 처리한 뒤 클라이언트가 응답을 버림(네트워크 유실 아님). 패널 라우팅·전송은 시험이 대신함 |
+| Y3 | high(docs) | close-run.sh의 전역 Cmd+,·Cmd+W가 앞 앱 확인 없이 나감 | `77d5213`: `send_key_to`가 앞 프로세스가 APID임을 두 번 확인한 뒤에만 보냄, 아니면 무효·정리 | 스크립트 |
+| Y4 | medium(docs) | stalled 상한 조건이 문서마다 `attemptCount`/시도 횟수로 남음 | `77d5213`: data-model·spec·ADR 0009를 `deliveryFailureCount < 3` + 바쁨 거절 예외로 통일(구현 리뷰의 옛 결정은 "대체됨"으로 표시) | 문서 |
+
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
