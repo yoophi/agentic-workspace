@@ -44,7 +44,11 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | gate-5 | `283a0b8` | OCR 3차 수정 전에 중단(fmt·clippy 0까지). 무효 |
 | **gate-6** | **`03db661`** | **전부 0**: fmt, clippy `-D warnings`, cargo 936 passed/0 failed/89 targets/filtered 0(ask-code·hushline 포함 workspace), check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 패키지 전부), build, workbench-client itest 7, AW itest 2 |
 
-- gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
+| gate-7 | `8865589` | OCR 4차 수정 전에 중단(fmt·clippy 0까지). 무효 |
+| **gate-8** | **`d0f061f`** | **전부 0**: fmt, clippy `-D warnings`, cargo 946 passed/0 failed/90 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 642·기타 전부), build, workbench-client itest 7, AW itest 2 |
+
+- gate-6은 Codex 5차·OCR 4차 수정 전 코드다. **최신 게이트는 gate-8**이다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
+- (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
 - contract_suite가 3개 결과 뒤 멈춘 것처럼 보인 구간은, 두 fixture 시험이 in-memory·HTTP 경로를 모두 도는 약 18초 동안이다. 교착이나 nested cargo가 아니다(`Harness::spawn`은 in-process loopback).
 
 ## OCR 구현 리뷰
