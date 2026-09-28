@@ -635,13 +635,27 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
   let cancelOutcome: string | undefined;
   /** 결과를 돌려주기 전에 할 일(서버가 취소를 적용해 끝 이벤트를 먼저 보낸 경우). */
   let beforeCancelReply: (() => Promise<void>) | undefined;
+  /** Codex r9: 다음 취소 한 번의 답을 붙잡는 문(열릴 때까지 답하지 않는다 — 그 사이 대기열이 바뀌는 순서). */
+  let cancelGate: Promise<void> | undefined;
+  /** 화면이 보낸 취소 요청 수(답을 받기 전에 센다). */
+  let cancelRequests = 0;
 
   beforeEach(() => {
     cancelOutcome = undefined;
     beforeCancelReply = undefined;
+    cancelGate = undefined;
+    cancelRequests = 0;
     setTransport({
       kind: "http",
       invoke: async (command, args, options) => {
+        if (command === "cancel_agent_run") {
+          cancelRequests += 1;
+          const gate = cancelGate;
+          cancelGate = undefined;
+          if (gate) {
+            await gate;
+          }
+        }
         if (command === "cancel_agent_run" && cancelOutcome !== undefined) {
           const thrown = cancelOutcome;
           cancelOutcome = undefined;
@@ -802,6 +816,141 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
     await waitForAgentRunPanel(() => !(panel.container.textContent?.includes("Handle the peer request") ?? true));
     expect(exchangeDeliveries()).toEqual([]);
+  });
+
+  function deferred() {
+    let release!: () => void;
+    const promise = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { promise, release };
+  }
+
+  function deliveriesOf(requestId: string) {
+    return invocationsFor("send_prompt_to_run").filter(
+      (args) => (args as { continuation?: { exchangeRequestId?: string } }).continuation?.exchangeRequestId === requestId,
+    );
+  }
+
+  // Codex r9(apps medium): 재시작 취소의 답을 기다리는 동안 대기열에 들어온 항목(서버가 이미 전달 확인한 새 교환 포함)은 취소가
+  // 끝나지 않았을 때 호출 전 대기열로 덮어써 지우지 않는다 — 살아 있는 run에 turn 끝에 전달된다.
+  it.each([
+    ["unknown", MESSAGE_RESULT_UNKNOWN],
+    ["refused by the server", "cancel refused by the server"],
+  ])(
+    "keeps an exchange that arrived while a full restart's cancel was pending when the cancel is %s",
+    async (_kind, error) => {
+      const { panel, runId } = await busyRunWithAQueuedExchange();
+      await rejectASteer(panel);
+
+      const gate = deferred();
+      cancelGate = gate.promise;
+      cancelOutcome = error;
+      await panel.clickButton("Full restart");
+      await panel.rerender({
+        externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
+      });
+      await waitForAgentRunPanel(() => panel.container.textContent?.includes("Second peer request") ?? false);
+      await act(async () => {
+        gate.release();
+      });
+      await waitForAgentRunPanel(() => panel.container.textContent?.includes(error) ?? false);
+
+      expect(panel.container.textContent, "the exchange that arrived during the cancel stays queued").toContain(
+        "Second peer request",
+      );
+      expect(panel.container.textContent).toContain("Handle the peer request");
+      expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([]);
+      expect(invocationsFor("start_agent_run")).toHaveLength(1);
+
+      await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+      await waitForAgentRunPanel(() => deliveriesOf("x-7").length === 1);
+      await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+      await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+      await waitForAgentRunPanel(() => deliveriesOf("x-8").length === 1);
+      expect(deliveriesOf("x-8")[0]).toMatchObject({ runId, prompt: "Second peer request" });
+    },
+  );
+
+  // 취소가 끝났으면 그 사이 들어온 항목도 같은 규칙이다: 교환(취소한 run이 대상)은 버리고 서버에서도 끝내며, 일반 prompt는
+  // 새 run으로 옮긴다.
+  it("moves prompts that arrived during a successful full-restart cancel and abandons the exchanges that did", async () => {
+    const { panel } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    const gate = deferred();
+    cancelGate = gate.promise;
+    await panel.clickButton("Full restart");
+    await panel.rerender({
+      externalPromptRequest: { id: "x-8", text: "Second peer request", delivery: "queue", exchangeRequestId: "x-8" },
+    });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Second peer request") ?? false);
+    await panel.rerender({ externalPromptRequest: { id: "manual-3", text: "Also do this", delivery: "queue" } });
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes("Also do this") ?? false);
+    await act(async () => {
+      gate.release();
+    });
+
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 2);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([{ requestId: "x-7" }, { requestId: "x-8" }]);
+    expect(panel.container.textContent, "the plain prompt moves to the replacement run").toContain("Also do this");
+    expect(panel.container.textContent).not.toContain("Second peer request");
+  });
+
+  // Codex r9(apps medium): 결과를 몰랐던(실제로는 적용되지 않은) 재시작 뒤 다시 누른 재시작은 앞 보류를 대체한다. 그 취소의 끝
+  // 이벤트가 성공 답보다 먼저 와도 대체 run은 정확히 하나다.
+  it("a retried full restart replaces the held one: the cancel end before the success reply starts exactly one run", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+    expect(invocationsFor("start_agent_run")).toHaveLength(1);
+
+    // 두 번째 취소는 성공한다: 그 run의 끝 이벤트가 답보다 먼저 온다(답을 문으로 붙잡고 끝 이벤트를 먼저 넣는다).
+    const gate = deferred();
+    cancelGate = gate.promise;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => cancelRequests === 2);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await act(async () => {
+      gate.release();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length >= 2);
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length >= 1);
+    // 뒤늦은 시작이 있으면 여기까지 온다(같은 run의 끝 이벤트도 한 번 더).
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(invocationsFor("start_agent_run"), "exactly one replacement run").toHaveLength(2);
+    expect(invocationsFor("discard_agent_exchange_delivery")).toEqual([{ requestId: "x-7" }]);
+  });
+
+  // 사용자가 Cancel을 누르면 앞 보류는 버려진다: 그 run이 나중에 취소로 끝나도 재시작하지 않는다.
+  it("a cancel replaces a held full restart: the later cancel end does not restart", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await rejectASteer(panel);
+
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Full restart");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+
+    const gate = deferred();
+    cancelGate = gate.promise;
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => cancelRequests === 2);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "cancelled", message: "cancelled" } });
+    await act(async () => {
+      gate.release();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length >= 1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(invocationsFor("start_agent_run"), "the cancelled restart does not come back").toHaveLength(1);
   });
 
   it("still abandons the queued exchange when the cancel succeeds", async () => {

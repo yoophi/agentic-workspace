@@ -474,7 +474,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const rejectedSteersRef = useRef<SteerInput[]>([]);
   /** 취소 결과를 모르는(unknown) 재시작(Codex r8): 그 run의 취소 끝 이벤트가 오면 한 번 이어 간다. 그 run이 새 turn을 받으면
    *  (살아 있다 — 취소가 적용되지 않았다) 버린다. */
-  const unsettledRestartRef = useRef<{ runId: string; resume: () => void } | null>(null);
+  const unsettledRestartRef = useRef<{ attemptId: number; runId: string; resume: () => void } | null>(null);
+  /** 지금 살아 있는 재시작 의도(Codex r9): 한 번의 "Full restart" 조작이 하나의 시도 id를 갖고, 재시작은 그 id로 **한 번만**
+   *  소비된다(취소 성공 답, 결과를 몰랐던 취소의 복구된 끝 이벤트 중 먼저 온 쪽). 새 재시작·취소 조작은 앞 의도를 대체한다. */
+  const restartIntentRef = useRef<{ attemptId: number; runId: string } | null>(null);
+  const restartAttemptSeqRef = useRef(0);
+  /** 끝난 run의 끝 이벤트가 비운 대기열(Codex r9): 취소 답보다 끝 이벤트가 먼저 오면 대기열은 이미 비어 있다 — 재시작·취소
+   *  정리는 그 run의 마지막 대기열(취소를 기다리는 동안 들어온 항목 포함)로 판단한다. */
+  const lastClearedQueueRef = useRef<{ runId: string; queue: QueuedPrompt[] } | null>(null);
   /** 마지막으로 끝난 run과 그 끝(Codex r8): 취소 호출의 결과보다 run 끝 이벤트가 먼저 올 수 있다(서버가 취소를 적용하면 끝
    *  이벤트를 먼저 보내고 답한다). 결과를 받은 쪽이 이 기록으로 run이 이미 끝났는지 본다. */
   const lastRunEndRef = useRef<{ runId: string; status: string } | null>(null);
@@ -961,6 +968,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       );
 
       if (timelineEvent.type === "error") {
+        lastClearedQueueRef.current = { runId: envelope.runId, queue: queuedPromptsRef.current };
         setIsAwaitingPromptResponse(false);
         setQueuedPrompts([]);
         setDirectPrompt(null);
@@ -977,8 +985,12 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         if (timelineEvent.status === "promptSent") {
           activePromptSentRef.current = true;
           if (unsettledRestartRef.current?.runId === envelope.runId) {
-            // 새 turn을 받았다: run은 살아 있고 취소는 적용되지 않았다 — 재시작을 잇지 않는다.
+            // 새 turn을 받았다: run은 살아 있고 취소는 적용되지 않았다 — 재시작을 잇지 않는다(의도도 버린다).
+            const dropped = unsettledRestartRef.current;
             unsettledRestartRef.current = null;
+            if (restartIntentRef.current?.attemptId === dropped.attemptId) {
+              restartIntentRef.current = null;
+            }
           }
           const activated = activateRunStartQueuedPrompt({
             queue: queuedPromptsRef.current,
@@ -1028,6 +1040,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           setIsAwaitingPromptResponse(false);
         }
         if (["completed", "cancelled"].includes(timelineEvent.status)) {
+          lastClearedQueueRef.current = { runId: envelope.runId, queue: queuedPromptsRef.current };
           setIsAwaitingPromptResponse(false);
           setQueuedPrompts([]);
           setPendingSteers([]);
@@ -1899,16 +1912,36 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
+  /** 재시작 의도를 그 시도 id로 한 번만 소비한다(Codex r9). 대체됐거나 이미 소비됐으면 false. */
+  function claimRestart(attemptId: number) {
+    if (restartIntentRef.current?.attemptId !== attemptId) {
+      return false;
+    }
+    restartIntentRef.current = null;
+    unsettledRestartRef.current = null;
+    return true;
+  }
+
+  /** 그 run의 지금 대기열: 끝 이벤트가 이미 비웠으면 비우기 직전의 대기열(Codex r9). */
+  function queueOfRun(runId: string) {
+    const cleared = lastClearedQueueRef.current;
+    if (cleared?.runId === runId && activeRunIdRef.current !== runId) {
+      return cleared.queue;
+    }
+    return queuedPromptsRef.current;
+  }
+
   async function cancel() {
     if (!activeRunId) {
       return;
     }
 
-    // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 서버가 거절해 run이 살아 있으면 확인된 미소비 교환이 남아
-    // wait-stop을 막는다(Codex r7).
-    const droppedExchanges = exchangeRequestIdsOf(queuedPromptsRef.current);
+    // 사용자가 취소를 골랐다: 살아 있는 재시작 의도(결과를 몰랐던 앞 재시작 포함)는 버린다(Codex r9).
+    restartIntentRef.current = null;
+    unsettledRestartRef.current = null;
+    const runIdToCancel = activeRunId;
     try {
-      await cancelAgentRun(activeRunId);
+      await cancelAgentRun(runIdToCancel);
     } catch (caughtError) {
       setError(String(caughtError));
       // 취소가 서버에 닿았는지 모른다(Codex r8): 보내지 않았거나(notApplied) 답을 못 받았다(unknown). run은 살아 있을 수
@@ -1918,6 +1951,9 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         return;
       }
     }
+    // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 서버가 거절해 run이 살아 있으면 확인된 미소비 교환이 남아
+    // wait-stop을 막는다(Codex r7). 대기열은 답을 받은 지금의 것이다(기다리는 동안 들어온 교환 포함, Codex r9).
+    const droppedExchanges = exchangeRequestIdsOf(queueOfRun(runIdToCancel));
     await recordRunGoalProgress();
     queuedPromptsRef.current = [];
     setQueuedPrompts([]);
@@ -2209,14 +2245,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   async function fullRestartWithRejectedSteer(steerInput: SteerInput) {
     const originalPrompt = directPrompt?.trim();
     const runIdToCancel = activeRunId;
-    // 교환 항목은 취소하는 run이 대상이라 새 run으로 옮기지 않는다(서버가 다른 run으로의 전달을 거절한다). 취소가 끝난
-    // 뒤에만 버리고 서버에서도 끝낸다(Codex r7·r8).
-    const originalQueue = queuedPromptsRef.current;
-    const queuedPromptsToKeep = originalQueue.filter((item) => !item.exchangeRequestId);
-    const droppedExchanges = exchangeRequestIdsOf(originalQueue);
     if (!runIdToCancel || !originalPrompt) {
       return;
     }
+    // 이 조작의 재시작 의도(Codex r9): 앞 의도(결과를 몰랐던 앞 재시작의 보류 포함)를 대체한다. 재시작은 이 id로 한 번만 한다.
+    restartAttemptSeqRef.current += 1;
+    const attemptId = restartAttemptSeqRef.current;
+    restartIntentRef.current = { attemptId, runId: runIdToCancel };
+    unsettledRestartRef.current = null;
 
     const nextGoal = buildSteerPrompt(originalPrompt, steerInput.text);
     const nextRejected = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);
@@ -2227,9 +2263,16 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     const wasAwaitingPromptResponse = isAwaitingPromptResponse;
     setIsAwaitingPromptResponse(true);
 
-    // 취소가 끝난 뒤: 버린 교환을 서버에서도 끝내고 새 run을 시작한다.
+    // 취소가 끝난 뒤: 버린 교환을 서버에서도 끝내고 새 run을 시작한다 — 이 시도의 의도가 아직 살아 있을 때 한 번만. 대기열은
+    // 호출 전 스냅샷이 아니라 취소한 run의 지금 대기열이다(기다리는 동안 들어온 항목 포함, Codex r9). 교환 항목은 취소한 run이
+    // 대상이라 새 run으로 옮기지 않고(서버가 다른 run으로의 전달을 거절한다) 버린 뒤 서버에서도 끝낸다(Codex r7·r8).
     async function restartAfterCancel() {
-      void discardExchangeDeliveries(droppedExchanges);
+      if (!claimRestart(attemptId)) {
+        return;
+      }
+      const queue = queueOfRun(runIdToCancel!);
+      const queuedPromptsToKeep = queue.filter((item) => !item.exchangeRequestId);
+      void discardExchangeDeliveries(exchangeRequestIdsOf(queue));
       try {
         const started = await startRun(nextGoal, {
           queuedPrompts: queuedPromptsToKeep,
@@ -2253,10 +2296,15 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       await cancelAgentRun(runIdToCancel);
     } catch (caughtError) {
       // 취소가 적용되지 않았거나(서버가 거절, 보내지 않음) 결과를 모른다(Codex r8): 원래 run이 살아 있을 수 있으므로 지금은
-      // 새 run을 시작하지 않고 원래 대기열(교환 항목 포함)과 거절된 steer를 되돌린다. 결과를 모르면 실제 run 상태를 복구된
-      // run 이벤트로 맞춘다: 그 run의 취소 끝이 오면 재시작을 한 번 잇고, 새 turn을 받으면(살아 있다) 버린다 — 그때는 turn
-      // 끝에 교환이 전달된다.
+      // 새 run을 시작하지 않고 거절된 steer를 되돌린다. 대기열은 건드리지 않는다 — 재시작은 호출 전에 아무것도 빼지 않았고,
+      // 기다리는 동안 들어온 항목(이미 확인된 새 교환 포함)을 호출 전 스냅샷으로 덮어쓰면 잃는다(Codex r9). 결과를 모르면 실제
+      // run 상태를 복구된 run 이벤트로 맞춘다: 그 run의 취소 끝이 오면 재시작을 한 번 잇고, 새 turn을 받으면(살아 있다)
+      // 버린다 — 그때는 turn 끝에 교환이 전달된다.
       const unsettled = unsettledCall(caughtError);
+      if (restartIntentRef.current?.attemptId !== attemptId) {
+        // 그 사이 다른 조작(새 재시작·취소)이 이 시도를 대체했다: 화면 상태는 그 조작이 맡는다.
+        return;
+      }
       const endedMeanwhile =
         lastRunEndRef.current?.runId === runIdToCancel ? lastRunEndRef.current.status : null;
       if (unsettled === "unknown" && endedMeanwhile === "cancelled") {
@@ -2267,15 +2315,18 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       rejectedSteersRef.current = [...rejectedSteersRef.current, steerInput];
       setRejectedSteers(rejectedSteersRef.current);
       setError(String(caughtError));
+      if (unsettled !== "unknown" || endedMeanwhile) {
+        // 재시작하지 않는다: 이 시도의 의도를 끝낸다.
+        restartIntentRef.current = null;
+      }
       if (endedMeanwhile) {
         // run은 이미 끝났다(끝 이벤트가 패널을 정리했다): 대기열을 되살리지 않는다.
         return;
       }
-      queuedPromptsRef.current = originalQueue;
-      setQueuedPrompts(originalQueue);
       setIsAwaitingPromptResponse(wasAwaitingPromptResponse);
       if (unsettled === "unknown") {
         unsettledRestartRef.current = {
+          attemptId,
           runId: runIdToCancel,
           resume: () => {
             const next = removeRejectedSteer(rejectedSteersRef.current, steerInput.id);

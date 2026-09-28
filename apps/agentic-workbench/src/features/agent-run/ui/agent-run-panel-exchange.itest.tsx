@@ -53,6 +53,9 @@ function queuedPromptButton(position: number, action: "제거" | "즉시 전송"
  *  보내지 않고 "결과 모름", `unknownApplied`는 실제 서버에 보낸 뒤 답을 버리고 "결과 모름"(응답 유실). 그 밖의 호출과
  *  이벤트 스트림은 그대로 실제 서버로 간다. */
 type CancelInjection = "notApplied" | "unknownNotApplied" | "unknownApplied";
+/** Codex r9: 주입과 함께, 답을 돌려주기 전에 문(`gate`)이 열릴 때까지 붙잡는다. `appliedHeld`는 실제 서버에 보내 적용되게 한 뒤
+ *  문이 열리면 실제 답(성공)을 돌려준다 — 끝 이벤트가 답보다 먼저 오는 순서. `held`는 답을 붙잡았다는 표지. */
+type HeldCancel = { mode: CancelInjection | "appliedHeld"; gate: Promise<void>; held: () => void };
 
 async function scenario({
   drainFirst = true,
@@ -78,10 +81,27 @@ async function scenario({
   const ownerConnection = await connectTo(target, "owner");
   cleanup.push(() => ownerConnection.close());
   const client = createWorkbenchClient({ connection: windowConnection });
-  let nextCancel: CancelInjection | undefined;
+  let nextCancel: CancelInjection | HeldCancel | undefined;
   const cancelsReachingServer: unknown[] = [];
   const screenClient: typeof client = {
     call: async (operation, input, options) => {
+      if (operation === ("run.cancel" as OperationId) && typeof nextCancel === "object") {
+        const held = nextCancel;
+        nextCancel = undefined;
+        if (held.mode === "appliedHeld") {
+          const outcome = await client.call(operation, input, options);
+          cancelsReachingServer.push(input);
+          held.held();
+          await held.gate;
+          return outcome;
+        }
+        if (held.mode === "unknownApplied") {
+          cancelsReachingServer.push(await client.call(operation, input, options));
+        }
+        held.held();
+        await held.gate;
+        return held.mode === "notApplied" ? { kind: "notApplied", reason: "offline" } : { kind: "unknown", reason: "lost" };
+      }
       if (operation === ("run.cancel" as OperationId) && nextCancel) {
         const mode = nextCancel;
         nextCancel = undefined;
@@ -233,6 +253,36 @@ async function scenario({
   const injectNextCancel = (mode: CancelInjection) => {
     nextCancel = mode;
   };
+  /** 다음 취소 한 번을 붙잡는다(`release`로 답을 돌려준다). `held`는 화면이 취소를 보냈고 답을 기다리는 중일 때 풀린다. */
+  const holdNextCancel = (mode: HeldCancel["mode"]) => {
+    let release!: () => void;
+    let markHeld!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      markHeld = resolve;
+    });
+    nextCancel = { mode, gate, held: markHeld };
+    return { release, held };
+  };
+  const sendExchange = async (requestId: string, message: string) => {
+    await call("exchange.send", {
+      benchId: bench,
+      request: { requestId, sourcePanelId: "main", targetPanelId: "p2", message, delivery: "queue" },
+    });
+    await vi.waitFor(() => expect(acked).toContain(requestId), { timeout: 15_000, interval: 20 });
+  };
+  const exchangeSendsOf = (requestId: string) =>
+    recorded.filter(
+      (item) =>
+        item.command === "send_prompt_to_run" &&
+        (item.args.continuation as { exchangeRequestId?: string } | undefined)?.exchangeRequestId === requestId,
+    );
+  const benchRuns = async () =>
+    (await owner<Array<{ benchId: string; runs?: Array<{ runId: string }> }>>("bench.list", {}))
+      .filter((item) => item.benchId === bench)
+      .flatMap((item) => (item.runs ?? []).map((run) => run.runId));
   return {
     panel,
     panelRun,
@@ -242,6 +292,10 @@ async function scenario({
     stopped,
     exchangeSends,
     injectNextCancel,
+    holdNextCancel,
+    sendExchange,
+    exchangeSendsOf,
+    benchRuns,
     cancelsReachingServer,
     respondPermission,
     beginWaitStop,
@@ -349,6 +403,76 @@ describe("real server: AgentRunPanel queue actions on an acknowledged exchange d
     if (starts.length === 2) {
       await waitForAgentRunPanel(() => s.panel.container.textContent?.includes("Steer rejected #1") ?? false, 15_000);
     }
+  });
+
+  // Codex r9(apps medium): 재시작 취소의 답을 기다리는 동안 새 교환이 도착해 패널 대기열에 들어가고 서버에 확인됐다. 취소가
+  // 적용되지 않고 결과를 모름으로 끝나면, 패널은 호출 전 대기열로 덮어써 그 교환을 잃지 않는다 — turn이 끝나면 두 교환 모두
+  // 이어 가기 표지로 전달되고 wait-stop이 끝난다.
+  it("an exchange that arrived while a full restart's cancel was pending survives an unknown result and is delivered", async () => {
+    const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
+    const hold = s.holdNextCancel("unknownNotApplied");
+    await press("Full restart");
+    await hold.held;
+    await s.sendExchange("x-2", "second peer message");
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes("second peer message") ?? false, 15_000);
+    await act(async () => {
+      hold.release();
+    });
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false, 15_000);
+
+    expect(s.cancelsReachingServer, "the injected cancel never reached the server").toEqual([]);
+    expect(s.panel.container.textContent, "the exchange that arrived during the cancel is still queued").toContain(
+      "second peer message",
+    );
+    expect(s.recorded.filter((item) => item.command === "discard_agent_exchange_delivery")).toEqual([]);
+    await s.beginWaitStop();
+    const held = await s.status();
+    expect(held.activeWork.pendingExchanges).toBe(2);
+
+    await s.finishTurn();
+    await s.stopped();
+    expect(s.exchangeSendsOf("x-1"), "the first exchange was delivered once").toHaveLength(1);
+    expect(s.exchangeSendsOf("x-2"), "the exchange that arrived during the cancel was delivered once").toHaveLength(1);
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "no replacement run").toHaveLength(1);
+  });
+
+  // Codex r9(apps medium): 결과를 몰랐던(적용되지 않은) 재시작 뒤 다시 누른 재시작은 앞 보류를 대체한다. 두 번째 취소는 실제로
+  // 적용되고, 그 run의 끝 이벤트가 성공 답보다 먼저 온다. 대체 run은 정확히 하나다(서버의 run 목록으로 확인).
+  it("a retried full restart after an unknown one starts exactly one replacement run when the cancel end precedes the reply", async () => {
+    const s = await scenario({ drainFirst: false, rejectSteerFirst: true });
+    s.injectNextCancel("unknownNotApplied");
+    await press("Full restart");
+    await waitForAgentRunPanel(() => s.panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false, 15_000);
+    expect(s.recorded.filter((item) => item.command === "start_agent_run")).toHaveLength(1);
+
+    const hold = s.holdNextCancel("appliedHeld");
+    await press("Full restart");
+    await hold.held;
+    // 서버가 취소를 적용했다: 끝 이벤트가 패널에 와서 대기열을 비울 때까지 답을 붙잡는다.
+    await waitForAgentRunPanel(() => queuedPromptButton(1, "제거") === null, 15_000);
+    await act(async () => {
+      hold.release();
+    });
+    await waitForAgentRunPanel(
+      () => s.recorded.filter((item) => item.command === "start_agent_run").length >= 2,
+      15_000,
+    );
+    const replacement = s.recorded.filter((item) => item.command === "start_agent_run")[1].args.request as {
+      runId: string;
+    };
+    await vi.waitFor(async () => expect((await s.status()).activeWork.busyRuns).toBe(1), { timeout: 15_000, interval: 20 });
+    await vi.waitFor(
+      async () => expect((await s.benchRuns()).sort()).toEqual(["source", replacement.runId].sort()),
+      { timeout: 15_000, interval: 20 },
+    );
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "exactly one replacement").toHaveLength(2);
+
+    await s.beginWaitStop();
+    expect((await s.status()).activeWork.pendingExchanges).toBe(0);
+    await s.respondPermission(replacement.runId);
+    await s.stopped();
+    expect(s.recorded.filter((item) => item.command === "start_agent_run"), "still exactly one replacement").toHaveLength(2);
+    expect(s.exchangeSends(), "nothing was sent to the cancelled run").toEqual([]);
   });
 
   it("cancel whose request was not applied keeps the run and its exchange; the exchange is delivered and the server stops", async () => {
