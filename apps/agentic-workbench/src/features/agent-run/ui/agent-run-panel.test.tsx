@@ -1245,6 +1245,119 @@ describe("AgentRunPanel when a cancel is not known to have reached the server (C
     ).toHaveLength(1);
   });
 
+  it("a direct prompt answered unknown before its late turn is removed from the composer when that turn arrives (OCR r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const send = holdNextSend((args) => (args as { prompt?: string } | undefined)?.prompt === "Late direct work", MESSAGE_RESULT_UNKNOWN);
+
+    await panel.enterPrompt("Late direct work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await send.sent;
+      send.release();
+    });
+    await waitForAgentRunPanel(() => panel.promptValue() === "Late direct work");
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Late direct work"),
+      "the unknown direct send is not retried automatically",
+    ).toHaveLength(1);
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+
+    await waitForAgentRunPanel(() => panel.promptValue() !== "Late direct work");
+    expect(panel.container.textContent, "the late applied prompt returns to the transcript").toContain("Late direct work");
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Late direct work"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps a new draft while reconciling a direct prompt whose late turn follows unknown (OCR r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const send = holdNextSend((args) => (args as { prompt?: string } | undefined)?.prompt === "Late direct work", MESSAGE_RESULT_UNKNOWN);
+
+    await panel.enterPrompt("Late direct work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await send.sent;
+      send.release();
+    });
+    await waitForAgentRunPanel(() => panel.promptValue() === "Late direct work");
+    await panel.enterPrompt("Keep this new draft");
+    await panel.pressPromptKey("Enter");
+    expect(
+      invocationsFor("send_prompt_to_run").filter((args) => (args as { prompt?: string }).prompt === "Keep this new draft"),
+      "a second direct send is blocked until the unknown result is reconciled",
+    ).toEqual([]);
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "sent" } });
+
+    expect(panel.promptValue(), "the user-edited draft survives the late lifecycle").toBe("Keep this new draft");
+    expect(panel.container.textContent, "the applied original prompt returns to the transcript").toContain("Late direct work");
+  });
+
+  it("ignores an old run's late direct-prompt turn after a replacement run has started (OCR r12)", async () => {
+    const { panel, runId } = await busyRunWithAQueuedExchange();
+    await act(async () => {
+      queuedPromptButton(1, "제거")?.click();
+    });
+    await waitForAgentRunPanel(() => invocationsFor("discard_agent_exchange_delivery").length === 1);
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptCompleted", message: "done" } });
+    const send = holdNextSend((args) => (args as { prompt?: string } | undefined)?.prompt === "Old late work", MESSAGE_RESULT_UNKNOWN);
+
+    await panel.enterPrompt("Old late work");
+    await panel.pressPromptKey("Enter");
+    await act(async () => {
+      await send.sent;
+      send.release();
+    });
+    await waitForAgentRunPanel(() => panel.promptValue() === "Old late work");
+    cancelOutcome = MESSAGE_RESULT_UNKNOWN;
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => panel.container.textContent?.includes(MESSAGE_RESULT_UNKNOWN) ?? false);
+    await panel.enterPrompt("Still blocked while cancel is unknown");
+    await panel.pressPromptKey("Enter");
+    expect(invocationsFor("start_agent_run"), "an unknown cancel does not unlock the unresolved run").toHaveLength(1);
+
+    await panel.clickButton("Cancel");
+    await waitForAgentRunPanel(() => !(panel.container.textContent?.includes("Running") ?? false));
+
+    await panel.enterPrompt("Replacement run work");
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() => invocationsFor("start_agent_run").length === 2);
+    const replacementRunId = (invocationsFor("start_agent_run")[1] as { request: { runId: string } }).request.runId;
+    await panel.emitRunEvent({
+      runId: replacementRunId,
+      event: { type: "lifecycle", status: "promptSent", message: "sent" },
+    });
+    await panel.enterPrompt("New-run draft");
+
+    await panel.emitRunEvent({ runId, event: { type: "lifecycle", status: "promptSent", message: "late old sent" } });
+
+    expect(panel.promptValue(), "an old run event cannot rewrite the replacement run's composer").toBe("New-run draft");
+    await panel.emitRunEvent({
+      runId: replacementRunId,
+      event: { type: "lifecycle", status: "promptCompleted", message: "done" },
+    });
+    await panel.pressPromptKey("Enter");
+    await waitForAgentRunPanel(() =>
+      invocationsFor("send_prompt_to_run").some(
+        (args) =>
+          (args as { runId?: string; prompt?: string }).runId === replacementRunId &&
+          (args as { prompt?: string }).prompt === "New-run draft",
+      ),
+    );
+  });
+
   it("an exchange delivery answered unknown before any turn was seen is retried with the same key (Codex r12)", async () => {
     const { panel, runId } = await busyRunWithAQueuedExchange();
     const send = holdNextSend(

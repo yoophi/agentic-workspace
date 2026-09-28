@@ -367,3 +367,13 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 ### 최종 HEAD 재검토
 
 위 수정으로 HEAD가 바뀌었으므로, 최종 게이트 뒤 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).
+
+#### OCR 12차 (`7ba92ba..fd4776f`)
+
+- `ocr delegate preview --format json`이 17개 변경 파일 중 9개를 reviewable로, 8개를 excluded로 분류했다. reviewable 9개 전부에 `ocr delegate rule`을 적용하고 diff와 호출 경로를 검토했다(9/9, coverage 100%, skipped 0). verdict는 **needs-attention**이다.
+- 최초 지적은 queued exchange와 직접 prompt를 함께 High로 분류했다. queued exchange 부분은 **오탐으로 기각**했다. 기존 시험 `an exchange delivery answered unknown before any turn was seen is retried with the same key`가 unknown 뒤 같은 멱등 키 재시도와 늦은 원래 lifecycle 정리를 이미 검증하며, 이는 계약의 의도된 복구 절차다.
+- **Medium — 직접 prompt의 unknown 응답 뒤 늦은 `promptSent`를 조정하지 않아 중복 전송 가능**(`agent-run-panel.tsx`): 직접 prompt에는 멱등 키가 없다. HTTP unknown이 먼저 오면 패널은 입력을 복원하고 낙관적 transcript를 제거했지만, 뒤늦은 `promptSent`는 그 상태를 고치지 않았다. 사용자가 복원된 입력을 다시 보내면 같은 prompt가 두 번 적용될 수 있다.
+- **반영**: run·prompt text·전송 전 `promptSent` 수를 unsettled 상태로 남긴다. 같은 run의 늦은 `promptSent`가 오면 사용자가 입력을 바꾸지 않은 경우에만 composer를 비우고 transcript·history를 적용 상태로 복원한다. 그 사이 편집한 새 초안은 보존한다. 미확정 동안에는 다음 prompt·steer를 보내지 않아 다른 turn을 앞 전송의 결과로 오인하지 않는다.
+- **lifecycle이 오지 않는 경우의 복구**: 시간 경과만으로 적용 여부를 추정하거나 직접 prompt를 재전송하지 않는다. `Cancel`은 계속 사용할 수 있다. 취소 결과도 unknown이면 run과 미확정 표지를 유지해 사용자가 다시 취소할 수 있고, 취소가 확정되면 표지를 지운다. 그 뒤 replacement run을 시작하고 prompt를 보낼 수 있다. old run의 늦은 이벤트는 active run ID 검사로 새 run의 composer에 닿지 않는다. run 오류·종료도 표지를 지운다.
+- 회귀 시험 3개는 (1) 적용 → HTTP unknown → 늦은 `promptSent` 조정, (2) 늦은 이벤트 전 새 초안 보존·후속 전송 차단, (3) lifecycle 없음 → Cancel unknown → 재시도 성공 → replacement run 시작·old 이벤트 격리·새 run 전송을 검증한다. 새 시험 red(기존 코드) → green(패널 60/60). 늦은 조정 조건 반전, composer 무조건 비우기, 확정 취소 때 표지 미제거의 세 변이가 각각 해당 시험에서 red였고 복원 뒤 OCR 시험 3/3 green이다.
+- OCR excluded 8개는 `run-panel-state.test.ts`, `agent-run-panel.test.tsx`, 044 계약·research·review·tasks 문서다. 이 분류를 reviewable coverage에 섞지 않았고, 최종 Codex 네 파티션에는 모두 포함한다.
