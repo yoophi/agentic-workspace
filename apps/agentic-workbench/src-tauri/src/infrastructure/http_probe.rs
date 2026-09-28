@@ -24,7 +24,8 @@ pub const APP_PROBE_FILE_ENV: &str = "AW_APP_TRANSPORT_PROBE_FILE";
 pub const APP_PROBE_AGENT_ENV: &str = "AW_APP_PROBE_AGENT_COMMAND";
 pub const APP_PROBE_CWD_ENV: &str = "AW_APP_PROBE_CWD";
 /// `refresh`: SC-004d 창 새로고침 1회 전달 시나리오(새로고침마다 다시 넣는다). `quit`: 044 T035 앱 종료 전 준비 시나리오
-/// (run을 띄우고 살려 둔 채 `ready-to-quit`을 보고한다, 한 번만 넣는다). 기본은 스트림·재연결 시나리오.
+/// (run을 띄우고 살려 둔 채 `ready-to-quit`을 보고한다, 한 번만 넣는다). `quit-busy`: 시작 turn이 진행 중인 채로 보고한다.
+/// `close-token`: T046 창 토큰 넘기기. 기본은 스트림·재연결 시나리오.
 pub const APP_PROBE_SCENARIO_ENV: &str = "AW_APP_PROBE_SCENARIO";
 /// 044 T046 `close-token`: 이 창 토큰(`{baseUrl, token, origin}`)을 넘기는 0600 비밀 파일. 보고서와 따로 둔다 — 스모크 스크립트는
 /// 이 파일로 닫기 전·뒤 같은 토큰의 인증 결과(상태 코드만)를 확인한다.
@@ -95,6 +96,17 @@ fn app_probe_template(scenario: &str) -> String {
     match scenario {
         "refresh" => APP_REFRESH_PROBE_SCRIPT.to_owned(),
         "quit" => APP_QUIT_PROBE_SCRIPT.to_owned(),
+        // T045(Codex 문서 리뷰): 시작 turn이 끝나기 전(agent가 문으로 붙잡음)에 종료 준비를 보고한다.
+        "quit-busy" => APP_QUIT_PROBE_SCRIPT
+            .replace("scenario: 'quit'", "scenario: 'quit-busy'")
+            .replace(
+                "    await waitFor(() => completedAfter(echoIndex()), 'start prompt echo and completion');\n",
+                "    await waitFor(() => echoIndex() >= 0, 'start prompt echo');\n    report.steps.completedBeforeQuit = completedAfter(echoIndex());\n",
+            )
+            .replace(
+                "report.phase = 'ready-to-quit';",
+                "report.phase = 'ready-to-quit-busy';",
+            ),
         "close-token" => APP_QUIT_PROBE_SCRIPT
             .replace("scenario: 'quit'", "scenario: 'close-token'")
             .replace("    report.phase = 'ready-to-quit';\n", CLOSE_TOKEN_STEP),
@@ -450,6 +462,30 @@ mod tests {
                 "quit probe must not use {forbidden}"
             );
         }
+    }
+
+    /// T045(SC-001, Codex 문서 리뷰): `quit-busy`는 시작 prompt의 에코만 받고 **완료를 기다리지 않은 채**(agent가 turn을
+    /// 문으로 붙잡는다) `ready-to-quit-busy`를 보고한다. 앱 종료 뒤 진행 중 turn이 서버에서 이어지는지 보려는 것이다.
+    #[test]
+    fn quit_busy_probe_reports_before_the_start_turn_completes() {
+        let script = app_probe_template("quit-busy")
+            .replace("__AGENT__", "\"agent\"")
+            .replace("__CWD__", "\"/work\"");
+        assert!(script.contains("scenario: 'quit-busy'"));
+        assert!(script.contains("report.phase = 'ready-to-quit-busy'"));
+        assert!(script.contains("await waitFor(() => echoIndex() >= 0, 'start prompt echo');"));
+        assert!(script.contains("report.steps.completedBeforeQuit = completedAfter(echoIndex());"));
+        assert!(
+            !script.contains("'start prompt echo and completion'"),
+            "the busy probe must not wait for the turn to complete"
+        );
+        for forbidden in ["cancel", "token", "get_workbench_connection"] {
+            assert!(
+                !script.contains(forbidden),
+                "quit-busy probe must not use {forbidden}"
+            );
+        }
+        assert_eq!(app_probe_template("quit"), APP_QUIT_PROBE_SCRIPT);
     }
 
     /// T046(SC-006): `close-token`은 `quit` 흐름에 "이 창 토큰을 비밀 파일로 넘기고, 닫기 전 그 토큰의 handshake 상태

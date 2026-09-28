@@ -31,6 +31,40 @@
 
 ## T045 — 앱 종료 뒤 run 지속 (SC-001)
 
+증거는 두 가지이고 범위가 다르다.
+
+1. **진행 중 turn의 실행·출력 지속**(아래 "진행 중 turn 지속", Codex 문서 리뷰 반영) — SC-001의 근거.
+2. **쉬는 세션의 지속과 후속 호출**(이 절의 첫 표) — 시작 turn이 **끝난 뒤**(`promptCompleted`, 종료 직후 `busyRuns=0`) 앱을 끄고, 종료 뒤 소유자가 **새 prompt**로 출력을 본다. 세션이 남는다는 것만 증명하고, 진행 중 turn이 앱 종료를 넘어 계속되는지는 증명하지 않는다(Codex 문서 리뷰 지적). 이 증거만 있을 때 T045는 부분 검증이었다.
+
+### 진행 중 turn 지속 (SC-001)
+
+흐름(`quit-busy` probe, `BUSY=1 quit-run.sh`):
+
+1. 가짜 agent(`--end-turn-gate <파일> --after-gate-chunk`)가 시작 turn을 문 파일로 붙잡는다. probe는 시작 에코만 받고 **완료 전에** `ready-to-quit-busy`를 보고한다(`completedBeforeQuit: false`).
+2. 그 경로로 앱을 끈다. **앱 PID 소멸**을 확인한다. 직후 `server.status.busyRuns = 1`이다(turn이 서버에서 진행 중). 이때 문 파일은 없다.
+3. `owner-check.py --observe-turn --release-file`:
+   - replay에 완료가 없음을 확인한다(`replayHasCompletion: false`).
+   - 구독을 연다.
+   - 고유 표지를 문 파일에 원자적으로 쓴다(열기).
+   - **새 prompt 없이**(`promptSent: false`) live로 기존 turn의 **새 출력** `after-gate:<표지>`(`liveOutputAfterRelease`)와 **완료**(`liveCompletion`)를 모두 받아야 통과한다.
+   - 그 뒤 취소한다.
+4. 표지는 앱 종료 뒤에 만들어진다. 그래서 그 출력은 앱이 없을 때 서버가 이어 간 turn이 만든 것이다. agent 기록의 prompt는 1개(시작 prompt)이고, `after-gate` 기록도 1개다.
+
+| 경로 | 배포 | 개발 |
+|---|---|---|
+| (c) Cmd+Q | ok `t045-rel-c-busyout-1` | ok `t045-dev-c-busyout-1` |
+| (d) Dock Quit | ok `t045-rel-d-busyout-1` | ok `t045-dev-d-busyout-1` |
+| (e) AppleScript `quit` | ok `t045-rel-e-busyout-1` | ok `t045-dev-e-busyout-1` |
+| (g) `SIGTERM` | ok `t045-rel-g-busyout-1` | ok `t045-dev-g-busyout-1` |
+
+- 모든 실행: 종료 뒤 `busyRuns=1`. live 순번 `[9, 10]` = 9 `after-gate:<표지>` 출력, 10 완료. 취소 완료.
+- 무효 실행 기록: `t045-rel-d-busy-1`은 Dock 메뉴가 열리기 전에 누름이 가 `Invalid index`가 났다. 앱이 끝나지 않아 스크립트가 정확한 PID에 TERM을 보냈다. 그래서 (d) 증거가 아니다.
+  - 이후 스크립트는 메뉴가 열릴 때까지 조건 대기한다(`dock-menu-open`).
+  - 경로로 끝나지 않은 실행은 `path-exercised=no`로 무효를 적는다.
+- `*-busy-1`(출력 표지 전 1차, 완료만 확인)은 scratchpad에 남기고, 이 표는 출력까지 확인한 `*-busyout-1`로 대체한다.
+
+### 쉬는 세션 지속 (보조 증거)
+
 흐름(`quit` probe): 에코 run 시작 → 시작 에코·완료 → `ready-to-quit`(run 살려 둠) → 그 경로로 종료 → **앱 PID 소멸** → 서버 PID 생존 → `server.status` → `owner-check.py`(identify 증명 → handshake → `bench.list`에서 같은 run → replay → 구독으로 소유자 prompt 에코를 live로 받음 → `run.cancel` → 목록에서 사라짐).
 
 | 경로 | 배포 | 개발 |

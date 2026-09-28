@@ -6,7 +6,7 @@
 
 | 기준 | 044에서 완료(근거) | 후속 미완료 |
 |---|---|---|
-| (a) 종료 뒤 지속 | 앱 종료(Cmd+Q·Dock·AppleScript·SIGTERM) 뒤 앱 PID 소멸 → 소유자 클라이언트로 같은 run 조회·live 출력·취소, 개발·배포 출처(`app-smoke.md` T045). 서버가 시작한 turn·대기열 prompt·orchestration 알림을 끝까지 실행(`wait_stop.rs`) | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
+| (a) 종료 뒤 지속 | 앱 종료(Cmd+Q·Dock·AppleScript·SIGTERM) 뒤 앱 PID 소멸 → **진행 중 turn이 서버에서 이어져 새 출력·완료를 낸다**(`busyRuns=1`, 새 prompt 없이 live), 소유자 클라이언트로 같은 run 조회·취소, 개발·배포 출처(`app-smoke.md` T045 "진행 중 turn 지속"). 서버가 시작한 turn·대기열 prompt·orchestration 알림을 끝까지 실행(`wait_stop.rs`) | CLI(6단계)로 같은 흐름. 다시 연 데스크톱이 남은 작업대에 다시 붙는 화면. 교환 전달의 서버 소유(오늘은 데스크톱 UI가 라우팅·전송, 임대가 없으면 `undeliverableExchanges`로 보고만) |
 | (b) 독립 composition root | `crates/workbench-host` 조립 + `apps/agentic-workbench-server`, MCP·launch decorator의 Tauri 결합 제거, 네이티브 삽입 전달 제거 | — |
 | (c) 단일 writer·생명주기 | 잠금·안내 파일·identify HMAC·ensure·시작 복구·서빙→비우기→정지·임대·유휴·정지 세 방식, 프로세스 시험(동시 10회, kill -9 복구, 권한), 연결 실패 화면(T047) | — |
 | (d) 프로세스 트리 가두기 | 서버 종료 때 자식 정리는 오늘 수준 유지 | 공통 감독자, 플랫폼별 트리 가두기, 강제 종료 뒤 잔여 자식 회수 |
@@ -77,4 +77,29 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 
 ## Codex 구현 리뷰
 
-(실행 뒤 기록)
+### 실행 이력 (완료로 세지 않은 것 포함)
+
+| 시도 | 대상 | 결과 | 리뷰로 셈 |
+|---|---|---|---|
+| 1 | `--base cb0bd4c`, HEAD `f7d4094` 전체 | `spawnSync git ENOBUFS`(diff 1.5MB가 companion의 git 출력 버퍼 1MB 초과) | 아니오 |
+| 2 | 합성 base 두 개(8182ad8·34d62ec)를 HEAD에서 직접 | 두 번 모두 `ENOBUFS`. companion이 `merge-base HEAD base`로 범위를 정하는데 합성 base가 HEAD의 조상이 아니라 다시 `cb0bd4c`..HEAD 전체가 됨 | 아니오 |
+| 3a | 코드: HEAD 트리와 같은 검토 커밋 `68074965`(부모 8182ad8), 144개 파일, 969,681B | turn이 `custom_tool_call` 출력 뒤 도구 실행 기록 없이 멈춤. app-server TCP 없음·CPU 0%, 66분 무진행. 그 job만 `/codex:cancel`로 중단(`turnInterrupted: true`). 공유 broker·app-server·다른 세션은 건드리지 않음 | 아니오 |
+| 3b | 문서·증거: 검토 커밋 `52a4ef2d`(부모 34d62ec), 121개 파일, 535,263B | **needs-attention** 1건(아래 C1) | 예(`f7d4094` 문서) |
+
+- 분할 범위 검증: 코드 144 + 문서 121 = 265 = `cb0bd4c..f7d4094` 전체. 겹침 0, 합집합 일치.
+- 두 검토 커밋의 트리는 모두 `235454f` = HEAD `f7d4094`의 트리다. 검토 중 작업 트리 파일은 바뀌지 않았다(detached checkout, `git status` 0). 검토 뒤 브랜치로 돌아왔다.
+
+### C1 (문서 리뷰, medium) — 쉬는 세션의 생존을 진행 중 작업 지속 증거로 씀
+
+- 지적: T045는 시작 turn 완료(`busyRuns=0`) 뒤 앱을 끄고 새 prompt로 출력을 봤다. 진행 중 turn이 앱 종료를 넘어 계속되는지는 증명하지 않는다.
+- 처리:
+  - T045·SC-001을 먼저 부분 검증으로 표시했다.
+  - debug probe `quit-busy`와 가짜 agent `--end-turn-gate … --after-gate-chunk`를 더했다. owner-check에는 `--observe-turn --release-file`을 더했다.
+  - 흐름: 진행 중 turn을 붙잡음 → 종료 뒤 `busyRuns=1` → 앱 PID 소멸 → 구독 뒤 고유 표지로 문을 엶 → 새 prompt 없이 그 표지의 **새 출력**과 **완료**를 live로 받음.
+  - 개발·배포 × (c)(d)(e)(g) 8건 모두 ok(`app-smoke.md` "진행 중 turn 지속"). 그 뒤 T045를 다시 완료로 표시했다.
+  - 사용자 검토로 "완료 이벤트만"이 아니라 "종료 뒤 새 출력"까지 단정하게 보강했다.
+- 단위 시험 `quit_busy_probe_reports_before_the_start_turn_completes`: red(`quit-busy-red-1.log` 종료 101, 기본 템플릿으로 떨어짐) → green(`quit-busy-green-1.log` 3 passed).
+
+### 최종 HEAD 재검토
+
+C1 수정으로 HEAD가 바뀌었으므로 코드·문서 분할 리뷰를 **같은 최종 HEAD**에서 다시 실행한다(아래에 기록).

@@ -1,0 +1,13 @@
+app-pid=39618 quit-path=d
+probe-status=done
+run-id=quit-fa5de4fb server-pid=39655
+server-verified=yes
+dock-menu-open=yes
+app-gone=yes
+path-exercised=yes
+server-alive-after-quit=yes
+status-after-quit={"result": "ok", "state": "serving", "leases": 0, "busyRuns": 1}
+busy-after-quit=yes
+gate-exists-before-observe=no
+owner-check-exit=0
+server-stopped=yes

@@ -101,7 +101,7 @@
 
 ## Phase 8: 실제 앱 검증 (US1·US2 완료 조건)
 
-- [X] T045 [US1] 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
+- [X] T045 [US1] (Codex 문서 리뷰로 진행 중 turn 지속 스모크 보완 — `app-smoke.md` "진행 중 turn 지속") 실제 앱 `quit` 스모크: T003에서 관측한 **종료 경로마다** run 시작 → 그 경로로 종료 → PID 소멸 확인 → `owner-check.py`로 run 진행·출력 이어짐·취소. 개발 출처와 배포 출처(`tauri build --debug --no-bundle` + 옆 서버 실행 파일) 각각. 결과 JSON을 `specs/044-standalone-server/reviews/app-smoke/`에. **관측 경로 중 하나라도 실패·미실행이면 SC-001 미완료로 둔다**
 - [X] T046 [US2] 창 닫기 대조: 관측한 창 닫기 경로((a)·(b))에서 그 작업대의 run이 취소되고 그 창 토큰이 거절됨(SC-006)
 - [X] T047 [US2] 서버 실행 파일이 없을 때 앱의 연결 실패 화면과 다시 시도, 서버가 떠 있을 때 새로 띄우지 않음, 서버 없을 때 한 번만 띄움(SC-005)
 - [X] T048 [US1] 관측 불가 경로(예: 로그아웃)와 Windows·Linux, **OS 프로세스 재시작 뒤 보류 task 재배정**(host 재조립 수준만 검증됨, `implementation-evidence.md` 대기 task 정책 변경)을 `specs/044-standalone-server/reviews/app-smoke.md`의 미검증 목록에 적는다(완료로 세지 않음)

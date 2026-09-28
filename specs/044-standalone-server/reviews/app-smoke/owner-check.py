@@ -185,6 +185,11 @@ class WebSocket:
         self.sock.close()
 
 
+def is_completion(body):
+    """run 스트림의 prompt 완료 이벤트(lifecycle promptCompleted)."""
+    return body.get("type") == "lifecycle" and body.get("status") == "promptCompleted"
+
+
 def find_run(benches, run_id):
     for bench in benches:
         for run in bench.get("runs", []):
@@ -199,6 +204,10 @@ def main():
     parser.add_argument("--run-id")
     parser.add_argument("--prompt")
     parser.add_argument("--timeout", type=float, default=20.0)
+    # T045(SC-001, Codex 문서 리뷰): 새 prompt를 보내지 않고 **진행 중인 기존 turn**의 완료를 live로 본다. 구독을 연 뒤
+    # `--release-file`을 만들어 agent의 turn 문을 푼다(구독 전에 완료되지 않게).
+    parser.add_argument("--observe-turn", action="store_true")
+    parser.add_argument("--release-file")
     args = parser.parse_args()
     report = {"result": "error", "steps": {}}
     try:
@@ -235,6 +244,11 @@ def main():
         report["steps"]["benchList"] = "ok"
 
         replay = call(base, owner, "run.replay", {"benchId": bench_id, "runId": run_id, "afterSequence": 0}, False)
+        if args.observe_turn:
+            bodies = [(item.get("event") or item.get("body") or {}) for item in replay.get("events", [])]
+            report["steps"]["replayHasCompletion"] = any(is_completion(body) for body in bodies)
+            if report["steps"]["replayHasCompletion"]:
+                raise CheckError("the start turn already completed before the observation (not an in-flight turn)")
         sequences = [item["sequence"] for item in replay.get("events", [])]
         last = replay.get("lastSequence", 0)
         report["steps"]["replayEvents"] = len(sequences)
@@ -257,12 +271,40 @@ def main():
             hello = socket_client.next_text()
             if hello.get("type") != "hello":
                 raise CheckError(f"expected hello, got {hello}")
-            prompt = args.prompt or ("owner-check-" + uuid.uuid4().hex[:8])
-            call(base, owner, "run.sendPrompt", {"benchId": bench_id, "runId": run_id, "prompt": prompt}, True)
             live = []
             echoed = False
             deadline = time.monotonic() + args.timeout
-            while time.monotonic() < deadline and not echoed:
+            if args.observe_turn:
+                # 고유 표지를 문 파일에 쓴다. agent(`--after-gate-chunk`)가 문이 열린 뒤 `after-gate:<표지>`를 출력한다 —
+                # 앱 종료 뒤에 만든 출력이라는 증거다(종료 전 replay에는 있을 수 없다).
+                marker = "owner-release-" + uuid.uuid4().hex[:8]
+                if args.release_file:
+                    # 원자적 쓰기: agent는 파일이 생기는 순간 읽으므로 빈 내용을 보지 않게 임시 파일에 쓴 뒤 이름을 바꾼다.
+                    staging = args.release_file + ".tmp"
+                    with open(staging, "w") as gate:
+                        gate.write(marker)
+                    os.replace(staging, args.release_file)
+                report["steps"]["promptSent"] = False
+                chunk = False
+                while time.monotonic() < deadline and not echoed:
+                    frame = socket_client.next_text()
+                    if frame.get("type") != "event":
+                        continue
+                    event = frame["event"]
+                    live.append(event["sequence"])
+                    body = event.get("body") or {}
+                    if body.get("type") == "agentMessage" and body.get("text") == "after-gate:" + marker:
+                        chunk = True
+                    if is_completion(body):
+                        echoed = True
+                report["steps"]["liveCompletion"] = echoed
+                report["steps"]["liveOutputAfterRelease"] = chunk
+                # 완료만이 아니라 앱 종료 뒤 새 출력까지 받아야 한다.
+                echoed = echoed and chunk
+            prompt = args.prompt or ("owner-check-" + uuid.uuid4().hex[:8])
+            if not args.observe_turn:
+                call(base, owner, "run.sendPrompt", {"benchId": bench_id, "runId": run_id, "prompt": prompt}, True)
+            while not args.observe_turn and time.monotonic() < deadline and not echoed:
                 frame = socket_client.next_text()
                 if frame.get("type") != "event":
                     continue
@@ -276,9 +318,9 @@ def main():
             socket_client.close()
         report["steps"]["liveSequences"] = live
         report["steps"]["liveAfterReplay"] = bool(live) and all(sequence > last for sequence in live)
-        report["steps"]["liveEcho"] = echoed
+        report["steps"]["liveEcho" if not args.observe_turn else "liveTurnCompleted"] = echoed
         if not echoed:
-            raise CheckError("no live output for the owner's prompt")
+            raise CheckError("no live completion of the in-flight turn" if args.observe_turn else "no live output for the owner's prompt")
 
         call(base, owner, "run.cancel", {"benchId": bench_id, "runId": run_id}, True)
         deadline = time.monotonic() + args.timeout
