@@ -58,6 +58,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | **gate-16** | **`8fcb8cb`** | **전부 0**(Codex 12차 수정 뒤, `CARGO_INCREMENTAL=0`): fmt, clippy `-D warnings`, cargo 1002 passed/0 failed/7 ignored/94 targets/filtered 0, check-types, pnpm test(workbench-client 73·agentic-workbench 676·기타 전부), build, workbench-client itest 7, AW itest 14. 원 로그·종료 코드는 `/private/tmp/aw-044-final-gate-16/` |
 | gate-17 | `1a48e0c` | fmt 0, clippy 0 뒤 cargo workspace에서 `workbench-core --test orchestration_agent`의 `first_turn_result_and_input_request_update_the_task_and_notify` 1건 실패. 통합 process의 **실제 종료 코드 101**(tool 결과)이며, `set -e` 때문에 `status.txt`에는 cargo 종료 코드가 누락됐다. 후속 단계는 실행되지 않아 무효 |
 | gate-18 | `c952011` | fmt·clippy·cargo workspace·check-types·pnpm test·build·client integration은 모두 0. AW integration은 `agent-run-panel-exchange.itest.tsx`의 stale 1회 HTTP assertion 1건 실패로 **실제 종료 코드 1**; `status.txt`에 실패 단계까지 모두 기록됐고 후속 단계 없음. 무효 |
+| **gate-19** | **`89ebe49`** | **전부 0**: fmt, clippy `-D warnings`, cargo 1015 passed/0 failed/7 ignored/94 targets/filtered 0, check-types, pnpm test, build, workbench-client integration 7/7, AW integration 14/14. 원 로그·각 단계 종료 코드는 `/private/tmp/aw-044-final-gate-19/`. 뒤의 C14 실제 앱 수정 전 코드이므로 최종 ship 근거는 아님 |
 
 - gate-8은 Codex 6차 수정(`02831fe`·`436b563`·`bf1d65d`) 전 코드다. gate-13은 Codex 11차 수정 전 코드다. gate-15는 중단돼 무효다. **최신 유효 게이트는 gate-16(`8fcb8cb`)이다.** (이전 기록) gate-6은 Codex 5차·OCR 4차 수정 전 코드다. gate-8 뒤 커밋은 스모크 스크립트 주석(`specs/`)만 바꿨고, 코드 트리는 `d0f061f`과 같다.
 - (이전 기록) gate-6 뒤 커밋은 문서(`specs/`)만 바꿨다. 코드 트리는 `03db661`과 같다.
@@ -402,7 +403,7 @@ OCR·Codex 구현 리뷰에 다음을 명시적으로 넣는다.
 | C11 | High | **유효** — retire 1회 실패 뒤 local mapping·재시도 정보 유실 | server client lifecycle call/idempotency, retire 시험 | (a) 서버 적용·응답 유실 후 같은 키 replay 1/1, (b) **최초 요청이 서버 미도달** 후 mapping 보존·같은 검증 instance 재시도 1/1; 둘 다 bench 종료·tombstone·pending 0 | 실제 앱 창 폐기 smoke |
 | C12 | High | **유효** — 같은 run의 unrelated `promptSent`로 unknown 송신 오판 | panel, HTTP transport, client/protocol `replayed`, UI 시험 | 패널 60/60: 늦은 이벤트 전 편집 초안 보존, unrelated same-run·old-run 이벤트 격리, 같은 stable key 재시도/Cancel 복구 | 최종 frontend gate·실제 앱 prompt smoke |
 | C13 | Medium | **유효** — `status` CLI가 `server.status`를 호출하지 않음 | server CLI, process 시험 | status가 실제 status payload를 출력 1/1 | process 전체 suite |
-| C14 | High | **유효, 미입증** — Cmd+W Settings 한 번이 main/run까지 닫음 | 중복 native Close menu 제거(`src-tauri/lib.rs`), 기존 이중-close 단위 가정 제거 | 코드 반영만 완료 | **development·release 실제 앱 b2 smoke 필수** |
+| C14 | High | **유효, 최신 앱에서 재현** — Cmd+W Settings 한 번이 main/run까지 닫음 | 단일 custom Close Window가 focused Tauri window 하나만 닫도록 변경(`src-tauri/lib.rs`); b2 runner는 재활성화 없이 PID+front window `Settings`를 두 번 확인 | gate-19 release 번들의 강화 전·후 runner 모두 앱 종료·run 제거·토큰 401·retire 2회로 실패해 제품 결함 확정. custom menu 단위 1/1·clippy 통과 | **수정 커밋의 development·release 실제 앱 b2 및 전체 close/quit smoke 필수** |
 | C15 | High | **유효** — gate-16은 최종 tree 이전이라 ship 근거 아님 | `tasks.md`, 이 문서 | 해당 없음 | final tree에서 `CARGO_INCREMENTAL=0` 전체 gate |
 | C16 | Medium | **유효** — T045/SC-001 등 완료 표지가 실제 smoke보다 앞섬 | `spec.md`, `tasks.md`, app-smoke 문서 | 완료 표지를 미완료로 되돌림 | T045/T046/SC-001/SC-006/T052는 실제 앱 smoke·최종 gate 뒤에만 완료 |
 | C17 | Medium | **유효** — FR-014가 구현과 다른 server-side incarnation 등록을 요구 | `spec.md`, research/contract | desktop 생성 incarnation + server token/tombstone 계약으로 정합화 | 최종 문서 교차검사 |

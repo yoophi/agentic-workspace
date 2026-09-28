@@ -59,9 +59,9 @@ case "$CLOSE" in
   a|f) ACT=$(sx "click (first button of window \"$MAIN\" whose subrole is \"AXCloseButton\")"); ACTRC=$?; log "action: $ACT (exit $ACTRC)" ;;
   b1) sx "perform action \"AXRaise\" of window \"$MAIN\"" >/dev/null; sleep 1
       log "front=$(sx 'get name of front window')"
-      ACT=$(sx 'click menu item "Close Window" of menu "Window" of menu bar 1'); ACTRC=$?; log "action: $ACT (exit $ACTRC)" ;;
+      ACT=$(sx 'click menu item "Close Window" of menu "File" of menu bar 1'); ACTRC=$?; log "action: $ACT (exit $ACTRC)" ;;
   b2) log "front=$(sx 'get name of front window')"
-      send_key_to "$APID" "$BID" "w" || invalid_stop "Cmd+W : the target app is not frontmost" ;;
+      send_key_to_front_window "$APID" "w" "Settings" || invalid_stop "Cmd+W : the target app/Settings window is not frontmost" ;;
 esac
 sleep 3
 ALIVE=$(kill -0 "$APID" 2>/dev/null && echo yes || echo no)

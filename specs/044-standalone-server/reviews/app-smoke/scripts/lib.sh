@@ -84,6 +84,19 @@ send_key_to() {
   osascript -e "tell application \"System Events\" to keystroke \"$key\" using command down" >/dev/null 2>&1
 }
 
+# 이미 앞에 있는 특정 창에만 전역 키를 보낸다. `activate`는 macOS의 key window를 바꿀 수 있으므로 호출하지 않는다.
+# 대상 PID와 front window 제목을 연속 두 번 확인하고, 어느 하나라도 바뀌면 키를 보내지 않는다.
+send_key_to_front_window() {
+  local apid=$1 key=$2 title=$3 front
+  front_is "$apid" || return 1
+  front=$(osascript -e "tell application \"System Events\" to tell (first process whose unix id is $apid) to get name of front window" 2>/dev/null) || return 1
+  [ "$front" = "$title" ] || return 1
+  front_is "$apid" || return 1
+  front=$(osascript -e "tell application \"System Events\" to tell (first process whose unix id is $apid) to get name of front window" 2>/dev/null) || return 1
+  [ "$front" = "$title" ] || return 1
+  osascript -e "tell application \"System Events\" to keystroke \"$key\" using command down" >/dev/null 2>&1
+}
+
 # quit 경로 (g): 기록한 신원이 같을 때만 SIGTERM. 보냈으면 0, 보내지 않았으면 1(`kill_exact`와 같음).
 send_sigterm() {
   kill_exact "$1" "$2"

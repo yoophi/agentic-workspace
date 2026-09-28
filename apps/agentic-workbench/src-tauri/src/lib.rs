@@ -45,6 +45,8 @@ use workbench_core::application::workbench_runtime::{RuntimeAdapters, WorkbenchR
 const ABOUT_MENU_ID: &str = "about-agentic-workbench";
 const PREFERENCES_MENU_ID: &str = "preferences-agentic-workbench";
 const PREFERENCES_ACCELERATOR: &str = "CmdOrCtrl+,";
+const CLOSE_WINDOW_MENU_ID: &str = "close-focused-window";
+const CLOSE_WINDOW_ACCELERATOR: &str = "CmdOrCtrl+W";
 const APP_DISPLAY_NAME: &str = "Agentic Workbench";
 const APP_VERSION: &str = env!("AGENTIC_WORKBENCH_PACKAGE_VERSION");
 const BUILD_COMMIT_HASH: &str = env!("AGENTIC_WORKBENCH_GIT_COMMIT_HASH");
@@ -238,6 +240,10 @@ pub fn run() {
             } else if event.id() == PREFERENCES_MENU_ID {
                 if let Err(error) = infrastructure::window_manager::open_settings_window(app) {
                     show_error_dialog(app, "Could not open Settings", &error);
+                }
+            } else if event.id() == CLOSE_WINDOW_MENU_ID {
+                if let Err(error) = close_focused_window(app) {
+                    show_error_dialog(app, "Could not close window", &error);
                 }
             } else if let Ok(true) =
                 infrastructure::native_window_menu::focus_window_from_menu_event(
@@ -515,6 +521,13 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
         true,
         Some(preferences_accelerator()),
     )?;
+    let close_window_item = MenuItem::with_id(
+        app,
+        CLOSE_WINDOW_MENU_ID,
+        "Close Window",
+        true,
+        Some(CLOSE_WINDOW_ACCELERATOR),
+    )?;
     let window_menu = Submenu::with_id_and_items(
         app,
         "Window",
@@ -569,7 +582,7 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
                 "File",
                 true,
                 &[
-                    &PredefinedMenuItem::close_window(app, None)?,
+                    &close_window_item,
                     #[cfg(not(target_os = "macos"))]
                     &PredefinedMenuItem::quit(app, None)?,
                 ],
@@ -599,6 +612,15 @@ fn build_native_menu<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> tauri::Res
             &help_menu,
         ],
     )
+}
+
+fn close_focused_window<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
+    let focused = app
+        .webview_windows()
+        .into_values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .ok_or_else(|| "No focused window is available.".to_owned())?;
+    focused.close().map_err(|error| error.to_string())
 }
 
 fn show_about_dialog<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
@@ -649,7 +671,10 @@ fn preferences_accelerator() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{preferences_accelerator, preferences_menu_id};
+    use super::{
+        CLOSE_WINDOW_ACCELERATOR, CLOSE_WINDOW_MENU_ID, preferences_accelerator,
+        preferences_menu_id,
+    };
 
     #[test]
     fn preferences_menu_uses_stable_id() {
@@ -659,5 +684,11 @@ mod tests {
     #[test]
     fn preferences_menu_uses_standard_macos_accelerator() {
         assert_eq!(preferences_accelerator(), "CmdOrCtrl+,");
+    }
+
+    #[test]
+    fn close_window_uses_one_custom_menu_accelerator() {
+        assert_eq!(CLOSE_WINDOW_MENU_ID, "close-focused-window");
+        assert_eq!(CLOSE_WINDOW_ACCELERATOR, "CmdOrCtrl+W");
     }
 }
