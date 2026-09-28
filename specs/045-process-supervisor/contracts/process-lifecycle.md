@@ -21,6 +21,7 @@
 - resolver cleanup은 같은 행에 `Adopted → Aborting` CAS를 수행한 뒤에만 signal/wait를 시작한다.
 - publication/activation이 이기면 resolver는 keep하고, `Aborting`이 이기면 caller는 typed `PublicationLost`를 받아 reply/event를 내보내지 않는다.
 - retry는 이미 정해진 winner와 같은 결과를 반환한다. `Published`를 `Aborting`으로, `Aborting`을 `Published`로 뒤집지 않는다.
+- unpublished resolver의 `ClaimUnpublishedAbort`는 `Reserved/Spawning/Adopted`에만 적용한다. publish/activate 뒤 cancel·timeout·shutdown은 `TerminatingPublished/TerminatingActive`로 이동해 winner 종류를 보존하며 resolver abort와 같은 전이를 쓰지 않는다.
 - storage 결과가 ambiguous하거나 읽기 불능이면 cleanup을 추정하지 않는다. child는 containment 안에서 quarantined 상태로 유지하고 readiness를 내린 채 reconcile을 계속한다. server shutdown은 platform containment로 정리하되, 저장소 복구 전 공개 성공을 만들지 않는다.
 
 ## 2. cancellation safety
@@ -45,7 +46,7 @@
 
 ## 4. 공개 상태
 
-- `Reserved/Spawning/Adopted/Aborting`은 내부 상태다.
+- `Reserved/Spawning/Adopted/Aborting/TerminatingPublished/TerminatingActive`는 내부 상태다. terminating 상태의 접미사는 이미 확정된 publication winner를 보존한다.
 - 외부 `accepted/started`는 `Published`와 같은 boundary다.
 - `Active`는 외부 publication이 없는 transient helper의 실행 상태다.
 - spawn/adopt 실패에는 started event가 없다.

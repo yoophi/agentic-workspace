@@ -6,6 +6,8 @@ pub enum ProcessState {
     Published,
     Active,
     Aborting,
+    TerminatingPublished,
+    TerminatingActive,
     Terminal,
 }
 
@@ -15,7 +17,8 @@ pub enum ProcessTransition {
     Adopt,
     Publish,
     ActivateTransient,
-    BeginAbort,
+    ClaimUnpublishedAbort,
+    RequestTermination,
     Finish,
 }
 
@@ -29,15 +32,23 @@ pub fn reduce(
     state: ProcessState,
     transition: ProcessTransition,
 ) -> Result<ProcessState, InvalidTransition> {
-    use ProcessState::{Aborting, Active, Adopted, Published, Reserved, Spawning, Terminal};
-    use ProcessTransition::{ActivateTransient, Adopt, BeginAbort, BeginSpawn, Finish, Publish};
+    use ProcessState::{
+        Aborting, Active, Adopted, Published, Reserved, Spawning, Terminal, TerminatingActive,
+        TerminatingPublished,
+    };
+    use ProcessTransition::{
+        ActivateTransient, Adopt, BeginSpawn, ClaimUnpublishedAbort, Finish, Publish,
+        RequestTermination,
+    };
     match (state, transition) {
         (Reserved, BeginSpawn) => Ok(Spawning),
         (Spawning, Adopt) => Ok(Adopted),
         (Adopted, Publish) => Ok(Published),
         (Adopted, ActivateTransient) => Ok(Active),
-        (Reserved | Spawning | Adopted | Published | Active, BeginAbort) => Ok(Aborting),
-        (Spawning | Published | Active | Aborting, Finish) => Ok(Terminal),
+        (Reserved | Spawning | Adopted, ClaimUnpublishedAbort) => Ok(Aborting),
+        (Published, RequestTermination) => Ok(TerminatingPublished),
+        (Active, RequestTermination) => Ok(TerminatingActive),
+        (Spawning | Aborting | TerminatingPublished | TerminatingActive, Finish) => Ok(Terminal),
         _ => Err(InvalidTransition { state, transition }),
     }
 }
@@ -60,11 +71,44 @@ mod tests {
 
     #[test]
     fn publication_cannot_win_after_abort_claims_the_attempt() {
-        let aborting = reduce(ProcessState::Adopted, ProcessTransition::BeginAbort).unwrap();
+        let aborting = reduce(
+            ProcessState::Adopted,
+            ProcessTransition::ClaimUnpublishedAbort,
+        )
+        .unwrap();
         assert!(reduce(aborting, ProcessTransition::Publish).is_err());
         assert_eq!(
             reduce(aborting, ProcessTransition::Finish),
             Ok(ProcessState::Terminal)
+        );
+    }
+
+    #[test]
+    fn late_unpublished_resolver_cannot_reverse_publication_or_activation() {
+        assert!(reduce(
+            ProcessState::Published,
+            ProcessTransition::ClaimUnpublishedAbort
+        )
+        .is_err());
+        assert!(reduce(
+            ProcessState::Active,
+            ProcessTransition::ClaimUnpublishedAbort
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn user_termination_preserves_the_winning_publication_kind() {
+        assert_eq!(
+            reduce(
+                ProcessState::Published,
+                ProcessTransition::RequestTermination
+            ),
+            Ok(ProcessState::TerminatingPublished)
+        );
+        assert_eq!(
+            reduce(ProcessState::Active, ProcessTransition::RequestTermination),
+            Ok(ProcessState::TerminatingActive)
         );
     }
 
