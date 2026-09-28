@@ -2,7 +2,7 @@
 
 ## R1. 공통 경계와 owner 순서
 
-**Decision**: `crates/process-supervisor`가 OS child handle, containment, output drain, cancel/wait를 소유한다. domain consumer는 기존 store/ledger에 owner와 attempt를 먼저 예약하고, supervisor가 `UnpublishedProcessLease`를 반환한 뒤 durable publication handoff가 끝나야 accepted/started를 공개한다.
+**Decision**: `crates/process-supervisor`가 OS child handle, containment, output drain, cancel/wait를 소유한다. durable business execution은 기존 domain store/ledger에 owner와 attempt를 먼저 예약한다. read-only helper의 domain 의미는 transient지만 모든 ServerOwned child는 supervisor store에 durable containment recovery anchor를 가진다. supervisor가 `UnpublishedProcessLease`를 반환한 뒤 publication CAS와 outbox commit이 끝나야 accepted/started를 공개한다.
 
 **Rationale**: 현재 `crates/acp-agent-core/src/infrastructure/acp/runner.rs:135-160`은 `LifecycleStatus::Started`를 emit한 뒤 `Command::spawn()`한다. spawn 실패에도 외부 projection이 started를 본다. 공통 crate가 durable store를 알게 하면 workbench/acp 의존이 역전되므로 reserve/commit은 consumer, 실제 child ownership은 supervisor로 나눈다.
 
@@ -12,7 +12,7 @@
 
 ## R2. cancellation-safe spawn/adopt
 
-**Decision**: registry가 child를 소유하고 caller는 `#[must_use] UnpublishedProcessLease`만 가진다. lease 반환 뒤 caller는 durable `process_attempt`을 Published로 commit한 다음 `lease.ack_published()`를 호출한다. lease가 commit 전/후 어느 구간에서 drop되거나 ack response가 유실되면 registry는 response send 실패만으로 추정하지 않고 `PublicationResolver(attempt_id)`를 호출한다. resolver가 Published면 child를 Published로 승격해 계속 소유하고, Reserved/Aborted/NotFound면 종료·wait한다. 저장소 일시 실패는 bounded retry 동안 외부 공개 없이 보류하고, deadline 뒤 fail-closed cleanup과 durable Aborted 보상을 수행한다.
+**Decision**: registry가 child를 소유하고 caller는 `#[must_use] UnpublishedProcessLease`만 가진다. lease 반환 뒤 publication caller와 resolver는 모두 `Adopted` 행의 CAS를 사용한다. caller는 한 transaction에서 `Adopted → Published`, domain result와 attempt-keyed outbox를 commit한다. resolver는 `Adopted → Aborting` CAS를 이긴 뒤에만 종료한다. transient helper는 `Adopted → Active`로 바꾸고 외부 event를 만들지 않는다. lease가 commit 전/후 어느 구간에서 drop되거나 ack response가 유실되면 registry는 response send 실패만으로 추정하지 않고 winner state를 resolve한다. 저장소 결과가 ambiguous하면 child를 containment 안에 quarantine하고 readiness를 내린 채 reconcile하며, 확인 없이 published child를 죽이지 않는다.
 
 **Rationale**: Tokio `Child`는 기본적으로 handle drop이 process cancel을 뜻하지 않는다. `kill_on_drop`도 Unix reap 시점을 보장하지 않는다. 또한 Adopted lease가 caller에 전달된 뒤 durable commit과 ack 사이에는 response receiver drop만으로 알 수 없는 ownership handoff 구간이 있다. durable publication state를 정본으로 재판정해야 commit된 실행을 잘못 죽이거나 commit 안 된 실행을 남기지 않는다. [Tokio Command 문서](https://docs.rs/tokio/latest/tokio/process/struct.Command.html)
 
@@ -26,6 +26,8 @@
 - durable Published commit 뒤 ack 전 drop: resolver가 Published를 보고 process 유지, started snapshot/retry는 같은 attempt.
 - ack 처리 뒤 reply 전 drop: Published process 유지, 재시도는 같은 attempt/result.
 - resolver storage fault와 future cancellation: bounded reconcile 뒤 정확히 하나의 keep 또는 cleanup outcome.
+- publication CAS pause 뒤 cleanup CAS와 cleanup CAS pause 뒤 publication CAS: 최초 transition만 승리하고 loser는 같은 typed result를 재현.
+- Published/outbox transaction 전후와 dispatcher send/ack 전후 crash: attempt별 durable logical event와 client projection 적용 정확히 1회.
 
 ## R3. Unix containment
 
@@ -132,23 +134,23 @@
 
 ## R11. durable owner와 attempt 저장소 매핑
 
-**Decision**: 기존 SQLite operation ledger schema v2에는 process attempt table이 없고 `SessionRegistry::reserve_run`, terminal map, watcher/catalog/PATH owner는 memory-only다. 따라서 additive schema v3 `process_attempt`을 만든다.
+**Decision**: 기존 SQLite operation ledger schema v2에는 process attempt/outbox table이 없고 `SessionRegistry::reserve_run`, terminal map, watcher/catalog/PATH owner는 memory-only다. 따라서 additive schema v3 `process_attempt`과 `process_publication_outbox`를 만든다. business durability와 containment durability를 구분한다. read-only helper operation/result는 transient지만 모든 ServerOwned child의 recovery anchor는 Reaped까지 durable하다.
 
-| Process family | Existing owner boundary | Durable attempt decision |
-|---|---|---|
-| ACP run | `operation_ledger`의 run start intent + memory `SessionRegistry` | v3 row를 execution/run id에 연결. accepted reply와 Started는 Published commit 뒤 |
-| ACP terminal | run/session 아래 memory terminal map만 존재 | v3 row를 run id + terminal id에 연결. terminal create reply 전에 publish |
-| Git/worktree mutation | existing `operation_ledger.execution_id` | v3 row 연결. 같은 operation retry는 같은 attempt/result |
-| Git read/history/diff/status | authenticated call, durable mutation intent 없음 | transient registry attempt. crash 시 containment cleanup, retry는 새 read |
-| worktree watcher Git probe | live watcher subscription/refcount | transient registry attempt. restart에서 watcher가 재구성 |
-| orchestration worktree guard | durable orchestration task, 실행은 read-only diff | task id owner + transient attempt; task store에 process PID를 쓰지 않음 |
-| catalog `curl` | cache file은 결과 cache일 뿐 owner가 아님 | server-scoped transient attempt; timeout/failure 시 cache fallback |
-| login-shell PATH probe | 기존 durable store 없음 | server-scoped transient attempt; timeout/failure 시 fallback PATH |
+| Process family | Existing owner boundary | Domain durability | Containment recovery anchor |
+|---|---|---|---|
+| ACP run | `operation_ledger`의 run start intent + memory `SessionRegistry` | execution/run result + Published/outbox | v3 row를 execution/run id에 연결 |
+| ACP terminal | run/session 아래 memory terminal map만 존재 | terminal owner + Published/outbox를 v3 transaction에 기록 | v3 row를 run id + terminal id에 연결 |
+| Git/worktree mutation | existing `operation_ledger.execution_id` | 같은 operation retry는 같은 result | v3 row를 execution id에 연결 |
+| Git read/history/diff/status | authenticated call, durable mutation intent 없음 | transient; crash 뒤 result 재개 없음 | v3 recovery anchor, terminal 뒤 GC |
+| worktree watcher Git probe | live watcher subscription/refcount | transient; restart에서 watcher 재구성 | v3 recovery anchor, terminal 뒤 GC |
+| orchestration worktree guard | durable orchestration task, 실행은 read-only diff | task id는 durable, helper result는 transient | v3 recovery anchor; task store에 PID를 쓰지 않음 |
+| catalog `curl` | cache file은 결과 cache일 뿐 owner가 아님 | server-scoped transient; timeout/failure 시 cache fallback | v3 recovery anchor, terminal 뒤 GC |
+| login-shell PATH probe | 기존 durable store 없음 | server-scoped transient; timeout/failure 시 fallback PATH | v3 recovery anchor, terminal 뒤 GC |
 
-**Rationale**: 존재하지 않는 durable terminal/helper store를 기존 저장소라고 가정할 수 없다. long-lived 또는 side-effecting process만 crash/retry 판정용 durable attempt가 필요하고, read-only helper는 containment로 crash side effect가 끝나므로 transient reservation이 정확한 경계다.
+**Rationale**: 존재하지 않는 durable terminal/helper business store를 기존 저장소라고 가정할 수 없다. long-lived 또는 side-effecting process만 crash/retry 가능한 domain intent가 필요하다. 그러나 keeper까지 죽는 crash에서 escaped descendant를 식별하려면 read-only helper도 비밀값 없는 recovery anchor가 필요하다. anchor는 result 재생이나 operation retry를 뜻하지 않는다.
 
 **Alternatives considered**:
-- 모든 helper를 SQLite에 기록: catalog/PATH/Git read마다 영구 write를 만들고 recovery 가치 없이 ledger를 팽창시킨다.
+- helper business result를 영구 기록: catalog/PATH/Git read마다 재생 의미를 만들고 ledger를 팽창시킨다. 대신 containment anchor는 terminal 보존 기간 뒤 GC한다.
 - memory SessionRegistry를 durable run owner로 간주: server crash 뒤 판정 근거가 없다.
 
 ## R12. accepted response도 adoption 뒤로 이동
@@ -157,6 +159,12 @@
 
 **Rationale**: Started event 한 줄만 옮겨도 run.start response가 spawn/adopt보다 앞서면 roadmap invariant를 충족하지 못한다. 반대로 전체 agent turn을 기다리면 044의 비동기 run 계약을 깨뜨린다.
 
+## R13. keeper death ownership과 publication outbox
+
+**Decision**: live server는 keeper handle/exit를 감시하고 keeper-only death를 즉시 `containment_lost` arbitration으로 보낸다. adoption 전이면 abort, publication 뒤면 readiness를 내리고 durable anchor로 cleanup ownership을 인계한다. server+keeper death는 다음 startup이 readiness 전에 모든 unfinished anchor를 reconcile한다. Published transaction은 idempotent response와 `(attempt_id,event_kind)` outbox를 함께 commit하며 dispatcher와 reconnect replay는 event id로 dedupe한다.
+
+**Rationale**: next startup만 recovery owner로 두면 live server 동안 descendant가 남고, publication state만 저장하면 commit/send crash gap에서 exactly-once logical event를 복구할 수 없다.
+
 ## 미해결 가정과 platform spike gate
 
 다음은 아직 검증되지 않았으며 "미해결 없음"으로 닫지 않는다.
@@ -164,6 +172,6 @@
 1. descendant가 `env_clear` 또는 새로운 `execve` environment로 attempt nonce를 제거한 뒤 session/group을 이탈할 수 있다.
 2. 같은 uid process environment를 읽는 기능이 macOS/Linux의 실제 배포 권한·sandbox·hardened runtime에서 허용되는지 확인되지 않았다.
 3. PID/start identity를 확인한 직후 signal하기 전 PID가 재사용되는 TOCTOU를 target handle/pidfd/audit token 없이 막을 수 있는지 확인되지 않았다.
-4. server뿐 아니라 keeper 자체가 hard kill된 뒤 누가 durable v3 unfinished attempt를 읽고 escaped descendant를 정리하는지 startup recovery 순서가 실제로 입증되지 않았다.
+4. live server takeover와 다음 startup을 recovery owner로 설계했지만, keeper hard kill 뒤 durable v3 anchor로 escaped descendant를 실제 안전하게 재획득·정리할 수 있는지 입증되지 않았다.
 
 OCR/Codex 설계 리뷰는 nonce 상속 fixture만으로 전체 containment를 주장하지 않는지 검토해야 한다. 구현 task로 넘어가기 전 platform spike는 env 제거+exec, leader 조기 종료, new session/group, double-fork+reparent, control FD close, server hard kill, keeper hard kill, identity-check/signal 사이 PID-reuse 대조를 실제 macOS/Linux에서 실행해야 한다. public API와 권한 안에서 안전한 identity handle을 확보하지 못하면 해당 target은 fail-closed blocker이며 group kill 성공으로 대체하지 않는다.

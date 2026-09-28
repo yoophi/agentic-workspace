@@ -96,20 +96,23 @@ agent나 helper가 stdout 또는 stderr를 빠르게 내보내거나 줄바꿈 �
 - **FR-003**: 시스템은 desktop daemon bootstrap, desktop 전용 native launcher, build-time command, test fixture, 다른 앱의 child를 서버 workload와 분리해 정본 inventory에 기록해야 한다.
 - **FR-004**: 각 실행 요청은 executable, 인자, 환경, 작업 디렉터리, owner, purpose, timeout, 출력 정책, 종료 정책을 구조화해 표현해야 하며 shell 문자열 결합에 의존하지 않아야 한다.
 - **FR-005**: 환경 값과 credential은 진단·오류·이벤트·로그에 노출하지 않아야 한다.
-- **FR-006**: durable execution과 run/terminal/workspace owner는 child 생성 전에 예약되어야 한다.
+- **FR-006**: durable execution과 run/terminal/workspace business owner는 child 생성 전에 domain store에 예약되어야 한다. read-only helper의 domain 실행 의미는 transient로 유지하되, 모든 서버 소유 child는 별도의 durable containment recovery anchor를 spawn 전에 가져야 한다.
 - **FR-007**: child 생성 뒤 PID/handle과 재사용을 구분할 시작 identity를 감독자가 소유한 다음에만 호출 성공과 accepted/started 상태를 외부에 공개해야 한다.
 - **FR-008**: child 생성, 감독 등록, durable 상태 갱신 중 어느 단계가 실패하거나 취소돼도 started를 거짓으로 공개하지 않고 예약과 실제 child를 정리해야 한다.
 - **FR-009**: 동일 owner/attempt의 accepted/started는 정확히 한 번 공개되어야 하며, 이전 attempt의 늦은 완료가 새 attempt 상태를 바꾸지 않아야 한다.
 - **FR-009a**: child adoption 뒤 durable publication acknowledgement 전 caller가 중단돼도, durable published attempt는 계속 실행되고 unpublished attempt는 정리되어야 한다. 단순 response 유실만으로 적용 여부를 추정해서는 안 된다.
+- **FR-009b**: publication과 cleanup은 `Adopted`에서 하나의 atomic conditional transition으로 경쟁해야 하며, 승리한 상태를 다른 경로가 뒤집거나 publication과 process 종료가 동시에 성공해서는 안 된다.
+- **FR-009c**: accepted/started publication과 idempotent response는 attempt identity에 연결된 durable logical event로 commit되어야 하며, crash/reconnect 재전달이 사용자 projection에 중복 적용되거나 committed event가 유실되어서는 안 된다.
 - **FR-010**: 감독 단위는 direct child 하나가 아니라 그 child가 만든 descendant tree 전체여야 한다.
 - **FR-011**: 취소·timeout·shutdown은 graceful tree terminate, 제한 시간, force tree kill, direct child wait 순서를 따라야 한다.
 - **FR-012**: 서로 경쟁하는 cancel, 자연 종료, force-stop, future 취소 중 정확히 하나의 종료 결과가 owner에 반영되고 나머지는 멱등이어야 한다.
 - **FR-013**: 서버의 정상 종료가 완료됐을 때 감독 중인 child와 회수되지 않은 direct child는 0개여야 한다.
 - **FR-014**: 서버 비정상 종료 뒤 각 지원 플랫폼에서 descendant가 남지 않게 하거나, 남을 수 있는 경우 다음 시작이 서버가 발급한 nonce와 시작 identity를 검증해 해당 tree만 정리해야 한다. leader 조기 종료, 새 process group/session, double-fork와 reparent 뒤에도 같은 보장을 유지해야 하며 PID만으로 종료해서는 안 된다.
+- **FR-014a**: keeper가 죽고 서버가 계속 실행되는 경우 서버는 이를 즉시 감지해 cleanup ownership을 인계해야 하며, 서버와 keeper가 함께 죽은 경우 다음 시작은 readiness 전에 모든 durable containment anchor를 reconcile해야 한다.
 - **FR-015**: stdout과 stderr는 동시에 drain되어야 하고, 어느 한쪽의 backpressure가 다른 쪽과 child 종료를 막지 않아야 한다.
 - **FR-016**: 각 stream은 protocol transport와 사용자 표시 로그 중 어느 계약인지 명시해야 하며, 두 종류에 같은 truncation/drop 정책을 적용해서는 안 된다.
 - **FR-017**: 사용자 표시 로그는 stream별 byte·event·rate 상한을 가지며 줄바꿈 없는 출력과 유효하지 않은 UTF-8에도 같은 상한이 적용되어야 한다. 잘리거나 버려진 양은 관측 가능한 상태로 보고되어야 한다.
-- **FR-018**: protocol stream은 frame별 최대 크기와 전체 진행 상한을 가져야 한다. frame 일부를 truncate/drop한 뒤 성공한 stream처럼 parsing을 계속해서는 안 되며, 한도 위반·malformed frame·EOF는 typed protocol failure와 해당 process 종료로 귀결되어야 한다.
+- **FR-018**: protocol stream은 frame별 최대 크기, incomplete-frame 진행 deadline/최소 진행률, owner 전체 runtime 상한을 가져야 한다. frame 일부를 truncate/drop한 뒤 성공한 stream처럼 parsing을 계속해서는 안 되며, 한도 위반·진행 정지·malformed frame·EOF는 typed protocol failure와 해당 process 종료로 귀결되어야 한다.
 - **FR-019**: protocol stream이 느리거나 한도를 위반해도 stderr/log drain과 status·cancel·shutdown은 교착 없이 계속 진행되어야 한다.
 - **FR-020**: 짧은 helper도 timeout, cancel, output, wait/reap 규칙을 따라야 하며 동기 대기로 서버 전체 executor를 막지 않아야 한다.
 - **FR-021**: 기존 run, terminal, Git, watcher와 catalog의 사용자 관측 결과는 감독 도입 뒤에도 호환되어야 한다. 단, 현재의 잘못된 started-before-spawn/adopt 순서는 바로잡는다.
@@ -144,10 +147,12 @@ agent나 helper가 stdout 또는 stderr를 빠르게 내보내거나 줄바꿈 �
 
 - **SC-001**: spawn 실패·adopt 실패·요청 취소를 각 100회 반복해도 외부에서 started를 관측한 횟수와 남은 child 수가 모두 0이다.
 - **SC-002**: 정상 시작을 100회 반복하면 각 attempt마다 감독 등록 뒤 accepted/started가 정확히 한 번 공개되고, 공개 전 등록 누락이 0건이다.
+- **SC-002a**: publication CAS와 cleanup CAS의 양쪽 승리 interleaving, commit 전후 crash, send/ack 전후 reconnect를 반복해 process keep/kill과 durable logical event가 같은 승자를 따르고 사용자 projection 적용 수가 attempt마다 정확히 1이다.
 - **SC-003**: 정상 종료 응답, 종료 무시, 손자 생성 fixture 각각에 cancel·wait-stop·force-stop을 적용한 모든 지원 target에서 종료 후 descendant와 unreaped direct child가 0개다.
 - **SC-004**: 서버 강제 종료 뒤 platform containment 또는 startup recovery를 거치면 감독 대상 descendant가 0개이고, PID 재사용 대조 프로세스는 100% 생존한다.
+- **SC-004a**: keeper-only hard kill과 server+keeper hard kill 뒤 durable/transient domain owner 모두에서 recovery anchor로 확인된 descendant는 0개가 되고 unrelated 대조 process는 모두 생존한다.
 - **SC-005**: stdout/stderr 동시 폭주와 줄바꿈 없는 각 100 MiB 표시 로그 fixture에서 정해진 메모리·event 상한을 넘지 않고 status·cancel 요청이 2초 안에 처리된다.
-- **SC-005a**: protocol 최대 frame의 경계값은 정상 처리되고, 1 byte 초과·malformed·중간 EOF는 각각 typed failure와 process 종료가 되며 손상된 frame 이후의 메시지가 성공 처리되는 경우는 0건이다.
+- **SC-005a**: protocol 최대 frame의 경계값은 정상 처리되고, 1 byte 초과·slow-loris 진행 정지·malformed·중간 EOF는 각각 typed failure와 process 종료가 되며 손상된 frame 이후의 메시지가 성공 처리되는 경우는 0건이다.
 - **SC-006**: production spawn inventory의 서버 소유 항목 100%가 공통 감독 진입점을 통과하며, 미분류 직접 spawn은 0개다.
 - **SC-007**: 기존 ACP run, terminal, Git/history/status, watcher refresh, catalog 조회, server stop 통합 시나리오가 기대 결과 변경 없이 통과한다.
 - **SC-008**: 로그·오류·이벤트 fixture에 주입한 credential sentinel이 모든 산출물에서 0회 나타난다.

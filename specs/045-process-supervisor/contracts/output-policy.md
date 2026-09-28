@@ -8,6 +8,8 @@
 - 일부 bytes를 truncate/drop한 뒤 다음 frame을 정상 처리하지 않는다.
 - fatal failure가 정해지면 stderr drain과 process tree cleanup은 끝까지 수행한다.
 - bounded ingress가 가득 차면 protocol reader는 backpressure를 적용하되 status/cancel/shutdown control task를 막지 않는다.
+- `frame_progress_deadline`과 `min_progress_bytes_per_interval`을 둔다. newline 없이 deadline을 넘기거나 최소 진행률 아래인 frame은 `ProtocolProgressTimeout` typed fatal failure로 tree를 종료한다.
+- 전체 turn/runtime deadline은 domain timeout policy가 소유한다. 끝없는 정상 frame도 owner timeout/cancel을 우회하지 못한다.
 
 ## Parsed capture
 
@@ -37,6 +39,8 @@
 | protocol limit + 1 | typed failure, tree terminated, next frame not delivered |
 | malformed JSON-RPC | typed failure, pending request failed |
 | mid-frame EOF | typed failure |
+| incomplete frame slow-loris | progress timeout, tree terminated |
+| endless valid frames | owner timeout/cancel remains responsive |
 | stderr 100 MiB no newline | bounded log, cancel responsive |
 | stdout+stderr pressure | no deadlock, both counters correct |
 | capture overflow | no partial parsed success |

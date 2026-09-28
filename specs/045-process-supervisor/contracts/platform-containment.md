@@ -18,6 +18,9 @@
 - 같은 uid process environment/identity inventory가 실제 app sandbox·hardened runtime·배포 권한에서 허용되어야 한다.
 - identity 확인과 signal 사이에는 재사용 불가능한 handle 또는 동등한 원자적 검증이 필요하다. `pid + start time 확인 → 나중에 kill(pid)`만으로 통과할 수 없다.
 - keeper 자체 hard kill에서는 다음 server startup이 durable unfinished `process_attempt`을 읽어 정리 주체가 되어야 한다. server control EOF를 관측할 keeper가 살아 있다고 가정하지 않는다.
+- live server는 keeper process handle/exit를 항상 감시한다. adoption 전 keeper death는 spawn failure+abort이며, publication 뒤 death는 containment-lost로 readiness를 내리고 server가 durable anchor를 기준으로 즉시 cleanup ownership을 인계한다.
+- cleanup 인계는 재사용 안전 handle/동등한 OS identity로 descendant를 확보할 수 있을 때만 signal한다. 안전한 인계가 불가능한 target은 capability unavailable이며 consumer migration을 시작하지 않는다.
+- server와 keeper가 함께 죽으면 다음 startup이 모든 durable containment anchor를 먼저 reconcile한 뒤 readiness를 연다. transient domain helper도 recovery anchor에서는 제외하지 않는다.
 
 이 네 항목은 platform spike와 OCR/Codex 설계 리뷰 대상이다. 해결 전에는 macOS/Linux containment 구현 task를 green으로 처리하지 않는다.
 
@@ -45,6 +48,8 @@
 | cancel during adopt | required | required | required |
 | server hard kill | required | required | required |
 | keeper hard kill + startup recovery | required | required | N/A (Job owned by server) |
+| keeper hard kill while server live | required | required | N/A (Job owned by server) |
+| server + keeper hard kill | required | required | server hard kill case |
 | identity-check/signal PID reuse race | safe handle required | safe handle required | process handle required |
 | PID reuse/control process | required | required | required |
 | stdout/stderr pressure | required | required | required |

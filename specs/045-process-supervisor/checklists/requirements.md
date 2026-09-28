@@ -6,15 +6,15 @@
 
 ## Content Quality
 
-- [x] No implementation details (languages, frameworks, APIs)
+- [ ] No implementation details (languages, frameworks, APIs) — process identity와 platform 보장을 검증하기 위해 OS 수준 제약이 남아 있음
 - [x] Focused on user value and business needs
 - [x] Written for non-technical stakeholders
 - [x] All mandatory sections completed
 
 ## Requirement Completeness
 
-- [x] No [NEEDS CLARIFICATION] markers remain
-- [x] Requirements are testable and unambiguous
+- [ ] No unresolved feasibility gates remain — Unix identity/권한과 combined-crash recovery는 실제 spike 필요
+- [ ] Requirements are testable and unambiguous — target API 선택과 fail-closed 조건을 spike 결과로 확정해야 함
 - [x] Success criteria are measurable
 - [x] Success criteria are technology-agnostic (no implementation details)
 - [x] All acceptance scenarios are defined
@@ -26,9 +26,9 @@
 
 - [x] All functional requirements have clear acceptance criteria
 - [x] User scenarios cover primary flows
-- [x] Feature meets measurable outcomes defined in Success Criteria
+- [ ] Feature meets measurable outcomes defined in Success Criteria — 아직 설계 단계이며 platform evidence 없음
 - [x] No implementation details leak into specification
 
 ## Notes
 
-- 1차 검토에서 모든 항목을 충족했다. 플랫폼별 구현 선택은 plan/research에서 결정하고 명세에는 관측 가능한 보장만 남겼다.
+- OCR/Codex 설계 리뷰에서 publication CAS/outbox, transient recovery anchor, keeper death owner, protocol progress와 platform feasibility가 prerequisite로 확인됐다. 이 항목은 문서 반영만으로 완료하지 않고 실제 target spike와 비영(非零) fixture 결과가 있어야 체크한다.
