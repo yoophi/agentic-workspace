@@ -14,6 +14,7 @@
 044(작업 관문 시험):
 - `--end-turn-gate <path>`: 권한이 승인된 prompt를 그 파일이 생길 때까지 끝내지 않는다(turn이 진행 중인 구간을 시험이
   정한다). 이 동안 다음 입력은 읽지 않는다 — 엔진이 대기열 prompt를 보내는 것은 현재 turn이 끝난 뒤다.
+- `--gate-limit <초>`: 문 파일 대기 상한(기본 120초). 넘거나 부모가 사라지면 `gate-abandoned`를 기록하고 끝낸다.
 - `--after-gate-chunk`: `--end-turn-gate`의 문이 열린 뒤 그 파일 내용을 `after-gate:<내용>` agent 메시지로 보내고 turn을
   끝낸다(앱 종료 뒤 문을 연 쪽이 그 고유 출력을 live로 받는지 — T045 진행 중 turn 출력 지속).
 - `--rpc-error-text <text>`: 본문에 text가 든 prompt에는 JSON-RPC 오류로 답한다(`rpc-error:<id>` 기록).
@@ -56,7 +57,8 @@ def respond(request_id, result):
 
 
 # 문 파일 대기의 상한(시험이 문을 만들기 전에 실패하면 agent가 영원히 남지 않게). 부모가 사라져도(launchd로 재부모화) 끝낸다.
-GATE_WAIT_LIMIT_SECONDS = 120
+# 시험 기본 120초. 긴 실제 앱 스모크는 `--gate-limit <초>`로 늘린다(앱 기동·종료·확인이 상한보다 오래 걸릴 수 있다).
+GATE_WAIT_LIMIT_SECONDS = float(sys.argv[sys.argv.index("--gate-limit") + 1]) if "--gate-limit" in sys.argv else 120
 PARENT = os.getppid()
 
 

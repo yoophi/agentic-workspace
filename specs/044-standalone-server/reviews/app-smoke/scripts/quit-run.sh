@@ -17,7 +17,7 @@ BEFORE=" $(app_pids | tr '\n' ' ') "
 AGENT="python3 $WT/crates/workbench-core/tests/support/agents/fake_acp_permission_agent.py --echo --log $R/agent.log"
 # BUSY=1(T045 진행 중 turn): agent가 시작 turn을 문 파일로 붙잡고, probe는 완료 전에 보고한다. 종료 뒤 owner-check가 문을 푼다.
 SCEN=quit; PHASE=ready-to-quit
-if [ "${BUSY:-}" = 1 ]; then AGENT="$AGENT --end-turn-gate $R/turn.gate --after-gate-chunk"; SCEN=quit-busy; PHASE=ready-to-quit-busy; fi
+if [ "${BUSY:-}" = 1 ]; then AGENT="$AGENT --end-turn-gate $R/turn.gate --after-gate-chunk --gate-limit 600"; SCEN=quit-busy; PHASE=ready-to-quit-busy; fi
 # TOKEN=1(Codex 코드 리뷰): close-token probe가 이 창 토큰을 비밀 파일(0600)에 넘긴다. 종료 뒤 같은 토큰이 거절되는지 본다.
 if [ "${TOKEN:-}" = 1 ]; then
   if [ "${BUSY:-}" = 1 ]; then SCEN=quit-busy-token; PHASE=ready-to-quit-busy-token; else SCEN=close-token; PHASE=ready-to-close; fi
@@ -66,12 +66,24 @@ case "$QUIT" in
          log "cmd-q-not-sent: frontmost changed just before sending (attempt invalid)"
        fi
      fi ;;
-  d) osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to perform action \"AXShowMenu\"" >> "$R/quit.txt" 2>&1
-     # 메뉴가 열릴 때까지 조건 대기(상한 10초) 뒤 누른다. 열리지 않으면 경로를 시험하지 못한 것으로 기록한다.
-     menu=no; for i in $(seq 1 40); do
-       [ "$(osascript -e "tell application \"System Events\" to tell process \"Dock\" to exists menu 1 of UI element \"$PRODUCT\" of list 1" 2>/dev/null)" = true ] && { menu=yes; break; }; sleep 0.25
-     done; log "dock-menu-open=$menu"
-     osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to click menu item \"Quit\" of menu 1" >> "$R/quit.txt" 2>&1 ;;
+  d) # Dock 타일은 이름으로 고른다 — 그 이름의 앱 프로세스가 정확히 하나이고 그것이 이 실행의 APID일 때만 누른다(다른 앱을 끄지 않게).
+     # System Events의 프로세스 이름은 실행 파일 이름이라(설치본 AW와 같음) 쓰지 않는다. 표시 이름으로 pid를 찾는다.
+     same=$("$SMOKE/apps-named" "$PRODUCT" 2>/dev/null)
+     log "dock-name-pids=${same:-none}"
+     if [ "$same" != "$APID" ]; then
+       log "dock-quit-not-sent: the Dock name does not map to exactly this app (attempt invalid)"
+     else
+       osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to perform action \"AXShowMenu\"" >> "$R/quit.txt" 2>&1
+       # 메뉴가 열릴 때까지 조건 대기(상한 10초). 열리지 않으면 누르지 않고 무효로 기록한다.
+       menu=no; for i in $(seq 1 40); do
+         [ "$(osascript -e "tell application \"System Events\" to tell process \"Dock\" to exists menu 1 of UI element \"$PRODUCT\" of list 1" 2>/dev/null)" = true ] && { menu=yes; break; }; sleep 0.25
+       done; log "dock-menu-open=$menu"
+       if [ "$menu" = yes ]; then
+         osascript -e "tell application \"System Events\" to tell process \"Dock\" to tell UI element \"$PRODUCT\" of list 1 to click menu item \"Quit\" of menu 1" >> "$R/quit.txt" 2>&1
+       else
+         log "dock-quit-not-sent: the Dock menu did not open (attempt invalid)"
+       fi
+     fi ;;
   e) osascript -e "tell application id \"$BID\" to quit" >> "$R/quit.txt" 2>&1 ;;
   g) kill -TERM "$APID" ;;
   *) log "unknown path"; exit 4 ;;
