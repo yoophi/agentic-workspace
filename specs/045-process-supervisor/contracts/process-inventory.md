@@ -7,7 +7,10 @@
 | `crates/acp-agent-core/src/infrastructure/agent_catalog.rs` | ServerOwned | CatalogHelper | parsed capture | required |
 | `crates/acp-agent-core/src/infrastructure/acp/util.rs` | ServerOwned | ShellProbe | parsed capture | required |
 | `crates/git-core/src/git_cli.rs` | ServerOwned | Git | parsed capture | required |
-| `crates/workbench-core/src/infrastructure/git/cli_*_provider.rs` | ServerOwned | Git | parsed capture | required |
+| `crates/workbench-core/src/infrastructure/git/cli_branch_provider.rs` | ServerOwned | Git | parsed capture | required |
+| `crates/workbench-core/src/infrastructure/git/cli_remote_provider.rs` | ServerOwned | Git | parsed capture | required |
+| `crates/workbench-core/src/infrastructure/git/cli_worktree_provider.rs` | ServerOwned | Git | parsed capture | required |
+| `crates/workbench-core/src/infrastructure/git/cli_worktree_change_provider.rs` | ServerOwned | Git | parsed capture | required |
 | `crates/workbench-core/src/infrastructure/fs/worktree_watcher.rs`의 Git probe | ServerOwned | WatcherHelper | parsed capture | required |
 | `crates/workbench-core/src/infrastructure/orchestration/worktree_guard.rs` | ServerOwned | Git | parsed capture | required |
 | `crates/workbench-host/src/lifecycle/ensure.rs` | DaemonBootstrap | Startup lifecycle | server log/null | excluded: launched server cannot own its launcher |

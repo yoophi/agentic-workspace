@@ -21,10 +21,10 @@ description: "독립 Workbench 서버의 모든 자식 프로세스를 공통 �
 
 **Purpose**: production 변경 없이 공통 crate와 정확한 inventory, platform spike harness를 만든다.
 
-- [ ] T001 `crates/process-supervisor/Cargo.toml`, `crates/process-supervisor/src/lib.rs`, root `Cargo.toml`에 재사용 supervisor crate skeleton과 target별 dependency boundary를 추가한다
-- [ ] T002 `scripts/check-process-spawn-inventory.py`와 `crates/process-supervisor/tests/process_inventory.rs`에 exact-path production spawn inventory gate를 작성하고 `specs/045-process-supervisor/contracts/process-inventory.md`의 모든 범주를 대조한다
-- [ ] T003 [P] `crates/process-supervisor/tests/fixtures/process_tree.rs`에 direct/grandchild, leader-exit, new group/session, double-fork+reparent, control-FD-close, env-clear+exec, signal-ignore fixture mode를 만든다
-- [ ] T004 [P] `crates/process-supervisor/tests/fixtures/protocol_peer.rs`에 exact-limit, limit+1, malformed, mid-frame EOF, slow-loris, endless-valid-frame fixture mode를 만든다
+- [x] T001 `crates/process-supervisor/Cargo.toml`, `crates/process-supervisor/src/lib.rs`에 재사용 supervisor crate skeleton과 target별 dependency boundary를 추가하고 root `Cargo.toml`의 `crates/*` membership을 확인한다
+- [x] T002 `scripts/check-process-spawn-inventory.py`와 `crates/process-supervisor/tests/process_inventory.rs`에 exact-path production spawn inventory gate를 작성하고 `specs/045-process-supervisor/contracts/process-inventory.md`의 모든 범주를 대조한다
+- [x] T003 [P] `crates/process-supervisor/tests/fixtures/process_tree.rs`에 direct/grandchild, leader-exit, new group/session, double-fork+reparent, control-FD-close, env-clear+exec, signal-ignore fixture mode를 만든다
+- [x] T004 [P] `crates/process-supervisor/tests/fixtures/protocol_peer.rs`에 exact-limit, limit+1, malformed, mid-frame EOF, slow-loris, endless-valid-frame fixture mode를 만든다
 
 ---
 

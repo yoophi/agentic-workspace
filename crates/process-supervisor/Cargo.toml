@@ -1,0 +1,20 @@
+[package]
+name = "process-supervisor"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "process-supervisor-tree-fixture"
+path = "tests/fixtures/process_tree.rs"
+test = false
+bench = false
+
+[[bin]]
+name = "process-supervisor-protocol-fixture"
+path = "tests/fixtures/protocol_peer.rs"
+test = false
+bench = false
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
