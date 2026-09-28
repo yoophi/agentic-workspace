@@ -1576,6 +1576,77 @@ async fn a_stale_recovery_snapshot_keeps_a_launch_that_succeeded_meanwhile() {
     );
 }
 
+/// `point`의 **첫** 도달만 붙잡는다(뒤의 도달은 그대로 지나간다 — 겹치는 두 번째 복구는 멈추지 않는다).
+fn pause_first_at(h: &BenchHarness, point: LaunchPoint) -> Pause {
+    let (tx, reached) = mpsc::unbounded_channel();
+    let release = Arc::new(Semaphore::new(0));
+    let gate = Arc::clone(&release);
+    let first = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let probe: LaunchProbe = Arc::new(move |at| {
+        let (tx, gate, first) = (tx.clone(), Arc::clone(&gate), Arc::clone(&first));
+        Box::pin(async move {
+            if at == point && first.swap(false, std::sync::atomic::Ordering::SeqCst) {
+                let _ = tx.send(());
+                gate.acquire().await.expect("probe gate").forget();
+            }
+        })
+    });
+    h.rt.runtime.orchestration().set_launch_probe(Some(probe));
+    Pause { reached, release }
+}
+
+/// Codex r12 (high): 복구 A가 task를 `Ready`로 읽고 재구성 전에 멈춘 사이 그 task의 기동이 성공해 인계되고, 그 뒤 시작한 복구
+/// B가 먼저 끝까지 적용된다. B가 A에게 필요한 변경 기록(A의 스냅샷 뒤의 인계)을 지우면 A는 실행 중 자리를 버려 한도 1에서도
+/// 다른 자식을 실행하게 된다. 겹치는 복구가 있어도 실행 중 자리와 한도가 유지돼야 한다.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn overlapping_recoveries_keep_a_launch_that_succeeded_between_them() {
+    let (h, bench, task_id, baseline) = ready_task_with_baseline().await;
+    let scheduler = h.rt.runtime.orchestration().scheduler().clone();
+    let mut paused = pause_first_at(&h, LaunchPoint::RecoverBeforeSchedulerApply);
+    let first = spawn_recover(&h, &bench);
+    tokio::time::timeout(WAIT, paused.reached.recv())
+        .await
+        .expect("recovery A took its snapshot (task ready) and waits before the rebuild");
+    let launched = tokio::time::timeout(WAIT, spawn_launch(&h, &bench, &task_id))
+        .await
+        .expect("the launch finishes")
+        .unwrap()
+        .expect("the launch succeeds");
+    drop(launched);
+    let run_id = node_of(&session(&h, &bench).await, &task_id)["currentRunId"]
+        .as_str()
+        .expect("the launched run is bound")
+        .to_owned();
+    let label = format!("launch:{run_id}");
+    h.engine
+        .wait_applied(|applied| applied == label, WAIT)
+        .await;
+    // 복구 B: A가 멈춘 채로 끝까지 돈다(두 번째 도달은 붙잡지 않는다).
+    recover(&h, &bench).await;
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "recovery B keeps the slot"
+    );
+    paused.release.add_permits(1);
+    tokio::time::timeout(WAIT, first)
+        .await
+        .expect("recovery A finishes")
+        .unwrap();
+    h.rt.runtime.orchestration().set_launch_probe(None);
+    assert_eq!(h.engine.run_count(), baseline.runs + 1);
+    assert_eq!(
+        scheduler.active_count().unwrap(),
+        1,
+        "recovery A, applied last with an older snapshot, did not drop the running slot"
+    );
+    let extra = create_extra(&h, "extra-after-overlapping-recover").await;
+    assert_eq!(
+        extra["queued"], true,
+        "the concurrency limit (1) holds while the launched run runs: {extra}"
+    );
+}
+
 /// Codex r11 (medium), 대칭 경우: 복구가 task를 `Running`으로 읽은 뒤 재구성 전에 그 task가 끝나 자리가 비었다(`release`). 낡은
 /// 스냅샷으로 실행 중 자리를 다시 세우면 실행 중 자식 없이 자리가 남는다(한도 1이면 다른 task가 계속 대기).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

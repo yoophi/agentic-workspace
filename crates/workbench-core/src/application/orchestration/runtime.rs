@@ -1442,8 +1442,9 @@ impl OrchestrationRuntime {
         self: &Arc<Self>,
         bench_id: &str,
     ) -> OrchestrationResult<OrchestrationSession> {
-        // 저장소 스냅샷을 읽기 **전**의 scheduler 세대(Codex r11): 재구성은 그 뒤 바뀐 task를 낡은 스냅샷으로 덮지 않는다.
-        let scheduler_since = self.scheduler.generation();
+        // 저장소 스냅샷을 읽기 **전**의 scheduler 세대를 등록한다(Codex r11·r12): 재구성은 그 뒤 바뀐 task를 낡은 스냅샷으로
+        // 덮지 않고, 이 창이 살아 있는 동안 다른(겹치는) 복구가 그 변경 기록을 지우지 못한다.
+        let scheduler_window = self.scheduler.begin_reconcile()?;
         let snapshot = self
             .snapshot_for(bench_id, MESSAGE_NOT_BOOTSTRAPPED)
             .await?;
@@ -1491,12 +1492,13 @@ impl OrchestrationRuntime {
         let launching_task_ids = self.launching_task_ids();
         self.launch_probe(LaunchPoint::RecoverBeforeSchedulerApply)
             .await;
-        self.scheduler.reconcile_since(
+        self.scheduler.reconcile_window(
+            &scheduler_window,
             &active_task_ids,
             &ready_task_ids,
             &launching_task_ids,
-            Some(scheduler_since),
         )?;
+        drop(scheduler_window);
         let commands = self.command_service();
         let bench = bench_id.to_owned();
         tokio::task::spawn_blocking(move || commands.reconcile_pending(&bench))

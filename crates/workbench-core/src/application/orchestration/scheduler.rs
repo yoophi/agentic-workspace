@@ -11,6 +11,11 @@
 //! (호출 future 취소 등) drop이 자기 보유를 놓는다 — 기동 guard가 생기기 전 구간의 취소도 보유를 남기지 않는다. 복구의
 //! 재구성은 스냅샷을 읽기 전의 scheduler 세대를 받아, 그 뒤 바뀐 task(기동 성공·끝·새 보유·대기)는 낡은 스냅샷이 아니라 지금
 //! 상태를 따른다.
+//!
+//! Codex r12: 복구는 스냅샷 세대를 [`ReconcileWindow`]로 **등록**한다. 변경 기록은 진행 중인 가장 오래된 복구의 세대보다 늦은
+//! 것을 모두 남긴다 — 겹치는 복구 B가 먼저 적용돼도, 더 오래된 스냅샷의 복구 A가 필요로 하는 기록(그 사이의 기동 성공 등)을
+//! 지우지 않는다. 재구성이 바꾼 task도 변경으로 기록해, 더 늦게 적용되는 낡은 복구가 새 결과를 덮지 않는다. `transfer`는
+//! **자기 보유를 실제로 뺀 경우에만** 실행 중으로 확정한다(끝난 task의 옛 기동이 같은 task의 새 시도 자리를 굳히지 않게).
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -97,13 +102,72 @@ struct SchedulerState {
     generation: u64,
     /// task별 마지막 변경 세대. 복구 재구성이 스냅샷 뒤 바뀐 task를 알아본다.
     touched: HashMap<String, u64>,
+    /// 진행 중인 복구의 스냅샷 세대(창 id → 세대, Codex r12). 변경 기록은 이 가운데 가장 오래된 세대보다 늦은 것을 남긴다.
+    windows: HashMap<u64, u64>,
+    next_window: u64,
+}
+
+/// 진행 중인 복구 하나의 스냅샷 세대 등록(Codex r12). 저장소 스냅샷을 읽기 **전에** [`OrchestrationScheduler::begin_reconcile`]
+/// 로 얻고 [`OrchestrationScheduler::reconcile_window`]로 적용한다. 버려지면(적용 뒤, 또는 복구가 도중에 끝나면) 등록을 뺀다.
+pub struct ReconcileWindow {
+    id: u64,
+    since: u64,
+    state: Arc<Mutex<SchedulerState>>,
+}
+
+impl ReconcileWindow {
+    pub fn since(&self) -> u64 {
+        self.since
+    }
+}
+
+impl Drop for ReconcileWindow {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.windows.remove(&self.id);
+            state.prune_touched(None);
+        }
+    }
 }
 
 impl SchedulerState {
+    /// 변경 기록 정리: `except`(지금 적용하는 창)를 뺀 진행 중 복구 가운데 가장 오래된 세대보다 늦은 기록만 남긴다. 진행 중
+    /// 복구가 없으면 모두 지운다(새 복구는 지금 세대부터 본다).
+    fn prune_touched(&mut self, except: Option<u64>) {
+        let oldest = self
+            .windows
+            .iter()
+            .filter(|(id, _)| Some(**id) != except)
+            .map(|(_, since)| *since)
+            .min();
+        match oldest {
+            Some(oldest) => self.touched.retain(|_, at| *at > oldest),
+            None => self.touched.clear(),
+        }
+    }
+
+    /// task 하나의 자리·대기 상태(재구성이 바꿨는지 비교용).
+    fn standing(&self, task_id: &str) -> (bool, bool, Vec<u64>, bool) {
+        let slot = self.active.get(task_id);
+        let mut holds = slot
+            .map(|slot| slot.holds.iter().copied().collect::<Vec<_>>())
+            .unwrap_or_default();
+        holds.sort_unstable();
+        (
+            slot.is_some(),
+            slot.is_some_and(|slot| slot.running),
+            holds,
+            self.queued.iter().any(|queued| queued == task_id),
+        )
+    }
+
     fn touch(&mut self, task_id: &str) {
         self.generation += 1;
-        let generation = self.generation;
-        self.touched.insert(task_id.to_owned(), generation);
+        // 기록은 진행 중인 복구가 있을 때만 쓸모가 있다(없으면 쌓지 않는다 — OCR 11차 Low).
+        if !self.windows.is_empty() {
+            let generation = self.generation;
+            self.touched.insert(task_id.to_owned(), generation);
+        }
     }
 
     fn hold(&mut self, task_id: &str) -> u64 {
@@ -198,14 +262,17 @@ impl OrchestrationScheduler {
         })
     }
 
-    /// 자기 기동이 성공했다: 보유를 실행 중 자리로 넘긴다. 그 사이 task가 끝나 자리가 비워졌으면 아무것도 하지 않는다.
+    /// 자기 기동이 성공했다: 보유를 실행 중 자리로 넘긴다. **이 보유가 아직 자리에 있을 때만** 실행 중으로 확정한다(Codex r12)
+    /// — 그 사이 task가 끝나 자리가 비워졌으면(그 뒤 같은 task의 새 시도가 새 자리를 얻었더라도) 아무것도 하지 않는다. 옛
+    /// 기동의 인계가 새 시도의 자리를 실행 중으로 굳혀, 그 시도가 끝난 뒤 실행할 작업 없이 자리를 차지하게 하지 않는다.
     pub fn transfer(&self, mut hold: SlotHold) {
         hold.owner = None;
         if let Ok(mut state) = self.lock() {
             if let Some(slot) = state.active.get_mut(&hold.task_id) {
-                slot.holds.remove(&hold.id);
-                slot.running = true;
-                state.touch(&hold.task_id);
+                if slot.holds.remove(&hold.id) {
+                    slot.running = true;
+                    state.touch(&hold.task_id);
+                }
             }
         }
     }
@@ -226,9 +293,43 @@ impl OrchestrationScheduler {
         Ok(state.promote(self.capacity))
     }
 
-    /// 지금 세대(Codex r11). 복구는 저장소 스냅샷을 읽기 **전에** 이것을 읽어 [`Self::reconcile_since`]에 넘긴다.
+    /// 지금 세대(Codex r11).
     pub fn generation(&self) -> u64 {
         self.lock().map(|state| state.generation).unwrap_or(0)
+    }
+
+    /// 복구 하나의 스냅샷 세대를 등록한다(Codex r12). 저장소 스냅샷을 읽기 **전에** 부르고, 받은 창으로
+    /// [`Self::reconcile_window`]를 적용한다. 창이 살아 있는 동안 그 세대 뒤의 변경 기록은 지워지지 않는다.
+    pub fn begin_reconcile(&self) -> Result<ReconcileWindow, OrchestrationError> {
+        let mut state = self.lock()?;
+        state.next_window += 1;
+        let (id, since) = (state.next_window, state.generation);
+        state.windows.insert(id, since);
+        Ok(ReconcileWindow {
+            id,
+            since,
+            state: Arc::clone(&self.state),
+        })
+    }
+
+    /// 등록한 창의 세대로 재구성한다([`Self::reconcile_since`]와 같되, 변경 기록 정리가 다른 진행 중 복구를 지킨다).
+    pub fn reconcile_window(
+        &self,
+        window: &ReconcileWindow,
+        active_task_ids: &[String],
+        ready_task_ids: &[String],
+        launching_task_ids: &[String],
+    ) -> Result<(), OrchestrationError> {
+        let mut state = self.lock()?;
+        Self::apply(
+            &mut state,
+            active_task_ids,
+            ready_task_ids,
+            launching_task_ids,
+            Some(window.since),
+            Some(window.id),
+        );
+        Ok(())
     }
 
     pub fn active_count(&self) -> Result<usize, OrchestrationError> {
@@ -282,10 +383,38 @@ impl OrchestrationScheduler {
         since: Option<u64>,
     ) -> Result<(), OrchestrationError> {
         let mut state = self.lock()?;
+        Self::apply(
+            &mut state,
+            active_task_ids,
+            ready_task_ids,
+            launching_task_ids,
+            since,
+            None,
+        );
+        Ok(())
+    }
+
+    fn apply(
+        state: &mut SchedulerState,
+        active_task_ids: &[String],
+        ready_task_ids: &[String],
+        launching_task_ids: &[String],
+        since: Option<u64>,
+        own_window: Option<u64>,
+    ) {
         let touched = std::mem::take(&mut state.touched);
         let fresh = |task_id: &str| {
             since.is_some_and(|since| touched.get(task_id).is_some_and(|at| *at > since))
         };
+        // 재구성 전 상태(바뀐 task를 변경으로 기록하려고, Codex r12).
+        let mut subjects: HashSet<String> = state.active.keys().cloned().collect();
+        subjects.extend(state.queued.iter().cloned());
+        subjects.extend(active_task_ids.iter().cloned());
+        subjects.extend(ready_task_ids.iter().cloned());
+        let before: HashMap<String, _> = subjects
+            .iter()
+            .map(|task_id| (task_id.clone(), state.standing(task_id)))
+            .collect();
         let mut previous = std::mem::take(&mut state.active);
         let previous_queue = std::mem::take(&mut state.queued);
         for task_id in active_task_ids {
@@ -322,12 +451,15 @@ impl OrchestrationScheduler {
                 state.queued.push_back(task_id.clone());
             }
         }
-        // 스냅샷 뒤의 변경 기록만 남긴다(다음 재구성이 쓴다).
-        state.touched = touched
-            .into_iter()
-            .filter(|(_, at)| since.is_some_and(|since| *at > since))
-            .collect();
-        Ok(())
+        // 변경 기록을 되돌려 놓고, 이 재구성이 바꾼 task를 변경으로 기록한다 — 더 오래된 스냅샷의 복구가 뒤늦게 적용돼도 이
+        // 결과를 덮지 않는다(Codex r12). 그다음 다른 진행 중 복구가 쓰지 않는 기록만 정리한다.
+        state.touched = touched;
+        for (task_id, was) in before {
+            if state.standing(&task_id) != was {
+                state.touch(&task_id);
+            }
+        }
+        state.prune_touched(own_window);
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, SchedulerState>, OrchestrationError> {
@@ -411,6 +543,98 @@ mod tests {
             scheduler.release("running-a").unwrap(),
             Some("ready-c".into())
         );
+    }
+
+    /// Codex r12 (medium): 옛 기동 A의 보유가 task 끝(`release`)으로 이미 사라진 뒤 같은 task의 새 시도 B가 새 자리를 얻었다.
+    /// A가 뒤늦게 인계(`transfer`)해도 B의 자리를 실행 중으로 굳히지 않는다 — B가 끝나 보유를 놓으면 자리가 빈다.
+    #[test]
+    fn a_stale_transfer_does_not_pin_a_newer_attempt_slot() {
+        let scheduler = OrchestrationScheduler::new(1);
+        let HoldOutcome::Acquired(old) = scheduler.acquire_hold("task-a").unwrap() else {
+            panic!("old attempt acquires")
+        };
+        scheduler.release("task-a").unwrap();
+        let HoldOutcome::Acquired(new) = scheduler.acquire_hold("task-a").unwrap() else {
+            panic!("new attempt acquires")
+        };
+        scheduler.transfer(old);
+        assert_eq!(scheduler.hold_count("task-a"), 1, "the new hold stays");
+        assert_eq!(scheduler.release_hold(new), None);
+        assert_eq!(
+            scheduler.active_count().unwrap(),
+            0,
+            "no running slot is left without work"
+        );
+    }
+
+    /// Codex r12 (high): 복구 A가 창을 연(스냅샷 `Ready`) 뒤 기동이 성공해 인계됐고, 그 뒤 창을 연 복구 B가 먼저 적용됐다. B의
+    /// 정리가 A가 쓸 변경 기록을 지우면 A는 실행 중 자리를 버린다. 진행 중 복구 A가 있는 동안 그 기록은 남아야 한다.
+    #[test]
+    fn an_overlapping_recovery_keeps_the_change_record_an_older_one_needs() {
+        let scheduler = OrchestrationScheduler::new(1);
+        let a = scheduler.begin_reconcile().unwrap();
+        let HoldOutcome::Acquired(hold) = scheduler.acquire_hold("task-a").unwrap() else {
+            panic!("acquires")
+        };
+        scheduler.transfer(hold);
+        let b = scheduler.begin_reconcile().unwrap();
+        scheduler
+            .reconcile_window(&b, &["task-a".into()], &[], &[])
+            .unwrap();
+        drop(b);
+        scheduler
+            .reconcile_window(&a, &[], &["task-a".into()], &[])
+            .unwrap();
+        drop(a);
+        assert_eq!(
+            scheduler.active_count().unwrap(),
+            1,
+            "the running slot survives"
+        );
+        assert_eq!(scheduler.queued_count().unwrap(), 0);
+        assert_eq!(
+            scheduler.acquire_hold("task-b").unwrap(),
+            HoldOutcome::Queued { position: 1 },
+            "the concurrency limit holds"
+        );
+    }
+
+    /// Codex r12: 더 새 스냅샷의 복구 B가 끝난 task의 낡은 자리를 비운 뒤, 더 오래된 스냅샷의 복구 A가 적용돼도 그 자리를 되살리지
+    /// 않는다(재구성이 바꾼 task도 변경으로 기록된다).
+    #[test]
+    fn an_older_recovery_applied_last_does_not_undo_a_newer_one() {
+        let scheduler = OrchestrationScheduler::new(1);
+        scheduler.acquire("task-a").unwrap();
+        let a = scheduler.begin_reconcile().unwrap();
+        let b = scheduler.begin_reconcile().unwrap();
+        scheduler.reconcile_window(&b, &[], &[], &[]).unwrap();
+        drop(b);
+        assert_eq!(scheduler.active_count().unwrap(), 0);
+        scheduler
+            .reconcile_window(&a, &["task-a".into()], &[], &[])
+            .unwrap();
+        drop(a);
+        assert_eq!(
+            scheduler.active_count().unwrap(),
+            0,
+            "the older snapshot does not revive the slot the newer one removed"
+        );
+    }
+
+    /// 창이 모두 닫히면 변경 기록이 남지 않는다(기록이 끝없이 쌓이지 않음).
+    #[test]
+    fn change_records_are_dropped_when_no_recovery_is_in_flight() {
+        let scheduler = OrchestrationScheduler::new(2);
+        scheduler.acquire("task-z").unwrap();
+        assert!(
+            scheduler.lock().unwrap().touched.is_empty(),
+            "no record without a recovery"
+        );
+        let window = scheduler.begin_reconcile().unwrap();
+        scheduler.acquire("task-a").unwrap();
+        assert!(!scheduler.lock().unwrap().touched.is_empty());
+        drop(window);
+        assert!(scheduler.lock().unwrap().touched.is_empty());
     }
 
     /// Codex r8: 되돌리는 중인 앞 시도 A의 보유 정리는 같은 자리에 보유를 더한 새 시도 B의 자리를 비우지 않는다.
