@@ -117,6 +117,10 @@ impl Attempt {
     pub fn endpoint(&self) -> &EndpointIdentity {
         &self.endpoint
     }
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
     pub fn state(&self) -> &AttemptState {
         &self.state
     }

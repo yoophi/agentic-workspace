@@ -11,22 +11,22 @@
 
 - [x] T003 `crates/workbench-client/tests/limits.rs`에 nonzero bounds, body/input/frame/queue exact/+1, duration overflow fixture를 먼저 작성하고 `src/domain/limits.rs`에 validated limits를 구현한다.
 - [x] T004 `crates/workbench-client/tests/attempt.rs`에 unknown/retry/epoch/immutable input/key/generation 및 stale completion fixture를 먼저 작성하고 `src/domain/attempt.rs`에 attempt state와 full outcome을 구현한다. Applied/Unknown/NotApplied를 혼동하지 않는다.
-- [ ] T005 `crates/workbench-client/tests/admission.rs`와 `src/application/admission.rs`에 catalog 전체 operation classification과 closed production allowlist, agent owner fallback0, missing045/046 gate 및 generic/explicit command parity를 구현한다. 새 operation은 기본 거절한다.
-- [ ] T006 `crates/workbench-client/src/ports/mod.rs`에 verified connection/credential, call transport, retry-store CAS, event consumer와 snapshot port를 정의하고 `tests/reuse.rs`의 독립 fixture consumer로 재사용을 확인한다. secret/private payload는 Debug에 노출하지 않는다.
+- [x] T005 `crates/workbench-client/tests/admission.rs`와 `src/application/admission.rs`에 catalog 전체 operation classification과 closed production allowlist, agent owner fallback0, missing045/046 gate 및 generic/explicit command parity를 구현한다. 새 operation은 기본 거절한다.
+- [x] T006 `crates/workbench-client/src/ports/mod.rs`에 verified connection/credential, call transport, retry-store CAS, event consumer와 snapshot port를 정의하고 `tests/reuse.rs`의 독립 fixture consumer로 재사용을 확인한다. secret/private payload는 Debug에 노출하지 않는다.
 
 ## Phase 3: US1 안전한 기존 서버 호출 (P1)
 
 독립 검증: 격리 loopback peer의 identity/credential, full fault/replay, replacement/cancellation fixtures. 실제 서버 검증은 T035–T038도 필요하다.
 
-- [ ] T007 [P] [US1] `crates/workbench-client/tests/locator.rs`에 symlink/부모 경로/uid/mode/type/size/replacement 및 agent descriptor fallback 거절 시험을 먼저 작성한다.
+- [x] T007 [P] [US1] `crates/workbench-client/tests/locator.rs`에 symlink/부모 경로/uid/mode/type/size/replacement 및 agent descriptor fallback 거절 시험을 먼저 작성한다.
 - [ ] T008 [P] [US1] `crates/workbench-client/tests/identity.rs`에 literal HMAC golden vector와 원 host 비교, identify 실패 credential0, proof 뒤 socket close/replacement 및 WS socket proof 시험을 먼저 작성한다.
-- [ ] T009 [US1] `crates/workbench-client/src/infrastructure/locator.rs`에 readonly no-follow FD descriptor read, loopback IP URL validation, protocol/storage compatibility, missing server unavailable을 구현한다. spawn/ensure/migrate 없음.
-- [ ] T010 [US1] `crates/workbench-client/src/infrastructure/identity.rs`에 standard hmac/sha2 proof verification과 redacted secret type을 구현한다. owner token은 credential provider 밖의 diagnostics에 넣지 않는다.
-- [ ] T011 [US1] `crates/workbench-client/src/infrastructure/http.rs`에 owned TCP HTTP1 sender/driver, same-socket identify→handshake→call, 새 socket fresh proof, proxy/redirect/automatic retry0 및 bounded headers/body/deadline을 구현한다.
-- [ ] T012 [P] [US1] `crates/workbench-client/tests/call_protocol.rs`에 malformed/status/requestId/kind/oversize/unknown body 및 full fault details/revision/replayed 보존 fixtures를 작성한다.
-- [ ] T013 [US1] `crates/workbench-client/src/application/call.rs`에 catalog input validation과 admission, exact request identity, typed protocol/transport failures, explicit retry 및 401/epoch 정책을 구현한다. timeout/local cancel 뒤 자동 server cancel0.
-- [ ] T014 [US1] `crates/workbench-client/tests/http_lifecycle.rs`에 slow headers/body, failed handshake, dropped caller, connect/proof/call cancellation과 driver/socket bounded settle를 검증한다.
-- [ ] T015 [US1] `crates/workbench-client/tests/call_retry.rs`에 response-loss same-key effect1, new epoch resubmit0, old generation completion0과 independent consumer parity를 검증한다.
+- [x] T009 [US1] `crates/workbench-client/src/infrastructure/locator.rs`에 readonly no-follow FD descriptor read, loopback IP URL validation, protocol/storage compatibility, missing server unavailable을 구현한다. spawn/ensure/migrate 없음.
+- [x] T010 [US1] `crates/workbench-client/src/infrastructure/identity.rs`에 standard hmac/sha2 proof verification과 redacted secret type을 구현한다. owner token은 credential provider 밖의 diagnostics에 넣지 않는다.
+- [x] T011 [US1] `crates/workbench-client/src/infrastructure/http.rs`에 owned TCP HTTP1 sender/driver, same-socket identify→handshake→call, 새 socket fresh proof, proxy/redirect/automatic retry0 및 bounded headers/body/deadline을 구현한다.
+- [x] T012 [P] [US1] `crates/workbench-client/tests/call_protocol.rs`에 malformed/status/requestId/kind/oversize/unknown body 및 full fault details/revision/replayed 보존 fixtures를 작성한다.
+- [x] T013 [US1] `crates/workbench-client/src/application/call.rs`에 catalog input validation과 admission, exact request identity, typed protocol/transport failures, explicit retry 및 401/epoch 정책을 구현한다. timeout/local cancel 뒤 자동 server cancel0.
+- [x] T014 [US1] `crates/workbench-client/tests/http_lifecycle.rs`에 slow headers/body, failed handshake, dropped caller, connect/proof/call cancellation과 driver/socket bounded settle를 검증한다.
+- [x] T015 [US1] `crates/workbench-client/tests/call_retry.rs`에 response-loss same-key effect1, new epoch resubmit0, old generation completion0과 independent consumer parity를 검증한다.
 
 ## Phase 4: US2 machine CLI와 durable retry (P1)
 
