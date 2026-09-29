@@ -57,7 +57,7 @@ identity proof 전 redirect/proxy, owner descriptor symlink/권한/교체/oversi
 - **FR-004**: full reply의 requestId/revision/replayed와 fault code/outcome/retryable/details를 의미 그대로 보존한다. transport loss는 Unknown과 명시적 NotApplied 거절을 구분한다.
 - **FR-005**: request identity와 idempotency key를 구분한다. mutation 재시도는 명시적 operation identity와 동일 key/payload/instance를 유지하며 epoch 변경 후 자동 전송하지 않는다.
 - **FR-006**: catalog/descriptor가 정의하는 operation·input·scope를 검사하고 generic `aw call`과 명시 명령의 의미를 같게 유지한다. unsupported operation은 silent fallback하지 않는다.
-- **FR-007**: `aw operations`, `aw project list`, `aw run start/watch/cancel`, `aw server status`, generic `aw call`을 제공한다. readiness가 필요한 launch/stop/ensure·agent profile 배포는 실제 prerequisite가 없으면 활성화하지 않는다.
+- **FR-007**: `aw events watch --input -`, `aw operations`, `aw project list`, `aw run start/watch/cancel`, `aw server status`, generic `aw call`을 제공한다. readiness가 필요한 launch/stop/ensure·agent profile 배포는 실제 prerequisite가 없으면 활성화하지 않는다.
 - **FR-008**: machine finite 성공은 stdout `{ok:true,data,requestId,...}` 하나, 실패는 stdout0·stderr `{ok:false,error,requestId,...}` 하나와 stable nonzero exit다. outcome과 uncertain retry 정보를 오류에 보존한다.
 - **FR-009**: human progress/warning은 stderr, machine mode는 color/spinner/interaction/log 혼합0이다. library panic/dependency log도 stdout을 오염시키지 않는다.
 - **FR-010**: input은 bounded stdin/file descriptor 기본이며 token·prompt·goal을 argv/log/Debug/error에 노출하지 않는다. raw private input echo를 하지 않는다.

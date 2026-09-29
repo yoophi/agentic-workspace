@@ -36,3 +36,7 @@ job review-mumgf0qh-iwt7yy/thread01a0ec6c-3c0c-7ad0-b515-e4441d195d1b, base20fcd
 ### D-C3 재개: 실제 stream identity 수정
 
 사용자의 실행 위치 변경 지시에 따라 Herdr w2:p1에서 재개했다. 이전 w1:p3는 pane_not_found이며 현재 pane의 Codex와 cwd를 확인했다. binding.rs::set의 독립 UUID, delivery_sink.rs::emit의 binding_id, orchestration_stream.rs의 반환 eventStreamId 구독 및 재바인딩 사례를 직접 확인했다. 계약의 orchestration:<benchId>를 bootstrap 응답 eventStreamId(내부 suffix는 bindingId)로 수정하고 plan/quickstart/model/research에 동기화했다. 위 D-C1 기록의 benchId suffix는 당시의 잘못된 설계 기록이며 이 D-C3가 대체한다. 원 verdict와 실패 기록은 보존한다. 실제 통합 시험은 아직 수행하지 않았다.
+
+### D-C3 OCR → Codex 완료 및 D-C4 반영
+
+base20fcd5f/head4a605da의 OCR automatic1JSON/excluded9Markdown과 host manual10/10(skipped0)을 대조했고 새 material0. artifacts `/private/tmp/aw-047-design/ocr-binding-{preview,rules,host-review}.json`. 후속 Codex thread01a0ec90-7b21-7fb2-a602-8c06f9cfeb93, actual exec15810 exit0, verdict needs-attention Medium1. 전체10파일 검토에서 실제 orchestration 이벤트를 소비할 CLI 명령 부재를 지적했다. 유효: run watch만으로는 실제 aw subprocess JSONL/ACK 증거를 만들 수 없다. `aw events watch --input -`의 exact cursor schema와 반환 eventStreamId 구독, bootstrap 출력 뒤 recover, 두 이벤트 JSONL/ACK 및 bounded SIGINT/reap를 spec/CLI contract/plan/quickstart에 반영했다. artifacts `/private/tmp/aw-047-design/binding-codex-{review.md,review.exit,source-context.md,source-manifest.json}`. 설계만 수정했으며 구현/시험은 미시작이다. 다음은 이 수정의 OCR → Codex 재검토다.
