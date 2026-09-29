@@ -125,3 +125,7 @@ T034–T039의 구현/실행 증거는 validation.md에 연결했다. process gu
 ### 구현2 수정 checkpoint
 
 Codex2 needs-attention Medium2를 반영해 RetryState 독립 상한/정규화 예약과 active 공유 stdout lease 계약·concurrent parent writer 회귀를 추가했다. client143/CLI59=202passed/ignored actual1, actual 별도1passed, strict Clippy exit0. 실제 명령/exit/실패 후 수정 근거는 validation의 Codex 구현2 checkpoint다. T041/T042는 새 고정 HEAD의 root8 및 OCR→Codex 승인 전까지 미체크, T043/T044는 이연/gate/인계 및 실제 PR/merge/main sync 전까지 미체크다.
+
+### 구현3 수정 checkpoint
+
+be63aaf root8 all exit0/workspace1221passed 뒤 Codex3 needs-attention Medium I-C4를 반영했다. snapshot owner/generation/scope 우선 검증·terminal cause 보존/추가요청0·transient shared policy 및 late stream/listener/foreign token 새 Live 영향0을 model/actual WS/actual aw로 검증했다. 기본207passed/ignored actual1, model26, actual 별도1passed, strictClippy 및 contract drift0. 실제 명령·exit/실패 후 수정은 validation에 기록한다. 최종 순차 승인과 root8·PR/CI·merge/main sync·인계 전 T041–T044는 계속 미체크다.

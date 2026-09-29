@@ -919,3 +919,160 @@ fn same_epoch_notification_lag_and_shutdown_require_snapshot_and_all_resets_reta
         assert_eq!(retained.cursor(), cursor(2));
     }
 }
+
+#[tokio::test]
+async fn terminal_snapshot_failure_preserves_cause_and_closes_without_cursor_change() {
+    use workbench_protocol::{FaultCode, Outcome, RequestId, WorkbenchFault};
+    for error in [
+        ClientError::Identity,
+        ClientError::Incompatible,
+        ClientError::Protocol,
+        ClientError::Fault(Box::new(
+            WorkbenchFault::new(
+                FaultCode::Unauthenticated,
+                RequestId::new("original").unwrap(),
+                "private-sentinel",
+            )
+            .with_outcome(Outcome::NotApplied),
+        )),
+        ClientError::Fault(Box::new(
+            WorkbenchFault::new(
+                FaultCode::Unavailable,
+                RequestId::new("original").unwrap(),
+                "private-sentinel",
+            )
+            .with_retryable(false),
+        )),
+    ] {
+        let expected = std::mem::discriminant(&error);
+        let fault = if let ClientError::Fault(fault) = &error {
+            Some(fault.clone())
+        } else {
+            None
+        };
+        let mut r = recovery();
+        let id = r.register(0).unwrap();
+        r.start_gap(gap(6)).unwrap();
+        let load = r.hello(1, "e").unwrap().unwrap();
+        let result = r.complete_snapshot(failed_snapshot_completion(load, error).await);
+        let Err(returned) = result else {
+            panic!("terminal snapshot error must not reconnect")
+        };
+        assert_eq!(std::mem::discriminant(&returned), expected);
+        if let Some(fault) = fault {
+            let ClientError::Fault(returned) = returned else {
+                panic!("original fault lost")
+            };
+            assert_eq!(returned, fault);
+        }
+        assert_eq!(r.phase(), RecoveryPhase::Terminal);
+        assert_eq!(r.cursor(), cursor(0));
+        assert_eq!(r.consumer_cursor(id).unwrap(), cursor(0));
+        assert!(r.next(id).unwrap().is_none());
+        assert!(matches!(
+            r.disconnected(),
+            Err(ClientError::StaleGeneration)
+        ));
+    }
+}
+#[tokio::test]
+async fn classified_transient_snapshot_failures_retry_the_same_boundary() {
+    use workbench_client::application::events::RecoveryOutcome;
+    use workbench_protocol::{FaultCode, RequestId, WorkbenchFault};
+    for error in [
+        ClientError::Unavailable,
+        ClientError::Deadline,
+        ClientError::TransportUnknown,
+        ClientError::Fault(Box::new(WorkbenchFault::new(
+            FaultCode::Unavailable,
+            RequestId::new("original").unwrap(),
+            "private-sentinel",
+        ))),
+        ClientError::Fault(Box::new(WorkbenchFault::new(
+            FaultCode::RateLimited,
+            RequestId::new("original").unwrap(),
+            "private-sentinel",
+        ))),
+    ] {
+        let mut r = recovery();
+        r.register(0).unwrap();
+        r.start_gap(gap(6)).unwrap();
+        let load = r.hello(1, "e").unwrap().unwrap();
+        assert!(
+            matches!(r.complete_snapshot(failed_snapshot_completion(load, error).await).unwrap(), RecoveryOutcome::Action(RecoveryAction::Connect(c)) if c==cursor(6))
+        );
+        assert_eq!(r.cursor(), cursor(0));
+    }
+}
+
+#[tokio::test]
+async fn old_terminal_snapshot_errors_cannot_end_a_new_live_round() {
+    for origin in 0..3 {
+        for error in [ClientError::Identity, ClientError::Protocol] {
+            let mut r = recovery();
+            let id = r.register(0).unwrap();
+            let old = match origin {
+                0 => {
+                    r.start_gap(gap(3)).unwrap();
+                    r.hello(1, "e").unwrap().unwrap()
+                }
+                1 => {
+                    r.hello(1, "e").unwrap();
+                    r.receive(event(1)).unwrap();
+                    let delivery = r.next(id).unwrap().unwrap();
+                    let RecoveryAction::Load(load) = r.consumer_failed(delivery).unwrap() else {
+                        panic!("listener load required")
+                    };
+                    load
+                }
+                _ => {
+                    let mut other = recovery();
+                    other.register(0).unwrap();
+                    other.start_gap(gap(3)).unwrap();
+                    other.hello(1, "e").unwrap().unwrap()
+                }
+            };
+            r.start_gap(gap(6)).unwrap();
+            let current = r.hello(1, "e").unwrap().unwrap();
+            let reset = r
+                .snapshot_loaded(current, snapshot(6))
+                .unwrap()
+                .pop()
+                .unwrap();
+            r.reset_applied(reset).unwrap();
+            assert!(r.is_live());
+            assert!(matches!(
+                r.complete_snapshot(failed_snapshot_completion(old, error).await),
+                Err(ClientError::StaleGeneration)
+            ));
+            assert!(r.is_live());
+            assert_eq!(r.cursor(), cursor(6));
+            assert_eq!(r.consumer_cursor(id).unwrap(), cursor(6));
+            r.receive(event(7)).unwrap();
+            let delivery = r.next(id).unwrap().unwrap();
+            r.ack(delivery).unwrap();
+            assert_eq!(r.cursor(), cursor(7));
+        }
+    }
+}
+
+async fn failed_snapshot_completion(
+    load: workbench_client::application::events::LoadRequest,
+    error: ClientError,
+) -> workbench_client::application::events::SnapshotCompletion {
+    struct Fails(Option<ClientError>);
+    #[async_trait::async_trait]
+    impl SnapshotPort for Fails {
+        async fn snapshot(&mut self, _: &StreamCursor) -> Result<Snapshot, ClientError> {
+            Err(self.0.take().unwrap())
+        }
+    }
+    workbench_client::application::events::spawn_snapshot(
+        load,
+        Box::new(Fails(Some(error))),
+        &Limits::default(),
+    )
+    .join()
+    .await
+    .unwrap()
+}

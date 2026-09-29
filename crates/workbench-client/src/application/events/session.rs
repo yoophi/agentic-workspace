@@ -495,7 +495,7 @@ impl EventSession {
                     tokio::time::sleep(delay).await;
                     match self.connect(cursor.clone()).await {
                         Ok(()) => return Ok(()),
-                        Err(error) if transient_connect(&error) => {}
+                        Err(error) if super::transient_recovery(&error) => {}
                         Err(error) => return Err(error),
                     }
                 }
@@ -669,22 +669,5 @@ impl Drop for QueueLease {
                 self.release(&mut state);
             };
         }
-    }
-}
-
-fn transient_connect(error: &ClientError) -> bool {
-    match error {
-        ClientError::Unavailable | ClientError::Deadline | ClientError::TransportUnknown => true,
-        ClientError::Fault(fault) => {
-            fault.retryable
-                && matches!(
-                    fault.code,
-                    workbench_protocol::FaultCode::Unavailable
-                        | workbench_protocol::FaultCode::Draining
-                        | workbench_protocol::FaultCode::RateLimited
-                        | workbench_protocol::FaultCode::DeadlineExceeded
-                )
-        }
-        _ => false,
     }
 }

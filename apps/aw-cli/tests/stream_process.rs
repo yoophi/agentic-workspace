@@ -856,3 +856,70 @@ async fn independent_projection(frames: &[Message]) -> Vec<Value> {
         .map(|event| serde_json::to_value(event).unwrap())
         .collect()
 }
+
+#[tokio::test]
+async fn actual_watch_terminal_snapshot_auth_and_protocol_errors_keep_cause_without_retry() {
+    use workbench_protocol::{FaultCode, Outcome};
+    for (action, code, exit) in [
+        (
+            Action::Fault(FaultCode::Unauthenticated, Outcome::NotApplied),
+            "unauthenticated",
+            3,
+        ),
+        (
+            Action::Raw(200, b"{invalid-json".to_vec()),
+            "protocolViolation",
+            1,
+        ),
+    ] {
+        let release = std::sync::Arc::new(tokio::sync::Notify::new());
+        let mut peer=Peer::spawn_multi(vec![ticket(),Action::WebSocketGate {before:vec![hello()],gate:release.clone(),after:vec![Message::Text(json!({"type":"gap","streamId":"orchestration:binding","epoch":"e","reason":"retentionExceeded","firstSequence":5,"lastSequence":5}).to_string())]}, ticket(),Action::WebSocketConcurrent(vec![hello(),event(6,"notificationRecovery")]),action]).await;
+        let mut child = watch(&peer, "500").await;
+        let mut reader = BufReader::new(child.stdout.take().unwrap());
+        use futures_util::FutureExt;
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            std::panic::AssertUnwindSafe(async {
+                assert_eq!(record(&mut reader).await["type"], "stream.open");
+                release.notify_one();
+                let end = record(&mut reader).await;
+                assert_eq!(end["type"], "stream.end");
+                assert_eq!(end["error"]["code"], code);
+                assert_eq!(end["cursor"]["afterSequence"], 0);
+            })
+            .catch_unwind(),
+        )
+        .await;
+        if !matches!(outcome, Ok(Ok(()))) {
+            child.start_kill().ok();
+        }
+        // Preserve child ownership through bounded wait/reap even when assertions/timeouts fail.
+        let output = support::finish(child, b"").await;
+        peer.settled().await;
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("snapshot CLI deadline after owned kill/reap and peer EOF"),
+        }
+        assert_eq!(output.status.code(), Some(exit));
+        assert!(output.stderr.is_empty());
+        let mut eof = String::new();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), reader.read_line(&mut eof))
+                .await
+                .unwrap()
+                .unwrap(),
+            0
+        );
+        let requests = peer.requests.lock().unwrap();
+        assert_eq!(requests.iter().filter(|r| r.0 == "/v1/calls").count(), 1);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|r| r.0 == "/v1/event-tickets")
+                .count(),
+            2
+        );
+        assert_eq!(requests.len(), 13);
+    }
+}

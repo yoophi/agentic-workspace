@@ -594,13 +594,20 @@ impl EventRecovery {
         &mut self,
         completion: SnapshotCompletion,
     ) -> Result<RecoveryOutcome, ClientError> {
+        // Validate ownership before classifying even terminal errors: a late old
+        // HTTP failure cannot terminate a newer recovery/live generation.
+        self.check_load(&completion.request)?;
         match completion.result {
             Ok(snapshot) => self
                 .snapshot_loaded(completion.request, snapshot)
                 .map(RecoveryOutcome::Reset),
-            Err(_) => self
+            Err(error) if transient_recovery(&error) => self
                 .snapshot_failed(completion.request)
                 .map(RecoveryOutcome::Action),
+            Err(error) => {
+                self.close()?;
+                Err(error)
+            }
         }
     }
     pub fn complete_reset(
@@ -777,4 +784,21 @@ pub fn spawn_delivery(
         },
         deadline.saturating_add(deadline),
     )
+}
+
+fn transient_recovery(error: &ClientError) -> bool {
+    match error {
+        ClientError::Unavailable | ClientError::Deadline | ClientError::TransportUnknown => true,
+        ClientError::Fault(fault) => {
+            fault.retryable
+                && matches!(
+                    fault.code,
+                    workbench_protocol::FaultCode::Unavailable
+                        | workbench_protocol::FaultCode::Draining
+                        | workbench_protocol::FaultCode::RateLimited
+                        | workbench_protocol::FaultCode::DeadlineExceeded
+                )
+        }
+        _ => false,
+    }
 }

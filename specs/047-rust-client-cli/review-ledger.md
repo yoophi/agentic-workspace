@@ -74,3 +74,9 @@ fa4c42f 전체 OCR73/73(skipped0)→Codex thread01a0ed40-3d1d-7132-9407-9e7c1081
 I-C3는 공유 OFD에 활성 O_NONBLOCK 효과가 있다는 유효 지적이다. reviewer가 제시한 대안 중 명시적 호출자 lease 계약과 실제 concurrent writer/backpressure 증거를 적용했다. active 공유 writer의 WouldBlock 처리/flags 변경 금지, JSONL 전용 출력 요구를 문서화했고 실제 subprocess4경로에서 parent write/burst WouldBlock/drain/종료 exactflagsrestore/재사용/socketEOF를 확인했다. 종료 복구만으로 활성 기간의 공유 효과가 없다고 주장하지 않는다.
 
 client/CLI202passed/actual 별도1passed/strictClippy exit0. 상세 actual 명령·수·exit 및 fixture requestId mismatch101는 validation에 기록했다. 새 고정 HEAD의 root8 및 OCR→Codex 재검토 전이며 이 기록은 최종 approve가 아니다.
+
+### 구현 Codex3: I-C4 Medium 수정
+
+be63aaf OCR73/73(skipped0)→Codex thread01a0ed4a-bd70-76b2-84ef-66756d4e814a /exec16577 actualexit0, verdict needs-attention Medium1. 전체 branch의 snapshot recovery가 terminal 신원/호환/프로토콜/nonretryable fault를 재시도하며 Unavailable로 덮는 유효 지적을 반영했다. complete_snapshot은 owner/generation/scope 검증을 오류 분류보다 먼저 실행하며 stale Identity/Protocol이 새 Live를 종료하지 않는다. 현재 terminal은 기존 close/invalidate 및 원 cause 반환, transient는 connect와 공통 allowlist/bounded retry를 사용한다.
+
+model26/기본207passed, current terminal 및 transient actual WS matrix, 실제 aw HTTP snapshot auth/protocol error→원 code/exit·추가snapshot0·ACK0, owned cleanup/EOF 회귀를 확인했다. 기존동작 red101, typed private-token 시험 작성 실패와 old Protocol transient fixture 수정은 validation에 보존한다. strictClippy/fmt/contract generation drift0, exact baseline actual 별도1passed. 수정 HEAD root8와 OCR→Codex4 승인 전이므로 PR/merge는 아직 수행하지 않는다.

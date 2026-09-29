@@ -440,7 +440,8 @@ impl SnapshotPort for PlannedPort {
             std::future::pending::<()>().await;
         }
         if self.fail_all {
-            return Err(ClientError::Protocol);
+            // This fixture exercises transient listener exhaustion, not terminal protocol errors.
+            return Err(ClientError::Unavailable);
         }
         Ok(Snapshot {
             cursor: cursor(self.after),
@@ -1497,4 +1498,177 @@ async fn stop_after_successful_callback_preserves_its_ack_before_invalidating_pe
     assert_eq!(result.cursor, cursor(1));
     assert!(result.cleanup_error.is_none());
     peer.settled().await;
+}
+
+struct FailingSnapshotSource {
+    endpoint: Arc<LocatedEndpoint>,
+    limits: Limits,
+    error: Arc<Mutex<Option<ClientError>>>,
+    loads: Arc<std::sync::atomic::AtomicUsize>,
+    connections: Arc<Mutex<Vec<u64>>>,
+    allow_success: bool,
+}
+struct FailingSnapshotPort {
+    error: Arc<Mutex<Option<ClientError>>>,
+    loads: Arc<std::sync::atomic::AtomicUsize>,
+    allow_success: bool,
+}
+#[async_trait]
+impl SnapshotPort for FailingSnapshotPort {
+    async fn snapshot(&mut self, _: &StreamCursor) -> Result<Snapshot, ClientError> {
+        self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(error) = self.error.lock().unwrap().take() {
+            return Err(error);
+        }
+        assert!(
+            self.allow_success,
+            "terminal failure must not issue another snapshot request"
+        );
+        Ok(Snapshot {
+            cursor: cursor(5),
+            value: json!({"revision":2}),
+        })
+    }
+}
+#[async_trait]
+impl EventSource for FailingSnapshotSource {
+    async fn connect(&self, cursor: &StreamCursor) -> Result<Box<dyn EventSocket>, ClientError> {
+        self.connections.lock().unwrap().push(cursor.after_sequence);
+        Ok(Box::new(
+            WebSocketConnection::connect(
+                self.endpoint.clone(),
+                self.limits.clone(),
+                vec![cursor.clone()],
+            )
+            .await?,
+        ))
+    }
+    fn snapshot_port(&self) -> Box<dyn SnapshotPort> {
+        Box::new(FailingSnapshotPort {
+            error: self.error.clone(),
+            loads: self.loads.clone(),
+            allow_success: self.allow_success,
+        })
+    }
+}
+#[tokio::test]
+async fn verified_live_snapshot_terminal_errors_stop_once_and_transient_error_recovers() {
+    use futures_util::FutureExt;
+    use workbench_protocol::{FaultCode, RequestId, WorkbenchFault};
+    for error in [
+        ClientError::Identity,
+        ClientError::Incompatible,
+        ClientError::Protocol,
+        ClientError::Fault(Box::new(WorkbenchFault::new(
+            FaultCode::Unauthenticated,
+            RequestId::new("original").unwrap(),
+            "private-sentinel",
+        ))),
+        ClientError::Unavailable,
+    ] {
+        let transient = matches!(error, ClientError::Unavailable);
+        let expected = std::mem::discriminant(&error);
+        let gate = Arc::new(Notify::new());
+        let mut actions = vec![
+            ticket(),
+            Action::WebSocketGate {
+                before: vec![hello()],
+                gate: gate.clone(),
+                after: vec![gap(5)],
+            },
+            ticket(),
+            Action::WebSocket(vec![hello(), message(6)]),
+        ];
+        if transient {
+            actions.extend([ticket(), Action::WebSocket(vec![hello(), message(6)])]);
+        }
+        let mut peer = Peer::spawn_multi(actions).await;
+        let state = Arc::new(Mutex::new(State::default()));
+        let observed = Arc::new(Notify::new());
+        let loads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let connections = Arc::new(Mutex::new(Vec::new()));
+        let config = limits();
+        let source = Arc::new(FailingSnapshotSource {
+            endpoint: peer.endpoint.clone(),
+            limits: config.clone(),
+            error: Arc::new(Mutex::new(Some(error))),
+            loads: loads.clone(),
+            connections: connections.clone(),
+            allow_success: transient,
+        });
+        let mut session = EventSession::new(cursor(0), source, config).unwrap();
+        session
+            .subscribe(0, ready_consumer(state.clone(), observed.clone()))
+            .unwrap();
+        let progress = session.progress();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let mut job = harness::OwnedTask::default();
+        job.start(session.run(async {
+            let _ = stop_rx.await;
+        }));
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            std::panic::AssertUnwindSafe(async {
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    while state.lock().unwrap().opened != 1 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                gate.notify_one();
+                if transient {
+                    tokio::time::timeout(Duration::from_secs(1), async {
+                        while progress.cursor().unwrap().after_sequence != 6 {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    stop_tx.send(()).unwrap();
+                }
+                let result = job.wait().await;
+                assert!(result.cleanup_error.is_none());
+                assert_eq!(progress.queue_usage().unwrap(), (0, 0));
+                if transient {
+                    assert!(matches!(result.result, Err(ClientError::Cancelled)));
+                    assert_eq!(result.cursor, cursor(6));
+                    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 2);
+                    assert_eq!(*connections.lock().unwrap(), vec![0, 5, 5]);
+                    assert_eq!(state.lock().unwrap().resets, vec![5]);
+                    assert_eq!(state.lock().unwrap().events, vec![6]);
+                } else {
+                    assert_eq!(
+                        std::mem::discriminant(&result.result.unwrap_err()),
+                        expected
+                    );
+                    assert_eq!(result.cursor, cursor(0));
+                    assert_eq!(loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+                    assert_eq!(*connections.lock().unwrap(), vec![0, 5]);
+                    assert!(state.lock().unwrap().resets.is_empty());
+                    assert!(state.lock().unwrap().events.is_empty());
+                }
+                assert_eq!(
+                    peer.requests
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|r| r.0.starts_with("/v1/events?"))
+                        .count(),
+                    if transient { 3 } else { 2 }
+                );
+            })
+            .catch_unwind(),
+        )
+        .await;
+        job.cancel_join()
+            .await
+            .expect("owned snapshot session cleanup");
+        peer.settled().await;
+        match outcome {
+            Ok(Ok(())) => {}
+            Ok(Err(panic)) => std::panic::resume_unwind(panic),
+            Err(_) => panic!("snapshot session deadline after abort/join and actual EOF"),
+        }
+    }
 }
