@@ -20,3 +20,7 @@ job review-mumg92ez-v6zw3v/thread01a0ec67-ffc1-72d1-9e00-fd19742a40c8, base20fcd
 ### D-C1 수정 선행 OCR delegate
 
 base deb3f7c→b7600d0,5Markdown은 자동reviewable0/excluded5unsupported_ext. host가 전체5/5와 원 recover/reconcile/persist_mutation/command·notification empty branch를 실제 읽어 reviewed5/skipped0/manualcoverage100%, 새material0. actualgit union5/중복0. active generation null의 next_delivery=None이 worker 전에 종료하고 service의 r+1/runtimeReconciled를 확인했다. 기존 sourceNotFound·High verdict와 productiongate 유지, 실행결과 아님. artifacts `/private/tmp/aw-047-design/ocr-correction-{preview,host-review}.json`. 수정tree Codex --wait에 전체10file와 원 전체함수 context를 제공한다.
+
+### D-C2 수정: 후속 비동기 이벤트 계약
+
+job review-mumgf0qh-iwt7yy/thread01a0ec6c-3c0c-7ad0-b515-e4441d195d1b, base20fcd5f/head640f1e7, actual tool91577 exit0/completed, needs-attention Medium1 보존. 후속 notificationRecovery event와 HTTP reply ordering 식별 누락은 유효; 추가 저장 revision 증가 추정은 emit_runtime_update_for/get_for_bench/emit/sink/publish_state 전체 대조로 기각한다. 두 event는 r+1을 공유하며 sequence만 각각 증가한다. contracts/client.md D-C2에 bootstrap s, runtimeReconciled s+1, notificationRecovery s+2 exact 식별·ACK, 두 이벤트와 reply 완료 후 최종 snapshot r+1, barrier 양방향 ordering을 명시했다. >=/sleep/제품 코드 변경으로 보완하지 않는다. 실행 시험은 아직 없고 SC-007 미완료. 전체 함수 context를 제공한 OCR→Codex 수정 설계 리뷰 뒤 tasks로 진행한다.

@@ -27,3 +27,15 @@ baseline actualbinary20fcd5f + private root fixture로 identity/handshake、syst
 ## CLI invocation을 넘는 retry identity
 
 mutation은 첫 submission 전에 owner-only private retry state를 저장한다: version、operation、protocol/contract、request/key、immutable input bytes/digest、instance/epoch、attempt generation、state/outcome. original input은 console에 출력하지 않는다. state는 data backup 대상 서버store가 아닌 caller runtime-control domain이며 root/path/no-follow/owner/mode/size와 atomic fsync update를 검증한다. submit 전 저장이 실패하면 요청0. unknown 상태에서 다음 invocation은 `--retry-state FILE`로 원 요청만 읽고 key/input flag 변경을 거절한다. verified instance/epoch 불일치는 unresolved로 유지하고 HTTP command0. arbitrary `--idempotency-key`만으로 이전 unknown 요청을 검증했다고 주장하지 않는다. explicit 새 operation은 별도 state/key이며 이전 unknown의 성공/실패 추정 없음. crash commit-before-output、state write 실패、old invocation completion/CAS、caller cancellation、reopen retry fixtures를 tasks에 포함한다. CLI private state가 있음에도 production all-writer/freeze/restore proof로 계산하지 않는다.
+
+## 실제 이벤트의 결정적 acceptance (D-C2)
+
+저장소 revision과 EventEnvelope sequence를 혼동하지 않는다. 원 persist_mutation은 commit 후 revision을 r+1로 발행한다. 뒤의 notification pass는 get_for_bench snapshot을 읽고 emit_runtime_update_for→emit_runtime_update→DeliveryOrchestrationSink.emit→EventHub.publish_state로 같은 revision을 다시 발행한다. helper/sink는 저장소 revision을 증가시키지 않고 hub만 같은 stream lock에서 sequence를1 증가시킨다. 빈 fixture의 다른 writer/notification0 조건에서 다음을 각각 exact assertion으로 검증한다.
+
+1. bootstrap event를 실제 소비·출력 ACK한 기준 (workspaceId, streamId, epoch, revision=r, sequence=s)을 저장한다. ticket/hello만으로 bootstrap ACK를 대신하지 않는다.
+2. empty recover를1회 제출하고 `schema=orchestration.workspaceUpdated.v1`, 동일 workspace/stream/epoch, `reason=runtimeReconciled`, `revision=r+1`, `sequence=s+1`인 target envelope를 반드시 실제 수신·소비·ACK한다. 다른 reason의 이벤트는 target 완료로 세지 않는다.
+3. 뒤의 `reason=notificationRecovery`, 동일 identity/schema, `revision=r+1`, `sequence=s+2` envelope도 별도 소비·ACK한다. 같은 revision이라는 이유로 이 이벤트를 중복 제거하지 않는다. cursor는 완전한 JSONL 출력/consumer ACK 뒤 s→s+1→s+2로만 전진한다. 예상 외 envelope/중복/누락은 실패이며 `>=`로 숨기지 않는다.
+4. HTTP recover reply와 WS event 도착 사이에는 총순서를 가정하지 않는다. 두 envelope ACK와 reply 성공을 명시적 완료 신호로 기다린 뒤 별도 orchestration.get으로 최종 snapshot을 읽고 revision=r+1 및 empty/run0 상태를 exact 비교한다. recover reply의 snapshot도 r+1이어야 한다. 유한 deadline은 실패 판정용이며 임의 sleep/timeout만으로 두 이벤트 완료를 추정하지 않는다.
+5. controlled peer에서는 reply-before-events와 두 events-before-reply 양쪽을 barrier로 강제하여 ACK/완료 reducer를 시험한다. 실제 서버에서는 관측된 순서와 두 eventId/sequence/reason/revision·reply·최종 snapshot을 보존하며 원 product 코드를 시험에 맞춰 변경하지 않는다. fixture teardown은 두 이벤트 처리 뒤 수행하며 누락/cleanup 실패는 별도로 기록한다.
+
+현재는 원 전체 함수의 읽기 증거 및 acceptance 설계다. 실제 binary 실행/통과는 아직 없으며 해당 통합 task 전까지 SC-007 미완료다.
