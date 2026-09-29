@@ -39,6 +39,11 @@ pub struct Delivery {
     consumer_generation: u64,
     stream_generation: u64,
 }
+impl Delivery {
+    pub fn consumer(&self) -> ConsumerId {
+        self.consumer
+    }
+}
 impl std::fmt::Debug for Delivery {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("Delivery([redacted])")
@@ -90,6 +95,19 @@ impl EventReducer {
     pub fn snapshot_on_reconnect(&self) -> bool {
         parse_stream_id(&self.cursor.stream_id).is_some_and(|(kind, _)| {
             kind.class() == workbench_protocol::events::EventClass::Notification
+        })
+    }
+    pub fn consumers(&self) -> Vec<ConsumerId> {
+        self.consumers.keys().copied().collect()
+    }
+    pub fn consumer_cursor(&self, id: ConsumerId) -> Result<StreamCursor, ClientError> {
+        let state = self
+            .consumers
+            .get(&id)
+            .ok_or(ClientError::StaleGeneration)?;
+        Ok(StreamCursor {
+            after_sequence: state.applied,
+            ..self.cursor.clone()
         })
     }
     pub fn received(&self) -> u64 {
@@ -327,6 +345,25 @@ impl EventReducer {
         s.queue.retain(|p| p.event.sequence > s.applied);
         s.resetting = false;
         s.inflight = None;
+        Ok(())
+    }
+    /// End pending work without claiming it applied. Used at terminal boundaries.
+    pub fn invalidate_pending(&mut self) -> Result<(), ClientError> {
+        let generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(ClientError::StaleGeneration)?;
+        if self.consumers.values().any(|s| s.generation == u64::MAX) {
+            return Err(ClientError::StaleGeneration);
+        }
+        self.generation = generation;
+        self.backlog.clear();
+        for state in self.consumers.values_mut() {
+            state.generation += 1;
+            state.inflight = None;
+            state.resetting = true;
+            state.queue.clear();
+        }
         Ok(())
     }
     pub fn rebind(&mut self, cursor: StreamCursor) -> Result<(), ClientError> {

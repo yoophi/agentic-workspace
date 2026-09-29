@@ -120,11 +120,31 @@ pub struct Snapshot {
 }
 #[async_trait]
 pub trait SnapshotPort: Send {
+    /// Return full state/journal coverage through the returned cursor, not a delta
+    /// starting at the requested cursor: an earlier listener may join during loading.
     async fn snapshot(&mut self, cursor: &StreamCursor) -> Result<Snapshot, ClientError>;
+    /// Live boundary is recovery coverage; actual applied remains the replay/reset origin.
+    async fn snapshot_after(
+        &mut self,
+        applied: &StreamCursor,
+        live: &StreamCursor,
+    ) -> Result<Snapshot, ClientError> {
+        let _ = live;
+        self.snapshot(applied).await
+    }
 }
 #[async_trait]
 pub trait EventConsumer: Send {
     /// Success means the full event was applied/output, not just received.
     async fn consume(&mut self, event: &EventEnvelope) -> Result<(), ClientError>;
     async fn reset(&mut self, snapshot: &Snapshot) -> Result<(), ClientError>;
+    /// Replay consumers can use their actual applied cursor; a gap boundary is not an ACK.
+    async fn reset_from(
+        &mut self,
+        snapshot: &Snapshot,
+        applied: &StreamCursor,
+    ) -> Result<(), ClientError> {
+        let _ = applied;
+        self.reset(snapshot).await
+    }
 }

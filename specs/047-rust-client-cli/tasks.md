@@ -46,7 +46,7 @@
 독립 검증: TS transition fixtures와 controlled WS peer, 지연 소비/gap/재바인딩/epoch/취소 race. 실제 CLI JSONL은 T033/T038에서 검증한다.
 
 - [x] T024 [P] [US3] `crates/workbench-client/tests/event_reducer.rs`에 received/applied 분리, all-consumer minimum, unregister/failure/old promise, same revision different sequence 및 binding replacement fixtures를 먼저 작성한다.
-- [ ] T025 [P] [US3] `crates/workbench-client/tests/recovery.rs`에 live-first hello→snapshot→reset→buffer filtering, snapshot 실패/new gap/new epoch, stale generation과 backoff exhausted fixtures를 먼저 작성한다. 원 `packages/workbench-client` race fixture를 대조한다.
+- [X] T025 [P] [US3] `crates/workbench-client/tests/recovery.rs`에 live-first hello→snapshot→reset→buffer filtering, snapshot 실패/new gap/new epoch, stale generation과 backoff exhausted fixtures를 먼저 작성한다. 원 `packages/workbench-client` race fixture를 대조한다.
 - [x] T026 [US3] `crates/workbench-client/src/domain/events.rs`에 stream/epoch/consumer generation과 ACK reducer, non-retaining worktree resnapshot 및 retained stream replay 정책을 구현한다.
 - [ ] T027 [US3] `crates/workbench-client/src/application/events.rs`에 live-first bounded recovery, snapshot port, cancellation/task ownership과 consumer failure/reset를 연결한다.
 - [ ] T028 [US3] `crates/workbench-client/src/infrastructure/websocket.rs`에 ticket POST, 별도 owned TCP의 identify proof 뒤 같은 socket upgrade, hello identity/cursor 검증과 message/frame/queue limits를 구현한다. URL credential·ticket diagnostics 금지.
@@ -96,3 +96,5 @@ flowchart TD
 T018–T021/T023의 private store·finite CLI·실제 subprocess retry는 validation.md의85개/exit0 근거로 체크했다. T016은 reachable fault14종과 SIGINT/deadline/usage/출력 오류를 검증했으나 cancel-rejected6은 production RunCancel gate가 닫혀 있어 실제 proof가 없다. T017은 최초/CAS fsync/rename 경계 오류 주입 및 CLI가 공유하는 publish-before-send use case의 owned HTTP command0 연결까지 검증했다. T022는 동일 production hook을 쓰는 격리 test subprocess의 실제 panic/JSON1/exit1/raw sentinel0/bounded reap까지 추가 검증했다. T008 WS proof와 T024 이후 event/actual server/전체 readiness는 미완료다.
 
 T024/T026 reducer13개는 received/applied·all-consumer min ACK·실패/제거/옛 delivery/reset·notification resnapshot 정책·binding/epoch 교체·같은 revision의 두 sequence와 bounded queue를 검증했다. ConsumerId/Delivery/Reset은 고유 reducer owner에 묶였다. earlier join의 live2→replay1 순서는 reducer에서 실패 재현 후 ordered queue/연속 ACK로 수정했으며, T025/T027의 async recovery/socket/snapshot 교차 시험은 별도로 남아 있다. WS나 recovery 완료로 계산하지 않는다.
+
+T025 recovery22개는 원 TS race/listener/gap/reconnect fixture와 대조했다. live-first hello 이후 snapshot/reset, earlier listener live2→replay1, pending load/reset 중 listener join/removal, epoch 모든 gap reason 및 old load 성공/실패·reset 거절, stream exhaustion의 listener load/reset/delivery 무효화와 listener-only exhaustion을 구분해 검증했다. callback/snapshot OwnedJob의 pending 취소·Drop·deadline·panic completion은 검증했지만 실제 session이 모든 socket/task를 취소하고 bounded join하는 연결은 T027에 남아 있다. 현재 전체126tests/strict clippy exit0이며 T027/T028 이후와045/046 전체 gate 미완료를 유지한다.
