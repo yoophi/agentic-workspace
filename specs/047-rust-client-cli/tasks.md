@@ -67,8 +67,8 @@
 - [x] T040 `specs/047-rust-client-cli/validation.md`에 client/CLI tests와 strict clippy, affected protocol/host/server/AW Rust checks 및 TS consumer 회귀의 실제 명령/exit/test 수를 기록한다. 변경 없는 경로는 검증 N/A 근거를 명시한다.
 - [X] T041 `specs/047-rust-client-cli/review-ledger.md`에 구현 전체 diff OCR delegate→Codex adversarial --wait 순차 리뷰와 valid findings 수정/재검증을 기록한다.
 - [X] T042 `specs/047-rust-client-cli/validation.md`에 최종 root package.json 8단계 gate와 exact HEAD를 기록한다. 실행하지 않은 macOS14+/signed bundle/desktop-CLI-TUI matrix를 PASS로 표시하지 않는다.
-- [ ] T043 `specs/047-rust-client-cli/validation.md`에 FR019/020·SC006의 045/046 prerequisites, 실제 desktop 종료 후 run 관찰/취소, TUI/MCP, signed CALVER packaging/update와 desktop business fallback 제거의 미완료 사실·미실행 검증·production gate·재개 조건을 명시하고 인계 문서에 연결한다. 원 전체 roadmap 구현 완료는 최신 047 종료 전제가 아니다. 가능한 047 검증/actual server 시험은 생략하지 않으며 전체 전환 완료로 선언하지 않는다.
-- [ ] T044 `specs/047-rust-client-cli/review-ledger.md`에 047 최종 PR/CI, origin/main squash merge, main checkout 및 pull 증거를 남긴다. 이후 `docs/047-completion-handoff.md`에 완료범위/commit·PR/검증근거/미완료 선행조건/후속작업/재개방법을 기록하고 중지한다. 전체 전환 완료나 후속 prerequisites 충족으로 확대하지 않는다.
+- [X] T043 `specs/047-rust-client-cli/validation.md`에 FR019/020·SC006의 045/046 prerequisites, 실제 desktop 종료 후 run 관찰/취소, TUI/MCP, signed CALVER packaging/update와 desktop business fallback 제거의 미완료 사실·미실행 검증·production gate·재개 조건을 명시하고 인계 문서에 연결한다. 원 전체 roadmap 구현 완료는 최신 047 종료 전제가 아니다. 가능한 047 검증/actual server 시험은 생략하지 않으며 전체 전환 완료로 선언하지 않는다.
+- [X] T044 `specs/047-rust-client-cli/review-ledger.md`에 047 최종 PR/CI, origin/main squash merge, main checkout 및 pull 증거를 남긴다. 이후 `docs/047-completion-handoff.md`에 완료범위/commit·PR/검증근거/미완료 선행조건/후속작업/재개방법을 기록하고 중지한다. 전체 전환 완료나 후속 prerequisites 충족으로 확대하지 않는다.
 
 ## 의존성과 실행 전략
 
@@ -143,3 +143,8 @@ Codex5 I-C6 Evicted 및 사용자 listener 직접 snapshot 경로의 transient b
 ### 최종 source 검증/리뷰 완료
 
 f8df5dc root8 all exit0/workspace1234passed·ignored8 및 OCR73/73(skipped0)→Codex6 actualexit0/approve를 validation/review-ledger에 기록했다. T016 체크는 reachable 계약/명시 exit6 이연과 현재 gate parity의 최신 scoped 완료이며 production cancel-rejected6 pass가 아니다. T041/T042 source 검증/순차 승인 완료, T043 최종인계연결/T044 PR/CI·merge/main sync·인계/중지는 미완료다. 이 기록 commit은 실행 source를 변경하지 않는다.
+
+
+### 047 종료 조건 충족
+
+T043 이연/gate/재개 경계는 docs/047-completion-handoff.md와 연결했고 T044 구현PR209의 CI success→expectedhead squashc3973ee→main checkout/pull exit0/local=origin main→인계 기록을 실제 완료했다. 전체44tasks는 최신 사용자047 한정범위 기준으로 체크하며 T016 production exit6 및 후속roadmap은 구현/시험 완료로 확대하지 않는다. 후속 구현을 시작하지 않고 완료 기록 전달 후 중지한다.
