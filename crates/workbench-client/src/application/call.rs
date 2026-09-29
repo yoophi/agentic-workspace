@@ -36,6 +36,7 @@ pub fn validate_request(request: &CallRequest) -> Result<OperationId, ClientErro
         SystemDescribe => input::<system::SystemDescribeInput>(&request.input),
         ServerStatus => input::<server::ServerStatusInput>(&request.input),
         BenchOpen => input::<bench::BenchOpenInput>(&request.input),
+        RunCancel => input::<run::RunCancelInput>(&request.input),
         BenchList => input::<bench::BenchListInput>(&request.input),
         OrchestrationBootstrap => {
             input::<orchestration::OrchestrationBootstrapInput>(&request.input)

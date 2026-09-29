@@ -34,12 +34,12 @@
 
 - [ ] T016 [P] [US2] `apps/aw-cli/tests/finite.rs`에 finite result/error envelope, 모든 exit family, stdin limits/UTF8/schema, secret sentinel, command alias parity golden을 먼저 작성한다.
 - [ ] T017 [P] [US2] `crates/workbench-client/tests/retry_store.rs`에 pre-send persistence failure=request0, fsync/crash-before-output/reopen, no-follow/owner/mode/size, cross-process CAS/active attempt 경쟁 fixtures를 먼저 작성한다.
-- [ ] T018 [US2] `crates/workbench-client/src/infrastructure/retry_store.rs`에 caller runtime-control 전용 private retry state, immutable input/key/operation/protocol/instance/epoch와 durable atomic publish/CAS를 구현한다. server user-data store와 분리한다.
-- [ ] T019 [US2] `apps/aw-cli/src/inbound.rs`에 operations/project list/run start/watch/cancel/server status/call/events watch parsing 및 bounded stdin을 구현한다. token/prompt/goal argv를 받지 않는다.
-- [ ] T020 [US2] `apps/aw-cli/src/application.rs`에 explicit/generic 동일 admission과 request projection, first-send retry-state publish, --retry-state exact replay 및 mismatched key/input/epoch 전송0을 연결한다.
-- [ ] T021 [US2] `apps/aw-cli/src/infrastructure/output.rs`에 safe finite output/error projection, full library outcome 보존과 stdout contamination0, bounded human stderr를 구현한다. arbitrary fault details/private fingerprint를 console로 dump하지 않는다.
+- [x] T018 [US2] `crates/workbench-client/src/infrastructure/retry_store.rs`에 caller runtime-control 전용 private retry state, immutable input/key/operation/protocol/instance/epoch와 durable atomic publish/CAS를 구현한다. server user-data store와 분리한다.
+- [x] T019 [US2] `apps/aw-cli/src/inbound.rs`에 operations/project list/run start/watch/cancel/server status/call/events watch parsing 및 bounded stdin을 구현한다. token/prompt/goal argv를 받지 않는다.
+- [x] T020 [US2] `apps/aw-cli/src/application.rs`에 explicit/generic 동일 admission과 request projection, first-send retry-state publish, --retry-state exact replay 및 mismatched key/input/epoch 전송0을 연결한다.
+- [x] T021 [US2] `apps/aw-cli/src/infrastructure/output.rs`에 safe finite output/error projection, full library outcome 보존과 stdout contamination0, bounded human stderr를 구현한다. arbitrary fault details/private fingerprint를 console로 dump하지 않는다.
 - [ ] T022 [US2] `apps/aw-cli/tests/cancellation.rs`와 `src/main.rs`에 SIGINT130, local deadline, broken pipe, malformed input의 bounded exit와 implicit server cancel0을 검증한다. panic/dependency logs의 stdout 혼합0을 확인한다.
-- [ ] T023 [US2] `apps/aw-cli/tests/retry_process.rs`에 실제 CLI 연속 invocation의 same-key replay, unknown crash/reopen, epoch change 및 concurrent completion CAS를 검증한다.
+- [x] T023 [US2] `apps/aw-cli/tests/retry_process.rs`에 실제 CLI 연속 invocation의 same-key replay, unknown crash/reopen, epoch change 및 concurrent completion CAS를 검증한다.
 
 ## Phase 5: US3 applied cursor와 event recovery (P2)
 
@@ -90,3 +90,7 @@ flowchart TD
 병렬 가능 예: US1 T007(locator)과 T008(identity), US2 T016(output)과 T017(retry store), US3 T024(ACK)와 T025(recovery). 이를 이유로 사용자 지정 실행 위치나 리뷰 순서를 바꾸지 않는다.
 
 요구사항 대응: FR001–006/015–016은 T004–T015, FR007–011은 T016–T023, FR012–014/017은 T024–T033, FR018–021 및 SC006–007은 T034–T044. SC001=T007–T014, SC002=T016/T021/T022, SC003=T004/T015/T017/T023, SC004=T024–T033, SC005=T014/T022/T029/T031/T034. 미완료 prerequisites는 완료 task로 세지 않는다.
+
+## US2 checkpoint 상태 (2026-09-29)
+
+T018–T021/T023의 private store·finite CLI·실제 subprocess retry는 validation.md의85개/exit0 근거로 체크했다. T016은 reachable fault14종과 SIGINT/deadline/usage/출력 오류를 검증했으나 cancel-rejected6은 production RunCancel gate가 닫혀 있어 실제 proof가 없다. T017의 fsync/rename 실패 주입과 T022의 panic 경계 직접 검증은 남아 있으므로 아직 체크하지 않는다. T008 WS proof와 T024 이후 event/actual server/전체 readiness는 미완료다.

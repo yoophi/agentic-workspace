@@ -20,12 +20,14 @@ pub const TOKEN: &str = "fixture-private-token";
 pub enum Action {
     Reply(u16, Value),
     Raw(u16, Vec<u8>),
+    Fault(workbench_protocol::FaultCode, workbench_protocol::Outcome),
     Close,
     Pause,
     SlowBody,
 }
 pub struct Peer {
     pub endpoint: Arc<LocatedEndpoint>,
+    pub descriptor: std::path::PathBuf,
     pub requests: Arc<Mutex<Vec<(String, bool, Value)>>>,
     pub received: Arc<tokio::sync::Notify>,
     pub effects: Arc<Mutex<std::collections::HashMap<String, Value>>>,
@@ -157,6 +159,21 @@ impl Peer {
                     let (status, body) = match action {
                         Action::Reply(status, value) => (status, value.to_string().into_bytes()),
                         Action::Raw(status, body) => (status, body),
+                        Action::Fault(code, outcome) => {
+                            let fault = workbench_protocol::WorkbenchFault::new(
+                                code,
+                                serde_json::from_value(body["requestId"].clone()).unwrap(),
+                                "private-sentinel",
+                            )
+                            .with_outcome(outcome)
+                            .with_details(json!({"token": TOKEN, "input": "private-sentinel"}));
+                            {
+                                let status = code.http_status();
+                                let mut value = serde_json::to_value(&fault).unwrap();
+                                value["status"] = json!(status);
+                                (status, serde_json::to_vec(&value).unwrap())
+                            }
+                        }
                         Action::Close => break 'connection,
                         Action::SlowBody => {
                             socket
@@ -191,6 +208,7 @@ impl Peer {
         });
         Self {
             endpoint,
+            descriptor: path,
             requests,
             effects,
             received,

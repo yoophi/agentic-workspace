@@ -13,7 +13,10 @@ workbench-client = { path = "../../crates/workbench-client" }
 workbench-protocol = { path = "../../crates/workbench-protocol" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util"] }
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util", "process"] }
 
 [dev-dependencies]
 tempfile = "3"
+hmac = "0.12"
+libc = "0.2"

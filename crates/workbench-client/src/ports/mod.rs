@@ -95,6 +95,7 @@ pub struct RetryRecord {
     pub endpoint: EndpointIdentity,
     pub generation: u64,
     pub outcome: workbench_protocol::Outcome,
+    pub result: Option<Result<CallReply, WorkbenchFault>>,
 }
 impl fmt::Debug for RetryRecord {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -109,7 +110,7 @@ pub trait RetryStore: Send + Sync {
     fn complete(
         &self,
         generation: u64,
-        outcome: workbench_protocol::Outcome,
+        result: Result<CallReply, WorkbenchFault>,
     ) -> Result<(), ClientError>;
 }
 

@@ -132,7 +132,7 @@ impl Attempt {
         }
         let allowed = match &self.state {
             AttemptState::Prepared | AttemptState::Unknown => true,
-            AttemptState::Fault(fault) => fault.retryable && fault.outcome != Outcome::Applied,
+            AttemptState::Fault(fault) => fault_allows_explicit_retry(fault),
             _ => false,
         };
         if !allowed {
@@ -197,4 +197,9 @@ impl Attempt {
             _ => Outcome::Unknown,
         }
     }
+}
+
+/// Shared explicit retry policy for in-memory and durable attempts.
+pub fn fault_allows_explicit_retry(fault: &WorkbenchFault) -> bool {
+    fault.retryable && fault.outcome != Outcome::Applied
 }

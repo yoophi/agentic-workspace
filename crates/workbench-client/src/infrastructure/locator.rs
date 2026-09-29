@@ -99,12 +99,12 @@ fn open_private_file_for_descriptor(path: &Path) -> Result<File, ClientError> {
     open_private_file_by(path, true)
 }
 
-fn open_private_file_by(path: &Path, missing_unavailable: bool) -> Result<File, ClientError> {
+pub(crate) fn open_private_parent(path: &Path) -> Result<(File, CString), ClientError> {
     let mut components = path.components();
     if components.next() != Some(Component::RootDir) {
         return Err(ClientError::PrivateState);
     }
-    let names: Vec<_> = components
+    let mut names: Vec<_> = components
         .map(|c| match c {
             Component::Normal(n) => {
                 CString::new(n.as_encoded_bytes()).map_err(|_| ClientError::PrivateState)
@@ -112,32 +112,24 @@ fn open_private_file_by(path: &Path, missing_unavailable: bool) -> Result<File, 
             _ => Err(ClientError::PrivateState),
         })
         .collect::<Result<_, _>>()?;
-    if names.is_empty() {
-        return Err(ClientError::PrivateState);
-    }
-    let mut directory = File::open("/").map_err(|_| ClientError::PrivateState)?;
+    let name = names.pop().ok_or(ClientError::PrivateState)?;
     let uid = unsafe { libc::geteuid() };
-    for (index, name) in names.iter().enumerate() {
-        let last = index == names.len() - 1;
-        if last {
-            let meta = directory
-                .metadata()
-                .map_err(|_| ClientError::PrivateState)?;
-            if meta.uid() != uid || meta.mode() & 0o077 != 0 {
-                return Err(ClientError::PrivateState);
-            }
-        }
-        let flags = libc::O_RDONLY
-            | libc::O_CLOEXEC
-            | libc::O_NOFOLLOW
-            | libc::O_NONBLOCK
-            | if last { 0 } else { libc::O_DIRECTORY };
-        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+    let mut directory = File::open("/").map_err(|_| ClientError::PrivateState)?;
+    for part in names {
+        let fd = unsafe {
+            libc::openat(
+                directory.as_raw_fd(),
+                part.as_ptr(),
+                libc::O_RDONLY
+                    | libc::O_CLOEXEC
+                    | libc::O_NOFOLLOW
+                    | libc::O_NONBLOCK
+                    | libc::O_DIRECTORY,
+            )
+        };
         if fd < 0 {
             return Err(
-                if missing_unavailable
-                    && std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound
-                {
+                if std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound {
                     ClientError::Unavailable
                 } else {
                     ClientError::PrivateState
@@ -146,12 +138,6 @@ fn open_private_file_by(path: &Path, missing_unavailable: bool) -> Result<File, 
         }
         let file = unsafe { File::from_raw_fd(fd) };
         let meta = file.metadata().map_err(|_| ClientError::PrivateState)?;
-        if last {
-            if !private_metadata_is_valid(&meta, uid) {
-                return Err(ClientError::PrivateState);
-            }
-            return Ok(file);
-        }
         if !meta.is_dir()
             || (meta.uid() != uid && meta.uid() != 0)
             || (meta.mode() & 0o022 != 0 && !(meta.uid() == 0 && meta.mode() & 0o1000 != 0))
@@ -160,7 +146,50 @@ fn open_private_file_by(path: &Path, missing_unavailable: bool) -> Result<File, 
         }
         directory = file;
     }
-    Err(ClientError::PrivateState)
+    let meta = directory
+        .metadata()
+        .map_err(|_| ClientError::PrivateState)?;
+    if meta.uid() != uid || meta.mode() & 0o077 != 0 {
+        return Err(ClientError::PrivateState);
+    }
+    Ok((directory, name))
+}
+fn open_private_file_by(path: &Path, missing_unavailable: bool) -> Result<File, ClientError> {
+    let (directory, name) = open_private_parent(path).map_err(|e| {
+        if !missing_unavailable {
+            ClientError::PrivateState
+        } else {
+            e
+        }
+    })?;
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK,
+        )
+    };
+    if fd < 0 {
+        return Err(
+            if missing_unavailable
+                && std::io::Error::last_os_error().kind() == std::io::ErrorKind::NotFound
+            {
+                ClientError::Unavailable
+            } else {
+                ClientError::PrivateState
+            },
+        );
+    }
+    let file = unsafe { File::from_raw_fd(fd) };
+    validate_private_file(&file)?;
+    Ok(file)
+}
+pub(crate) fn validate_private_file(file: &File) -> Result<(), ClientError> {
+    let meta = file.metadata().map_err(|_| ClientError::PrivateState)?;
+    if !private_metadata_is_valid(&meta, unsafe { libc::geteuid() }) {
+        return Err(ClientError::PrivateState);
+    }
+    Ok(())
 }
 pub(crate) fn read_bounded(file: File, limit: usize) -> Result<Vec<u8>, ClientError> {
     if file
