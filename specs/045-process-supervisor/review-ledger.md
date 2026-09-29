@@ -34,6 +34,8 @@ OCR 자동 분류 coverage와 host 수동 설계 coverage를 합쳐서 100%라�
 
 고정 증거는 CI run `36429844170`, HEAD `c3e292f91a39d522e38bfb1449c2d28c2d767324`이다. Windows는 명시적 `drop(job)` 시 미리 확보한 direct/descendant process handle의 bounded wait까지 실제 target에서 통과했다. 별도 owner/server hard-kill fixture는 아직 없으므로 Windows 전체 crash 계약 통과로 확대하지 않는다. macOS와 Linux job 자체는 exit 0이지만 required containment 판정은 실패다. macOS는 env-clear+new-session descendant가 nonce inventory에서 사라지고 ordinary parent가 arbitrary descendant audit token을 얻지 못했다. Linux는 pidfd가 exact known child signal을 보호했지만 env-clear descendant discovery를 제공하지 않았고, runner cgroup v2 subtree 생성은 `EACCES(13)`였다. PID 재사용을 실제 유발하는 identity-check/signal race fixture도 아직 없어 T005는 미완료다. 따라서 T010은 미완료이며 production consumer migration을 시작하지 않는다.
 
+2026-09-29 후속 actual-target 증거는 이전 실패 범위를 일부 좁혔다. exact `4e2b3f9`, run `36507261720`, Windows job `109211378930`에서 owner hard-kill 뒤 owner/direct/descendant bounded wait가 모두 완료됐다. exact `278232c`, run `36508048667`, Linux job `109213830925`에서는 일반 runner가 아닌 별도 `Delegate=yes` service 안에서 `clone3(CLONE_INTO_CGROUP)` birth placement, env-clear descendant membership, `cgroup.kill`, `populated 0`을 1/1 통과했다. Windows 나머지 matrix와 Linux installed daemon crash/startup recovery/direct-launch fail-closed는 계속 미완료다. macOS SDK link probe는 `-lEndpointSecurity`로 성공했지만 entitlement-bearing provisioning profile이 없어 activation/event/crash를 실행하지 못했다. 따라서 T010과 production migration 금지는 유지한다.
+
 ### 검토할 배포 대안
 
 | 대안 | 충족하려는 불변식 | 배포/권한 비용 | 다음 결정 증거 |

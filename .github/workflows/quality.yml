@@ -36,6 +36,11 @@ jobs:
       - name: Run actual target feasibility
         run: cargo test -p process-supervisor --all-targets -- --nocapture
 
+      - name: Probe macOS Endpoint Security deployment prerequisites
+        if: runner.os == 'macOS'
+        shell: bash
+        run: scripts/check-macos-endpoint-security-feasibility.sh
+
       - name: Run delegated cgroup birth-placement feasibility
         if: runner.os == 'Linux'
         shell: bash
