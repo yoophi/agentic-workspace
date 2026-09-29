@@ -1076,3 +1076,45 @@ async fn failed_snapshot_completion(
     .await
     .unwrap()
 }
+
+#[test]
+fn raw_exponent_snapshot_normalization_uses_snapshot_budget_then_ack() {
+    let limits = Limits::new(LimitConfig {
+        body_bytes: 64 * 1024,
+        ..Default::default()
+    })
+    .unwrap();
+    let wire = format!(
+        "[{}]",
+        std::iter::repeat_n("1e10", 13_000)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    assert!(wire.len() < limits.maximum(workbench_client::domain::limits::Resource::Body));
+    let value: serde_json::Value = serde_json::from_str(&wire).unwrap();
+    assert!(
+        serde_json::to_vec(&value).unwrap().len()
+            > limits.maximum(workbench_client::domain::limits::Resource::Body)
+    );
+    let mut r = EventRecovery::new(cursor(0), limits).unwrap();
+    let id = r.register(0).unwrap();
+    r.start_gap(gap(6)).unwrap();
+    let load = r.hello(1, "e").unwrap().unwrap();
+    let reset = r
+        .snapshot_loaded(
+            load,
+            Snapshot {
+                cursor: cursor(6),
+                value,
+            },
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+    r.reset_applied(reset).unwrap();
+    assert_eq!(r.cursor(), cursor(6));
+    r.receive(event(7)).unwrap();
+    let delivery = r.next(id).unwrap().unwrap();
+    r.ack(delivery).unwrap();
+    assert_eq!(r.cursor(), cursor(7));
+}

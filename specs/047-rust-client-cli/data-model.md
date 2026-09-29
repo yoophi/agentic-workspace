@@ -6,7 +6,7 @@
 - CallOutcome: full CallReply/WorkbenchFault와 TransportUnknown·ProtocolViolation·PrerequisiteUnavailable 구분. HTTP/body/request/operation/epoch consistency 검사. details는 library 보존, console 안전 projection.
 - AppliedCursor: streamId/serverEpoch/consumerGeneration/sequence. received position 별도. consumer ACK·stdout complete write 이후만 increment, old generation completion 무시.
 - Recovery: Connecting→Live→Reconnecting; gap→LiveBuffering→SnapshotLoading→ConsumerReset→FilteredReplay→Live. snapshot/hello 실패 또는 newgap는 fresh operationGeneration에서 재시도, max attempts exhausted typed failure.
-- Limits: nonzero input/body/frame/queue byte+item/whole deadline, cancellation outstanding task ownership.
+- Limits: nonzero input/cursor、raw body/frame/message、normalized snapshot、JSONL record、retry-state、queue byte+item/whole deadline. raw Body8MiB는 그대로이고 normalized snapshot192MiB/record256MiB는 직렬화 representation budget이다. cursor max-u64 width와 wrapper/newline을 예약하며 cancellation outstanding task ownership을 유지한다.
 
 credential/private payload와 process handle/storage data를 model diagnostics에 넣지 않는다. TUI·CLI는 cursor와 소비 callback을 각 caller가 소유하며 global singleton reducer를 공유하지 않는다.
 

@@ -75,6 +75,7 @@ pub struct EventReducer {
 impl EventReducer {
     pub fn new(cursor: StreamCursor, limits: Limits) -> Result<Self, ClientError> {
         validate_cursor(&cursor)?;
+        limits.check_cursor(&cursor)?;
         let received = cursor.after_sequence;
         let owner_id = NEXT_OWNER
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
@@ -386,6 +387,7 @@ impl EventReducer {
     }
     pub fn rebind(&mut self, cursor: StreamCursor) -> Result<(), ClientError> {
         validate_cursor(&cursor)?;
+        self.limits.check_cursor(&cursor)?;
         let generation = self
             .generation
             .checked_add(1)

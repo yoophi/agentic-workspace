@@ -129,3 +129,7 @@ Codex2 needs-attention Medium2를 반영해 RetryState 독립 상한/정규화 �
 ### 구현3 수정 checkpoint
 
 be63aaf root8 all exit0/workspace1221passed 뒤 Codex3 needs-attention Medium I-C4를 반영했다. snapshot owner/generation/scope 우선 검증·terminal cause 보존/추가요청0·transient shared policy 및 late stream/listener/foreign token 새 Live 영향0을 model/actual WS/actual aw로 검증했다. 기본207passed/ignored actual1, model26, actual 별도1passed, strictClippy 및 contract drift0. 실제 명령·exit/실패 후 수정은 validation에 기록한다. 최종 순차 승인과 root8·PR/CI·merge/main sync·인계 전 T041–T044는 계속 미체크다.
+
+### 구현4 표현 예산 수정 checkpoint
+
+Codex4 I-C5와 사용자 raw/normalized/wrapper 보완을 반영해 Body8MiB·WS/queue를 유지하고 Snapshot192MiB/JsonlRecord256MiB를 분리했다. cursor max-u64/input 표현 예약, overflow/부족 거절 및 actual near8MiB reset/ACK6·raw exponent model·event/reset/error-end/newline/큰 metadata 회귀가 기본212passed/ignored actual1에서 통과했다. strictClippy와 actual 별도1passed. 상세 명령/exit/red는 validation에 기록하며 최종 root8/순차 승인 전 T041–T044는 계속 미체크다.

@@ -400,8 +400,9 @@ impl EventRecovery {
         snapshot: Snapshot,
     ) -> Result<Vec<ResetWork>, ClientError> {
         self.check_load(&load)?;
+        self.limits.check_cursor(&snapshot.cursor)?;
         self.limits.check_add(
-            Resource::Body,
+            Resource::Snapshot,
             0,
             serde_json::to_vec(&snapshot.value)
                 .map_err(|_| ClientError::Protocol)?

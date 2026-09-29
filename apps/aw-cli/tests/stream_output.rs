@@ -417,3 +417,147 @@ async fn successful_old_generation_jsonl_reset_completion_cannot_advance_after_n
     assert_eq!(model.cursor(), cursor(0));
     assert_eq!(model.reconnect_cursor(), cursor(8));
 }
+
+struct ChunkWriter(Arc<Mutex<State>>);
+impl AsyncWrite for ChunkWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        _: &mut Context<'_>,
+        bytes: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        self.0.lock().unwrap().bytes.extend_from_slice(bytes);
+        Poll::Ready(Ok(bytes.len()))
+    }
+    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.0.lock().unwrap().flushes += 1;
+        Poll::Ready(Ok(()))
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.poll_flush(cx)
+    }
+}
+#[tokio::test]
+async fn event_reset_end_records_include_normalization_large_cursors_wrappers_and_newlines() {
+    use workbench_client::{
+        application::events::EventRecovery,
+        domain::limits::{LimitConfig, Resource},
+    };
+    use workbench_protocol::workbench::{GapNotice, GapReason};
+    let config = LimitConfig {
+        input_bytes: 1024,
+        body_bytes: 1024,
+        snapshot_bytes: 24 * 1024,
+        queue_bytes: 24 * 1024,
+        jsonl_record_bytes: 154 * 1024,
+        ..Default::default()
+    };
+    let limits = Limits::new(config).unwrap();
+    let mut start = cursor(u64::MAX);
+    let overhead = serde_json::to_vec(&start).unwrap().len();
+    start
+        .stream_id
+        .push_str(&"x".repeat(limits.maximum(Resource::Input) - overhead));
+    start.after_sequence = 0;
+    limits.check_cursor(&start).unwrap();
+    let state = Arc::new(Mutex::new(State::default()));
+    let output = JsonlOutput::new(ChunkWriter(state.clone()), limits.clone());
+    let mut consumer = output.consumer();
+    let mut model = EventRecovery::new(start.clone(), limits.clone()).unwrap();
+    let id = model.register(0).unwrap();
+    model.hello(1, "e").unwrap();
+    consumer.opened(&start).await.unwrap();
+    let mut envelope = event();
+    envelope.stream_id = start.stream_id.clone();
+    envelope.body = json!({"padding":""});
+    let overhead = serde_json::to_vec(&envelope).unwrap().len();
+    envelope.body["padding"] = json!("x".repeat(limits.maximum(Resource::QueueBytes) - overhead));
+    assert_eq!(
+        serde_json::to_vec(&envelope).unwrap().len(),
+        limits.maximum(Resource::QueueBytes)
+    );
+    model.receive(envelope).unwrap();
+    let delivery = model.next(id).unwrap().unwrap();
+    consumer.consume(&delivery.event).await.unwrap();
+    model.ack(delivery).unwrap();
+    assert_eq!(model.cursor().after_sequence, 1);
+    let raw = format!(
+        "[{}]",
+        std::iter::repeat_n("1e10", 150)
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    assert!(raw.len() < limits.maximum(Resource::Body));
+    let numbers: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert!(serde_json::to_vec(&numbers).unwrap().len() > limits.maximum(Resource::Body));
+    let mut value = json!({"numbers":numbers,"padding":""});
+    let overhead = serde_json::to_vec(&value).unwrap().len();
+    value["padding"] = json!("x".repeat(limits.maximum(Resource::Snapshot) - overhead));
+    assert_eq!(
+        serde_json::to_vec(&value).unwrap().len(),
+        limits.maximum(Resource::Snapshot)
+    );
+    model
+        .start_gap(GapNotice {
+            stream_id: start.stream_id.clone(),
+            epoch: "e".into(),
+            reason: GapReason::RetentionExceeded,
+            first_sequence: Some(6),
+            last_sequence: Some(6),
+        })
+        .unwrap();
+    let load = model.hello(1, "e").unwrap().unwrap();
+    let applied = model.cursor();
+    let snapshot = Snapshot {
+        cursor: StreamCursor {
+            after_sequence: 6,
+            ..start.clone()
+        },
+        value,
+    };
+    let reset = model
+        .snapshot_loaded(
+            load,
+            Snapshot {
+                cursor: snapshot.cursor.clone(),
+                value: snapshot.value.clone(),
+            },
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+    consumer.reset_from(&snapshot, &applied).await.unwrap();
+    model.reset_applied(reset).unwrap();
+    assert_eq!(model.cursor().after_sequence, 6);
+    let error = aw_cli::infrastructure::output::CliError::new(
+        "internal",
+        1,
+        workbench_protocol::Outcome::Unknown,
+        false,
+    );
+    output.finish(&model.cursor(), Some(&error)).await.unwrap();
+    let bytes = &state.lock().unwrap().bytes;
+    let records = bytes
+        .split_inclusive(|byte| *byte == b'\n')
+        .collect::<Vec<_>>();
+    assert_eq!(records.len(), 4);
+    for record in &records {
+        assert_eq!(record.last(), Some(&b'\n'));
+        assert!(record.len() <= limits.maximum(Resource::JsonlRecord));
+    }
+    assert!(records[1].len() > limits.maximum(Resource::QueueBytes));
+    assert!(records[2].len() > limits.maximum(Resource::Snapshot));
+    let parsed = records
+        .iter()
+        .map(|record| serde_json::from_slice::<serde_json::Value>(record).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        parsed
+            .iter()
+            .map(|v| v["type"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["stream.open", "event", "stream.reset", "stream.end"]
+    );
+    assert_eq!(parsed[3]["cursor"]["afterSequence"], 6);
+    assert_eq!(parsed[3]["error"]["code"], "internal");
+    assert_eq!(parsed[3]["ok"], false);
+}

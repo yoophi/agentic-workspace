@@ -80,3 +80,9 @@ client/CLI202passed/actual 별도1passed/strictClippy exit0. 상세 actual 명�
 be63aaf OCR73/73(skipped0)→Codex thread01a0ed4a-bd70-76b2-84ef-66756d4e814a /exec16577 actualexit0, verdict needs-attention Medium1. 전체 branch의 snapshot recovery가 terminal 신원/호환/프로토콜/nonretryable fault를 재시도하며 Unavailable로 덮는 유효 지적을 반영했다. complete_snapshot은 owner/generation/scope 검증을 오류 분류보다 먼저 실행하며 stale Identity/Protocol이 새 Live를 종료하지 않는다. 현재 terminal은 기존 close/invalidate 및 원 cause 반환, transient는 connect와 공통 allowlist/bounded retry를 사용한다.
 
 model26/기본207passed, current terminal 및 transient actual WS matrix, 실제 aw HTTP snapshot auth/protocol error→원 code/exit·추가snapshot0·ACK0, owned cleanup/EOF 회귀를 확인했다. 기존동작 red101, typed private-token 시험 작성 실패와 old Protocol transient fixture 수정은 validation에 보존한다. strictClippy/fmt/contract generation drift0, exact baseline actual 별도1passed. 수정 HEAD root8와 OCR→Codex4 승인 전이므로 PR/merge는 아직 수행하지 않는다.
+
+### 구현 Codex4: I-C5 Medium 수정
+
+febc326 OCR73/73(skipped0)→Codex thread01a0ed53-7f71-7b41-b2c2-344026156ee1 /exec2168 actualexit0, verdict **needs-attention Medium1**. root8 all exit0/workspace1226passed였으나 valid near8MiB snapshot에 reset cursor/wrapper/newline을 추가하면 기존 Body8MiB 출력 검사가 실패하는 유효 I-C5를 반영했다. 원 artifacts `implementation-round4/`를 보존한다. 사용자 보완에 따라 snapshot_loaded의 Body 재사용도 함께 제거했다. raw HTTP/WS/queue는 그대로이며 normalized Snapshot192MiB와 JsonlRecord256MiB를 분리하고 checked reserve·cursor max sequence width Input1MiB를 검증한다.
+
+actual aw exact8MiB HTTP snapshot reset→live6/ACK6·SIGINT130/EOF/reap, raw exponent normalized snapshot reset/ACK, large metadata 및 event/reset/error-end 전체 record/newline 비교를 확인했다. 기본212passed/ignored actual1, strictClippy/fmt exit0, exact baseline actual별도1passed. 새 고정 HEAD의 root8와 OCR→Codex5 최종 승인은 다음 단계이며 PR/merge 미실행이다.

@@ -115,3 +115,7 @@ scripts/test-workbench-client-wire.sh
 HTTP raw body8MiB와 durable state는 별도 예산이다. 기본 retry-state256MiB는 즉시 할당하는 버퍼 크기가 아니라 저장·읽기 상한이다. 최초 publish는 현재 input/identity 직렬화 크기 + 최대 body의24배 +64KiB를 예약하며 공간이 부족하면 전송 전에 거절한다. arbitrary_precision을 사용하지 않는 JSON 숫자는 i64/u64/유한 f64이고 직렬화 최대24bytes, raw 숫자 token은 최소1byte다. 문자열은 raw byte당 최대6bytes로 escape되고 구조 구분자는 늘어나지 않는다. 따라서24배는 reply output/fault details의 parse→serialize 정규화를 포함하는 보수적 상한이며 raw 길이와 저장 길이가 같다고 가정하지 않는다. 이 상한은 허용된 finite JSON 응답에 한정한다.
 
 watch의 pipe/socket/TTY 출력은 활성 기간 공유 open-file-description에 O_NONBLOCK lease를 적용한다. 부모의 공유 FD도 영향을 받으므로 concurrent writer는 WouldBlock을 처리하고 flags를 바꾸지 않아야 한다. JSONL protocol용 출력은 다른 writer 데이터가 끼어들지 않도록 전용으로 사용한다. 종료/취소/등록 실패 뒤 원 flags를 복구하며 활성 기간 불변을 보장하지 않는다. regular file과 /dev/null은 lease 없이 지원한다.
+
+## snapshot과 JSONL 표현의 상한
+
+HTTP raw body8MiB·WS frame/message1MiB·event queue256/8MiB는 유지한다. normalized snapshot value192MiB(24×raw Body)와 최종 JSONL record256MiB를 별도로 검사한다. record 상한은 accepted snapshot/event + cursor 두 개의 input1MiB 예약 +128KiB wrapper/error/newline 여유를 포함한다. cursor 예약은 u64 최대 sequence width를 포함하며 metadata 초과는 construction/rebind/출력 전에 typed failure다. [표현별 상세 계약](../specs/047-rust-client-cli/contracts/client.md)을 따른다. near8MiB HTTP snapshot의 reset wrapper 때문에 유효 payload를 거절하지 않으며 ACK는 완전한 newline/flush 이후에만 전진한다.

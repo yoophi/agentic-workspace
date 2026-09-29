@@ -80,7 +80,8 @@ impl<W: AsyncWrite + Unpin + Send> JsonlOutput<W> {
     async fn write(&self, value: Value, end: bool) -> Result<(), ClientError> {
         let mut bytes = serde_json::to_vec(&value).map_err(|_| ClientError::Protocol)?;
         bytes.push(b'\n');
-        self.limits.check_add(Resource::Body, 0, bytes.len())?;
+        self.limits
+            .check_add(Resource::JsonlRecord, 0, bytes.len())?;
         let mut writer = self.writer.lock().await;
         if self.failed() || self.flags.ended.load(Ordering::SeqCst) {
             return Err(ClientError::Unavailable);
@@ -108,6 +109,7 @@ impl<W: AsyncWrite + Unpin + Send> JsonlOutput<W> {
         if !self.opened() {
             return Err(ClientError::Protocol);
         }
+        self.limits.check_cursor(cursor)?;
         let mut value = json!({"type":"stream.end","cursor":cursor,"ok":error.is_none()});
         if let Some(error) = error {
             value["error"] = error.value()["error"].clone();
@@ -125,6 +127,7 @@ impl<W: AsyncWrite + Unpin + Send + 'static> EventConsumer for JsonlConsumer<W> 
         if self.0.opened() {
             return Err(ClientError::Protocol);
         }
+        self.0.limits.check_cursor(cursor)?;
         self.0
             .write(json!({"type":"stream.open","cursor":cursor}), false)
             .await?;
@@ -150,6 +153,8 @@ impl<W: AsyncWrite + Unpin + Send + 'static> EventConsumer for JsonlConsumer<W> 
         if !self.0.opened() {
             return Err(ClientError::Protocol);
         }
+        self.0.limits.check_cursor(&snapshot.cursor)?;
+        self.0.limits.check_cursor(applied)?;
         self.0.write(json!({"type":"stream.reset","cursor":snapshot.cursor,"applied":applied,"snapshot":snapshot.value}), false).await
     }
 }

@@ -47,3 +47,19 @@ mutation은 첫 submission 전에 owner-only private retry state를 저장한다
 retry state의 저장/읽기 상한은 HTTP raw body와 독립적이다(기본256MiB). submission 전에 현재 request/identity serialized bytes +24×최대 raw body +64KiB를 예약한다. 숫자/문자열의 parse→serialize 정규화를 포함하며 공간 부족/overflow는 전송 전에 오류다. finite JSON 숫자24bytes 이하와 문자열 escape6배 이하의 허용 형식을 전제로 한다. 완료 응답은 원 identity/outcome과 함께 저장되어 동일 요청 cache reopen이 추가 HTTP resubmit 없이 가능하다.
 
 snapshot completion은 owner/generation/scope를 오류 분류보다 먼저 검증한다. old terminal 오류도 stale이며 새 Live에 영향0이다. 현재 Identity/Incompatible/Protocol/auth 및 nonretryable fault는 원 cause를 보존하여 terminal 정리하며 추가 snapshot0이다. transient allowlist는 connect와 동일하고 applied/boundary cursor 및 bounded budget/backoff를 유지한다.
+
+## 직렬화 예산 비교 (I-C5)
+
+wire 상한은 변경하지 않는다. Limits는 아래 표현의 상한을 각각 검증하며 부족/overflow는 typed failure다. cursor는 stream/epoch/keys와 afterSequence=u64::MAX의 직렬화 크기를 input1MiB에 포함하여 future sequence 증가분도 예약한다. construction/rebind/snapshot 및 JSONL open/reset/end에서 검사한다.
+
+| 표현 | 기본 상한 | 포함 범위 |
+|---|---|---|
+| raw HTTP body |8MiB|실제 수신 bytes, 정규화 전|
+| raw WS frame/message |1MiB 각각|실제 frame/message bytes|
+| normalized snapshot value |192MiB|serde Value 전체 직렬화, raw Body 최대24배|
+| serialized event queue |전체8MiB/256items|EventEnvelope를 포함한 aggregate reader/channel/inflight/reducer event budget|
+| JSONL event |record256MiB 이내|queue가 허용한 serialized envelope + type/event wrapper +newline|
+| JSONL reset |record256MiB 이내|snapshot value + cursor/applied 각 최대1MiB +wrapper+newline|
+| JSONL open/end |record256MiB 이내|cursor +open/end wrapper, end safe error projection +newline|
+
+JSONL config는 `max(snapshot_bytes, queue_bytes) +2*input_bytes +128KiB` 이상의 크기와 overflow 부재를 요구한다.128KiB는 bounded wrapper/error projection/newline 여유이며 cursor는 별도 input 표현 상한이다. write는 최종 직렬화 bytes에 newline을 붙인 뒤 JsonlRecord를 검사하고 write_all/flush 완료만 ACK한다. raw exponent 정규화는 snapshot/retry-state 예약의24배에 포함하며 record가 raw Body와 같은 길이라는 가정은 없다. 이 값은 즉시 확보하는 버퍼가 아닌 검증 상한이다.

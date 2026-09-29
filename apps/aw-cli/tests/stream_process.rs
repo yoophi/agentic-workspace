@@ -923,3 +923,52 @@ async fn actual_watch_terminal_snapshot_auth_and_protocol_errors_keep_cause_with
         assert_eq!(requests.len(), 13);
     }
 }
+
+#[tokio::test]
+async fn actual_watch_near_http_body_limit_snapshot_writes_full_reset_then_acks_live_event() {
+    let mut snapshot = json!({"schemaVersion":1,"id":"workspace","worktreePath":"","eventStreamId":"orchestration:binding","mainNodeId":"main","activeCoordinatorGenerationId":null,"nodes":[],"generations":[],"tasks":[],"reports":[],"commands":[],"coordinatorNotifications":[],"dispatches":[],"idempotencyRecords":[],"revision":2,"createdAt":"2026-09-29T00:00:00Z","updatedAt":"2026-09-29T00:00:00Z"});
+    let mut reply = json!({"kind":"complete","output":snapshot,"replayed":false});
+    let overhead = serde_json::to_vec(&reply).unwrap().len();
+    let payload_bytes = 8 * 1024 * 1024 - overhead;
+    reply["output"]["worktreePath"] = json!("x".repeat(payload_bytes));
+    snapshot = reply["output"].clone();
+    assert_eq!(serde_json::to_vec(&reply).unwrap().len(), 8 * 1024 * 1024);
+    assert!(serde_json::to_vec(&json!({"type":"stream.reset","cursor":{"streamId":"orchestration:binding","epoch":"e","afterSequence":5},"applied":{"streamId":"orchestration:binding","epoch":"e","afterSequence":0},"snapshot":snapshot})).unwrap().len()+1>8*1024*1024);
+    let release = std::sync::Arc::new(tokio::sync::Notify::new());
+    let mut peer=Peer::spawn_multi(vec![ticket(),Action::WebSocketGate {before:vec![hello()],gate:release.clone(),after:vec![Message::Text(json!({"type":"gap","streamId":"orchestration:binding","epoch":"e","reason":"retentionExceeded","firstSequence":5,"lastSequence":5}).to_string())]},ticket(),Action::WebSocketConcurrent(vec![hello(),event(6,"notificationRecovery")]),Action::Reply(200,json!({"kind":"complete","output":[{"benchId":"actual-bench","workingDirectory":"/private/fixture","owner":"owner","runs":[]}],"replayed":false})),Action::Reply(200,reply)]).await;
+    let mut child = watch(&peer, "2000").await;
+    let mut reader = BufReader::new(child.stdout.take().unwrap());
+    use futures_util::FutureExt;
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(5),
+        std::panic::AssertUnwindSafe(async {
+            assert_eq!(record(&mut reader).await["type"], "stream.open");
+            release.notify_one();
+            let reset = record(&mut reader).await;
+            assert_eq!(reset["type"], "stream.reset");
+            assert_eq!(reset["snapshot"], snapshot);
+            assert_eq!(reset["cursor"]["afterSequence"], 5);
+            assert_eq!(reset["applied"]["afterSequence"], 0);
+            assert_eq!(record(&mut reader).await["event"]["sequence"], 6);
+            interrupt(&child);
+            let end = record(&mut reader).await;
+            assert_eq!(end["type"], "stream.end");
+            assert_eq!(end["cursor"]["afterSequence"], 6);
+        })
+        .catch_unwind(),
+    )
+    .await;
+    if !matches!(outcome, Ok(Ok(()))) {
+        child.start_kill().ok();
+    }
+    let output = support::finish(child, b"").await;
+    peer.settled().await;
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("near-limit snapshot deadline after owned kill/reap and peer EOF"),
+    }
+    assert_eq!(output.status.code(), Some(130));
+    assert!(output.stderr.is_empty());
+    assert_eq!(peer.requests.lock().unwrap().len(), 14);
+}

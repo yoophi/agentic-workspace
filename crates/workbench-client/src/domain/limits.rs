@@ -6,6 +6,8 @@ pub enum Resource {
     Input,
     Body,
     RetryState,
+    Snapshot,
+    JsonlRecord,
     Frame,
     Message,
     QueueBytes,
@@ -13,10 +15,12 @@ pub enum Resource {
 }
 
 impl Resource {
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 9] = [
         Self::Input,
         Self::Body,
         Self::RetryState,
+        Self::Snapshot,
+        Self::JsonlRecord,
         Self::Frame,
         Self::Message,
         Self::QueueBytes,
@@ -38,6 +42,10 @@ pub enum LimitError {
         "retry-state budget must reserve input, response and bounded metadata without overflow"
     )]
     RetryStateBudget,
+    #[error("snapshot budget must cover normalized HTTP JSON")]
+    SnapshotBudget,
+    #[error("JSONL budget must cover accepted snapshot/event, cursors, wrapper and newline")]
+    JsonlBudget,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +53,8 @@ pub struct LimitConfig {
     pub input_bytes: usize,
     pub body_bytes: usize,
     pub retry_state_bytes: usize,
+    pub snapshot_bytes: usize,
+    pub jsonl_record_bytes: usize,
     pub frame_bytes: usize,
     pub message_bytes: usize,
     pub queue_bytes: usize,
@@ -62,6 +72,8 @@ impl Default for LimitConfig {
             input_bytes: 1024 * 1024,
             body_bytes: 8 * 1024 * 1024,
             retry_state_bytes: 256 * 1024 * 1024,
+            snapshot_bytes: 192 * 1024 * 1024,
+            jsonl_record_bytes: 256 * 1024 * 1024,
             frame_bytes: 1024 * 1024,
             message_bytes: 1024 * 1024,
             queue_bytes: 8 * 1024 * 1024,
@@ -108,6 +120,30 @@ impl Limits {
         if limits.0.retry_state_bytes < minimum_state {
             return Err(LimitError::RetryStateBudget);
         }
+        let normalized_body = limits
+            .0
+            .body_bytes
+            .checked_mul(24)
+            .ok_or(LimitError::SnapshotBudget)?;
+        if limits.0.snapshot_bytes < normalized_body {
+            return Err(LimitError::SnapshotBudget);
+        }
+        let minimum_jsonl = limits
+            .0
+            .snapshot_bytes
+            .max(limits.0.queue_bytes)
+            .checked_add(
+                limits
+                    .0
+                    .input_bytes
+                    .checked_mul(2)
+                    .ok_or(LimitError::JsonlBudget)?,
+            )
+            .and_then(|bytes| bytes.checked_add(128 * 1024))
+            .ok_or(LimitError::JsonlBudget)?;
+        if limits.0.jsonl_record_bytes < minimum_jsonl {
+            return Err(LimitError::JsonlBudget);
+        }
         for (name, duration) in [
             ("connect_timeout", limits.0.connect_timeout),
             ("request_timeout", limits.0.request_timeout),
@@ -134,6 +170,8 @@ impl Limits {
             Resource::Input => self.0.input_bytes,
             Resource::Body => self.0.body_bytes,
             Resource::RetryState => self.0.retry_state_bytes,
+            Resource::Snapshot => self.0.snapshot_bytes,
+            Resource::JsonlRecord => self.0.jsonl_record_bytes,
             Resource::Frame => self.0.frame_bytes,
             Resource::Message => self.0.message_bytes,
             Resource::QueueBytes => self.0.queue_bytes,
@@ -141,6 +179,21 @@ impl Limits {
         }
     }
 
+    /// Reserve the full u64 sequence width so cursor growth never consumes output metadata room.
+    pub fn check_cursor(
+        &self,
+        cursor: &workbench_protocol::workbench::StreamCursor,
+    ) -> Result<(), LimitError> {
+        let raw = self.check_add(Resource::Input, 0, cursor.stream_id.len())?;
+        self.check_add(Resource::Input, raw, cursor.epoch.len())?;
+        let widest = workbench_protocol::workbench::StreamCursor {
+            after_sequence: u64::MAX,
+            ..cursor.clone()
+        };
+        let bytes =
+            serde_json::to_vec(&widest).map_err(|_| LimitError::Exceeded(Resource::Input))?;
+        self.check_add(Resource::Input, 0, bytes.len()).map(|_| ())
+    }
     /// Returns the new retained amount, never a truncated successful result.
     pub fn check_add(
         &self,
