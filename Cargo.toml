@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "crates/*",
+    "apps/aw-cli",
     "apps/agentic-workbench/src-tauri",
     "apps/agentic-workbench-server",
     "apps/ask-code/src-tauri",
