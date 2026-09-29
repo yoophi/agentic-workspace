@@ -1,7 +1,16 @@
 //! Windows feasibility entry points are compiled and exercised on the Windows
 //! quality job before production consumers may migrate.
 
-use std::{ffi::OsStr, io, mem, os::windows::ffi::OsStrExt, path::Path, ptr};
+use std::{
+    ffi::OsStr,
+    io, mem,
+    os::windows::ffi::OsStrExt,
+    os::windows::io::AsRawHandle,
+    path::Path,
+    process::{Child, Command},
+    ptr,
+    time::Duration,
+};
 
 use windows_sys::Win32::{
     Foundation::{CloseHandle, ERROR_ACCESS_DENIED, HANDLE, WAIT_OBJECT_0},
@@ -46,6 +55,14 @@ pub struct WindowsJobEvidence {
     pub resumed_once: bool,
     pub active_processes_before_close: u32,
     pub breakaway_denied: bool,
+    pub direct_wait_completed: bool,
+    pub descendant_wait_completed: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WindowsServerCrashEvidence {
+    pub owner_terminate_error: Option<i32>,
+    pub owner_wait_completed: bool,
     pub direct_wait_completed: bool,
     pub descendant_wait_completed: bool,
 }
@@ -114,9 +131,55 @@ impl Drop for SuspendedProcessGuard {
     }
 }
 
-/// Runs the real suspended-create/Job assignment/kill-on-close sequence.
-/// The fixture records whether an explicit breakaway creation was rejected.
-pub fn run_job_object_spike(fixture: &Path, result_path: &Path) -> io::Result<WindowsJobEvidence> {
+struct OwnerProcessGuard(Option<Child>);
+
+struct OwnerTerminationEvidence {
+    terminate_error: Option<i32>,
+    wait_completed: bool,
+}
+
+impl OwnerProcessGuard {
+    fn terminate_and_wait(&mut self) -> OwnerTerminationEvidence {
+        let Some(child) = self.0.as_mut() else {
+            return OwnerTerminationEvidence {
+                terminate_error: None,
+                wait_completed: true,
+            };
+        };
+        let terminate_error = child.kill().err().and_then(|error| error.raw_os_error());
+        // SAFETY: Child retains ownership of this process handle for the whole
+        // bounded wait. It is not removed from the guard until try_wait reaps it.
+        let wait_completed =
+            unsafe { WaitForSingleObject(child.as_raw_handle().cast(), 5_000) == WAIT_OBJECT_0 };
+        let reaped = wait_completed && matches!(child.try_wait(), Ok(Some(_)));
+        if reaped {
+            self.0.take();
+        }
+        OwnerTerminationEvidence {
+            terminate_error,
+            wait_completed: reaped,
+        }
+    }
+}
+
+impl Drop for OwnerProcessGuard {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.as_mut() {
+            let _ = child.kill();
+            // SAFETY: the guard still owns the process handle. Cleanup is
+            // bounded; a timeout closes the handle on Child drop without an
+            // unbounded wait, and the returned evidence has already failed.
+            let completed = unsafe {
+                WaitForSingleObject(child.as_raw_handle().cast(), 5_000) == WAIT_OBJECT_0
+            };
+            if completed {
+                let _ = child.try_wait();
+            }
+        }
+    }
+}
+
+fn create_kill_on_close_job() -> io::Result<Handle> {
     let job = Handle::new(unsafe { CreateJobObjectW(ptr::null(), ptr::null()) })?;
     let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { mem::zeroed() };
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -132,13 +195,11 @@ pub fn run_job_object_spike(fixture: &Path, result_path: &Path) -> io::Result<Wi
     {
         return Err(io::Error::last_os_error());
     }
+    Ok(job)
+}
 
-    let command = format!(
-        "\"{}\" windows-job-probe \"{}\"",
-        fixture.display(),
-        result_path.display()
-    );
-    let mut command_wide: Vec<u16> = OsStr::new(&command).encode_wide().chain(Some(0)).collect();
+fn create_suspended(command: &str) -> io::Result<SuspendedProcessGuard> {
+    let mut command_wide: Vec<u16> = OsStr::new(command).encode_wide().chain(Some(0)).collect();
     let mut startup: STARTUPINFOW = unsafe { mem::zeroed() };
     startup.cb = mem::size_of::<STARTUPINFOW>() as u32;
     let mut process_info: PROCESS_INFORMATION = unsafe { mem::zeroed() };
@@ -160,7 +221,20 @@ pub fn run_job_object_spike(fixture: &Path, result_path: &Path) -> io::Result<Wi
     {
         return Err(io::Error::last_os_error());
     }
-    let process = SuspendedProcessGuard::new(process_info)?;
+    SuspendedProcessGuard::new(process_info)
+}
+
+/// Runs the real suspended-create/Job assignment/kill-on-close sequence.
+/// The fixture records whether an explicit breakaway creation was rejected.
+pub fn run_job_object_spike(fixture: &Path, result_path: &Path) -> io::Result<WindowsJobEvidence> {
+    let job = create_kill_on_close_job()?;
+
+    let command = format!(
+        "\"{}\" windows-job-probe \"{}\"",
+        fixture.display(),
+        result_path.display()
+    );
+    let process = create_suspended(&command)?;
 
     // SAFETY: the process handle was returned by CreateProcessW and remains suspended.
     if unsafe { AssignProcessToJobObject(job.0, process.process) } == 0 {
@@ -227,6 +301,78 @@ pub fn run_job_object_spike(fixture: &Path, result_path: &Path) -> io::Result<Wi
         resumed_once: previous_suspend_count == 1,
         active_processes_before_close: active_processes,
         breakaway_denied,
+        direct_wait_completed,
+        descendant_wait_completed,
+    })
+}
+
+/// Fixture entry point: owns a kill-on-close Job until this owner process is
+/// terminated. The payload reports its own and its descendant's PID.
+pub fn hold_job_until_owner_exit(fixture: &Path, result_path: &Path) -> io::Result<()> {
+    let job = create_kill_on_close_job()?;
+    let command = format!(
+        "\"{}\" windows-job-owned-payload \"{}\"",
+        fixture.display(),
+        result_path.display()
+    );
+    let process = create_suspended(&command)?;
+    // SAFETY: the payload remains suspended until Job assignment succeeds.
+    if unsafe { AssignProcessToJobObject(job.0, process.process) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    // SAFETY: this is the payload primary thread's first resume.
+    if unsafe { ResumeThread(process.thread) } != 1 {
+        return Err(io::Error::last_os_error());
+    }
+
+    let _owned_job = job;
+    let _owned_process = process;
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+}
+
+/// Kills the separate Job owner process and waits on handles opened before the
+/// kill, proving owner-handle loss terminates both payload generations.
+pub fn run_server_crash_spike(
+    fixture: &Path,
+    result_path: &Path,
+) -> io::Result<WindowsServerCrashEvidence> {
+    let owner = Command::new(fixture)
+        .arg("windows-job-owner")
+        .arg(result_path)
+        .spawn()?;
+    let mut owner = OwnerProcessGuard(Some(owner));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let (direct_pid, descendant_pid) = loop {
+        if let Ok(value) = std::fs::read_to_string(result_path) {
+            let mut fields = value.trim().split(':');
+            let direct = fields.next().and_then(|value| value.parse::<u32>().ok());
+            let descendant = fields.next().and_then(|value| value.parse::<u32>().ok());
+            if let (Some(direct), Some(descendant)) = (direct, descendant) {
+                break (direct, descendant);
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Job owner fixture result",
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    // SAFETY: the fixture reported live contained processes. These handles are
+    // acquired before killing the owner and remain identity-safe across reuse.
+    let direct = Handle::new(unsafe { OpenProcess(SYNCHRONIZE_ACCESS, 0, direct_pid) })?;
+    let descendant = Handle::new(unsafe { OpenProcess(SYNCHRONIZE_ACCESS, 0, descendant_pid) })?;
+    let owner_termination = owner.terminate_and_wait();
+    let direct_wait_completed = unsafe { WaitForSingleObject(direct.0, 5_000) } == WAIT_OBJECT_0;
+    let descendant_wait_completed =
+        unsafe { WaitForSingleObject(descendant.0, 5_000) } == WAIT_OBJECT_0;
+    let _ = std::fs::remove_file(result_path);
+    Ok(WindowsServerCrashEvidence {
+        owner_terminate_error: owner_termination.terminate_error,
+        owner_wait_completed: owner_termination.wait_completed,
         direct_wait_completed,
         descendant_wait_completed,
     })

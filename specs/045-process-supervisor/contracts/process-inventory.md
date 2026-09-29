@@ -16,6 +16,7 @@
 | `crates/workbench-host/src/lifecycle/ensure.rs` | DaemonBootstrap | Startup lifecycle | server log/null | excluded: launched server cannot own its launcher |
 | `apps/agentic-workbench/src-tauri/src/inbound/tauri_commands.rs` native opener | DesktopNative | Desktop shell | null | excluded: Tauri native boundary |
 | `apps/agentic-workbench/src-tauri/build.rs` | Build | Build process | capture | excluded: server runtime 아님 |
+| `crates/process-supervisor/src/platform/windows/feasibility.rs` | Fixture | Windows feasibility owner | fixture result file | excluded: actual-target containment spike가 별도 owner process를 생성하는 시험 경계 |
 | `tests/**`, `#[cfg(test)]` child | Fixture | Test | fixture-specific | excluded from production gate; used for contract tests |
 | `apps/git-explorer/src-tauri/src/adapters/outbound/git_cli.rs` | OtherApp | GE Git adapter | parsed capture | 045 AW server scope 밖; GE lifecycle |
 | `apps/git-explorer/src-tauri/src/adapters/outbound/fs_repository_watcher.rs` | OtherApp | GE watcher helper | parsed capture | 045 AW server scope 밖; GE lifecycle |

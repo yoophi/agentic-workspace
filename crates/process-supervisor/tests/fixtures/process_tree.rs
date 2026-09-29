@@ -57,6 +57,8 @@ fn main() {
             sleep_forever();
         }
         "windows-job-probe" => windows_job_probe(),
+        "windows-job-owner" => windows_job_owner(),
+        "windows-job-owned-payload" => windows_job_owned_payload(),
         "new-process-group" => {
             #[cfg(unix)]
             // SAFETY: the fixture is single-threaded and changes only its own
@@ -188,9 +190,48 @@ fn windows_job_probe() -> ! {
     sleep_forever();
 }
 
+#[cfg(windows)]
+fn windows_job_owner() -> ! {
+    let result_path = env::args().nth(2).expect("result path argument");
+    let executable = env::current_exe().expect("fixture executable");
+    process_supervisor::platform::windows::feasibility::hold_job_until_owner_exit(
+        &executable,
+        std::path::Path::new(&result_path),
+    )
+    .expect("hold Job until owner exit");
+    unreachable!("Job owner fixture runs until it is terminated");
+}
+
+#[cfg(windows)]
+#[allow(clippy::zombie_processes)]
+fn windows_job_owned_payload() -> ! {
+    let result_path = env::args().nth(2).expect("result path argument");
+    let executable = env::current_exe().expect("fixture executable");
+    let descendant = Command::new(executable)
+        .arg("sleep")
+        .spawn()
+        .expect("spawn Job-owned descendant");
+    fs::write(
+        result_path,
+        format!("{}:{}", std::process::id(), descendant.id()),
+    )
+    .expect("write Job-owned process ids");
+    sleep_forever();
+}
+
 #[cfg(not(windows))]
 fn windows_job_probe() -> ! {
     panic!("Windows Job fixture is Windows-only");
+}
+
+#[cfg(not(windows))]
+fn windows_job_owner() -> ! {
+    panic!("Windows Job owner fixture is Windows-only");
+}
+
+#[cfg(not(windows))]
+fn windows_job_owned_payload() -> ! {
+    panic!("Windows Job payload fixture is Windows-only");
 }
 
 #[cfg(unix)]
