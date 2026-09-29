@@ -1,0 +1,1 @@
+//! Rust client infrastructure boundary.

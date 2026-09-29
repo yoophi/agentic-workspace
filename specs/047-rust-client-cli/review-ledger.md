@@ -40,3 +40,7 @@ job review-mumgf0qh-iwt7yy/thread01a0ec6c-3c0c-7ad0-b515-e4441d195d1b, base20fcd
 ### D-C3 OCR → Codex 완료 및 D-C4 반영
 
 base20fcd5f/head4a605da의 OCR automatic1JSON/excluded9Markdown과 host manual10/10(skipped0)을 대조했고 새 material0. artifacts `/private/tmp/aw-047-design/ocr-binding-{preview,rules,host-review}.json`. 후속 Codex thread01a0ec90-7b21-7fb2-a602-8c06f9cfeb93, actual exec15810 exit0, verdict needs-attention Medium1. 전체10파일 검토에서 실제 orchestration 이벤트를 소비할 CLI 명령 부재를 지적했다. 유효: run watch만으로는 실제 aw subprocess JSONL/ACK 증거를 만들 수 없다. `aw events watch --input -`의 exact cursor schema와 반환 eventStreamId 구독, bootstrap 출력 뒤 recover, 두 이벤트 JSONL/ACK 및 bounded SIGINT/reap를 spec/CLI contract/plan/quickstart에 반영했다. artifacts `/private/tmp/aw-047-design/binding-codex-{review.md,review.exit,source-context.md,source-manifest.json}`. 설계만 수정했으며 구현/시험은 미시작이다. 다음은 이 수정의 OCR → Codex 재검토다.
+
+### D-C4 再리뷰 완료 및 tasks 생성
+
+OCR 4a605da..bd6099c automatic0/excluded5Markdown, host manual5/5(skipped0) 새 material0. Codex thread01a0ec91-d009-7750-a652-3dde6733f0d5 / exec76973 actual exit0, verdict approve. 리뷰어는 bd6099c 전체 설계에 새 material finding 없음, CLI subprocess 경로가 D-C4를 설계상 해결했다고 명시했으며 implementation/actual acceptance 미실행과 045/046/TUI/MCP/signing gates를 보존했다. artifacts `/private/tmp/aw-047-design/watch-codex-{review.md,review.exit,source-context.md,source-manifest.json}` 및 `ocr-watch-{preview,host-review}.json`. 이후 setup-tasks.sh --json으로 지정 template/context를 확인하여 44개 tasks를 생성했다. extensions.yml 없음. 모든 task는 미완료에서 시작한다.

@@ -1,0 +1,19 @@
+[package]
+name = "aw-cli"
+version = "0.1.0"
+edition = "2021"
+description = "Workbench command-line client"
+
+[[bin]]
+name = "aw"
+path = "src/main.rs"
+
+[dependencies]
+workbench-client = { path = "../../crates/workbench-client" }
+workbench-protocol = { path = "../../crates/workbench-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util"] }
+
+[dev-dependencies]
+tempfile = "3"
