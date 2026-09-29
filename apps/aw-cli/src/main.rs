@@ -1,8 +1,8 @@
 //! CLI composition root; parsing, bounded lifetime, cancellation and safe output.
-mod application;
-mod inbound;
-mod infrastructure;
-use infrastructure::output::{finite, CliError};
+use aw_cli::{
+    application, inbound,
+    infrastructure::output::{finite, CliError},
+};
 use std::{
     process::ExitCode,
     sync::{Arc, Mutex},

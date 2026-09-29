@@ -9,6 +9,7 @@ name = "aw"
 path = "src/main.rs"
 
 [dependencies]
+async-trait = "0.1"
 workbench-client = { path = "../../crates/workbench-client" }
 workbench-protocol = { path = "../../crates/workbench-protocol" }
 serde = { version = "1", features = ["derive"] }

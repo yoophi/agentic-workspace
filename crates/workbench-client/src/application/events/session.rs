@@ -180,8 +180,8 @@ impl EventSession {
     }
     pub async fn run(mut self, stop: impl Future<Output = ()>) -> SessionResult {
         let result = tokio::select! {biased; _=stop=>Err(ClientError::Cancelled),result=self.drive()=>result};
-        let cursor = self.model.cursor();
         let cleanup_error = self.cleanup().await.err();
+        let cursor = self.model.cursor();
         SessionResult {
             cursor,
             result,
@@ -528,25 +528,57 @@ impl EventSession {
         Ok(())
     }
     async fn cleanup(&mut self) -> Result<(), ClientError> {
-        {
-            let budget = self.budget.clone();
-            let mut state = budget.lock().map_err(|_| ClientError::Protocol)?;
-            self.model.close()?;
-            let (items, bytes) = self.model.reducer.usage();
-            state.model_items = items;
-            state.model_bytes = bytes;
-        }
-        self.publish()?;
-        // Attempt both cleanup paths even if one fails; none is intentionally detached.
-        let reader = self.cancel_reader().await;
-        let jobs = self.cancel_callbacks().await;
+        // Stop new IO first, then preserve already successful callback completions.
+        // Aborted/pending callbacks never become ACKs; stale generations stay stale.
+        self.jobs.abort_all();
         self.opens.abort_all();
+        let reader = self.cancel_reader().await;
+        let mut settled = Vec::new();
+        let jobs = tokio::time::timeout(self.limits.config().connect_timeout, async {
+            while let Some(result) = self.jobs.join_next().await {
+                if let Ok(completion) = result {
+                    settled.push(completion);
+                }
+            }
+        })
+        .await
+        .map_err(|_| ClientError::Deadline);
+        let mut applied = Ok(());
+        for completion in settled {
+            let result = match completion {
+                Completion::Delivery(_, completion) if completion.result.is_ok() => {
+                    self.model.ack(completion.delivery)
+                }
+                Completion::Reset(_, completion) if completion.result.is_ok() => {
+                    self.model.complete_reset(completion).map(|_| ())
+                }
+                _ => Ok(()),
+            };
+            if !matches!(result, Err(ClientError::StaleGeneration)) {
+                applied = applied.and(result);
+            }
+        }
         let opens = tokio::time::timeout(self.limits.config().connect_timeout, async {
             while self.opens.join_next().await.is_some() {}
         })
         .await
         .map_err(|_| ClientError::Deadline);
-        reader.and(jobs).and(opens)
+        let closed = {
+            let budget = self.budget.clone();
+            let mut state = budget.lock().map_err(|_| ClientError::Protocol)?;
+            let result = self.model.close();
+            let (items, bytes) = self.model.reducer.usage();
+            state.model_items = items;
+            state.model_bytes = bytes;
+            result
+        };
+        let published = self.publish();
+        reader
+            .and(jobs)
+            .and(applied)
+            .and(opens)
+            .and(closed)
+            .and(published)
     }
 }
 

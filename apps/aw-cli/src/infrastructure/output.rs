@@ -1,4 +1,6 @@
 //! Safe machine projection: arbitrary peer messages/details never enter diagnostics.
+#[path = "output/stream.rs"]
+pub mod stream;
 use serde_json::{json, Value};
 use workbench_client::ports::ClientError;
 use workbench_protocol::{CallReply, FaultCode, Outcome, RequestId, WorkbenchFault};

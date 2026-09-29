@@ -1384,3 +1384,46 @@ async fn notification_disconnect_opens_live_socket_before_snapshot_and_resets_be
         vec![0, 1]
     );
 }
+
+struct StopAfterApplied {
+    applied: Arc<Notify>,
+}
+#[async_trait]
+impl EventConsumer for StopAfterApplied {
+    async fn consume(&mut self, _: &EventEnvelope) -> Result<(), ClientError> {
+        self.applied.notify_one();
+        Ok(())
+    }
+    async fn reset(&mut self, _: &Snapshot) -> Result<(), ClientError> {
+        Ok(())
+    }
+}
+#[tokio::test]
+async fn stop_after_successful_callback_preserves_its_ack_before_invalidating_pending_jobs() {
+    let mut peer =
+        Peer::spawn_multi(vec![ticket(), Action::WebSocket(vec![hello(), message(1)])]).await;
+    let config = limits();
+    let source = Arc::new(Source {
+        endpoint: peer.endpoint.clone(),
+        limits: config.clone(),
+        snapshot_started: Arc::new(Notify::new()),
+        snapshot_after: 0,
+    });
+    let applied = Arc::new(Notify::new());
+    let mut session = EventSession::new(cursor(0), source, config).unwrap();
+    session
+        .subscribe(
+            0,
+            Box::new(StopAfterApplied {
+                applied: applied.clone(),
+            }),
+        )
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(1), session.run(applied.notified()))
+        .await
+        .unwrap();
+    assert!(matches!(result.result, Err(ClientError::Cancelled)));
+    assert_eq!(result.cursor, cursor(1));
+    assert!(result.cleanup_error.is_none());
+    peer.settled().await;
+}
