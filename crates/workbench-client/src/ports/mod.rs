@@ -150,6 +150,10 @@ pub trait EventSource: Send + Sync {
 }
 #[async_trait]
 pub trait EventConsumer: Send {
+    /// State projections can resnapshot; irreversible output sinks terminate on failure.
+    fn resync_on_failure(&self) -> bool {
+        true
+    }
     /// Called after verified subscription hello, before this consumer receives events.
     async fn opened(&mut self, _cursor: &StreamCursor) -> Result<(), ClientError> {
         Ok(())

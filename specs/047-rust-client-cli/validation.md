@@ -1,5 +1,13 @@
 # 047 구현 검증 기록
 
+## 현재 적용할 완료 범위 (2026-09-29 최신 사용자 지시)
+
+047 Rust client/CLI 자체의 가능한 모든 계약·actual exact20fcd5f 서버 및 aw subprocess 시험·affected/root8 검증·OCR delegate → Codex adversarial --wait 순차 리뷰/수정·PR/CI·squash merge·main checkout/pull·`docs/047-completion-handoff.md` 기록 후 중지한다. 현재 이 조건은 미충족이며 작업 중이다. 045/046·TUI/MCP·서명/update·desktop fallback 제거는 후속 미완료로 인계하고 production gate를 유지한다. 후속 구현을 시작하지 않으며 전체 전환 완료로 주장하지 않는다.
+
+T016 cancel-rejected exit6은 닫힌 RunCancel prerequisite 때문에 production 미검증/이연이다. 현재 도달 가능한 exit 검증과 explicit/generic gate parity를 유지하며 이연을 최종 리뷰받는다. 후속 실제 proof 없이 활성화하지 않는다. T043은 전체 roadmap 구현 대신 위 미완료 사실/gate/재개 조건의 인계 검증으로 변경됐다. 아래 기존 날짜별 checkpoint는 당시 실제 실행 결과와 범위의 이력으로 보존하며, 과거 전체 readiness 요구가 최신 047 종료 기준을 대체하지 않는다.
+
+기준 HEAD `05e55a395be27a3c8b6d66e9fe557980e7ad6d5f`, branch `047-rust-client-cli`. T030/031 추가 소스와 subprocess 시험은 uncommitted 작업 중이며 최종 전체 재검증/리뷰/PR 전이다. goal.md는 untracked 유지, 별도 사용자 docs2개 수정/stage/commit 금지.
+
 ## 2026-09-29: T001–T004
 
 환경: Darwin 24.6.0 arm64, macOS 15.6.1. macOS14+/설치본 검증 아님. 설계 기준 bd6099c, 이후 tasks 생성과 client/CLI 공통 기반 작업.
@@ -141,3 +149,20 @@ T027 actual session callback/snapshot/socket ownership 연결, T028 aggregate qu
 `cargo fmt -p workbench-client -p aw-cli` exit0; 최종 `cargo test -p workbench-client -p aw-cli` exit0 **162passed/failed0/ignored0/filtered0**(client134/CLI28). 로그 `/private/tmp/aw-047-design/jsonl-consumer-checkpoint-tests.log`. strict `cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings` exit0, `git diff --check` exit0. 최초 consumer module 미구현/path 해석/Limits API 이름 오류는 각각 compile exit101이며 정정 후 전체를 재검증했다. direct fixture의 fault projection unit을 중복 실행한 최초5개 집계 대신 library import 후 고유6개 결과를 사용했다.
 
 T030/T031은 **미완료**다. 다음은 production HTTP snapshot source(반환 bindingId/benchId/workspaceId 구별), actual `aw events watch` 및 run watch의 동일 admission/JSONL 연결, 취소 가능한 OS stdout write와 SIGINT/final stream.end/finite preflight 경계다. T032/T033 actual ordering/subprocess와 T034–T044 actual server/review/전체 readiness/PR·merge 모두 남는다. user docs2개와 goal stage/commit0,045/046 readiness 활성화0 유지.
+
+## 2026-09-29: T030–T033 실제 CLI streaming 및 controlled ordering
+
+기준 HEAD `05e55a395be27a3c8b6d66e9fe557980e7ad6d5f` 이후 변경. 최신 사용자 종료 기준 변경(spec/plan/tasks/contracts/goal 및 이 문서)도 최종 구현 리뷰에 포함한다.
+
+- `cargo fmt -p workbench-client -p aw-cli` exit0. `cargo test -p workbench-client -p aw-cli` exit0 **187passed/failed0/ignored0/filtered0**(client136/CLI51), `/private/tmp/aw-047-design/cli-stream-ordering-tests.log`. `cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings` exit0, `/private/tmp/aw-047-design/cli-stream-ordering-clippy.log`. `git diff --check` exit0. Cargo.lock은 aw-cli test-only bytes/http-body-util/hyper/hyper-util/uuid dependency edge5만 추가했으며 package version 변경0. production graph의 host/core/server/Tauri0 유지.
+- `cargo test -p aw-cli --test event_snapshot` exit0 **4passed**: binding/bench/workspace 식별자를 구별하는 실제 HTTP readonly bench.list→orchestration.get, absent/duplicate/malformed snapshot 및 epoch/gated 요청0. live hello 이후 fresh source를 쓰며 applied/boundary와 revision99/sequence5를 구별한다. notification snapshot은 notificationsRetained:false이며 저장되지 않은 title/state를 만들지 않는다.
+- stdout unit **5passed**(위 전체 library suite 포함): 정상 Drop의 원 blocking/nonblocking flags, full pipe pending writer 취소+join, FD consume 뒤 AsyncFd registration 실패의 원 flags 복구, /dev/null 무등록 쓰기, /dev/zero 등 unsupported char 거절. F_DUPFD_CLOEXEC가 공유하는 OFD의 flags를 stable owned restoration FD lease로 복구한다. regular file의64KiB cap은 syscall당 byte 한도이며 syscall 시간 상한 증거가 아니다.
+- `cargo test -p aw-cli --test stream_output` exit0 **8passed**: partial/newline/flush 경계와 actual session ACK1/partial ACK0, 늦은 old-generation 성공 delivery/reset을 새 gap 뒤 완료해도 StaleGeneration 및 cursor0. 마지막2개는 production JsonlConsumer와 EventRecovery/OwnedJob 조합의 flush readiness/waker barrier이며 managed socket 취소 proof를 대신하지 않는다.
+- `cargo test -p workbench-client --test event_ordering` exit0 **2passed**: private test-only HarnessConnection의 fresh nonce proof→same TCP handshake/recover request를 실제 peer가 받은 `/v1/calls` + operation barrier를 확인한 뒤 reply/event gate를 release한다. bootstrap s7/r40→runtimeReconciled8/r41→notificationRecovery9/r41 exact vector, ACK7→9, HTTP reply 및 final snapshot41을 양방향 비교한다. reply-first에는 event gate가 닫힌 동안 record1/cursor7, events-first에는 request 수신 이후 두 ACK 완료 때 reply gate가 닫혀 call 미완료임을 확인한다. outer timeout/panic 뒤 owned call/session abort+bounded join; Drop도 abort하며 detach하지 않는다. production recover admission은 변경0, raw test authority는 production library에 포함되지 않는다.
+- `cargo test -p aw-cli --test stream_process`는 최종 전체 실행에서 **12passed/failed0**: actual open→sameRev 두 event→SIGINT end/130·EOF; idle request timeout보다 오래 생존; invalid frame 뒤 safe end/1; /dev/null redirect 실제 subprocess/130/EOF; shared stdout socket OFD 원 nonblocking false/true × SIGINT130/protocol1 flags exact 복구와 부모 writer 재사용; live-first gap→HTTP snapshot→reset→event6; invalid/gated preflight의 stdout0/JSON1/HTTP0; initial proof/hello fault; pending proof SIGINT; broken pipe의 resnapshot/implicit command0; 실제700KiB event의 socket backpressure POLLOUT/FIONREAD readiness 후 SIGINT130/reap·원flags복구/partial newline0/end append0/EOF; bootstrap→recover request 수신 barrier→두 order JSONL exact vector·독립 EventConsumer/ACK reducer parity·snapshot/end cursor3/reap. full stdout pipe에서는 stream.end 성공을 주장하지 않으며 library partial proof가 ACK0을 별도로 확인한다.
+
+실패와 수정: 최초 전체182 시도는 pending-proof SIGINT fixture가 halt_at="identify"로 실제 경로와 불일치하여 request2/expected1(exit101/해당 suite10passed1failed)이었다. `/v1/system/identify`로 수정 뒤182 전체/strict Clippy exit0. Clippy question_mark lint2는 exit101; 기계적으로 ? 적용한 partial move compile exit101 뒤 terminal && result.is_err() 반환으로 수정했다. T032 최초 production recover call은 Admission으로 거절(exit101/2failed)되어 private test-only owner harness로 분리했으며 production gate를 해제하지 않았다. 이후 helper method/path compile exit101과 fixture command 자동 idempotency key의 effect-map count1/expected0 실패를 수정하여 recover identity1/retry0을 exact 비교했다. T033 helper 상대 경로 오류 compile exit101은 올바른 경로로 정정했다. 최종187 결과로 위 실패를 덮어 PASS라고 주장하지 않는다.
+
+macOS shared flags 시험의 최초 raw whole flags 비교는 syscall write 뒤 Darwin FWASWRITTEN(0x10000) kernel bit가 추가되어 실패했다. 원 flags를 잡기 전 같은 libc::write로 그 bit를 미리 설정한 뒤 F_GETFL 전체 값을 비교하며 O_NONBLOCK을 마스킹해 숨기지 않는다. [Apple XNU fcntl.h](https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/sys/fcntl.h)의 FWASWRITTEN/FCNTLFLAGS 정의와 관측을 구별한다. SIGINT shared-output fixture의 gate 미release→peer.settled timeout은 gate 없는 hello peer로 바꾸어 실제 socket EOF를 읽고 검증했으며 peer.stop으로 대체하지 않았다.
+
+T030–T033 체크는 이 controlled 범위다. T034–T038 actual exact20fcd5f binary/private-root/aw subprocess 및 최종 affected/root8 checks·순차 OCR→Codex review·PR/CI/merge/main sync·인계 문서는 미완료다. T016 production exit6은 미충족 prerequisite 이연으로 최종 리뷰 대상이며 production gate 유지. 045/046·TUI/MCP·배포·fallback 후속 구현 시작0. goal.md와 사용자 docs2개 stage/commit0.

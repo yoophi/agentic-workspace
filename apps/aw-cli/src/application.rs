@@ -1,6 +1,7 @@
 //! CLI use cases. All mutations publish private identity before the first call.
+pub mod stream;
 use crate::{
-    inbound::{read_input, request, Command, Input, Options, WatchInput},
+    inbound::{read_input, request, Command, Input, Options},
     infrastructure::output::{success, CliError},
 };
 use serde_json::{json, Value};
@@ -30,7 +31,7 @@ fn catalog(operation: Option<OperationId>) -> Value {
  }).collect();
     json!(values)
 }
-pub async fn run(options: Options, receipt: ReceiptSlot) -> Result<Value, CliError> {
+pub async fn run_finite(options: Options, receipt: ReceiptSlot) -> Result<Value, CliError> {
     if let Command::Operations(operation) = options.command {
         return Ok(json!({"ok":true,"data":catalog(operation),"requestId":RequestId::random()}));
     }
@@ -96,27 +97,7 @@ pub async fn run(options: Options, receipt: ReceiptSlot) -> Result<Value, CliErr
                 }
             }
         }
-        Command::Watch { input, run, after } => {
-            if run.is_none() {
-                let source = input.as_deref().ok_or_else(CliError::usage)?;
-                let value = read_input(source, &options.limits).await?;
-                let watch: WatchInput =
-                    serde_json::from_value(value).map_err(|_| CliError::usage())?;
-                if workbench_protocol::events::parse_stream_id(&watch.stream_id).is_none()
-                    || watch.epoch.is_empty()
-                {
-                    return Err(CliError::usage());
-                }
-                let _cursor = workbench_protocol::workbench::StreamCursor {
-                    stream_id: watch.stream_id,
-                    epoch: watch.epoch,
-                    after_sequence: watch.after_sequence,
-                };
-            } else {
-                let _after_sequence = *after;
-            }
-            return Err(CliError::from_client(ClientError::PrerequisiteUnavailable));
-        }
+        Command::Watch { .. } => return Err(CliError::usage()),
         Command::Operations(_) => unreachable!(),
     };
     let descriptor = options

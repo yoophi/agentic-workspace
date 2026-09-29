@@ -19,12 +19,23 @@ use workbench_client::{
 pub const TOKEN: &str = "fixture-private-token";
 pub enum Action {
     Reply(u16, Value),
+    ReplyGate {
+        status: u16,
+        body: Value,
+        gate: Arc<tokio::sync::Notify>,
+    },
     Raw(u16, Vec<u8>),
     Fault(workbench_protocol::FaultCode, workbench_protocol::Outcome),
     Close,
     Pause,
     SlowBody,
     WebSocket(Vec<tokio_tungstenite::tungstenite::Message>),
+    WebSocketConcurrent(Vec<tokio_tungstenite::tungstenite::Message>),
+    WebSocketGateConcurrent {
+        before: Vec<tokio_tungstenite::tungstenite::Message>,
+        gate: Arc<tokio::sync::Notify>,
+        after: Vec<tokio_tungstenite::tungstenite::Message>,
+    },
     WebSocketGate {
         before: Vec<tokio_tungstenite::tungstenite::Message>,
         gate: Arc<tokio::sync::Notify>,
@@ -97,7 +108,14 @@ impl Peer {
         let task = tokio::spawn(async move {
             let mut steps = actions.into_iter();
             let mut connections = 0;
+            let mut upgraded = tokio::task::JoinSet::new();
             loop {
+                if steps.len() == 0 && !upgraded.is_empty() {
+                    while let Some(result) = upgraded.join_next().await {
+                        result.unwrap();
+                    }
+                    return;
+                }
                 let (mut socket, _) = listener.accept().await.unwrap();
                 connections += 1;
                 'connection: loop {
@@ -205,10 +223,25 @@ impl Peer {
                                 break 'connection;
                             }
                         }
-                        action @ (Action::WebSocket(_) | Action::WebSocketGate { .. }) => {
+                        action @ (Action::WebSocket(_)
+                        | Action::WebSocketConcurrent(_)
+                        | Action::WebSocketGate { .. }
+                        | Action::WebSocketGateConcurrent { .. }) => {
+                            let concurrent = matches!(
+                                &action,
+                                Action::WebSocketConcurrent(_)
+                                    | Action::WebSocketGateConcurrent { .. }
+                            );
                             let (frames, gate, after) = match action {
-                                Action::WebSocket(frames) => (frames, None, Vec::new()),
+                                Action::WebSocket(frames) | Action::WebSocketConcurrent(frames) => {
+                                    (frames, None, Vec::new())
+                                }
                                 Action::WebSocketGate {
+                                    before,
+                                    gate,
+                                    after,
+                                }
+                                | Action::WebSocketGateConcurrent {
                                     before,
                                     gate,
                                     after,
@@ -239,6 +272,23 @@ impl Peer {
                             for frame in frames {
                                 ws.send(frame).await.unwrap();
                             }
+                            if concurrent {
+                                upgraded.spawn(async move {
+                                    if let Some(gate) = gate {
+                                        gate.notified().await;
+                                    }
+                                    for frame in after {
+                                        ws.send(frame).await.unwrap();
+                                    }
+                                    while let Some(Ok(frame)) = ws.next().await {
+                                        if frame.is_close() {
+                                            let _ = ws.flush().await;
+                                            break;
+                                        }
+                                    }
+                                });
+                                break 'connection;
+                            }
                             if let Some(gate) = gate {
                                 gate.notified().await;
                             }
@@ -256,6 +306,10 @@ impl Peer {
                             } else {
                                 break 'connection;
                             }
+                        }
+                        Action::ReplyGate { status, body, gate } => {
+                            gate.notified().await;
+                            (status, body.to_string().into_bytes())
                         }
                         Action::Reply(status, value) => (status, value.to_string().into_bytes()),
                         Action::Raw(status, body) => (status, body),

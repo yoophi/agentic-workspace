@@ -39,6 +39,8 @@ struct State {
     fail_at: Option<usize>,
     hold_at: Option<usize>,
     hold_flush: bool,
+    flush_pending: Option<Arc<tokio::sync::Notify>>,
+    flush_waker: Option<std::task::Waker>,
     flushed: Option<(usize, Arc<tokio::sync::Notify>)>,
     writing_pending: Option<Arc<tokio::sync::Notify>>,
 }
@@ -62,9 +64,13 @@ impl AsyncWrite for Writer {
         state.bytes.push(bytes[0]);
         Poll::Ready(Ok(1))
     }
-    fn poll_flush(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let mut state = self.0.lock().unwrap();
         if state.hold_flush {
+            state.flush_waker = Some(cx.waker().clone());
+            if let Some(notify) = &state.flush_pending {
+                notify.notify_one();
+            }
             return Poll::Pending;
         }
         state.flushes += 1;
@@ -313,4 +319,101 @@ async fn stop_during_actual_session_partial_jsonl_write_aborts_callback_and_keep
     let state = state.lock().unwrap();
     assert_eq!(state.bytes.len(), expected_open + 7);
     assert_eq!(state.bytes.iter().filter(|b| **b == b'\n').count(), 1);
+}
+
+fn recovery_gap(after: u64) -> workbench_protocol::workbench::GapNotice {
+    workbench_protocol::workbench::GapNotice {
+        stream_id: cursor(0).stream_id,
+        epoch: "e".into(),
+        reason: workbench_protocol::workbench::GapReason::RetentionExceeded,
+        first_sequence: Some(after),
+        last_sequence: Some(after),
+    }
+}
+fn release_flush(state: &Arc<Mutex<State>>) {
+    let waker = {
+        let mut state = state.lock().unwrap();
+        state.hold_flush = false;
+        state.flush_waker.take().unwrap()
+    };
+    waker.wake();
+}
+#[tokio::test]
+async fn successful_old_generation_jsonl_delivery_completion_cannot_ack_after_new_gap() {
+    use workbench_client::application::events::{spawn_delivery, EventRecovery};
+    let pending = Arc::new(Notify::new());
+    let state = Arc::new(Mutex::new(State::default()));
+    let out = sink(state.clone());
+    let mut consumer = out.consumer();
+    consumer.opened(&cursor(0)).await.unwrap();
+    {
+        let mut state = state.lock().unwrap();
+        state.hold_flush = true;
+        state.flush_pending = Some(pending.clone());
+    }
+    let mut model = EventRecovery::new(cursor(0), Limits::default()).unwrap();
+    let id = model.register(0).unwrap();
+    model.hello(1, "e").unwrap();
+    model.receive(event()).unwrap();
+    let work = model.next(id).unwrap().unwrap();
+    let job = spawn_delivery(work, Box::new(consumer), &Limits::default());
+    tokio::time::timeout(std::time::Duration::from_secs(1), pending.notified())
+        .await
+        .unwrap();
+    assert_eq!(model.cursor(), cursor(0));
+    assert_eq!(state.lock().unwrap().bytes.last(), Some(&b'\n'));
+    model.start_gap(recovery_gap(5)).unwrap();
+    release_flush(&state);
+    let (_, completion) = job.join().await.unwrap();
+    assert!(!out.failed());
+    assert!(matches!(
+        model.complete_delivery(completion),
+        Err(ClientError::StaleGeneration)
+    ));
+    assert_eq!(model.cursor(), cursor(0));
+    assert_eq!(model.reconnect_cursor(), cursor(5));
+}
+#[tokio::test]
+async fn successful_old_generation_jsonl_reset_completion_cannot_advance_after_new_gap() {
+    use workbench_client::application::events::{spawn_reset, EventRecovery};
+    let pending = Arc::new(Notify::new());
+    let state = Arc::new(Mutex::new(State::default()));
+    let out = sink(state.clone());
+    let mut consumer = out.consumer();
+    consumer.opened(&cursor(0)).await.unwrap();
+    {
+        let mut state = state.lock().unwrap();
+        state.hold_flush = true;
+        state.flush_pending = Some(pending.clone());
+    }
+    let mut model = EventRecovery::new(cursor(0), Limits::default()).unwrap();
+    model.register(0).unwrap();
+    model.start_gap(recovery_gap(5)).unwrap();
+    let load = model.hello(1, "e").unwrap().unwrap();
+    let work = model
+        .snapshot_loaded(
+            load,
+            Snapshot {
+                cursor: cursor(5),
+                value: json!({"revision":7}),
+            },
+        )
+        .unwrap()
+        .pop()
+        .unwrap();
+    let job = spawn_reset(work, Box::new(consumer), &Limits::default());
+    tokio::time::timeout(std::time::Duration::from_secs(1), pending.notified())
+        .await
+        .unwrap();
+    assert_eq!(model.cursor(), cursor(0));
+    model.start_gap(recovery_gap(8)).unwrap();
+    release_flush(&state);
+    let (_, completion) = job.join().await.unwrap();
+    assert!(!out.failed());
+    assert!(matches!(
+        model.complete_reset(completion),
+        Err(ClientError::StaleGeneration)
+    ));
+    assert_eq!(model.cursor(), cursor(0));
+    assert_eq!(model.reconnect_cursor(), cursor(8));
 }

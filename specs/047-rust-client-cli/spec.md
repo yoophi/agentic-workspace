@@ -69,8 +69,8 @@ identity proof 전 redirect/proxy, owner descriptor symlink/권한/교체/oversi
 - **FR-016**: destructive operation은 원 catalog/revision/권한·human grant 의미를 유지한다. `--yes`로 agent에게 grant를 만들어주지 않는다.
 - **FR-017**: Rust client는 CLI 외 독립 fixture consumer에서 재사용 가능하고 이후 TUI가 직접 사용할 port를 제공한다. TUI UI·MCP stdio 어댑터는 전체 로드맵 후속이며 완료로 계산하지 않는다.
 - **FR-018**: macOS Apple Silicon이 이번 대상이다. 계획된14+ 지원과 현재15 검증 근거를 구분하며 Linux/Windows 구현·검증을 새로 수행하지 않는다.
-- **FR-019**: 실제 desktop/CLI/TUI concurrent use, desktop 종료 후 run 관찰/취소, CALVER signed/notarized package·CLI discover/update 경로는 후속 readiness로 남기고 fake peer 통과로 전체 서버 전환 완료를 선언하지 않는다.
-- **FR-020**: 045 T010/T016 containment/migration 및 046 backup/freeze/restore gates를 우회하지 않는다. source branch/base/미병합 의존성과 fixture 대 production 증거를 기록한다.
+- **FR-019**: 실제 desktop/CLI/TUI concurrent use, desktop 종료 후 run 관찰/취소, TUI/MCP, CALVER signed/notarized package·CLI discover/update 및 desktop business fallback 제거는 이번 047 후속 이연 범위다. 미완료·재개 조건을 인계하고 fake peer 통과로 전체 서버 전환 완료를 선언하지 않는다. 후속 구현은 시작하지 않는다.
+- **FR-020**: 045 T010/T016 containment/migration 및 046 backup/freeze/restore gates를 우회하지 않는다. source branch/base/미병합 의존성과 fixture 대 production 증거, 미완료 전제와 재개 gate를 인계한다. 045/046 구현 완료 자체는 최신 범위의 047 종료 전제가 아니다.
 
 - **FR-021**: fake peer 외에도 merged044 실제 server binary와 격리 데이터 경로에서 신원→호환→조회·허용된 비실행 mutation·실제event 수신을 검증한다. agent/child launch 없이 수행하며 binary source/commit과 cleanup 증거를 보존한다. fake peer만 통과한 adapter를 최종 client 완료로 간주하지 않는다.
 
@@ -87,6 +87,10 @@ VerifiedEndpoint(instance/epoch/compatibility, 비밀은 redacted), CallerProfil
 - Persistence and safety: descriptor readonly/owner/size/identity 검사, run/bench scope·key/outcome 보존. 원 데이터 root/store 쓰기 없음.
 - Documentation and Storybook: 한국어 docs와 명령 계약, Mermaid 흐름. UI 없으므로 Storybook 해당 없음.
 
+## 최신 사용자 종료 기준 (2026-09-29)
+
+원 전체 전환 목표를 supersede하여 이번 작업은 047 Rust client/CLI 자체 구현·가능한 모든 계약/actual exact merged044 통합 검증·OCR delegate → Codex adversarial `--wait` 순차 리뷰/수정·PR/CI·squash merge·main checkout/pull과 `docs/047-completion-handoff.md` 기록 후 종료한다. 045/046 보완·TUI/MCP·배포 등 후속 구현은 시작하지 않는다. FR019/020 및 SC006은 미완료 사실·production gate 유지·인계 정확성을 요구하며, 해당 후속 구현 완료를 047 merge 전제로 요구하지 않는다. T016의 외부 prerequisite 종속 exit6은 명시적 이연으로 리뷰하고 fake 활성화하지 않는다. SC001–005/007 및 가능한 047 계약·actual server 시험은 그대로 필수다.
+
 ## Success Criteria
 
 ### Measurable Outcomes
@@ -97,7 +101,7 @@ VerifiedEndpoint(instance/epoch/compatibility, 비밀은 redacted), CallerProfil
 - **SC-004**: 지연 소비/gap/epoch/live snapshot fixtures에서 적용 cursor 오진전0·필요 이벤트 유실0·새 generation에 old completion mutation0.
 - **SC-005**: timeout/SIGINT/broken pipe/quota fixtures에서 bounded 종료와 원 서버 작업의 암묵 취소0.
 - **SC-007**: 실제 기존 서버와 Rust client·CLI에서 조회·동일key 재시도·비실행 mutation·event 소비 결과가 일치하며 actual agent/child launch0·사용자root 접근0·test server 잔존0.
-- **SC-006**: declared macOS support 및 실제 signed package·desktop/CLI/TUI 동시 결과는 해당 실행 근거가 있을 때만 완료한다. independent fixtures와 전체 배포 완료를 합치지 않는다.
+- **SC-006**: 실제 검증한 macOS host만 근거로 기재한다. 미실행 macOS14+/signed package·desktop/CLI/TUI matrix·TUI/MCP·update·fallback 제거와 045/046은 미완료로 인계하고 production gate를 유지한다. 해당 후속 완료는 047 종료 gate에서 제외하며 independent fixtures를 전체 배포 완료로 합치지 않는다.
 
 ## Assumptions
 

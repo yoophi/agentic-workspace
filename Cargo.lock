@@ -340,8 +340,12 @@ name = "aw-cli"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "bytes",
  "futures-util",
  "hmac",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
  "libc",
  "serde",
  "serde_json",
@@ -349,6 +353,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "uuid",
  "workbench-client",
  "workbench-protocol",
 ]

@@ -24,8 +24,8 @@ type Consumer = Arc<AsyncMutex<Box<dyn EventConsumer>>>;
 enum Completion {
     Opened(ConsumerId, Result<(), ClientError>),
     Snapshot(SnapshotCompletion),
-    Reset(ConsumerId, ResetCompletion),
-    Delivery(ConsumerId, DeliveryCompletion),
+    Reset(ConsumerId, ResetCompletion, bool),
+    Delivery(ConsumerId, DeliveryCompletion, bool),
 }
 /// Progress is published only by the actor after applied completion; readers cannot ACK.
 #[derive(Clone)]
@@ -372,17 +372,17 @@ impl EventSession {
             let deadline = self.limits.config().request_timeout;
             self.busy.insert(id);
             self.jobs.spawn(async move {
+                let mut terminal = false;
                 let result = bounded_callback(
                     async {
-                        port.lock()
-                            .await
-                            .reset_from(&work.snapshot, &work.applied)
-                            .await
+                        let mut port = port.lock().await;
+                        terminal = !port.resync_on_failure();
+                        port.reset_from(&work.snapshot, &work.applied).await
                     },
                     deadline,
                 )
                 .await;
-                Completion::Reset(id, ResetCompletion { work, result })
+                Completion::Reset(id, ResetCompletion { work, result }, terminal)
             });
         }
         Ok(())
@@ -397,12 +397,17 @@ impl EventSession {
                 let deadline = self.limits.config().request_timeout;
                 self.busy.insert(id);
                 self.jobs.spawn(async move {
+                    let mut terminal = false;
                     let result = bounded_callback(
-                        async { port.lock().await.consume(&delivery.event).await },
+                        async {
+                            let mut port = port.lock().await;
+                            terminal = !port.resync_on_failure();
+                            port.consume(&delivery.event).await
+                        },
                         deadline,
                     )
                     .await;
-                    Completion::Delivery(id, DeliveryCompletion { delivery, result })
+                    Completion::Delivery(id, DeliveryCompletion { delivery, result }, terminal)
                 });
             }
         }
@@ -434,7 +439,10 @@ impl EventSession {
                         Err(error) => return Err(error),
                     }
                 }
-                Completion::Reset(id, completion) => {
+                Completion::Reset(id, completion, terminal) => {
+                    if terminal && completion.result.is_err() {
+                        return completion.result;
+                    }
                     self.busy.remove(&id);
                     let recovering = self.model.round.is_some();
                     let action = self.model.complete_reset(completion)?;
@@ -443,7 +451,10 @@ impl EventSession {
                     }
                     action
                 }
-                Completion::Delivery(id, completion) => {
+                Completion::Delivery(id, completion, terminal) => {
+                    if terminal && completion.result.is_err() {
+                        return completion.result;
+                    }
                     self.busy.remove(&id);
                     let action = self.model.complete_delivery(completion)?;
                     if action.is_none() && self.model.is_live() {
@@ -546,10 +557,10 @@ impl EventSession {
         let mut applied = Ok(());
         for completion in settled {
             let result = match completion {
-                Completion::Delivery(_, completion) if completion.result.is_ok() => {
+                Completion::Delivery(_, completion, _) if completion.result.is_ok() => {
                     self.model.ack(completion.delivery)
                 }
-                Completion::Reset(_, completion) if completion.result.is_ok() => {
+                Completion::Reset(_, completion, _) if completion.result.is_ok() => {
                     self.model.complete_reset(completion).map(|_| ())
                 }
                 _ => Ok(()),

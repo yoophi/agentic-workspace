@@ -136,6 +136,17 @@ pub fn parse(args: Vec<String>) -> Result<Options, CliError> {
         },
         _ => return Err(usage()),
     };
+    if let Command::Watch { run, .. } = &command {
+        if key.is_some()
+            || revision.is_some()
+            || retry_state.is_some()
+            || state_dir.is_some()
+            || (run.is_some() && input.is_some())
+            || (run.is_none() && seen.contains("--after"))
+        {
+            return Err(usage());
+        }
+    }
     if retry_state.is_some()
         && (input.is_some() || key.is_some() || revision.is_some() || state_dir.is_some())
     {

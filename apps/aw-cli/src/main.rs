@@ -53,8 +53,11 @@ async fn async_main() -> u8 {
                 return 1;
             }
         };
+    if matches!(&options.command, inbound::Command::Watch { .. }) {
+        return application::stream::run(options, &mut interrupt).await;
+    }
     let task_receipt = receipt.clone();
-    let mut job = tokio::spawn(application::run(options, task_receipt));
+    let mut job = tokio::spawn(application::run_finite(options, task_receipt));
     let result = tokio::select! {
      result=&mut job=>job_result(result),
      _=interrupt.recv()=>{job.abort();let _=(&mut job).await;Err(CliError::new("cancelled",130,Outcome::Unknown,false))},

@@ -8,7 +8,7 @@ use std::sync::{
 };
 use tokio::{
     io::{AsyncWrite, AsyncWriteExt},
-    sync::Mutex,
+    sync::{Mutex, Notify},
 };
 use workbench_client::{
     domain::limits::{Limits, Resource},
@@ -19,6 +19,7 @@ struct Flags {
     opened: AtomicBool,
     failed: AtomicBool,
     ended: AtomicBool,
+    failure: Notify,
 }
 pub struct JsonlOutput<W> {
     writer: Arc<Mutex<W>>,
@@ -42,6 +43,7 @@ impl Drop for Flight {
     fn drop(&mut self) {
         if !self.complete {
             self.flags.failed.store(true, Ordering::SeqCst);
+            self.flags.failure.notify_waiters();
         }
     }
 }
@@ -53,6 +55,7 @@ impl<W: AsyncWrite + Unpin + Send> JsonlOutput<W> {
                 opened: AtomicBool::new(false),
                 failed: AtomicBool::new(false),
                 ended: AtomicBool::new(false),
+                failure: Notify::new(),
             }),
             limits,
         }
@@ -62,6 +65,14 @@ impl<W: AsyncWrite + Unpin + Send> JsonlOutput<W> {
     }
     pub fn failed(&self) -> bool {
         self.flags.failed.load(Ordering::SeqCst)
+    }
+    pub async fn failure(&self) {
+        let notified = self.flags.failure.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        if !self.failed() {
+            notified.await;
+        }
     }
     pub fn consumer(&self) -> JsonlConsumer<W> {
         JsonlConsumer(self.clone())
@@ -107,6 +118,9 @@ impl<W: AsyncWrite + Unpin + Send> JsonlOutput<W> {
 pub struct JsonlConsumer<W>(JsonlOutput<W>);
 #[async_trait]
 impl<W: AsyncWrite + Unpin + Send + 'static> EventConsumer for JsonlConsumer<W> {
+    fn resync_on_failure(&self) -> bool {
+        false
+    }
     async fn opened(&mut self, cursor: &StreamCursor) -> Result<(), ClientError> {
         if self.0.opened() {
             return Err(ClientError::Protocol);

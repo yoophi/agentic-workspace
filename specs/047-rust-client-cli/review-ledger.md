@@ -1,6 +1,6 @@
 # 047 설계/구현 리뷰 기록
 
-현재 specify/plan draft, 구현·tests 없음. base20fcd5f의별도047 branch, 0456e4bf30·0469b1b2e2 보존. source dependency(protocol/lifecycle/TSclient) diff0 actual 확인. 046 partial7/31 및045macOS T010/T016 PENDING 유지. 새 Linux/Windows 구현/검증0. 관련 없는 untracked docs/code-review-app-migration.md 보존/제외.
+설계 시작 당시 이력: specify/plan draft, 구현·tests 없음. base20fcd5f의별도047 branch, 0456e4bf30·0469b1b2e2 보존. source dependency(protocol/lifecycle/TSclient) diff0 actual 확인. 046 partial7/31 및045macOS T010/T016 PENDING 유지. 새 Linux/Windows 구현/검증0. 관련 없는 untracked docs/code-review-app-migration.md 보존/제외.
 
 주요 리뷰 질문: client-only dependency 경계、full fault/outcome/replayed 보존、unknown operation/key/epoch generation과 double send、descriptor/identity credential 순서、agent authority fallback、applied cursor/live-first recovery、quota/cancel/stdout、generic mutation productiongate。approved 순서는 OCR host manual 전체Markdown → Codex --wait이며 둘의scope/verdict/findings반영을 별도 기록한다. 그전 tasks/implementation 미실행.
 
@@ -44,3 +44,7 @@ base20fcd5f/head4a605da의 OCR automatic1JSON/excluded9Markdown과 host manual10
 ### D-C4 再리뷰 완료 및 tasks 생성
 
 OCR 4a605da..bd6099c automatic0/excluded5Markdown, host manual5/5(skipped0) 새 material0. Codex thread01a0ec91-d009-7750-a652-3dde6733f0d5 / exec76973 actual exit0, verdict approve. 리뷰어는 bd6099c 전체 설계에 새 material finding 없음, CLI subprocess 경로가 D-C4를 설계상 해결했다고 명시했으며 implementation/actual acceptance 미실행과 045/046/TUI/MCP/signing gates를 보존했다. artifacts `/private/tmp/aw-047-design/watch-codex-{review.md,review.exit,source-context.md,source-manifest.json}` 및 `ocr-watch-{preview,host-review}.json`. 이후 setup-tasks.sh --json으로 지정 template/context를 확인하여 44개 tasks를 생성했다. extensions.yml 없음. 모든 task는 미완료에서 시작한다.
+
+## 최신 범위 변경: 047 완료·인계 후 중지 (2026-09-29)
+
+사용자 지시로 기존 전체 전환 완료 기준을 supersede했다. 047 자체 가능한 계약·exact merged044 actual server/aw subprocess 검증·OCR delegate → Codex adversarial --wait 순차 구현 리뷰 및 수정·재검증·PR/CI·squash merge·main checkout/pull·완료 인계 문서 후 중지한다. 045/046 보완·TUI/MCP·배포·desktop fallback 제거는 후속 구현을 시작하지 않고 미완료/gate 유지/재개 조건을 인계한다. T016 production cancel-rejected exit6은 prerequisite 종속 이연으로 명시하여 검토받으며 현재 production gate를 해제하지 않는다. T043의 전체 roadmap 완료 요구는 이연/gate/인계 정확성 검증으로 대체됐다. 이는 구현 리뷰 approve나 가능한 047 시험 면제가 아니다. 수정된 spec/plan/tasks/validation 및 cli exit 계약을 최종 구현 순차 리뷰 범위에 포함한다.
