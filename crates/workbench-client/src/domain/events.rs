@@ -195,7 +195,7 @@ impl EventReducer {
         }
         Ok(())
     }
-    fn usage(&self) -> (usize, usize) {
+    pub(crate) fn usage(&self) -> (usize, usize) {
         let backlog = self.backlog.iter();
         let consumers = self.consumers.values().flat_map(|s| s.queue.iter());
         backlog
@@ -203,6 +203,14 @@ impl EventReducer {
             .fold((0, 0), |(n, b), p| (n + 1, b + p.bytes))
     }
     pub fn receive(&mut self, event: EventEnvelope) -> Result<(), ClientError> {
+        self.receive_reserved(event, 0, 0)
+    }
+    pub(crate) fn receive_reserved(
+        &mut self,
+        event: EventEnvelope,
+        pending_items: usize,
+        pending_bytes: usize,
+    ) -> Result<(), ClientError> {
         let (kind, _) = parse_stream_id(&event.stream_id).ok_or(ClientError::Protocol)?;
         if event.stream_id != self.cursor.stream_id
             || event.epoch != self.cursor.epoch
@@ -232,6 +240,12 @@ impl EventReducer {
                 .count()
         };
         let (items, retained) = self.usage();
+        let items = self
+            .limits
+            .check_add(Resource::QueueItems, items, pending_items)?;
+        let retained = self
+            .limits
+            .check_add(Resource::QueueBytes, retained, pending_bytes)?;
         self.limits
             .check_add(Resource::QueueItems, items, destinations)?;
         self.limits.check_add(

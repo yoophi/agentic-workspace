@@ -25,6 +25,11 @@ pub enum Action {
     Pause,
     SlowBody,
     WebSocket(Vec<tokio_tungstenite::tungstenite::Message>),
+    WebSocketGate {
+        before: Vec<tokio_tungstenite::tungstenite::Message>,
+        gate: Arc<tokio::sync::Notify>,
+        after: Vec<tokio_tungstenite::tungstenite::Message>,
+    },
     WebSocketRaw(Vec<u8>),
 }
 pub struct Peer {
@@ -50,6 +55,13 @@ impl Peer {
             .await
             .expect("peer socket did not settle")
             .expect("peer failed");
+    }
+    pub async fn stop(&mut self) {
+        self.task.abort();
+        let result = tokio::time::timeout(std::time::Duration::from_secs(1), &mut self.task)
+            .await
+            .expect("peer stop did not settle");
+        assert!(result.is_ok() || result.unwrap_err().is_cancelled());
     }
     pub async fn spawn_at(actions: Vec<Action>, valid_identity: bool, halt_at: &str) -> Self {
         Self::spawn_policy(actions, valid_identity, halt_at, false).await
@@ -187,9 +199,22 @@ impl Peer {
                             socket.write_all(&bytes).await.unwrap();
                             let mut discard = [0; 1024];
                             while socket.read(&mut discard).await.unwrap_or(0) != 0 {}
-                            return;
+                            if !multi || steps.len() == 0 {
+                                return;
+                            } else {
+                                break 'connection;
+                            }
                         }
-                        Action::WebSocket(frames) => {
+                        action @ (Action::WebSocket(_) | Action::WebSocketGate { .. }) => {
+                            let (frames, gate, after) = match action {
+                                Action::WebSocket(frames) => (frames, None, Vec::new()),
+                                Action::WebSocketGate {
+                                    before,
+                                    gate,
+                                    after,
+                                } => (before, Some(gate), after),
+                                _ => unreachable!(),
+                            };
                             use futures_util::{SinkExt, StreamExt};
                             use tokio_tungstenite::{
                                 tungstenite::{handshake::derive_accept_key, protocol::Role},
@@ -214,13 +239,23 @@ impl Peer {
                             for frame in frames {
                                 ws.send(frame).await.unwrap();
                             }
+                            if let Some(gate) = gate {
+                                gate.notified().await;
+                            }
+                            for frame in after {
+                                ws.send(frame).await.unwrap();
+                            }
                             while let Some(Ok(frame)) = ws.next().await {
                                 if frame.is_close() {
                                     let _ = ws.flush().await;
                                     break;
                                 }
                             }
-                            return;
+                            if !multi || steps.len() == 0 {
+                                return;
+                            } else {
+                                break 'connection;
+                            }
                         }
                         Action::Reply(status, value) => (status, value.to_string().into_bytes()),
                         Action::Raw(status, body) => (status, body),

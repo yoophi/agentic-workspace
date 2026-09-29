@@ -133,8 +133,27 @@ pub trait SnapshotPort: Send {
         self.snapshot(applied).await
     }
 }
+/// A freshly proven, hello-verified owned socket. Dropping it releases the connection.
+#[async_trait]
+pub trait EventSocket: Send {
+    fn identity(&self) -> &EndpointIdentity;
+    async fn next(&mut self)
+        -> Result<Option<workbench_protocol::events::EventFrame>, ClientError>;
+    async fn close(&mut self) -> Result<(), ClientError>;
+}
+/// Connection policy and snapshot construction remain adapters; sessions own their jobs.
+#[async_trait]
+pub trait EventSource: Send + Sync {
+    async fn connect(&self, cursor: &StreamCursor) -> Result<Box<dyn EventSocket>, ClientError>;
+    /// Each load owns a fresh port, allowing cancellation without reusing a retired HTTP sender.
+    fn snapshot_port(&self) -> Box<dyn SnapshotPort>;
+}
 #[async_trait]
 pub trait EventConsumer: Send {
+    /// Called after verified subscription hello, before this consumer receives events.
+    async fn opened(&mut self, _cursor: &StreamCursor) -> Result<(), ClientError> {
+        Ok(())
+    }
     /// Success means the full event was applied/output, not just received.
     async fn consume(&mut self, event: &EventEnvelope) -> Result<(), ClientError>;
     async fn reset(&mut self, snapshot: &Snapshot) -> Result<(), ClientError>;

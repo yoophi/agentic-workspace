@@ -31,6 +31,7 @@ pub struct WebSocketConnection {
     socket: Option<Socket>,
     limits: Limits,
     cursors: BTreeMap<String, StreamCursor>,
+    identity: crate::domain::attempt::EndpointIdentity,
 }
 impl std::fmt::Debug for WebSocketConnection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -136,6 +137,7 @@ impl WebSocketConnection {
             socket: Some(socket),
             limits,
             cursors: requested,
+            identity: endpoint.identity().clone(),
         };
         // The hello follows server subscription registration, before event/gap/fault.
         let frame = caller.read().await?.ok_or(ClientError::Unavailable)?;
@@ -201,6 +203,18 @@ impl WebSocketConnection {
                 .map_err(map_error)?;
         }
         Ok(())
+    }
+}
+#[async_trait::async_trait]
+impl crate::ports::EventSocket for WebSocketConnection {
+    fn identity(&self) -> &crate::domain::attempt::EndpointIdentity {
+        &self.identity
+    }
+    async fn next(&mut self) -> Result<Option<EventFrame>, ClientError> {
+        Self::next(self).await
+    }
+    async fn close(&mut self) -> Result<(), ClientError> {
+        Self::close(self).await
     }
 }
 fn map_error(error: Error) -> ClientError {

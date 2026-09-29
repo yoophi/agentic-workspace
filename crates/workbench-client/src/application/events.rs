@@ -1,4 +1,5 @@
 //! Live-first recovery orchestration. Async completion tokens never confer an ACK.
+pub mod session;
 use crate::{
     domain::{
         events::{ConsumerId, Delivery, EventReducer, Reset},
@@ -612,12 +613,15 @@ impl EventRecovery {
         }
     }
     pub fn backoff(&self, jitter: u16) -> Result<Duration, ClientError> {
+        self.backoff_for(self.attempts, jitter)
+    }
+    pub(crate) fn backoff_for(&self, attempts: u32, jitter: u16) -> Result<Duration, ClientError> {
         if jitter > 1000 {
             return Err(ClientError::InvalidInput);
         }
         let config = self.limits.config();
         let factor = 1u32
-            .checked_shl(self.attempts.saturating_sub(1))
+            .checked_shl(attempts.saturating_sub(1))
             .unwrap_or(u32::MAX);
         let base = config
             .backoff_min
