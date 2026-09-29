@@ -53,7 +53,7 @@ impl HarnessConnection {
             let handshake = connection
                 .post(
                     "/v1/system/handshake",
-                    json!({"protocolVersions":[1],"clientName":"047-private-wire-harness"}),
+                    json!({"supportedProtocolVersions":[1],"client":{"name":"047-private-wire-harness","version":"0.1.0"}}),
                     true,
                 )
                 .await;

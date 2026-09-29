@@ -166,3 +166,36 @@ T030/T031은 **미완료**다. 다음은 production HTTP snapshot source(반환 
 macOS shared flags 시험의 최초 raw whole flags 비교는 syscall write 뒤 Darwin FWASWRITTEN(0x10000) kernel bit가 추가되어 실패했다. 원 flags를 잡기 전 같은 libc::write로 그 bit를 미리 설정한 뒤 F_GETFL 전체 값을 비교하며 O_NONBLOCK을 마스킹해 숨기지 않는다. [Apple XNU fcntl.h](https://raw.githubusercontent.com/apple-oss-distributions/xnu/main/bsd/sys/fcntl.h)의 FWASWRITTEN/FCNTLFLAGS 정의와 관측을 구별한다. SIGINT shared-output fixture의 gate 미release→peer.settled timeout은 gate 없는 hello peer로 바꾸어 실제 socket EOF를 읽고 검증했으며 peer.stop으로 대체하지 않았다.
 
 T030–T033 체크는 이 controlled 범위다. T034–T038 actual exact20fcd5f binary/private-root/aw subprocess 및 최종 affected/root8 checks·순차 OCR→Codex review·PR/CI/merge/main sync·인계 문서는 미완료다. T016 production exit6은 미충족 prerequisite 이연으로 최종 리뷰 대상이며 production gate 유지. 045/046·TUI/MCP·배포·fallback 후속 구현 시작0. goal.md와 사용자 docs2개 stage/commit0.
+
+## 2026-09-29: T034–T039 actual merged044 서버 및 CLI wire checkpoint
+
+기준 `27855e2` 이후 변경. `cargo fmt -p workbench-client -p aw-cli` exit0. `cargo test -p workbench-client -p aw-cli` exit0 **192passed/failed0/ignored1/filtered0**(client136/CLI56), 로그 `/private/tmp/aw-047-design/actual-wire-checkpoint-tests.log`. ignore1은 환경/명시 실행을 요구하는 actual_server이며 아래 별도 실행은1passed/ignored0이다. strict `cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings` exit0(`/private/tmp/aw-047-design/actual-wire-clippy.log`). `bash -n scripts/test-workbench-client-wire.sh` 및 `git diff --check` exit0.
+
+`cargo test -p aw-cli --test process_guard`의 현재 suite는 전체 실행에서 **5passed**. `/bin/sleep`의 startup deadline/pending ready future Drop, panic/error/explicit kill+wait, private root Arc lifetime, finite `/usr/bin/true`/exit deadline 및 pending test-only HTTP call wait timeout을 소유한 abort+bounded join/physical peer EOF로 검증했다. cleanup record는 pid/killed/reaped/status/error를 보존하며 실패 시 child를 Drop cleanup까지 유지한다. 실제 killed fixture는 kill(pid,0)=ESRCH/waitpid=ECHILD, normal probe는 exit/status/reaped를 확인했다. ready future의 temporary Path borrow compile exit101과 MutexGuard await/Drop match lint exit101은 lifetime binding/scoped guard/matches로 수정했다. cleanup 오류를 성공으로 덮거나 spawn된 child를 detach하지 않는다. 실제 실패 syscall 주입이나 macOS production process containment를 증명하는 시험은 아니다.
+
+### 고정 서버 출처
+
+`scripts/test-workbench-client-wire.sh --build-only` exit0. current branch source를 쓰지 않고 `git archive 20fcd5fdcf633ae06792d51a9b963e3857909440`을 `/private/tmp/aw-047-wire.dYwrsD/source`에 추출해 별도 target에서 `cargo build --locked -p agentic-workbench-server` exit0을 수집했다. build log/provenance는 해당 private directory에 있다.
+
+| artifact | 실제 SHA-256 |
+|---|---|
+| server binary | `3fcb07ef711a77ffdc58f14c60f144455a7d4cfe3ec9cb5a83011fa67b425e9d` |
+| exact source archive | `d6366d5165e683797499b5f82ca0db4402896aae82cb9faf54bb6f9c0b4a19ed` |
+| baseline Cargo.lock | `85689f1fd6c7eef6f3152a3582d648ebbfcd1391c5fcf5a273c555c78b09fd4a` |
+| copied actual aw under test | `d5631cba2397e28d50dddde3ea7dae1aeaeb2226ac7ac947b56fb2efccfe8d89` |
+
+host macOS15.6.1 arm64. baseline server package version는 변경0이며 현재 branch binary를 old server로 위장하지 않았다. 사용자 branches/worktrees/source·docs2개는 보존했다.
+
+### 실제 실행
+
+실제 명령: `AW_047_SERVER_BINARY=/private/tmp/aw-047-wire.dYwrsD/target/debug/agentic-workbench-server AW_047_SERVER_PROVENANCE=/private/tmp/aw-047-wire.dYwrsD/provenance.json AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture` exit0 **1passed/failed0/ignored0/filtered0**. 로그 `/private/tmp/aw-047-design/actual-wire-progress.log`, 안전한 event/ordinal/sha 증거 `/private/tmp/aw-047-design/actual-wire-evidence.json`. combined 시험은1회 명시 server `serve --data-dir private`를 시작하며 자동 ensure0이다.
+
+- 실제 readonly descriptor(pid=owned child), fresh identify→same TCP authenticated handshake 및 library/CLI system.describe/project.list parity, actual project create/update/delete와 동일 key library/CLI replay(true)/effect1·final list[]를 확인했다. CLI의 별도 invocation별 private caller state-dir를 사용하며 state cache로 HTTP replay를 대신하지 않았다. 기존 completed key state를 최초 publish로 덮는 잘못된 fixture는 privateState5로 실패(exit101)했고 새 caller root로 분리했다. `--retry-state` Unknown 복구는 기존 controlled abrupt-exit proof와 구분한다.
+- bench.open→orchestration.bootstrap 반환 `eventStreamId`와 benchId/workspaceId가 구별되며 두 실제 WS consumer의 epoch/stream/schema/workspaceId가 일치한다. Main1/currentRunId null/assigned task null/active generation null, generations/tasks/reports/commands/coordinatorNotifications/dispatch0, bench runs[] 및 business gate reservations/busy/queued/tasks/pending operations/notifications0을 bootstrap 후·recover 직전·완료 후 확인했다. nonempty면 private recover를 제출하기 전에 assertion 실패한다. production CLI generic recover는 prerequisiteUnavailable8을 실제 검증했다.
+- actual Rust EventSession 독립 consumer와 sandboxed 실제 aw subprocess에 cursor0을 전달하고 bootstrap JSONL/consumer ACK 이후 test-only HarnessConnection의 empty recover를1회 제출했다. bootstrap **sequence1/revision0**, runtimeReconciled **2/1**, notificationRecovery **3/1** 두 eventId/envelope를 exact 비교하고 same-revision event를 각각 ACK했다. HTTP complete output과 별도 orchestration.get final full snapshot revision1이 일치한다. actual 관측 ordinal은 event2=0/HTTP reply=1/event3=2였다. 이 ordinal은 HTTP 결과와 완전한 CLI JSONL 관측 순서이며 서버 전체 총순서로 확대하지 않는다. controlled 양방향 gate proof는 T032/T033에 별도 있다.
+- SIGINT 뒤 CLI stream.end cursor3/exit130/stderr0/stdout EOF/bounded reap, 독립 session cursor3/cleanup error0, business run/task/dispatch0 및 owned server 최종kill/reap를 확인했다. 실제 server PID18413은 cleanup ledger reaped=true/error0 및 kill(pid,0)=ESRCH였다. host-side bounded owned ps 관측에서 해당 server의 child0을 확인했다. agents를 실행하는 operation은 제출하지 않았다.
+- 동일 macOS seatbelt profile의 **private sentinel cat 성공(stdout exact/stderr0)**을 먼저 확인하고, 존재를 확인한 home AGENTS 파일 cat의 **권한 거절**과 shell background `/usr/bin/true` fork의 **권한 거절**을 대조했다. probe 모두 OwnedProcess의 exit deadline/kill/reap/cleanup record 안에서 실행한다. server와 copied SHA-identical aw는 user-home file access와 process-fork를 거절하는 profile에서 실행했다. 초기 nonzero+stdout0만 본 probe를 proof로 유지하지 않았다. 이 test-only profile/직접 child 관측/empty runtime proof는045 production containment, signed installed binary, 실제 ACP lifecycle 완료가 아니다.
+
+실패/정정: 최초 actual query acceptedCalls0 기대는 실제1로 실패(exit101). merged044 `handlers/server::server_status`가 조회 자신을 포함한다고 명시하므로 현재 관측 호출 exact1/다른 accepted call0을 business launch reservation0과 구분했다. arbitrary >=/sleep으로 바꾸지 않았다. seatbelt 내부 ps의 KERN_PROC_ALL 실패(exit101)는 서버/CLI profile을 해제하지 않고 host-side owned observer로 분리했다. 단계별 실패는 별도 실행으로 남겼으며 최종 explicit1passed로 전체와 합산해 ignored 시험을 실행한 척하지 않는다. 최종 source 변화는 guard scoped formatting/lint 정리이며 재검증은 최종 gates에서 계속한다.
+
+T034–T039 체크는 위 구현/증거와 한국어 `docs/workbench-rust-client-cli.md`/실제 quickstart 범위다. T040 affected checks/T041 OCR→Codex/T042 root8gate/T043 이연 인계 검증/T044 PR·CI/squash/main sync 및 최종 완료 인계 문서는 미완료. T016 exit6 및045/046·TUI/MCP·signing/update·desktop fallback 미완료 production gate는 유지하고 후속 구현을 시작하지 않는다. goal.md와 별도 사용자 docs2개 stage/commit0.

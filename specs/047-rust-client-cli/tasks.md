@@ -58,12 +58,12 @@
 
 ## Phase 6: 실제 서버 통합과 047 완료·인계 조건
 
-- [ ] T034 `apps/aw-cli/tests/support/process_guard.rs`에 private temp data/control root, startup deadline, cancel/panic/error kill+bounded wait/reap fixture ownership을 구현하고 `specs/047-rust-client-cli/validation.md`에 cleanup 실패도 기록한다.
-- [ ] T035 `scripts/test-workbench-client-wire.sh`에서 exact merged044 `20fcd5fdcf633ae06792d51a9b963e3857909440` 소스의 실제 server binary를 별도 build directory에서 빌드하고 commit/artifact SHA를 기록한다. 현 branch binary를 옛 binary로 위장하지 않는다.
-- [ ] T036 `apps/aw-cli/tests/actual_server.rs`에 명시적 private server1회 시작과 Rust client/aw subprocess identity→handshake→system.describe/project.list→project CRUD/same-key replay를 검증한다. CLI 자동 daemon ensure0.
-- [ ] T037 `apps/aw-cli/tests/actual_server.rs`에 bench.open→empty bootstrap의 Main1/currentRunId null/active generation null 및 tasks/generations/reports/commands/notifications/dispatch0/in-flight0을 확인한다. nonempty면 recover0/fail, generic production recover는 gate 유지.
-- [ ] T038 `apps/aw-cli/tests/actual_server.rs`에 실제 events watch subprocess로 반환 eventStreamId/epoch/cursor0을 보내 bootstrap JSONL 뒤 empty recover를1회 실행한다. D-C2/D-C3/D-C4의 두 exact event ACK, HTTP reply, 최종 snapshot r+1 및 agent/child launch0·user root 접근0·server/CLI 잔존0 증거를 수집한다.
-- [ ] T039 `docs/workbench-rust-client-cli.md`에 명령/오류/retry/recovery/권한/지원 범위와 pending gate를 한국어 및 Mermaid로 문서화하고 `specs/047-rust-client-cli/quickstart.md`를 실제 명령으로 갱신한다.
+- [x] T034 `apps/aw-cli/tests/support/process_guard.rs`에 private temp data/control root, startup deadline, cancel/panic/error kill+bounded wait/reap fixture ownership을 구현하고 `specs/047-rust-client-cli/validation.md`에 cleanup 실패도 기록한다.
+- [x] T035 `scripts/test-workbench-client-wire.sh`에서 exact merged044 `20fcd5fdcf633ae06792d51a9b963e3857909440` 소스의 실제 server binary를 별도 build directory에서 빌드하고 commit/artifact SHA를 기록한다. 현 branch binary를 옛 binary로 위장하지 않는다.
+- [x] T036 `apps/aw-cli/tests/actual_server.rs`에 명시적 private server1회 시작과 Rust client/aw subprocess identity→handshake→system.describe/project.list→project CRUD/same-key replay를 검증한다. CLI 자동 daemon ensure0.
+- [x] T037 `apps/aw-cli/tests/actual_server.rs`에 bench.open→empty bootstrap의 Main1/currentRunId null/active generation null 및 tasks/generations/reports/commands/notifications/dispatch0/in-flight0을 확인한다. nonempty면 recover0/fail, generic production recover는 gate 유지.
+- [x] T038 `apps/aw-cli/tests/actual_server.rs`에 실제 events watch subprocess로 반환 eventStreamId/epoch/cursor0을 보내 bootstrap JSONL 뒤 empty recover를1회 실행한다. D-C2/D-C3/D-C4의 두 exact event ACK, HTTP reply, 최종 snapshot r+1 및 agent/child launch0·user root 접근0·server/CLI 잔존0 증거를 수집한다.
+- [x] T039 `docs/workbench-rust-client-cli.md`에 명령/오류/retry/recovery/권한/지원 범위와 pending gate를 한국어 및 Mermaid로 문서화하고 `specs/047-rust-client-cli/quickstart.md`를 실제 명령으로 갱신한다.
 - [ ] T040 `specs/047-rust-client-cli/validation.md`에 client/CLI tests와 strict clippy, affected protocol/host/server/AW Rust checks 및 TS consumer 회귀의 실제 명령/exit/test 수를 기록한다. 변경 없는 경로는 검증 N/A 근거를 명시한다.
 - [ ] T041 `specs/047-rust-client-cli/review-ledger.md`에 구현 전체 diff OCR delegate→Codex adversarial --wait 순차 리뷰와 valid findings 수정/재검증을 기록한다.
 - [ ] T042 `specs/047-rust-client-cli/validation.md`에 최종 root package.json 8단계 gate와 exact HEAD를 기록한다. 실행하지 않은 macOS14+/signed bundle/desktop-CLI-TUI matrix를 PASS로 표시하지 않는다.
@@ -117,3 +117,7 @@ T030 준비 중 JSONL consumer6개와 종료 직전 성공 ACK1 회귀를 추가
 ## US3 CLI streaming 및 ordering checkpoint (2026-09-29)
 
 T030–T033 구현·controlled 검증 완료. 실제 owner readonly HTTP snapshot adapter, 공통 JSONL consumer, OS stdout writer 및 aw watch subprocess를 연결했다. generic/explicit Run watch는 동일 미충족 production gate를 유지한다. stdout flags는 동일 open-file-description의 원 flags를 별도 FD lease로 복구하고 /dev/null만 비등록 character device로 지원한다. 정상/SIGINT/registration 실패·partial/broken/slow pipe와 old generation의 성공 delivery/reset ACK0을 검증했다. T032는 실제 recover 요청 수신 barrier 뒤 HTTP reply-first/events-first를 강제하며 owned task timeout/panic 경계에서 abort+bounded join한다. T033 actual subprocess는 bootstrap→recover 두 exact event→snapshot→SIGINT end/130/reap와 독립 consumer 결과를 비교했다. 전체187개(client136/CLI51), strict Clippy exit0; 상세 명령/실패·수정 근거는 validation.md. 이는 controlled fixture이며 actual exact20fcd5f wire/T034–T044와 최종 리뷰·PR·merge·인계는 아직 미완료다. T016 exit6 이연과045/046 production gate 유지, 후속 구현 시작0.
+
+## Actual merged044 wire checkpoint (2026-09-29)
+
+T034–T039의 구현/실행 증거는 validation.md에 연결했다. process guard의5개는 startup/exit deadline, pending future Drop, panic/error/normal exit와 root lifetime, owned call timeout/socket EOF까지 bounded kill/reap를 검증한다. exact20fcd5f archive의 locked server build exit0, SHA/provenance 및 실제 private-root server1회와 Rust client/aw subprocess wire 시험1개 exit0. actual bootstrap s1/r0→runtimeReconciled2/r1→notificationRecovery3/r1을 양 consumer에서 exact ACK3·final snapshot1로 비교했다. Main1/run0/empty vectors·business reservations0/관측용 accepted query1·server child0, positive private/home deny/fork deny bounded probe, copied CLI 동일 SHA와 CLI130/server reap를 검증했다. 이는045 production containment/signed bundle proof가 아니며 gate 활성화0이다. 새 한국어 사용 문서와 실제 quickstart를 추가했다. 최종 순차 리뷰/affected checks/root8gate/PR·CI/merge/main sync/완료 인계는 아직 남는다.

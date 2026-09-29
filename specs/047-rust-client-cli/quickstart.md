@@ -1,14 +1,23 @@
-# 검증 안내 (아직 구현 전)
+# 047 Rust client/CLI 검증 안내
 
-spec→plan→OCR→Codex→tasks→implement 순서. 이후 pure unit/golden/negative fixtures→controlled HTTP/WS peer→affected host/protocol conformance→strictClippy→필요한8gate. 이번 branch에는 아직 crate/binary가 없으므로 실행하지 않은 cargo 명령/통과 수치를 만들어 기록하지 않는다.
+최신 종료 기준은 047 자체 구현·계약/actual server 검증·순차 OCR delegate → Codex adversarial --wait 리뷰 및 수정·PR/CI·squash merge·main checkout/pull·완료 인계 문서 후 중지다. 045/046·TUI/MCP·배포 등 후속 구현은 시작하지 않으며 미완료/gate 유지로 인계한다.
 
-확인할 시나리오: 잘못된 identity/proxy/redirect credential0, malformed/oversize body/default-success0, response loss samekey/payload/1effect、epochchange0resubmit、delayed apply/gap/live snapshot race、stdin/argv/no-logs、SIGINT/localcancel/broken pipe/ACK0、agent owner fallback0、generic productiongate bypass0. actual ES/production restore/installed CLI/app/TUI matrix는 별도 PENDING.
+```sh
+cargo build -p aw-cli
+target/debug/aw operations
+cargo test -p workbench-client -p aw-cli
+cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings
+scripts/test-workbench-client-wire.sh
+```
 
-base20fcd5f, 045/046 preserved refs 의존성은 plan을 따른다. 다음 구현 task는 순차 설계 리뷰가 완료한 뒤만 생성한다. unrelated user file은 stage/commit하지 않는다.
+기존 서버 descriptor는 `--descriptor`로 지정한다. mutation은 별도0700 caller retry state-dir를 요구한다. commands/input/retry/JSONL/exit/권한 및 이연 production gate는 [사용 안내](../../docs/workbench-rust-client-cli.md)를 따른다. ownerToken/ticket을 argv나 logs에 넣지 않는다.
 
+actual wire script는 exact merged04420fcd5f source archive·별도 locked build의 binary SHA/provenance를 남기며 private temp data/control root의 서버1회 명시 실행과 실제 aw subprocess를 시험한다. 기본 unit 실행에서는 actual_server1개가 ignore이며 script의 명시적 --ignored 실행 결과를 별도로 기록한다. `--build-only`는 build/provenance만 수행하며 actual wire PASS로 계산하지 않는다.
 
-사용자 지정 actual server 통합: merged044 exact20fcd5f server build+SHA를 고정한 격리 fixture에서 client/CLI identity→handshake→project.list/system.describe, project CRUD same-key/replayed, bench.open→orchestration.bootstrap(empty)→반환된 eventStreamId(`orchestration:<bindingId>`)의 WS subscription→empty-workspace recover event 수신·cursor/snapshot revision parity를 검증한다. actual ACP/child0, 사용자root0, cleanup완료가 acceptance다. server fixture child와 자동 daemon ensure를 구분한다. fakepeer→실제 wire→affected gate를 모두 기록하고 하나로 축소하지 않는다.
+확인 범위: readonly locator/identity/same-socket credential proof, malformed/oversize/redirect/proxy credential0, full fault/Unknown·explicit retry/CAS/crash reopen, applied cursor/old owner-generation/queue/recovery와 SIGINT/partial/broken stdout, shared OFD flags restoration 및 macOS /dev/null. controlled T032/033은 실제 recover request 수신 barrier 뒤 reply-first/events-first를 강제한다. actual event acceptance는 contracts/client.md D-C2/D-C3와 contracts/cli.md D-C4의 bootstrap s/r→runtimeReconciled s+1/r+1→notificationRecovery s+2/r+1 exact identity/ACK, HTTP reply와 final snapshot을 따른다. arbitrary sleep/느슨한 >= 비교나 같은 revision dedup으로 누락을 숨기지 않는다.
 
-actual event acceptance는 contracts/client.md D-C2를 따른다. runtimeReconciled와 notificationRecovery의 같은 revision r+1/서로 다른 exact sequence s+1,s+2를 모두 소비·ACK한 뒤 최종 snapshot을 비교한다. HTTP reply 순서는 독립이며 barrier peer의 양방향 ordering 및 actual wire evidence를 별도로 기록한다.
+actual private fixture는 Main1/currentRunId null/active generation null 및 tasks/generations/reports/commands/coordinatorNotifications/dispatch0을 확인한 뒤 test-only empty recover를1회 실행한다. production recover 및 RunCancel gate를 해제하지 않는다. sandbox probe는 private sentinel 성공/home 파일 권한 거절/fork 거절을 같은 profile에서 bounded ownership으로 대조한다. 실제 process ownership/EOF/reap/child0 및 source/runtime 상태 근거를 기록하되045 production containment나 설치본/signed package readiness로 확대하지 않는다.
 
-CLI 이벤트 검증은 contracts/cli.md D-C4의 `aw events watch --input -` 실제 subprocess를 사용한다. 반환 eventStreamId/검증된 epoch/afterSequence=0을 stdin으로 전달하고 bootstrap 및 두 recover event의 완전한 stdout JSONL을 검사한다. Rust library 소비만으로 CLI acceptance를 대신하지 않는다.
+base20fcd5f와 미병합0456e4bf30/0469b1b2e2 및 기존 user files/worktree는 보존한다. macOS15.6.1 arm64 proof만 있으며14+/signed bundle/desktop·CLI·TUI matrix는 미검증이다. Linux/Windows는 제외한다. cancel-rejected exit6은 미충족 RunCancel prerequisite 때문에 production 미검증/이연으로 리뷰받는다.
+
+최종 실제 명령/개수/exit와 실패·수정은 [validation.md](validation.md), 순차 리뷰/PR·merge는 [review-ledger.md](review-ledger.md), 작업 종료·후속 재개는 `docs/047-completion-handoff.md`를 따른다. 현재 최종 리뷰/PR/merge/인계 완료 전이다.

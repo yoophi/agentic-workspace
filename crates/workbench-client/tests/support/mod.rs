@@ -275,7 +275,16 @@ impl Peer {
                             if concurrent {
                                 upgraded.spawn(async move {
                                     if let Some(gate) = gate {
-                                        gate.notified().await;
+                                        tokio::select! {
+                                            _ = gate.notified() => {},
+                                            frame = ws.next() => {
+                                                match frame {
+                                                    None | Some(Err(_)) => return,
+                                                    Some(Ok(frame)) if frame.is_close() => { let _ = ws.flush().await; return; },
+                                                    _ => panic!("unexpected fixture frame before gate"),
+                                                }
+                                            }
+                                        }
                                     }
                                     for frame in after {
                                         ws.send(frame).await.unwrap();
@@ -308,7 +317,14 @@ impl Peer {
                             }
                         }
                         Action::ReplyGate { status, body, gate } => {
-                            gate.notified().await;
+                            let mut eof = [0];
+                            tokio::select! {
+                                _ = gate.notified() => {},
+                                count = socket.read(&mut eof) => {
+                                    assert_eq!(count.unwrap_or(0), 0, "unexpected pipelined fixture request");
+                                    break 'connection;
+                                }
+                            }
                             (status, body.to_string().into_bytes())
                         }
                         Action::Reply(status, value) => (status, value.to_string().into_bytes()),
