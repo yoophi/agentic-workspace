@@ -19,7 +19,7 @@
 독립 검증: 격리 loopback peer의 identity/credential, full fault/replay, replacement/cancellation fixtures. 실제 서버 검증은 T035–T038도 필요하다.
 
 - [x] T007 [P] [US1] `crates/workbench-client/tests/locator.rs`에 symlink/부모 경로/uid/mode/type/size/replacement 및 agent descriptor fallback 거절 시험을 먼저 작성한다.
-- [ ] T008 [P] [US1] `crates/workbench-client/tests/identity.rs`에 literal HMAC golden vector와 원 host 비교, identify 실패 credential0, proof 뒤 socket close/replacement 및 WS socket proof 시험을 먼저 작성한다.
+- [x] T008 [P] [US1] `crates/workbench-client/tests/identity.rs`에 literal HMAC golden vector와 원 host 비교, identify 실패 credential0, proof 뒤 socket close/replacement 및 WS socket proof 시험을 먼저 작성한다.
 - [x] T009 [US1] `crates/workbench-client/src/infrastructure/locator.rs`에 readonly no-follow FD descriptor read, loopback IP URL validation, protocol/storage compatibility, missing server unavailable을 구현한다. spawn/ensure/migrate 없음.
 - [x] T010 [US1] `crates/workbench-client/src/infrastructure/identity.rs`에 standard hmac/sha2 proof verification과 redacted secret type을 구현한다. owner token은 credential provider 밖의 diagnostics에 넣지 않는다.
 - [x] T011 [US1] `crates/workbench-client/src/infrastructure/http.rs`에 owned TCP HTTP1 sender/driver, same-socket identify→handshake→call, 새 socket fresh proof, proxy/redirect/automatic retry0 및 bounded headers/body/deadline을 구현한다.
@@ -98,3 +98,5 @@ T018–T021/T023의 private store·finite CLI·실제 subprocess retry는 valida
 T024/T026 reducer13개는 received/applied·all-consumer min ACK·실패/제거/옛 delivery/reset·notification resnapshot 정책·binding/epoch 교체·같은 revision의 두 sequence와 bounded queue를 검증했다. ConsumerId/Delivery/Reset은 고유 reducer owner에 묶였다. earlier join의 live2→replay1 순서는 reducer에서 실패 재현 후 ordered queue/연속 ACK로 수정했으며, T025/T027의 async recovery/socket/snapshot 교차 시험은 별도로 남아 있다. WS나 recovery 완료로 계산하지 않는다.
 
 T025 recovery22개는 원 TS race/listener/gap/reconnect fixture와 대조했다. live-first hello 이후 snapshot/reset, earlier listener live2→replay1, pending load/reset 중 listener join/removal, epoch 모든 gap reason 및 old load 성공/실패·reset 거절, stream exhaustion의 listener load/reset/delivery 무효화와 listener-only exhaustion을 구분해 검증했다. callback/snapshot OwnedJob의 pending 취소·Drop·deadline·panic completion은 검증했지만 실제 session이 모든 socket/task를 취소하고 bounded join하는 연결은 T027에 남아 있다. 현재 전체126tests/strict clippy exit0이며 T027/T028 이후와045/046 전체 gate 미완료를 유지한다.
+
+T008 별도 WS socket의 fresh nonce proof·same-socket upgrade와 replacement listen-before-release(연결0/Authorization0/ticket0)까지 controlled peer에서 검증해 체크했다. WS adapter 초안14개와 전체140tests/strict clippy exit0. T027 managed session의 snapshot/consumer/socket task 취소·bounded join 연결, T028 aggregate queue 연결, T029 queue pressure/recovery race 실제 socket 연결과 T030 이후는 미완료다. 따라서 transport 초안을 US3/actual merged044 wire/전체 readiness 완료로 계산하지 않는다.

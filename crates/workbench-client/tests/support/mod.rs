@@ -24,6 +24,8 @@ pub enum Action {
     Close,
     Pause,
     SlowBody,
+    WebSocket(Vec<tokio_tungstenite::tungstenite::Message>),
+    WebSocketRaw(Vec<u8>),
 }
 pub struct Peer {
     pub endpoint: Arc<LocatedEndpoint>,
@@ -55,6 +57,9 @@ impl Peer {
     pub async fn spawn_multi(actions: Vec<Action>) -> Self {
         Self::spawn_policy(actions, true, "", true).await
     }
+    pub async fn spawn_multi_at(actions: Vec<Action>, halt_at: &str) -> Self {
+        Self::spawn_policy(actions, true, halt_at, true).await
+    }
     async fn spawn_policy(
         actions: Vec<Action>,
         valid_identity: bool,
@@ -79,8 +84,10 @@ impl Peer {
         let signal = received.clone();
         let task = tokio::spawn(async move {
             let mut steps = actions.into_iter();
+            let mut connections = 0;
             loop {
                 let (mut socket, _) = listener.accept().await.unwrap();
+                connections += 1;
                 'connection: loop {
                     let mut head = Vec::new();
                     let mut byte = [0];
@@ -116,7 +123,11 @@ impl Peer {
                     if socket.read_exact(&mut body).await.is_err() {
                         break 'connection;
                     }
-                    let body: Value = serde_json::from_slice(&body).unwrap();
+                    let body: Value = if body.is_empty() {
+                        Value::Null
+                    } else {
+                        serde_json::from_slice(&body).unwrap()
+                    };
                     seen.lock()
                         .unwrap()
                         .push((path.clone(), auth, body.clone()));
@@ -146,7 +157,7 @@ impl Peer {
                             .collect();
                         Action::Reply(
                             200,
-                            json!({"instanceId":"i","proof":if valid_identity {proof}else {"0".repeat(64)}}),
+                            json!({"instanceId":"i","proof":if valid_identity && !(halt_at=="wrong-ws-identity" && connections==2) {proof}else {"0".repeat(64)}}),
                         )
                     } else if path == "/v1/system/handshake" {
                         Action::Reply(
@@ -157,6 +168,60 @@ impl Peer {
                         steps.next().unwrap_or(Action::Close)
                     };
                     let (status, body) = match action {
+                        Action::WebSocketRaw(bytes) => {
+                            use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+                            assert!(path.starts_with("/v1/events?ticket="));
+                            assert!(!auth);
+                            let key = head
+                                .lines()
+                                .find_map(|line| {
+                                    line.split_once(':')
+                                        .filter(|(name, _)| {
+                                            name.eq_ignore_ascii_case("sec-websocket-key")
+                                        })
+                                        .map(|(_, value)| value.trim())
+                                })
+                                .unwrap();
+                            let accept = derive_accept_key(key.as_bytes());
+                            socket.write_all(format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").as_bytes()).await.unwrap();
+                            socket.write_all(&bytes).await.unwrap();
+                            let mut discard = [0; 1024];
+                            while socket.read(&mut discard).await.unwrap_or(0) != 0 {}
+                            return;
+                        }
+                        Action::WebSocket(frames) => {
+                            use futures_util::{SinkExt, StreamExt};
+                            use tokio_tungstenite::{
+                                tungstenite::{handshake::derive_accept_key, protocol::Role},
+                                WebSocketStream,
+                            };
+                            assert!(path.starts_with("/v1/events?ticket="));
+                            assert!(!auth);
+                            let key = head
+                                .lines()
+                                .find_map(|line| {
+                                    line.split_once(':')
+                                        .filter(|(name, _)| {
+                                            name.eq_ignore_ascii_case("sec-websocket-key")
+                                        })
+                                        .map(|(_, value)| value.trim())
+                                })
+                                .unwrap();
+                            let accept = derive_accept_key(key.as_bytes());
+                            socket.write_all(format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n").as_bytes()).await.unwrap();
+                            let mut ws =
+                                WebSocketStream::from_raw_socket(socket, Role::Server, None).await;
+                            for frame in frames {
+                                ws.send(frame).await.unwrap();
+                            }
+                            while let Some(Ok(frame)) = ws.next().await {
+                                if frame.is_close() {
+                                    let _ = ws.flush().await;
+                                    break;
+                                }
+                            }
+                            return;
+                        }
                         Action::Reply(status, value) => (status, value.to_string().into_bytes()),
                         Action::Raw(status, body) => (status, body),
                         Action::Fault(code, outcome) => {

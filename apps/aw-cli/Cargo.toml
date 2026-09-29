@@ -17,6 +17,8 @@ sha2 = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "io-std", "io-util", "process"] }
 
 [dev-dependencies]
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
 tempfile = "3"
 hmac = "0.12"
 libc = "0.2"

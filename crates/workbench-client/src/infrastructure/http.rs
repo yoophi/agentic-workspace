@@ -50,6 +50,25 @@ impl HttpConnection {
         endpoint: Arc<LocatedEndpoint>,
         limits: Limits,
     ) -> Result<Self, ClientError> {
+        let mut caller = Self::prove_inner(endpoint, limits).await?;
+        caller.handshake().await?;
+        Ok(caller)
+    }
+    pub(crate) async fn prove(
+        endpoint: Arc<LocatedEndpoint>,
+        limits: Limits,
+    ) -> Result<Self, ClientError> {
+        timeout(
+            limits.config().request_timeout,
+            Self::prove_inner(endpoint, limits.clone()),
+        )
+        .await
+        .map_err(|_| ClientError::Deadline)?
+    }
+    async fn prove_inner(
+        endpoint: Arc<LocatedEndpoint>,
+        limits: Limits,
+    ) -> Result<Self, ClientError> {
         let socket = timeout(
             limits.config().connect_timeout,
             TcpStream::connect(endpoint.address()),
@@ -88,7 +107,11 @@ impl HttpConnection {
             caller.endpoint.identity().instance(),
             identity["proof"].as_str().ok_or(ClientError::Identity)?,
         )?;
+        Ok(caller)
+    }
+    async fn handshake(&mut self) -> Result<(), ClientError> {
         // Every credential-bearing request uses this exact sender; failed proof drops it.
+        let caller = self;
         let (status,handshake)=caller.json_request("/v1/system/handshake",json!({"supportedProtocolVersions":[PROTOCOL_VERSION],"client":{"name":"aw-rust-client","version":env!("CARGO_PKG_VERSION")}}),true).await?;
         if status != 200
             || handshake["instanceId"].as_str() != Some(caller.endpoint.identity().instance())
@@ -100,7 +123,54 @@ impl HttpConnection {
         {
             return Err(ClientError::Incompatible);
         }
-        Ok(caller)
+        Ok(())
+    }
+    pub(crate) async fn upgrade(
+        mut self,
+        request: Request<Full<Bytes>>,
+    ) -> Result<hyper::upgrade::Upgraded, ClientError> {
+        let key = request
+            .headers()
+            .get("sec-websocket-key")
+            .ok_or(ClientError::Protocol)?
+            .as_bytes()
+            .to_vec();
+        let accept = tokio_tungstenite::tungstenite::handshake::derive_accept_key(&key);
+        let mut response = self
+            .sender
+            .send_request(request)
+            .await
+            .map_err(|_| ClientError::Unavailable)?;
+        if response.status() != 101 {
+            let status = response.status().as_u16();
+            let body = read_response(response, &self.limits).await?;
+            let value = serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
+            return Err(ClientError::Fault(decode_fault(status, value)?));
+        }
+        // Validate the complete standard upgrade response before transferring ownership.
+        let header = |name: &str| response.headers().get(name).and_then(|h| h.to_str().ok());
+        if header("sec-websocket-accept") != Some(accept.as_str())
+            || !header("upgrade").is_some_and(|h| h.eq_ignore_ascii_case("websocket"))
+            || !header("connection").is_some_and(|h| {
+                h.split(',')
+                    .any(|t| t.trim().eq_ignore_ascii_case("upgrade"))
+            })
+            || response.headers().contains_key("sec-websocket-extensions")
+            || response.headers().contains_key("sec-websocket-protocol")
+        {
+            return Err(ClientError::Protocol);
+        }
+        let upgraded = hyper::upgrade::on(&mut response)
+            .await
+            .map_err(|_| ClientError::Protocol)?;
+        if let Some(driver) = self.driver.as_mut() {
+            match timeout(self.limits.config().connect_timeout, driver).await {
+                Ok(Ok(())) => {}
+                _ => return Err(ClientError::Deadline),
+            }
+        }
+        self.driver = None;
+        Ok(upgraded)
     }
     pub(crate) async fn json_request(
         &mut self,
@@ -186,18 +256,23 @@ pub fn decode_reply(
         }
         return serde_json::from_value(value).map_err(|_| ClientError::Protocol);
     }
+    let fault = decode_fault(status, value)?;
+    if fault.request_id != request.request_id {
+        return Err(ClientError::Protocol);
+    }
+    Err(ClientError::Fault(fault))
+}
+/// Ticket/upgrade errors have a server-generated trace ID rather than a CallRequest ID.
+pub(crate) fn decode_fault(status: u16, value: Value) -> Result<WorkbenchFault, ClientError> {
     if !(400..=599).contains(&status) {
         return Err(ClientError::Protocol);
     }
     let fault: WorkbenchFault =
         serde_json::from_value(value.clone()).map_err(|_| ClientError::Protocol)?;
-    if fault.request_id != request.request_id
-        || fault.code.http_status() != status
-        || value["status"].as_u64() != Some(status as u64)
-    {
+    if fault.code.http_status() != status || value["status"].as_u64() != Some(status as u64) {
         return Err(ClientError::Protocol);
     }
-    Err(ClientError::Fault(fault))
+    Ok(fault)
 }
 // Dropping just a call future must also retire its socket: no late reply can be
 // reused by a new attempt through the retained connection object.

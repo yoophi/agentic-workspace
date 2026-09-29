@@ -57,3 +57,15 @@ pub fn admit(operation: &str, profile: CallerProfile) -> Result<OperationId, Adm
         _ => Ok(operation),
     }
 }
+
+/// Watching existing non-executing workspace/bench state does not activate process operations.
+pub fn admit_stream(stream: &str, profile: CallerProfile) -> Result<(), crate::ports::ClientError> {
+    use workbench_protocol::events::{parse_stream_id, StreamKind};
+    let (kind, _) = parse_stream_id(stream).ok_or(crate::ports::ClientError::InvalidInput)?;
+    if profile != CallerProfile::Owner
+        || !matches!(kind, StreamKind::Orchestration | StreamKind::Bench)
+    {
+        return Err(crate::ports::ClientError::PrerequisiteUnavailable);
+    }
+    Ok(())
+}
