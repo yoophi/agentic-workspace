@@ -59,6 +59,8 @@ fn main() {
         "windows-job-probe" => windows_job_probe(),
         "windows-job-owner" => windows_job_owner(),
         "windows-job-owned-payload" => windows_job_owned_payload(),
+        "linux-clone-into-cgroup" => linux_clone_into_cgroup(),
+        "linux-cgroup-payload" => linux_cgroup_payload(),
         "new-process-group" => {
             #[cfg(unix)]
             // SAFETY: the fixture is single-threaded and changes only its own
@@ -217,6 +219,94 @@ fn windows_job_owned_payload() -> ! {
     )
     .expect("write Job-owned process ids");
     sleep_forever();
+}
+
+#[cfg(target_os = "linux")]
+fn linux_clone_into_cgroup() {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::process::CommandExt;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct CloneArgs {
+        flags: u64,
+        pidfd: u64,
+        child_tid: u64,
+        parent_tid: u64,
+        exit_signal: u64,
+        stack: u64,
+        stack_size: u64,
+        tls: u64,
+        set_tid: u64,
+        set_tid_size: u64,
+        cgroup: u64,
+    }
+
+    const CLONE_INTO_CGROUP: u64 = 1 << 33;
+    let cgroup_path = env::args().nth(2).expect("cgroup path argument");
+    let result_path = env::args().nth(3).expect("result path argument");
+    let cgroup = fs::File::open(cgroup_path).expect("open attempt cgroup");
+    let args = CloneArgs {
+        flags: CLONE_INTO_CGROUP,
+        exit_signal: libc::SIGCHLD as u64,
+        cgroup: cgroup.as_raw_fd() as u64,
+        ..CloneArgs::default()
+    };
+    // SAFETY: clone3 receives a complete zero-initialized clone_args. The
+    // returned child immediately execs the single-threaded fixture binary.
+    let child = unsafe {
+        libc::syscall(
+            libc::SYS_clone3,
+            &args as *const CloneArgs,
+            std::mem::size_of::<CloneArgs>(),
+        )
+    };
+    if child < 0 {
+        panic!(
+            "clone3(CLONE_INTO_CGROUP) failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    if child == 0 {
+        let executable = env::current_exe().expect("fixture executable");
+        let error = Command::new(executable)
+            .arg("linux-cgroup-payload")
+            .arg(result_path)
+            .env_clear()
+            .exec();
+        eprintln!("exec linux cgroup payload failed: {error}");
+        // SAFETY: exec failed in the clone child; no Rust destructors may run.
+        unsafe { libc::_exit(126) };
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(clippy::zombie_processes)]
+fn linux_cgroup_payload() -> ! {
+    let result_path = env::args().nth(2).expect("result path argument");
+    let executable = env::current_exe().expect("fixture executable");
+    let mut descendant = Command::new(executable);
+    descendant.arg("sleep").env_clear();
+    new_session(&mut descendant);
+    let descendant = descendant
+        .spawn()
+        .expect("spawn env-cleared cgroup descendant");
+    fs::write(
+        result_path,
+        format!("{}:{}", std::process::id(), descendant.id()),
+    )
+    .expect("write cgroup process ids");
+    sleep_forever();
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_clone_into_cgroup() {
+    panic!("Linux cgroup fixture is Linux-only");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_cgroup_payload() -> ! {
+    panic!("Linux cgroup payload fixture is Linux-only");
 }
 
 #[cfg(not(windows))]

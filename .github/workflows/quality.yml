@@ -36,6 +36,29 @@ jobs:
       - name: Run actual target feasibility
         run: cargo test -p process-supervisor --all-targets -- --nocapture
 
+      - name: Run delegated cgroup birth-placement feasibility
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test_bin="$(find target/debug/deps -maxdepth 1 -type f -executable -name 'platform_feasibility-*' | head -n 1)"
+          test -n "$test_bin"
+          test_bin="$(realpath "$test_bin")"
+          sudo systemd-run \
+            --wait \
+            --pipe \
+            --collect \
+            --service-type=exec \
+            --unit="aw-045-delegated-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --property=Delegate=yes \
+            --uid="$(id -u)" \
+            --gid="$(id -g)" \
+            --setenv=AW_045_DELEGATED_CGROUP=1 \
+            "$test_bin" \
+            --exact delegated_cgroup_birth_placement_contains_env_clear_descendant \
+            --ignored \
+            --nocapture
+
   validate:
     runs-on: macos-15
     timeout-minutes: 45

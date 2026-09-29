@@ -414,6 +414,126 @@ fn cgroup_v2_delegation_is_measured_without_claiming_descendant_containment() {
     );
 }
 
+#[cfg(target_os = "linux")]
+struct DelegatedCgroupCleanup {
+    cgroup: std::path::PathBuf,
+    result: std::path::PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for DelegatedCgroupCleanup {
+    fn drop(&mut self) {
+        let _ = fs::write(self.cgroup.join("cgroup.kill"), "1");
+        for _ in 0..100 {
+            let empty = fs::read_to_string(self.cgroup.join("cgroup.events"))
+                .map(|events| events.lines().any(|line| line == "populated 0"))
+                .unwrap_or(false);
+            if empty {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        let _ = fs::remove_dir(&self.cgroup);
+        let _ = fs::remove_file(&self.result);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_pid_pair(path: &std::path::Path) -> (u32, u32) {
+    for _ in 0..200 {
+        if let Ok(value) = fs::read_to_string(path) {
+            let mut fields = value.trim().split(':');
+            let direct = fields.next().and_then(|field| field.parse::<u32>().ok());
+            let descendant = fields.next().and_then(|field| field.parse::<u32>().ok());
+            if let (Some(direct), Some(descendant)) = (direct, descendant) {
+                return (direct, descendant);
+            }
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    panic!("cgroup payload did not report direct and descendant PIDs");
+}
+
+#[cfg(target_os = "linux")]
+fn process_cgroup(pid: u32) -> String {
+    fs::read_to_string(format!("/proc/{pid}/cgroup"))
+        .expect("read fixture cgroup")
+        .lines()
+        .find_map(|line| line.strip_prefix("0::").map(str::to_owned))
+        .expect("fixture belongs to unified cgroup hierarchy")
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+#[ignore = "requires an actual systemd Delegate=yes service boundary"]
+fn delegated_cgroup_birth_placement_contains_env_clear_descendant() {
+    assert_eq!(
+        std::env::var("AW_045_DELEGATED_CGROUP").as_deref(),
+        Ok("1"),
+        "run only inside the dedicated delegated-cgroup CI service"
+    );
+    let evidence = probe_cgroup_v2_delegation();
+    assert!(evidence.unified_hierarchy);
+    assert!(evidence.cgroup_kill_available);
+    assert!(evidence.child_cgroup_creatable);
+    let relative = evidence.current_path.expect("current delegated cgroup");
+    let current = std::path::Path::new("/sys/fs/cgroup").join(relative.trim_start_matches('/'));
+    let attempt_name = format!("aw-045-attempt-{}", std::process::id());
+    let attempt = current.join(&attempt_name);
+    fs::create_dir(&attempt).expect("create attempt cgroup in delegated subtree");
+    let result = std::env::temp_dir().join(format!(
+        "aw-045-linux-cgroup-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock after epoch")
+            .as_nanos()
+    ));
+    let cleanup = DelegatedCgroupCleanup {
+        cgroup: attempt.clone(),
+        result: result.clone(),
+    };
+
+    let status = Command::new(env!("CARGO_BIN_EXE_process-supervisor-tree-fixture"))
+        .arg("linux-clone-into-cgroup")
+        .arg(&attempt)
+        .arg(&result)
+        .status()
+        .expect("run clone3 birth-placement fixture");
+    assert!(status.success());
+    let (direct_pid, descendant_pid) = wait_for_pid_pair(&result);
+    let direct_identity = process_start_identity(direct_pid).expect("direct identity");
+    let descendant_identity = process_start_identity(descendant_pid).expect("descendant identity");
+    let expected_suffix = format!("/{attempt_name}");
+    assert!(process_cgroup(direct_pid).ends_with(&expected_suffix));
+    assert!(process_cgroup(descendant_pid).ends_with(&expected_suffix));
+
+    fs::write(attempt.join("cgroup.kill"), "1").expect("kill attempt cgroup");
+    let mut empty = false;
+    for _ in 0..250 {
+        empty = fs::read_to_string(attempt.join("cgroup.events"))
+            .map(|events| events.lines().any(|line| line == "populated 0"))
+            .unwrap_or(false);
+        if empty {
+            break;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        empty,
+        "attempt cgroup must become unpopulated after cgroup.kill"
+    );
+    assert!(wait_for_identity_to_disappear(direct_pid, direct_identity));
+    assert!(wait_for_identity_to_disappear(
+        descendant_pid,
+        descendant_identity
+    ));
+    println!(
+        "delegated=true clone_into_cgroup=true env_clear_descendant_contained=true populated_zero=true"
+    );
+    drop(cleanup);
+}
+
 #[cfg(target_os = "macos")]
 #[test]
 fn audit_token_signal_api_records_actual_ordinary_process_permission() {
