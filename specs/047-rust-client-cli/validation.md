@@ -231,3 +231,18 @@ T040 체크는194개 새 client/CLI를 포함한 root1213 및 affected/TS 근거
 실제 서버·최종 root8·전체 OCR→Codex를 수정 HEAD에 다시 묶어 검증한다. 원 needs-attention을 승인으로 바꾸거나 기존 fcae18e root8만으로 이번 수정 검증을 완료했다고 하지 않는다.
 
 I-C1 이후 actual 명령은 앞선 동일 baseline/env로 `AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-notification-gap-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture`, exit0 **1passed** (3.77s), `actual-wire-notification-gap.log`. 새 CLI SHA `899d702558423a3d3debc171cf03d8e9421cf2cbb6b41af8df82ce706fea265a`, server SHA `3fcb07ef711a77ffdc58f14c60f144455a7d4cfe3ec9cb5a83011fa67b425e9d`. 실제 vector1/0→2/1→3/1/ACK3·snapshot1, probes 대조 및 serverPID16674reaped/child0을 재확인했다.
+
+## Codex 구현2 Medium 수정 checkpoint (2026-09-29)
+
+OCR73/73(skipped0) 뒤 fa4c42f의 순차 Codex thread01a0ed40-3d1d-7132-9407-9e7c10815656, exec14405 실제exit0는 **needs-attention Medium2**였다. artifacts `implementation-round2/`에 원 결과와 fa4c42f root8 all exit0(workspace1215passed/ignored8)를 보존했다.
+
+- I-C2: 완료 reply와 원 input을 HTTP body8MiB 상한에 함께 저장하여 Applied를 Unknown으로 남길 수 있었다. 별도 RetryState256MiB 저장/읽기 상한과 publish-before-submit reserve를 적용했다. 예약은 현재 원 input/identity 직렬화 크기 +24×raw body 최대치 +64KiB이며 overflow/부족은 전송 전에 거절한다. 24배는 arbitrary_precision 없는 i64/u64/finite f64 최대24bytes, 문자열 raw byte당 escape 최대6bytes, 구조 구분자 유지에 근거한다. raw와 normalized 길이가 같다는 가정은 제거했다. exact8MiB reply+nonempty input은 terminal cache로 reopen하며 실제 aw 재호출은 requests3/effect1, 동일 stdout/추가HTTP0이다. 지수표기1e10 reply/fault를 body64KiB 경계에서 parse→serialize하면 raw+64KiB보다 커지지만 완료 저장/reopen Applied 캐시를 보존한다. 실제 raw HTTP 지수 reply subprocess도 normalized state>raw+64KiB, reopen 동일 stdout/추가HTTP0을 확인했다. f64 지수−324..308·부호·mantissa 및 integer extrema는24bytes 상한 회귀를 포함한다.
+- I-C3: 활성 watch 동안 O_NONBLOCK 공유 OFD lease를 호출자 계약으로 명시했다. 부모 concurrent writer는 WouldBlock 처리/flags 변경 금지, machine JSONL은 전용 출력 사용이 필요하다. 종료 후 원 flags 복구와 활성 기간 flags 불변을 혼동하지 않는다. 실제 shared Unix socket subprocess는 원 blocking/nonblocking × SIGINT/protocol exit4경로에서 부모 쓰기 성공→burst WouldBlock→전 bytes drain→자식 종료→exact 원 flags 및 부모 재사용→실제 socket EOF를 확인한다. regular file/devnull은 lease 없음, regular write64KiB는 byte cap만 의미한다.
+
+실제 환경은 `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`이다.
+
+- `cargo test -p workbench-client -p aw-cli` exit0 **202passed (client143/CLI59), failed0, ignored actual1**, `review2-corrections-tests-retry.log`. 이전 exact8MiB red는 Body exceeded exit101(`retry-state-budget-red.log`); 정규화 fault fixture의 requestId 불일치1회는 stale completion exit101(`review2-corrections-tests.log`)였으며 원 requestId를 그대로 사용하도록 고쳐 재실행했다.
+- `cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings` exit0, `review2-corrections-clippy.log`; `cargo fmt -p workbench-client -p aw-cli` exit0; `git diff --check` exit0.
+- `AW_047_SERVER_BINARY=/private/tmp/aw-047-wire.dYwrsD/target/debug/agentic-workbench-server AW_047_SERVER_PROVENANCE=/private/tmp/aw-047-wire.dYwrsD/provenance.json AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-review2-corrections-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture` exit0 **1passed**(3.77s), `actual-wire-review2-corrections.log`. exact20fcd5f serverSHA3fcb07ef…b425e9d, bootstrap1/0→runtime2/1→notification3/1 ACK3/snapshot1, positive private sentinel/negative home/fork probes, serverPID8284reaped/child0。이는 fixture 증거이며045 production proof가 아니다.
+
+새 고정 수정 HEAD에서 root8 및 OCR→Codex 전체 순차 재리뷰는 다음 단계다. T041/T042 및 PR/merge/인계는 아직 미완료이며 production RunCancel/recover 및045/046 gates는 유지한다. SSH fetch timeout exit128 및 bounded HTTPS fetch30초 transport timeout(owned process SIGTERM/exit−15), 부모 gh TLS handshake timeout을 관측했다. 인증/remote 변경0이며 permission 문제로 단정하지 않는다.

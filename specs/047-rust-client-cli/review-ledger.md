@@ -66,3 +66,11 @@ headfcae18e/base20fcd5f의 OCR73/73·skipped0 후 Codex adversarial `--wait --mo
 non-retaining stream은 gap last/received 경계에서 새 live-first round와 generation을 시작하며 fresh hello 이후 snapshot/reset을 수행한다. 모든 stream reset 전 delivery를 막는다. retained replay·느린 reset과 다른 consumer 독립 진행은 보존한다. regression은 과거 notification2를 실제로 재전송하지 않고 live3만 보내며 pending snapshot 및 pending reset 동안 consume/ACK0·applied1을 확인하고 reset2→live3/ACK3로 종료한다. model은 두 consumer 중 하나만 reset한 경우에도 delivery0을 확인한다. failure/panic/outer timeout 뒤 owned abort+bounded join 및 actual peer EOF를 수집한다. task guard는 기존 ordering/process guard의 test-only Harness OwnedTask를 그대로 재사용한다.
 
 수정 후 가능한 checks와 actual wire/root gates를 재검증하고 새 고정 HEAD에서 전체 OCR→Codex 순차 리뷰를 다시 실행한다. PR/merge는 그 전에 수행하지 않는다.
+
+### 구현 Codex2: I-C2/I-C3 Medium 수정
+
+fa4c42f 전체 OCR73/73(skipped0)→Codex thread01a0ed40-3d1d-7132-9407-9e7c10815656 /exec14405 actualexit0, verdict **needs-attention Medium2**. 원 artifacts `implementation-round2/`를 보존했다. I-C2는 유효한 큰 reply 완료를 body-budget state에 저장할 수 없는 결함으로 판단했다. RetryState 별도256MiB와 input/identity+normalized reply reserve를 적용하고 exact8MiB nonempty input 및 raw exponent reply/fault reopen, actual aw 재호출 추가HTTP0을 검증했다. 사용자 보완대로 숫자 정규화 상한24배를 예약에 포함하며 raw body와 저장 JSON의 길이 동일성을 가정하지 않는다.
+
+I-C3는 공유 OFD에 활성 O_NONBLOCK 효과가 있다는 유효 지적이다. reviewer가 제시한 대안 중 명시적 호출자 lease 계약과 실제 concurrent writer/backpressure 증거를 적용했다. active 공유 writer의 WouldBlock 처리/flags 변경 금지, JSONL 전용 출력 요구를 문서화했고 실제 subprocess4경로에서 parent write/burst WouldBlock/drain/종료 exactflagsrestore/재사용/socketEOF를 확인했다. 종료 복구만으로 활성 기간의 공유 효과가 없다고 주장하지 않는다.
+
+client/CLI202passed/actual 별도1passed/strictClippy exit0. 상세 actual 명령·수·exit 및 fixture requestId mismatch101는 validation에 기록했다. 새 고정 HEAD의 root8 및 OCR→Codex 재검토 전이며 이 기록은 최종 approve가 아니다.

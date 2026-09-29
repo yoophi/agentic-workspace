@@ -145,7 +145,8 @@ impl PrivateRetryStore {
     ) -> Result<(), ClientError> {
         self.check_lease()?;
         let bytes = serde_json::to_vec(state).map_err(|_| ClientError::PrivateState)?;
-        self.limits.check_add(Resource::Body, 0, bytes.len())?;
+        self.limits
+            .check_add(Resource::RetryState, 0, bytes.len())?;
         let temp = CString::new(format!(
             ".{}.{}.tmp",
             self.name.to_string_lossy(),
@@ -211,7 +212,7 @@ impl PrivateRetryStore {
         }
         let file = unsafe { File::from_raw_fd(fd) };
         validate_private_file(&file)?;
-        let bytes = read_bounded(file, self.limits.maximum(Resource::Body))?;
+        let bytes = read_bounded(file, self.limits.maximum(Resource::RetryState))?;
         let state: State = serde_json::from_slice(&bytes).map_err(|_| ClientError::PrivateState)?;
         if state.version != 1
             || state.protocol != PROTOCOL_VERSION
@@ -336,21 +337,36 @@ impl PrivateRetryStore {
         {
             return Err(ClientError::StaleGeneration);
         }
-        self.write_checked(
-            &State {
-                version: 1,
-                protocol: PROTOCOL_VERSION,
-                contract: CONTRACT_REVISION,
-                request: record.request.clone(),
-                instance: record.endpoint.instance().into(),
-                epoch: record.endpoint.epoch().into(),
-                generation: 1,
-                outcome: Outcome::Unknown,
-                input_digest: digest(&record.request.input)?,
-                result: None,
-            },
-            checkpoint,
-        )
+        let state = State {
+            version: 1,
+            protocol: PROTOCOL_VERSION,
+            contract: CONTRACT_REVISION,
+            request: record.request.clone(),
+            instance: record.endpoint.instance().into(),
+            epoch: record.endpoint.epoch().into(),
+            generation: 1,
+            outcome: Outcome::Unknown,
+            input_digest: digest(&record.request.input)?,
+            result: None,
+        };
+        // Reserve normalized JSON, not raw wire length, before submission. Without
+        // arbitrary_precision, a number serializes to at most 24 bytes (finite f64,
+        // i64/u64); each raw numeric token occupies at least one byte. Strings expand
+        // by at most six bytes per raw byte, and structural punctuation is unchanged.
+        // Thus 24 * wire-body bounds Value normalization; 64KiB covers typed wrappers.
+        // Large caller-supplied identity/key metadata cannot consume the completion reserve.
+        let initial_bytes = serde_json::to_vec(&state)
+            .map_err(|_| ClientError::PrivateState)?
+            .len();
+        let reserve = self
+            .limits
+            .maximum(Resource::Body)
+            .checked_mul(24)
+            .and_then(|bytes| bytes.checked_add(64 * 1024))
+            .ok_or(ClientError::PrivateState)?;
+        self.limits
+            .check_add(Resource::RetryState, initial_bytes, reserve)?;
+        self.write_checked(&state, checkpoint)
     }
 }
 impl RetryStore for PrivateRetryStore {

@@ -8,6 +8,9 @@ exit:0success/1internal/2usage-schema-unsupported/3auth-forbidden/4notfound/5con
 
 JSONL: open 전 finite 오류; open 뒤 stream.open→event/control records→stream.end. 각 newline까지 write_all 성공해야 cursor ACK. stdout write error/broken pipe는 ACK 없이 local 종료; server cancel 없음. SIGINT final bounded stream.end 가능한 경우만 쓰고 exit130, old stream generation 완료가 다음 요청에 mutation0. private logs/ticket/token/protocol frame raw debug0.
 
+stdout이 pipe/socket/TTY이면 watch가 사용하는 동안 공유 open-file-description에 O_NONBLOCK lease를 적용하고 정상/오류/SIGINT Drop 뒤 원 flags를 복구한다. 같은 description을 공유하는 부모·동시 writer는 활성 기간의 WouldBlock을 처리하고 flags를 변경하지 않아야 한다. machine JSONL을 보존하려면 다른 writer의 데이터가 같은 출력에 끼어들지 않게 전용 출력을 사용한다. regular file 및 /dev/null에는 이 lease가 필요 없다. 64KiB write cap은 bytes 제한이며 regular-file syscall 시간 상한을 뜻하지 않는다.
+
+
 actual mcp serve/TUI renderer/packaging은 원 roadmap 별도이며 새 client가 그 완료를 의미하지 않음.
 
 ## Generic event watch (D-C4)

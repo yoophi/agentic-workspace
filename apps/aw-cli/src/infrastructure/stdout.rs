@@ -45,6 +45,10 @@ impl StdoutWriter {
         Self::duplicate(libc::STDOUT_FILENO)
     }
     /// Duplicates an output descriptor; the caller retains its original ownership.
+    /// Pipe/socket/TTY output temporarily sets O_NONBLOCK on the shared open-file-description.
+    /// Concurrent owners must handle WouldBlock and avoid interleaving protocol records. They
+    /// must not change its status flags during this lease. Drop restores the original flags;
+    /// regular files and /dev/null do not require this lease.
     pub fn duplicate(fd: RawFd) -> io::Result<Self> {
         Self::duplicate_registered(fd, AsyncFd::new)
     }

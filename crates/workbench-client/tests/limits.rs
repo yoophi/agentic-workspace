@@ -6,6 +6,7 @@ fn reviewed_defaults_are_bounded() {
     let limits = Limits::default();
     assert_eq!(limits.maximum(Resource::Input), 1024 * 1024);
     assert_eq!(limits.maximum(Resource::Body), 8 * 1024 * 1024);
+    assert_eq!(limits.maximum(Resource::RetryState), 256 * 1024 * 1024);
     assert_eq!(limits.maximum(Resource::Frame), 1024 * 1024);
     assert_eq!(limits.maximum(Resource::Message), 1024 * 1024);
     assert_eq!(limits.maximum(Resource::QueueBytes), 8 * 1024 * 1024);
@@ -38,6 +39,7 @@ fn zero_resource_limits_are_rejected() {
         match resource {
             Resource::Input => config.input_bytes = 0,
             Resource::Body => config.body_bytes = 0,
+            Resource::RetryState => config.retry_state_bytes = 0,
             Resource::Frame => config.frame_bytes = 0,
             Resource::Message => config.message_bytes = 0,
             Resource::QueueBytes => config.queue_bytes = 0,
@@ -108,4 +110,44 @@ fn customized_limits_are_used_without_silent_truncation() {
         limits.check_add(Resource::Input, 0, 32),
         Err(LimitError::Exceeded(Resource::Input))
     );
+}
+
+#[test]
+fn retry_state_budget_reserves_input_response_and_metadata_without_overflow() {
+    let mut config = LimitConfig::default();
+    let minimum = config.input_bytes + 24 * config.body_bytes + 128 * 1024;
+    config.retry_state_bytes = minimum - 1;
+    assert_eq!(
+        Limits::new(config.clone()).unwrap_err(),
+        LimitError::RetryStateBudget
+    );
+    config.retry_state_bytes = minimum;
+    assert!(Limits::new(config).is_ok());
+    assert_eq!(
+        Limits::new(LimitConfig {
+            input_bytes: usize::MAX,
+            body_bytes: usize::MAX,
+            retry_state_bytes: usize::MAX,
+            ..Default::default()
+        })
+        .unwrap_err(),
+        LimitError::RetryStateBudget
+    );
+}
+
+#[test]
+fn finite_json_numbers_fit_conservative_normalization_bound() {
+    for exponent in -324..=308 {
+        for sign in [-1.0, 1.0] {
+            for mantissa in [1.0, 1.2345678901234567, 9.999999999999998] {
+                let number = sign * mantissa * 10f64.powi(exponent);
+                if number.is_finite() {
+                    assert!(serde_json::to_vec(&number).unwrap().len() <= 24);
+                }
+            }
+        }
+    }
+    for number in [i64::MIN as i128, i64::MAX as i128, u64::MAX as i128] {
+        assert!(serde_json::to_vec(&number).unwrap().len() <= 24);
+    }
 }

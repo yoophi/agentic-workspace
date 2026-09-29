@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use support::peer::{Action, Peer};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::Child,
 };
 use tokio_tungstenite::tungstenite::Message;
@@ -272,6 +272,36 @@ async fn actual_child_shared_stdout_flags_restore_after_sigint_and_protocol_exit
                 unsafe { libc::fcntl(shared.as_raw_fd(), libc::F_GETFL) } & libc::O_NONBLOCK,
                 0
             );
+            // The active watch owns a temporary O_NONBLOCK lease on the shared description.
+            // A concurrent parent writer must handle WouldBlock and avoid mixing JSONL records.
+            shared.write_all(b"parent-active\n").unwrap();
+            let mut parent_line = String::new();
+            tokio::time::timeout(Duration::from_secs(1), reader.read_line(&mut parent_line))
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(parent_line, "parent-active\n");
+            let chunk = [b'p'; 8192];
+            let mut written = 0;
+            loop {
+                match std::io::Write::write(&mut shared, &chunk) {
+                    Ok(count) => {
+                        assert!(count > 0);
+                        written += count;
+                        assert!(written <= 4 * 1024 * 1024);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+                    Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(error) => panic!("shared writer failed: {error}"),
+                }
+            }
+            assert!(written > 0);
+            let mut parent_bytes = vec![0; written];
+            tokio::time::timeout(Duration::from_secs(1), reader.read_exact(&mut parent_bytes))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(parent_bytes.iter().all(|byte| *byte == b'p'));
             if sigint {
                 interrupt(&child);
             } else {

@@ -121,3 +121,7 @@ T030–T033 구현·controlled 검증 완료. 실제 owner readonly HTTP snapsho
 ## Actual merged044 wire checkpoint (2026-09-29)
 
 T034–T039의 구현/실행 증거는 validation.md에 연결했다. process guard의5개는 startup/exit deadline, pending future Drop, panic/error/normal exit와 root lifetime, owned call timeout/socket EOF까지 bounded kill/reap를 검증한다. exact20fcd5f archive의 locked server build exit0, SHA/provenance 및 실제 private-root server1회와 Rust client/aw subprocess wire 시험1개 exit0. actual bootstrap s1/r0→runtimeReconciled2/r1→notificationRecovery3/r1을 양 consumer에서 exact ACK3·final snapshot1로 비교했다. Main1/run0/empty vectors·business reservations0/관측용 accepted query1·server child0, positive private/home deny/fork deny bounded probe, copied CLI 동일 SHA와 CLI130/server reap를 검증했다. 이는045 production containment/signed bundle proof가 아니며 gate 활성화0이다. 새 한국어 사용 문서와 실제 quickstart를 추가했다. 최종 순차 리뷰/affected checks/root8gate/PR·CI/merge/main sync/완료 인계는 아직 남는다.
+
+### 구현2 수정 checkpoint
+
+Codex2 needs-attention Medium2를 반영해 RetryState 독립 상한/정규화 예약과 active 공유 stdout lease 계약·concurrent parent writer 회귀를 추가했다. client143/CLI59=202passed/ignored actual1, actual 별도1passed, strict Clippy exit0. 실제 명령/exit/실패 후 수정 근거는 validation의 Codex 구현2 checkpoint다. T041/T042는 새 고정 HEAD의 root8 및 OCR→Codex 승인 전까지 미체크, T043/T044는 이연/gate/인계 및 실제 PR/merge/main sync 전까지 미체크다.

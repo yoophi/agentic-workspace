@@ -311,3 +311,93 @@ async fn killed_cli_reopens_unknown_and_active_invocation_cannot_claim_its_lease
     assert_eq!(requests[2].2, requests[5].2);
     assert_eq!(peer.effects.lock().unwrap().len(), 1);
 }
+
+#[tokio::test]
+async fn near_body_limit_success_is_durable_cached_and_reopen_sends_no_http() {
+    let mut reply = json!({"kind":"complete","output":{"description":""},"revision":17});
+    let overhead = serde_json::to_vec(&reply).unwrap().len();
+    reply["output"]["description"] = json!("x".repeat(8 * 1024 * 1024 - overhead));
+    assert_eq!(serde_json::to_vec(&reply).unwrap().len(), 8 * 1024 * 1024);
+    let peer = Peer::spawn_multi(vec![Action::Reply(200, reply)]).await;
+    let state = state_directory();
+    let root = state.path().canonicalize().unwrap();
+    let output = run(
+        &[
+            "call",
+            "project.create",
+            "--input",
+            "-",
+            "--descriptor",
+            peer.descriptor.to_str().unwrap(),
+            "--state-dir",
+            root.to_str().unwrap(),
+        ],
+        br#"{"name":"large-reply","workingDirectory":"/private/tmp"}"#,
+    )
+    .await;
+    assert!(
+        output.status.success(),
+        "large complete reply must persist before returning success"
+    );
+    assert!(output.stderr.is_empty());
+    let path = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .unwrap();
+    assert!(std::fs::metadata(&path).unwrap().len() > 8 * 1024 * 1024);
+    let cached = run(&["call", "--retry-state", path.to_str().unwrap()], b"").await;
+    assert!(cached.status.success());
+    assert!(cached.stderr.is_empty());
+    assert_eq!(cached.stdout, output.stdout);
+    assert_eq!(peer.requests.lock().unwrap().len(), 3);
+    assert_eq!(peer.effects.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn raw_exponent_wire_normalization_is_durable_and_reopen_sends_no_http() {
+    let numbers = std::iter::repeat_n("1e10", 100_000)
+        .collect::<Vec<_>>()
+        .join(",");
+    let wire = format!(r#"{{"kind":"complete","output":[{numbers}],"revision":17}}"#).into_bytes();
+    let raw_len = wire.len();
+    let peer = Peer::spawn_multi(vec![Action::Raw(200, wire)]).await;
+    let state = state_directory();
+    let root = state.path().canonicalize().unwrap();
+    let output = run(
+        &[
+            "call",
+            "project.create",
+            "--input",
+            "-",
+            "--descriptor",
+            peer.descriptor.to_str().unwrap(),
+            "--state-dir",
+            root.to_str().unwrap(),
+        ],
+        br#"{"name":"exponent-reply","workingDirectory":"/private/tmp"}"#,
+    )
+    .await;
+    assert!(output.status.success());
+    assert!(output.stderr.is_empty());
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(value["data"][0], json!(10_000_000_000.0));
+    let path = std::fs::read_dir(&root)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .unwrap();
+    assert!(std::fs::metadata(&path).unwrap().len() > (raw_len + 64 * 1024) as u64);
+    let cached = run(&["call", "--retry-state", path.to_str().unwrap()], b"").await;
+    assert!(cached.status.success());
+    assert!(cached.stderr.is_empty());
+    assert_eq!(cached.stdout, output.stdout);
+    assert_eq!(peer.requests.lock().unwrap().len(), 3);
+    assert_eq!(peer.effects.lock().unwrap().len(), 1);
+}

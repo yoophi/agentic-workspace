@@ -43,3 +43,5 @@ mutation은 첫 submission 전에 owner-only private retry state를 저장한다
 ## 스트림 식별자와 재바인딩 (D-C3)
 
 `benchId`는 recover/get 입력과 작업대 권한 확인용이고, `workspaceId`는 저장된 작업 영역 식별자다. `bindingId`는 현재 작업 영역과 작업대의 묶임마다 발급된다. bootstrap 응답의 `eventStreamId`가 구독 주소이며 missing/null이면 명시적으로 실패한다. 동일 workspace를 다른 bench에 재바인딩하면 새 eventStreamId를 취득하고 새 consumer generation을 연다. 이전 스트림의 evicted gap 또는 늦은 ACK를 새 스트림 cursor로 이식하지 않는다. 실제 통합 fixture는 응답 eventStreamId와 ticket/hello/envelope identity의 일치를 확인하고, controlled fixture는 독립적인 bench/workspace/binding ID와 재바인딩을 사용해 ID 혼동을 검출한다. 기존 서버 동작을 바꾸어 잘못된 client 식별자를 허용하지 않는다.
+
+retry state의 저장/읽기 상한은 HTTP raw body와 독립적이다(기본256MiB). submission 전에 현재 request/identity serialized bytes +24×최대 raw body +64KiB를 예약한다. 숫자/문자열의 parse→serialize 정규화를 포함하며 공간 부족/overflow는 전송 전에 오류다. finite JSON 숫자24bytes 이하와 문자열 escape6배 이하의 허용 형식을 전제로 한다. 완료 응답은 원 identity/outcome과 함께 저장되어 동일 요청 cache reopen이 추가 HTTP resubmit 없이 가능하다.

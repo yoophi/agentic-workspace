@@ -328,3 +328,84 @@ fn reopened_record_still_enforces_input_budget() {
     let store = PrivateRetryStore::open(&path, limits).unwrap();
     assert!(store.load().is_err());
 }
+
+#[test]
+fn near_body_limit_applied_reply_with_nonempty_input_reopens_as_terminal_cache() {
+    let (_dir, path) = root();
+    let limits = Limits::default();
+    let original = record();
+    let empty = CallReply::complete(json!({"description":""}), Some(17));
+    let overhead = serde_json::to_vec(&empty).unwrap().len();
+    let reply = CallReply::complete(
+        json!({"description":"x".repeat(limits.maximum(workbench_client::domain::limits::Resource::Body)-overhead)}),
+        Some(17),
+    );
+    assert_eq!(
+        serde_json::to_vec(&reply).unwrap().len(),
+        limits.maximum(workbench_client::domain::limits::Resource::Body)
+    );
+    {
+        let store = PrivateRetryStore::open(&path, limits.clone()).unwrap();
+        store.publish(&original).unwrap();
+        store.complete(1, Ok(reply.clone())).unwrap();
+    }
+    assert!(
+        fs::metadata(&path).unwrap().len()
+            > limits.maximum(workbench_client::domain::limits::Resource::Body) as u64
+    );
+    let store = PrivateRetryStore::open(&path, limits).unwrap();
+    let cached = store.load().unwrap();
+    assert_eq!(cached.request, original.request);
+    assert_eq!(cached.generation, 1);
+    assert_eq!(cached.outcome, Outcome::Applied);
+    assert_eq!(cached.result, Some(Ok(reply)));
+    assert!(matches!(
+        store.begin_retry(1, &original.endpoint),
+        Err(workbench_client::ports::ClientError::StaleGeneration)
+    ));
+}
+
+#[test]
+fn normalized_exponent_reply_and_fault_fit_reserved_state_and_reopen() {
+    use workbench_client::domain::limits::{LimitConfig, Resource};
+    use workbench_protocol::WorkbenchFault;
+    let body_bytes = 64 * 1024;
+    let numbers = std::iter::repeat_n("1e10", (body_bytes - 512) / 5)
+        .collect::<Vec<_>>()
+        .join(",");
+    let reply_wire =
+        format!(r#"{{"kind":"complete","output":[{numbers}],"revision":17,"replayed":false}}"#);
+    let original = record();
+    let fault_wire = format!(
+        r#"{{"code":"internal","message":"failure","retryable":false,"outcome":"applied","requestId":"{}","details":[{numbers}]}}"#,
+        original.request.request_id.as_str()
+    );
+    let results = [
+        Ok(serde_json::from_str::<CallReply>(&reply_wire).unwrap()),
+        Err(serde_json::from_str::<WorkbenchFault>(&fault_wire).unwrap()),
+    ];
+    for (wire, result) in [reply_wire, fault_wire].into_iter().zip(results) {
+        assert!(wire.len() <= body_bytes);
+        assert!(serde_json::to_vec(&result).unwrap().len() > body_bytes + 64 * 1024);
+        let (_dir, path) = root();
+        let limits = Limits::new(LimitConfig {
+            body_bytes,
+            ..Default::default()
+        })
+        .unwrap();
+        {
+            let store = PrivateRetryStore::open(&path, limits.clone()).unwrap();
+            store.publish(&original).unwrap();
+            store.complete(1, result.clone()).unwrap();
+        }
+        assert!(fs::metadata(&path).unwrap().len() > (body_bytes + 64 * 1024) as u64);
+        assert!(fs::metadata(&path).unwrap().len() < limits.maximum(Resource::RetryState) as u64);
+        let store = PrivateRetryStore::open(&path, limits).unwrap();
+        assert_eq!(store.load().unwrap().result, Some(result));
+        assert_eq!(store.load().unwrap().outcome, Outcome::Applied);
+        assert!(matches!(
+            store.begin_retry(1, &original.endpoint),
+            Err(workbench_client::ports::ClientError::StaleGeneration)
+        ));
+    }
+}
