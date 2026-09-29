@@ -14,7 +14,7 @@ Decision: merged044 기반, 045/046 cherry-pick 없음. protocol/lifecycle/TS cl
 
 원 `lifecycle/client.rs::verify_instance_by`, `descriptor.rs::read_descriptor`, `identity.rs::proof` 순서를 참고한다. nonce identify(credential 없음)→HMAC verify→credential handshake(instance/epoch/protocol/storage)→call. 원 HMAC은 SHA256(ownerToken) key, nonce newline instanceId payload다. client-only identity proof는 standard hmac/sha2를 쓰거나 pure shared helper로 추출하며 원 host 비교 vectors를 통과해야 한다. owner secret를 protocol serializer/Debug에 싣지 않는다. descriptor PID는 identity proof가 아니다.
 
-HTTP는 existing lock reqwest0.12.28를 후보로 유지한다. [공식 ClientBuilder](https://docs.rs/reqwest/latest/reqwest/struct.ClientBuilder.html)의 no_proxy/redirect/total timeout 및 retry 정책을 확인했고 local installed0.12.28 source에 retry_policy/default retry가 존재한다. 실제 adapter는 `retry(reqwest::retry::never())`, redirect none、no_proxy를 명시한다. exact pinned docs URL fetch 실패는 API 부재 증거가 아니며 설치 source와 compile 검사로 확정한다. `bytes()` whole-body 무제한 allocation 대신 bounded chunks+whole deadline. endpoint IP literal loopback/validated path만 허용, credential 전에 redirect/호환 검사.
+HTTP는 existing lock reqwest0.12.28를 후보로 유지한다. [공식 pinned ClientBuilder](https://docs.rs/reqwest/0.12.28/reqwest/struct.ClientBuilder.html)의 no_proxy/redirect/total timeout 및 retry 정책을 확인했고 local installed0.12.28 source에 retry_policy/default retry가 존재한다. 실제 adapter는 `retry(reqwest::retry::never())`, redirect none、no_proxy를 명시한다. 이후 pinned0.12.28 공식문서를 조회해 API를 확인했다. `bytes()` whole-body 무제한 allocation 대신 bounded chunks+whole deadline. endpoint IP literal loopback/validated path만 허용, credential 전에 redirect/호환 검사.
 
 ## R4 WS와 applied cursor
 
@@ -34,3 +34,10 @@ existing lock tokio-tungstenite/tungstenite0.24.0. [공식 source](https://githu
 ## R7 actual server integration source evidence
 
 사용자 최신 요청으로 merged044 실제 binary/private root wire 경로를 포함한다. core `application/bench_service.rs::open`은 canonical directory→registry.open뿐이고 `application/orchestration/runtime.rs::bootstrap/set_presentation`는 blocking 원 service JSON mutation이다. `service.rs::bootstrap`은 Main-only workspace와 workspace changed를 emit한다. project CRUD는 intent ledger/write를 검증하지만 event 생산을 가정하지 않는다. orchestration bootstrap 후 actual ticket/WS의 Main presentation mutation event를 소비한다. watcher는 `worktree_watcher.rs`에 git Command spawn이 있어 이번 child없는 actual event 경로로 사용하지 않는다. producer/consumer의 exact 입력·stream ownership은 구현 전에 전체 함수/source 및 원 integration fixture로 재확인한다. testserver fixture의 원data root bootstrap은 명시적 private scope이고046 live migration/freeze 우회가 아니다.
+
+
+## R8 OCR 설계 반영: connection identity와 private retry state
+
+D-O1 High 유효: reqwest의 일반 managed pool만으로 identify와 credential 요청이 동일TCP임을 보장했다고 주장할 수 없다. [공식 hyper HTTP1 handshake](https://docs.rs/hyper/latest/hyper/client/conn/http1/fn.handshake.html)와 [upgrade](https://docs.rs/hyper/latest/hyper/upgrade/index.html)를 사용해 sender/connection future/socket 수명을 직접 소유하는 adapter를 선택한다. 새TCP마다 unauthenticated identify부터, same socket에서 handshake/call 또는ticket WS upgrade. endpoint replacement fixture는 identity 성공 뒤 serverclose+다른 peer bind→credential0을 확인한다. standard HMAC verify_slice와 원host vector 비교를 사용한다. transport library 자체 retry없음、bounded read/deadline/task cleanup은 별도 시험한다. reqwest는 조사된 대안이며 현재 auth-bearing path 선택은 아니다.
+
+D-O2 Medium 유효: CLI key-only retry는 previous payload/epoch bound identity를 보존하지 않는다. submission 전 owner-only private state에 immutable input/key/instance/epoch를 durable publish하며 failure전송0; 다음 invocation은 그 state의 동일 attempt만 재시도. 사용자입력→stderr receipt만으로 원source를 입증했다고 하지 않는다. caller runtime-control state는 서버 backup writer와 독립이고 실제 control-store 안전한 open/fsync/CAS/crash fixtures가 필요하다. client private state의 mutable active-use와 finalized outcome을 구분하고 old process completion이 새 attempt를 덮지 못하게 한다.

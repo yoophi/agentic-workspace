@@ -2,7 +2,7 @@
 
 ## Connection
 
-IP literal127.0.0.1 또는[::1] loopback만; credentials/userinfo/query/fragment가 든 base URL 및 redirect/proxy 거절. owner-only bounded descriptor no-follow FD open→uid/mode/file type/size 확인→read, read source 교체는 open한 FD identity 기준. PID 생존으로 endpoint trust를 만들지 않는다. fresh nonce identify MAC 확인 전 Authorization0, instance가 handshake/call 사이 바뀌면 전체 proof 재확인. handshake epoch는 nonempty/descriptor 일치와 supported protocol/storage. missing server는 unavailable; ensure/spawn 호출 없음.
+IP literal127.0.0.1 또는[::1] loopback만; credentials/userinfo/query/fragment가 든 base URL 및 redirect/proxy 거절. owner-only bounded descriptor no-follow FD open→uid/mode/file type/size 확인→read, read source 교체는 open한 FD identity 기준. PID 생존으로 endpoint trust를 만들지 않는다. TCP connection을 직접 소유한 HTTP sender에서 fresh nonce identify MAC 확인 전 Authorization0, identify→credential handshake/call은 같은 TCP connection sender로 보내고 server close/reconnect/pool replacement가 있으면 credential 없는 fresh proof부터 다시 확인한다. authenticated retry/implicit reconnect는 transport에서 금지한다. 별도WS TCP도 ticket upgrade 전 같은 socket에서 identify proof를 확인하고 upgrade로 넘긴다. 고정URL/이전 proof만으로 새 연결에 credential을 보내지 않는다. handshake epoch는 nonempty/descriptor 일치와 supported protocol/storage. missing server는 unavailable; ensure/spawn 호출 없음.
 
 ## Call
 
@@ -22,3 +22,8 @@ fake peer는 test-only VerifiedEndpoint와 admission fixture를 쓴다. producti
 ## Actual merged044 wire conformance
 
 baseline actualbinary20fcd5f + private root fixture로 identity/handshake、system.describe/project.list、project.create/update/delete/replay와 event route를 검증한다. project event는 존재한다고 가정하지 않는다. 실제bench.open→orchestration.bootstrap(Main only)→orchestration stream ticket/WS→Main setPresentation의 원 emitted event 및 snapshot revision을 사용한다. worker/agent launch 없음은 원 service/runtime 호출과 run/bench 상태/fixture process evidence로 확인한다. 명시적 test server process의 startup deadline/kill+bounded wait/reap가 실패하면 assertion 실패와 cleanup failure를 모두 남긴다. 서버status/stop fixture cleanup은 harness authority로 실행하며 CLI public stop readiness와 별개다. fakepeer race 통과만으로 wire완료 아님.
+
+
+## CLI invocation을 넘는 retry identity
+
+mutation은 첫 submission 전에 owner-only private retry state를 저장한다: version、operation、protocol/contract、request/key、immutable input bytes/digest、instance/epoch、attempt generation、state/outcome. original input은 console에 출력하지 않는다. state는 data backup 대상 서버store가 아닌 caller runtime-control domain이며 root/path/no-follow/owner/mode/size와 atomic fsync update를 검증한다. submit 전 저장이 실패하면 요청0. unknown 상태에서 다음 invocation은 `--retry-state FILE`로 원 요청만 읽고 key/input flag 변경을 거절한다. verified instance/epoch 불일치는 unresolved로 유지하고 HTTP command0. arbitrary `--idempotency-key`만으로 이전 unknown 요청을 검증했다고 주장하지 않는다. explicit 새 operation은 별도 state/key이며 이전 unknown의 성공/실패 추정 없음. crash commit-before-output、state write 실패、old invocation completion/CAS、caller cancellation、reopen retry fixtures를 tasks에 포함한다. CLI private state가 있음에도 production all-writer/freeze/restore proof로 계산하지 않는다.
