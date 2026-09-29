@@ -435,7 +435,7 @@ async fn ticket_issue_and_expired_upgrade_faults_preserve_full_typed_status_with
         let result =
             WebSocketConnection::connect(p.endpoint.clone(), Limits::default(), cursors()).await;
         assert!(
-            matches!(result,Err(ClientError::Fault(ref f)) if f==&fault),
+            matches!(result,Err(ClientError::Fault(ref f)) if f.as_ref()==&fault),
             "expired={expired_upgrade} result={result:?}"
         );
         let requests = p.requests.lock().unwrap();

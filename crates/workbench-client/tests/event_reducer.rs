@@ -302,3 +302,33 @@ fn earlier_join_live_two_before_replay_one_must_ack_one_then_two() {
     r.ack(other).unwrap();
     assert_eq!(r.cursor().after_sequence, 2);
 }
+
+#[test]
+fn replaced_delivery_payload_is_stale_even_with_matching_owner_and_sequence() {
+    for replacement in [
+        event("orchestration:binding-b", "epoch-a", 1, 1),
+        event("orchestration:binding-a", "epoch-b", 1, 1),
+        event("orchestration:binding-a", "epoch-a", 1, 99),
+    ] {
+        let mut r = reducer();
+        let consumer = r.register(0).unwrap();
+        r.receive(event("orchestration:binding-a", "epoch-a", 1, 1))
+            .unwrap();
+        let mut delivery = r.next(consumer).unwrap().unwrap();
+        delivery.event = std::sync::Arc::new(replacement);
+        assert!(matches!(r.ack(delivery), Err(ClientError::StaleGeneration)));
+        assert_eq!(r.cursor().after_sequence, 0);
+        assert_eq!(r.received(), 1);
+        assert!(r.next(consumer).unwrap().is_none()); // original inflight was not cleared
+        let reset = r.begin_reset(consumer).unwrap();
+        r.finish_reset(reset, &cursor("orchestration:binding-a", "epoch-a", 0))
+            .unwrap();
+        let original = r.next(consumer).unwrap().unwrap();
+        assert_eq!(
+            original.event.body,
+            event("orchestration:binding-a", "epoch-a", 1, 1).body
+        );
+        r.ack(original).unwrap();
+        assert_eq!(r.cursor().after_sequence, 1);
+    }
+}

@@ -85,7 +85,7 @@ async fn full_fault_is_preserved_with_exact_request_and_http_identity() {
         .await
         .unwrap();
     match connection.call(&request).await {
-        Err(ClientError::Fault(result)) => assert_eq!(result, fault),
+        Err(ClientError::Fault(result)) => assert_eq!(*result, fault),
         other => panic!("{other:?}"),
     };
     connection.close().await.unwrap();

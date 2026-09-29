@@ -25,6 +25,19 @@ fn main() -> ExitCode {
     runtime.shutdown_timeout(std::time::Duration::from_millis(100));
     ExitCode::from(code)
 }
+// Parsing and signal setup precede the caller-supplied deadline. Their diagnostics
+// still have a bounded wait, including a stderr pipe whose reader has stopped.
+async fn initial_error(error: CliError) -> u8 {
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        finite(error.value(), true),
+    )
+    .await
+    {
+        Ok(Ok(())) => error.exit,
+        _ => 8,
+    }
+}
 async fn async_main() -> u8 {
     let args = std::env::args_os()
         .skip(1)
@@ -33,9 +46,7 @@ async fn async_main() -> u8 {
     let options = match args.and_then(inbound::parse) {
         Ok(options) => options,
         Err(error) => {
-            let code = error.exit;
-            let _ = finite(error.value(), true).await;
-            return code;
+            return initial_error(error).await;
         }
     };
     let deadline = options.limits.config().request_timeout;
@@ -45,12 +56,8 @@ async fn async_main() -> u8 {
         match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()) {
             Ok(signal) => signal,
             Err(_) => {
-                let _ = finite(
-                    CliError::new("internal", 1, Outcome::NotApplied, false).value(),
-                    true,
-                )
-                .await;
-                return 1;
+                return initial_error(CliError::new("internal", 1, Outcome::NotApplied, false))
+                    .await;
             }
         };
     if matches!(&options.command, inbound::Command::Watch { .. }) {

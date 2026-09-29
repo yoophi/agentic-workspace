@@ -83,10 +83,10 @@ fn error_debug_hides_server_message_and_arbitrary_details() {
         "private-sentinel",
     )
     .with_details(json!({"token":"private-sentinel"}));
-    let error = ClientError::Fault(fault.clone());
+    let error = ClientError::Fault(Box::new(fault.clone()));
     assert!(!format!("{error:?} {error}").contains("private-sentinel"));
     if let ClientError::Fault(preserved) = error {
-        assert_eq!(preserved, fault);
+        assert_eq!(*preserved, fault);
     } else {
         panic!("fault lost");
     }

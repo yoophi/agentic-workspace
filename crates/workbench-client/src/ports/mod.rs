@@ -42,7 +42,8 @@ pub enum ClientError {
     TransportUnknown,
     Limit(LimitError),
     PrerequisiteUnavailable,
-    Fault(WorkbenchFault),
+    // Preserve every fault field without inflating all Result errors under workspace JSON features.
+    Fault(Box<WorkbenchFault>),
     PrivateState,
     StaleGeneration,
 }

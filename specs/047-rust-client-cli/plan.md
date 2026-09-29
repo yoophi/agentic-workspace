@@ -65,3 +65,7 @@ base `20fcd5fdcf633ae06792d51a9b963e3857909440` = origin/main merged044(#208). 0
 ## Constitution Recheck / Readiness
 
 구조 설계 위반 없음, actual safety/readiness PENDING. extensions.yml과 update-agent-context.sh는 이 base에 없으며 hook/context script 미실행 이유를 기록한다. 원 전체 목표는 superseded 이력과 후속 인계 범위로 보존한다. 최신 047 종료 gate는 가능한 client/CLI 계약과 exact merged044 통합·최종 검증/순차 리뷰/PR·CI/merge/main sync/인계 기록이며, 미완료 후속 roadmap 구현을 047 merge 전제로 요구하지 않는다. production gate와 지원/보장 수준은 실제 증거 없이 확대하지 않는다.
+
+## 구현 checkpoint와 잔여 종료 gate
+
+위 Constitution Check의 설계/계획 PASS와 당시 미실행 설명은 이력이다. 현재 T001–T039 controlled 및 actual exact merged044 wire checkpoint의 실제 실행 증거는 validation.md에 기록했다. 최종 affected/root8 검증·순차 구현 리뷰·PR/CI·main merge/sync·인계는 완료 전이며 production readiness를 주장하지 않는다. 045/046 및 설치본/macOS14+/desktop 종료 후 run/TUI/MCP/signing/update/fallback 제거는 후속 미완료다.

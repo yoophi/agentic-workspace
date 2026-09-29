@@ -303,6 +303,10 @@ impl EventReducer {
             || d.stream_generation != self.generation
             || d.consumer_generation != s.generation
             || s.inflight != Some(d.event.sequence)
+            || !s
+                .queue
+                .front()
+                .is_some_and(|pending| Arc::ptr_eq(&pending.event, &d.event))
         {
             return Err(ClientError::StaleGeneration);
         }

@@ -268,7 +268,9 @@ impl EventSession {
                             }
                             self.action(action).await?;
                         }
-                        Some(EventFrame::Fault { fault }) => return Err(ClientError::Fault(fault)),
+                        Some(EventFrame::Fault { fault }) => {
+                            return Err(ClientError::Fault(Box::new(fault)))
+                        }
                         _ => return Err(ClientError::Protocol),
                     }
                 }

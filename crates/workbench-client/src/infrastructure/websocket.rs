@@ -92,9 +92,9 @@ impl WebSocketConnection {
         let ticket: Ticket = if status == 200 {
             serde_json::from_value(value).map_err(|_| ClientError::Protocol)?
         } else {
-            return Err(ClientError::Fault(
+            return Err(ClientError::Fault(Box::new(
                 crate::infrastructure::http::decode_fault(status, value)?,
-            ));
+            )));
         };
         if ticket.expires_at.is_empty() || ticket.expires_at.len() > 128 {
             return Err(ClientError::Protocol);

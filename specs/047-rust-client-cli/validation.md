@@ -6,7 +6,7 @@
 
 T016 cancel-rejected exit6은 닫힌 RunCancel prerequisite 때문에 production 미검증/이연이다. 현재 도달 가능한 exit 검증과 explicit/generic gate parity를 유지하며 이연을 최종 리뷰받는다. 후속 실제 proof 없이 활성화하지 않는다. T043은 전체 roadmap 구현 대신 위 미완료 사실/gate/재개 조건의 인계 검증으로 변경됐다. 아래 기존 날짜별 checkpoint는 당시 실제 실행 결과와 범위의 이력으로 보존하며, 과거 전체 readiness 요구가 최신 047 종료 기준을 대체하지 않는다.
 
-기준 HEAD `05e55a395be27a3c8b6d66e9fe557980e7ad6d5f`, branch `047-rust-client-cli`. T030/031 추가 소스와 subprocess 시험은 uncommitted 작업 중이며 최종 전체 재검증/리뷰/PR 전이다. goal.md는 untracked 유지, 별도 사용자 docs2개 수정/stage/commit 금지.
+현재 checkpoint HEAD `be9852c91ef7ddc2609c855cac77fa4030d1b422`, branch `047-rust-client-cli`. T001–T039의 구현 및 controlled/actual wire checkpoint를 완료했고, 최종 workspace 검증과 구현 리뷰 수정은 작업 중이다. PR/CI/merge/main sync/인계는 아직 완료하지 않았다. goal.md는 untracked 유지, 별도 사용자 docs2개 수정/stage/commit 금지.
 
 ## 2026-09-29: T001–T004
 
@@ -199,3 +199,21 @@ host macOS15.6.1 arm64. baseline server package version는 변경0이며 현재 
 실패/정정: 최초 actual query acceptedCalls0 기대는 실제1로 실패(exit101). merged044 `handlers/server::server_status`가 조회 자신을 포함한다고 명시하므로 현재 관측 호출 exact1/다른 accepted call0을 business launch reservation0과 구분했다. arbitrary >=/sleep으로 바꾸지 않았다. seatbelt 내부 ps의 KERN_PROC_ALL 실패(exit101)는 서버/CLI profile을 해제하지 않고 host-side owned observer로 분리했다. 단계별 실패는 별도 실행으로 남겼으며 최종 explicit1passed로 전체와 합산해 ignored 시험을 실행한 척하지 않는다. 최종 source 변화는 guard scoped formatting/lint 정리이며 재검증은 최종 gates에서 계속한다.
 
 T034–T039 체크는 위 구현/증거와 한국어 `docs/workbench-rust-client-cli.md`/실제 quickstart 범위다. T040 affected checks/T041 OCR→Codex/T042 root8gate/T043 이연 인계 검증/T044 PR·CI/squash/main sync 및 최종 완료 인계 문서는 미완료. T016 exit6 및045/046·TUI/MCP·signing/update·desktop fallback 미완료 production gate는 유지하고 후속 구현을 시작하지 않는다. goal.md와 별도 사용자 docs2개 stage/commit0.
+
+## 2026-09-29: 최종 workspace 및 OCR host 수정 checkpoint
+
+`be9852c` 이후 client error의 full Fault를 Box로 보존하고, 초기 argv/signal 오류 출력에1초 deadline을 적용하며, Delivery public event 교체가 원 ACK를 통과하지 못하도록 queue Arc identity를 검사했다. actual stderr pipe를 WouldBlock까지 채우고 reader 미소비·parent 양 끝 열린 상태를 child reap까지 유지한 시험은 exit8/bounded reap를 확인했다. 잘못된 stream/epoch 또는 같은 identity·sequence의 다른 body로 교체한 token은 모두 StaleGeneration/queue·inflight·received·cursor 변경0이며 원 pending delivery는 reset 후 정상 ACK한다.
+
+- `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo test --workspace --all-targets` exit0, **120 suites/1213passed/failed0/ignored8/filtered0/measured0**. 로그 `/private/tmp/aw-047-design/final-root-rust-tests-debug0-sequential.log`, target별 집계 `final-root-rust-test-counts.json`. 신규 client137/CLI57=194passed와 actual ignored1을 포함한다. 기존 scripted engine/core/host/Desktop 단위·integration 회귀를 production ACP/045 containment/desktop 설치본 matrix proof로 확대하지 않는다.
+- `cargo fmt --all -- --check` exit0. `git diff --check`의 spec status trailing whitespace exit2는 해당 줄을 정정한 뒤 exit0.
+- affected `cargo check -p workbench-protocol -p workbench-core -p workbench-host -p workbench-server -p agentic-workbench-server -p agentic-workbench` exit0 (`affected-rust-check.log`). `pnpm --filter @yoophi/workbench-client test` exit0 **9files/74tests/typeerrors0** (`affected-ts-client-tests.log`). protocol/lifecycle/TS consumer 구현 변경0, 기존 package version 변경0이다. frontend UI/FSD/Storybook·릴리스 version·Linux/Windows 변경/검증은 N/A이며 새 client/CLI production graph에는 host/core/server/Tauri0이다.
+- `pnpm check-types` exit0 **13/13Turbo cached**, `pnpm test` exit0 **12/12cached**, `pnpm build` exit0 **5/5cached**. logs `final-root-{check-types,ts-tests,build}.log`. 새 frontend 실행으로 기록하지 않는다.
+- `pnpm --filter @yoophi/workbench-client test:integration` exit0 **3files/7tests** (`final-client-integration.log`), `pnpm --filter @yoophi/agentic-workbench test:integration` exit0 **3files/14tests** (`final-aw-integration.log`). 기존 HTTP503 negative fixture 로그는 기대된 실패 응답이며 suite 실패0이다.
+
+실패/재실행 이력: 최초 root strict Clippy는 ClientError::Fault variant128bytes 이상 result_large_err113건으로 exit101이었다 (`final-root-rust-clippy.log`). full fault fields를 Box 안에 보존한 뒤 workspace strict Clippy exit0 (`final-root-rust-clippy-boxed.log`); 최종 추가 수정 뒤 `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo clippy --workspace --all-targets -- -D warnings`도 exit0 (`final-root-rust-clippy-debug0.log`). 개별 client Clippy와 workspace feature union의 크기 차이가 원인이라는 설명은 추론이며 관측은 root lint와 variant 크기다. 최초 root Rust test는 link ENOSPC exit101 (`final-root-rust-tests.log`). generated incremental 캐시 정리 후 default debug 재시도는 disk 여유가 다시 부족해지므로 owned cargo에 SIGINT를 보내 exit130으로 종료했다 (`final-root-rust-tests-boxed.log`), 제품 회귀 실패가 아니다. `cargo clean --profile dev` exit0/generated130747files·31.5GiB 정리 (`root-build-cache-clean.log`), source/user files/private baseline provenance는 보존했다. cleanup 완료 전에 debug0 build를 겹쳐 시작한1회는 제 실행 순서 오류로 syn object ENOENT exit101 (`final-root-rust-tests-debug0.log`)이었다. cleanup 완료 수집 뒤 **순차** 재실행이 위1213passed다. debug/incremental/jobs 설정은 생성 artifact·빌드 자원 설정이며 시험 대상/의미를 축소하지 않는다.
+
+최종 strict Clippy·actual wire 재실행과 고정 HEAD/root8 evidence·순차 OCR→Codex 구현 리뷰·PR/CI/merge/main sync·완료 인계는 아직 완료 전이다. T016 production exit6 및045/046/TUI/MCP/signing/update/fallback 등 후속 gate는 유지한다.
+
+최종 actual 재실행: 위 actual 명령에 `CARGO_INCREMENTAL=0 CARGO_BUILD_JOBS=2 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0`를 적용하고 `AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-final-evidence.json`으로 실행, exit0 **1passed/failed0/ignored0/filtered0** (3.92s). 로그 `actual-wire-final.log`. exact server SHA/출처는 동일하고 새 CLI 바이너리 SHA는 final evidence에 별도 기록했다. actual bootstrap1/0→runtime2/1→notification3/1/ACK3, reply ordinal1/event ordinals[0,2], positive private sentinel/home 권한 거절/fork probe 거절, observerAccepted1/businessWork0/child0을 재확인했다. server PID28471 최종reaped=true/cleanup error0. 테스트 profile·empty fixture 근거이며 production containment/ACP launch 완료가 아니다.
+
+T040 체크는194개 새 client/CLI를 포함한 root1213 및 affected/TS 근거다. T042는 review할 고정 HEAD에서 root8 gate를 재확인한 뒤 체크하며, 소스와 검증 artifact의 SHA를 연결한다. 후속 리뷰 수정이 있으면 해당 검증을 갱신한다.

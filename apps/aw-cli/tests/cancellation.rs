@@ -143,3 +143,55 @@ async fn broken_stdout_pipe_has_safe_error_and_bounded_exit() {
     assert_eq!(error["error"]["code"], "outputUnavailable");
     assert_eq!(output.stderr.iter().filter(|b| **b == b'\n').count(), 1);
 }
+
+#[tokio::test]
+async fn invalid_argv_with_full_stderr_pipe_has_bounded_exit_without_reader_eof() {
+    use std::{
+        io::Write,
+        os::fd::{AsRawFd, FromRawFd},
+        process::Stdio,
+    };
+    let mut pair = [-1; 2];
+    assert_eq!(unsafe { libc::pipe(pair.as_mut_ptr()) }, 0);
+    let reader = unsafe { std::fs::File::from_raw_fd(pair[0]) };
+    let mut writer = unsafe { std::fs::File::from_raw_fd(pair[1]) };
+    let flags = unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_GETFL) };
+    assert!(flags >= 0);
+    assert_eq!(
+        unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) },
+        0
+    );
+    loop {
+        match writer.write(&[b'x'; 4096]) {
+            Ok(count) => assert!(count > 0),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
+            Err(error) => panic!("pipe fill failed: {error}"),
+        }
+    }
+    assert_eq!(
+        unsafe { libc::fcntl(writer.as_raw_fd(), libc::F_SETFL, flags) },
+        0
+    );
+    let mut child = tokio::process::Command::new(env!("CARGO_BIN_EXE_aw"))
+        .arg("invalid-command")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::from(writer.try_clone().unwrap()))
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(3), child.wait()).await {
+        Ok(status) => status.unwrap(),
+        Err(_) => {
+            child.start_kill().unwrap();
+            tokio::time::timeout(std::time::Duration::from_secs(1), child.wait())
+                .await
+                .unwrap()
+                .unwrap();
+            panic!("invalid argv output did not terminate after kill/reap");
+        }
+    };
+    assert_eq!(status.code(), Some(8));
+    // No bytes are consumed and both parent pipe ends remain open through reap.
+    drop((reader, writer));
+}

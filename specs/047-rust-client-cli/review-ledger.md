@@ -48,3 +48,13 @@ OCR 4a605da..bd6099c automatic0/excluded5Markdown, host manual5/5(skipped0) 새 
 ## 최신 범위 변경: 047 완료·인계 후 중지 (2026-09-29)
 
 사용자 지시로 기존 전체 전환 완료 기준을 supersede했다. 047 자체 가능한 계약·exact merged044 actual server/aw subprocess 검증·OCR delegate → Codex adversarial --wait 순차 구현 리뷰 및 수정·재검증·PR/CI·squash merge·main checkout/pull·완료 인계 문서 후 중지한다. 045/046 보완·TUI/MCP·배포·desktop fallback 제거는 후속 구현을 시작하지 않고 미완료/gate 유지/재개 조건을 인계한다. T016 production cancel-rejected exit6은 prerequisite 종속 이연으로 명시하여 검토받으며 현재 production gate를 해제하지 않는다. T043의 전체 roadmap 완료 요구는 이연/gate/인계 정확성 검증으로 대체됐다. 이는 구현 리뷰 approve나 가능한 047 시험 면제가 아니다. 수정된 spec/plan/tasks/validation 및 cli exit 계약을 최종 구현 순차 리뷰 범위에 포함한다.
+
+## 구현 OCR host preliminary 검토 및 수정
+
+base20fcd5f/headbe9852c의 deterministic preview는73files/automatic reviewable60/excluded13이다 (`implementation-ocr-preview.json` 및 `implementation-ocr-rules.json`). host는 Rust/client·CLI·실제/controlled 시험·shell·Cargo/lock·전체047 산출물을 직접 읽어 검토했다. Markdown/lock의 자동 제외를 검토 생략으로 계산하지 않는다. 고정 수정 HEAD의 최종 preview/coverage/report를 생성한 뒤 Codex를 순차 실행하며, 현재는 Codex 구현 approval 전이다.
+
+- I-O1 Medium: main의 argv parse/signal 등록 오류 경로는 caller deadline 이전 finite stderr를 무기한 기다릴 수 있었다.1초 diagnostic deadline과 실제 full pipe/reader 미소비/parent FD 열린 상태/exit8·bounded kill/reap 회귀를 추가했다. workspace Rust 전체에서 해당 회귀 통과.
+- I-O2 Medium: 고유 reducer owner/generation이 일치하는 Delivery의 public event를 같은 sequence의 다른 payload로 바꾸면 원 pending event를 ACK할 수 있었다. queue front의 원 Arc identity 검사와 stream/epoch/body 교체 후 상태 변경0·원 event 재소비 회귀를 추가했다. workspace Rust 전체에서 해당 회귀 통과.
+- workspace root strict lint의 large ClientError는 full WorkbenchFault를 Box로 보존해 수정했다. JSON/details/outcome/retryable/requestId를 지우거나 코드로 축약하지 않았고 root1213tests 및 최종 strict Clippy exit0이다.
+
+일반 reqwest pool/fresh TCP proof 경합, execute future Drop Unknown, Arc store CAS, retryable fault reopen, restore preflight Unknown, cancel typed 입력/gate parity, unfinished stdin barrier, 최초 publish syscall 경계, production hook 격리 panic, reducer owner/replay interleave, epoch/exhaustion stale completion, pending opened/budget/transient reconnect/full reset retry budget, stdout shared OFD/devnull/EOF, recover request 수신 이전 이벤트 fixture, sandbox probe false positive 및 owned deadline에 대한 사용자 검토 지적을 구현/회귀와 validation의 각 checkpoint에 반영했다. pending external prerequisites는 false PASS로 바꾸지 않는다.

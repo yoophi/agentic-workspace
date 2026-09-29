@@ -57,6 +57,8 @@ finite 성공은 stdout JSON1개+newline, 실패는 stdout0/stderr JSON1개다. 
 | 10 | interaction required |
 | 130 | SIGINT local 종료 |
 
+출력 채널이 broken/blocked이면 JSON 전달을 보장할 수 없으며 outputUnavailable(exit8)로 bounded 종료한다. argv·signal 초기화 오류 출력은1초, 그 이후 finite 출력은 request timeout으로 제한한다.
+
 exit만으로 서버 작업의 Applied/Unknown/NotApplied를 추정하지 않는다. transport에 이미 제출한 작업은 외부 future drop에도 Unknown으로 남고 동일 identity의 explicit retry를 허용한다. local 종료가 원 서버 작업을 취소하지 않는다.
 
 ## 이벤트와 recovery

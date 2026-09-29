@@ -90,7 +90,7 @@ pub async fn execute(
         Err(ClientError::Fault(fault)) => {
             submitted
                 .attempt
-                .fail(generation, fault.clone())
+                .fail(generation, (*fault).clone())
                 .map_err(|_| ClientError::Protocol)?;
             submitted.resolved = true;
             Err(ClientError::Fault(fault))

@@ -28,7 +28,7 @@ impl CliError {
     }
     pub fn from_client(error: ClientError) -> Self {
         match error {
-            ClientError::Fault(fault) => Self::fault(fault),
+            ClientError::Fault(fault) => Self::fault(*fault),
             ClientError::InvalidInput => Self::usage(),
             ClientError::Unavailable => Self::new("unavailable", 8, Outcome::NotApplied, true),
             ClientError::Incompatible => {

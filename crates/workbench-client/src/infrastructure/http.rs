@@ -145,7 +145,7 @@ impl HttpConnection {
             let status = response.status().as_u16();
             let body = read_response(response, &self.limits).await?;
             let value = serde_json::from_slice(&body).map_err(|_| ClientError::Protocol)?;
-            return Err(ClientError::Fault(decode_fault(status, value)?));
+            return Err(ClientError::Fault(Box::new(decode_fault(status, value)?)));
         }
         // Validate the complete standard upgrade response before transferring ownership.
         let header = |name: &str| response.headers().get(name).and_then(|h| h.to_str().ok());
@@ -260,7 +260,7 @@ pub fn decode_reply(
     if fault.request_id != request.request_id {
         return Err(ClientError::Protocol);
     }
-    Err(ClientError::Fault(fault))
+    Err(ClientError::Fault(Box::new(fault)))
 }
 /// Ticket/upgrade errors have a server-generated trace ID rather than a CallRequest ID.
 pub(crate) fn decode_fault(status: u16, value: Value) -> Result<WorkbenchFault, ClientError> {

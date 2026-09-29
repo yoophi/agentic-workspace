@@ -2,7 +2,7 @@
 
 **Feature Branch**: `047-rust-client-cli`  
 **Created**: 2026-09-29  
-**Status**: specify·plan draft / 순차 설계 리뷰 예정, 구현 전  
+**Status**: 구현·controlled/actual wire 검증 완료 checkpoint; 최종 workspace 검증·순차 구현 리뷰·PR/CI/merge·인계 진행 중
 **Input**: macOS standalone HTTP/WS server+thin desktop 전체 로드맵에서 Rust client/CLI를 독립 진행한다. 045/046 미완료·production gate를 그대로 보존하고 다른 작업 파일을 포함하지 않는다.
 
 ## User Scenarios & Testing
@@ -58,7 +58,7 @@ identity proof 전 redirect/proxy, owner descriptor symlink/권한/교체/oversi
 - **FR-005**: request identity와 idempotency key를 구분한다. mutation 재시도는 명시적 operation identity와 동일 key/payload/instance를 유지하며 epoch 변경 후 자동 전송하지 않는다.
 - **FR-006**: catalog/descriptor가 정의하는 operation·input·scope를 검사하고 generic `aw call`과 명시 명령의 의미를 같게 유지한다. unsupported operation은 silent fallback하지 않는다.
 - **FR-007**: `aw events watch --input -`, `aw operations`, `aw project list`, `aw run start/watch/cancel`, `aw server status`, generic `aw call`을 제공한다. readiness가 필요한 launch/stop/ensure·agent profile 배포는 실제 prerequisite가 없으면 활성화하지 않는다.
-- **FR-008**: machine finite 성공은 stdout `{ok:true,data,requestId,...}` 하나, 실패는 stdout0·stderr `{ok:false,error,requestId,...}` 하나와 stable nonzero exit다. outcome과 uncertain retry 정보를 오류에 보존한다.
+- **FR-008**: machine finite 성공은 stdout `{ok:true,data,requestId,...}` 하나, 실패는 stdout0·stderr `{ok:false,error,requestId,...}` 하나와 stable nonzero exit다. outcome과 uncertain retry 정보를 오류에 보존한다. 출력 채널 자체가 broken/blocked이면 JSON 전달 성공을 주장하지 않고 bounded 종료·outputUnavailable을 반환한다.
 - **FR-009**: human progress/warning은 stderr, machine mode는 color/spinner/interaction/log 혼합0이다. library panic/dependency log도 stdout을 오염시키지 않는다.
 - **FR-010**: input은 bounded stdin/file descriptor 기본이며 token·prompt·goal을 argv/log/Debug/error에 노출하지 않는다. raw private input echo를 하지 않는다.
 - **FR-011**: timeout/SIGINT는 local wait만 종료한다. 명시적 cancel-on-timeout 또는 cancel operation은 별도 요청/권한/멱등 계약으로 처리한다.

@@ -38,7 +38,7 @@ mutation은 첫 submission 전에 owner-only private retry state를 저장한다
 4. HTTP recover reply와 WS event 도착 사이에는 총순서를 가정하지 않는다. 두 envelope ACK와 reply 성공을 명시적 완료 신호로 기다린 뒤 별도 orchestration.get으로 최종 snapshot을 읽고 revision=r+1 및 empty/run0 상태를 exact 비교한다. recover reply의 snapshot도 r+1이어야 한다. 유한 deadline은 실패 판정용이며 임의 sleep/timeout만으로 두 이벤트 완료를 추정하지 않는다.
 5. controlled peer에서는 reply-before-events와 두 events-before-reply 양쪽을 barrier로 강제하여 ACK/완료 reducer를 시험한다. 실제 서버에서는 관측된 순서와 두 eventId/sequence/reason/revision·reply·최종 snapshot을 보존하며 원 product 코드를 시험에 맞춰 변경하지 않는다. fixture teardown은 두 이벤트 처리 뒤 수행하며 누락/cleanup 실패는 별도로 기록한다.
 
-현재는 원 전체 함수의 읽기 증거 및 acceptance 설계다. 실제 binary 실행/통과는 아직 없으며 해당 통합 task 전까지 SC-007 미완료다.
+이 acceptance는 T032/T033 controlled 양방향 barrier와 T038 exact merged044 binary/실제 aw subprocess에서 검증했다. 실제 명령·artifact SHA·event vector·cleanup 증거는 validation.md의 T034–T039 checkpoint에 기록했다. 최종 소스 재검증·순차 구현 리뷰·PR/CI/merge 및 인계 완료는 별도 최종 gate다.
 
 ## 스트림 식별자와 재바인딩 (D-C3)
 
