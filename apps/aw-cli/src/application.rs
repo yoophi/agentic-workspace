@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use workbench_client::{
     application::{
         admission::{admit, CallerProfile},
-        call::execute,
+        call::{execute, publish_attempt},
     },
     domain::attempt::{Attempt, AttemptState},
     infrastructure::{
@@ -38,6 +38,7 @@ pub async fn run(options: Options, receipt: ReceiptSlot) -> Result<Value, CliErr
     let mut state_path = None;
     let mut generation = 1;
     let mut deferred_cancel = None;
+    let mut prepared_attempt = None;
     let mut call = match &options.command {
         Command::Call {
             operation,
@@ -214,19 +215,23 @@ pub async fn run(options: Options, receipt: ReceiptSlot) -> Result<Value, CliErr
                 e.outcome = Outcome::NotApplied;
                 e
             })?;
-            opened
-                .publish(&RetryRecord {
-                    request: call.clone(),
-                    endpoint: endpoint.identity().clone(),
-                    generation: 1,
-                    outcome: Outcome::Unknown,
-                    result: None,
-                })
+            prepared_attempt = Some(
+                publish_attempt(
+                    &opened,
+                    &RetryRecord {
+                        request: call.clone(),
+                        endpoint: endpoint.identity().clone(),
+                        generation: 1,
+                        outcome: Outcome::Unknown,
+                        result: None,
+                    },
+                )
                 .map_err(|e| {
                     let mut e = CliError::from_client(e);
                     e.outcome = Outcome::NotApplied;
                     e
-                })?;
+                })?,
+            );
             store = Some(opened);
             state_path = Some(path);
         }
@@ -240,8 +245,11 @@ pub async fn run(options: Options, receipt: ReceiptSlot) -> Result<Value, CliErr
             outcome: Outcome::Unknown,
         });
     }
-    let mut attempt =
-        Attempt::new(call.clone(), endpoint.identity().clone()).map_err(|_| CliError::usage())?;
+    let mut attempt = match prepared_attempt {
+        Some(attempt) => attempt,
+        None => Attempt::new(call.clone(), endpoint.identity().clone())
+            .map_err(|_| CliError::usage())?,
+    };
     let called = execute(&mut connection, &mut attempt).await;
     if let Some(receipt) = receipt
         .lock()

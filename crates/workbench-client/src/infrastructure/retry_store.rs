@@ -34,6 +34,12 @@ struct State {
     input_digest: String,
     result: Option<Result<CallReply, WorkbenchFault>>,
 }
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WriteStage {
+    FileSync,
+    Rename,
+    DirectorySync,
+}
 pub struct PrivateRetryStore {
     directory: File,
     name: CString,
@@ -41,6 +47,15 @@ pub struct PrivateRetryStore {
     lock_name: CString,
     limits: Limits,
     transaction: std::sync::Mutex<()>,
+}
+impl Drop for PrivateRetryStore {
+    fn drop(&mut self) {
+        // End this instance's lease explicitly; close alone can leave a shared open
+        // file description alive temporarily across a concurrent process launch.
+        unsafe {
+            libc::flock(self.lock.as_raw_fd(), libc::LOCK_UN);
+        }
+    }
 }
 impl PrivateRetryStore {
     /// Lifetime owns the exclusive cross-process active-use lease; no token in argv.
@@ -121,6 +136,13 @@ impl PrivateRetryStore {
         Ok(())
     }
     fn write(&self, state: &State) -> Result<(), ClientError> {
+        self.write_checked(state, |_| Ok(()))
+    }
+    fn write_checked(
+        &self,
+        state: &State,
+        checkpoint: impl Fn(WriteStage) -> Result<(), ClientError>,
+    ) -> Result<(), ClientError> {
         self.check_lease()?;
         let bytes = serde_json::to_vec(state).map_err(|_| ClientError::PrivateState)?;
         self.limits.check_add(Resource::Body, 0, bytes.len())?;
@@ -150,8 +172,10 @@ impl PrivateRetryStore {
             validate_private_file(&file)?;
             file.write_all(&bytes)
                 .map_err(|_| ClientError::PrivateState)?;
+            checkpoint(WriteStage::FileSync)?;
             file.sync_all().map_err(|_| ClientError::PrivateState)?;
             self.check_lease()?;
+            checkpoint(WriteStage::Rename)?;
             if unsafe {
                 libc::renameat(
                     self.directory.as_raw_fd(),
@@ -163,6 +187,7 @@ impl PrivateRetryStore {
             {
                 return Err(ClientError::PrivateState);
             }
+            checkpoint(WriteStage::DirectorySync)?;
             self.directory
                 .sync_all()
                 .map_err(|_| ClientError::PrivateState)
@@ -275,8 +300,12 @@ fn record(state: State) -> Result<RetryRecord, ClientError> {
         result: state.result,
     })
 }
-impl RetryStore for PrivateRetryStore {
-    fn publish(&self, record: &RetryRecord) -> Result<(), ClientError> {
+impl PrivateRetryStore {
+    fn publish_checked(
+        &self,
+        record: &RetryRecord,
+        checkpoint: impl Fn(WriteStage) -> Result<(), ClientError>,
+    ) -> Result<(), ClientError> {
         let _transaction = self
             .transaction
             .lock()
@@ -307,18 +336,26 @@ impl RetryStore for PrivateRetryStore {
         {
             return Err(ClientError::StaleGeneration);
         }
-        self.write(&State {
-            version: 1,
-            protocol: PROTOCOL_VERSION,
-            contract: CONTRACT_REVISION,
-            request: record.request.clone(),
-            instance: record.endpoint.instance().into(),
-            epoch: record.endpoint.epoch().into(),
-            generation: 1,
-            outcome: Outcome::Unknown,
-            input_digest: digest(&record.request.input)?,
-            result: None,
-        })
+        self.write_checked(
+            &State {
+                version: 1,
+                protocol: PROTOCOL_VERSION,
+                contract: CONTRACT_REVISION,
+                request: record.request.clone(),
+                instance: record.endpoint.instance().into(),
+                epoch: record.endpoint.epoch().into(),
+                generation: 1,
+                outcome: Outcome::Unknown,
+                input_digest: digest(&record.request.input)?,
+                result: None,
+            },
+            checkpoint,
+        )
+    }
+}
+impl RetryStore for PrivateRetryStore {
+    fn publish(&self, record: &RetryRecord) -> Result<(), ClientError> {
+        self.publish_checked(record, |_| Ok(()))
     }
     fn load(&self) -> Result<RetryRecord, ClientError> {
         let _transaction = self
@@ -349,5 +386,177 @@ impl RetryStore for PrivateRetryStore {
         state.outcome = outcome(&result);
         state.result = Some(result);
         self.write(&state)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+    #[test]
+    fn sync_and_rename_failure_injection_never_reports_publish_success_or_loses_identity() {
+        for stage in [
+            WriteStage::FileSync,
+            WriteStage::Rename,
+            WriteStage::DirectorySync,
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let parent = root.path().canonicalize().unwrap();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let path = parent.join("attempt.json");
+            let store = PrivateRetryStore::open(&path, Limits::default()).unwrap();
+            let original = RetryRecord {
+                request: CallRequest::command(
+                    workbench_protocol::OperationId::ProjectCreate,
+                    serde_json::json!({"name":"private","workingDirectory":"/private/tmp"}),
+                ),
+                endpoint: EndpointIdentity::new("i", "e").unwrap(),
+                generation: 1,
+                outcome: Outcome::Unknown,
+                result: None,
+            };
+            let failed = store.publish_checked(&original, |at| {
+                if at == stage {
+                    Err(ClientError::PrivateState)
+                } else {
+                    Ok(())
+                }
+            });
+            assert!(matches!(failed, Err(ClientError::PrivateState)));
+            // This is syscall-boundary failure injection, not reboot durability proof.
+            // Callers must not submit after this error, even if rename made state visible.
+            if stage == WriteStage::DirectorySync {
+                let restored = store.load().unwrap();
+                assert_eq!(restored.request, original.request);
+                assert_eq!(restored.endpoint, original.endpoint);
+                assert_eq!(restored.generation, 1);
+                assert_eq!(restored.outcome, Outcome::Unknown);
+                assert!(restored.result.is_none());
+            } else {
+                assert!(!path.exists());
+                assert!(store.load().is_err());
+                store.publish(&original).unwrap();
+            }
+
+            let mut next = store.load_state().unwrap();
+            next.generation = 2;
+            assert!(matches!(
+                store.write_checked(&next, |at| if at == stage {
+                    Err(ClientError::PrivateState)
+                } else {
+                    Ok(())
+                }),
+                Err(ClientError::PrivateState)
+            ));
+            let restored = store.load().unwrap();
+            assert_eq!(restored.request, original.request);
+            assert_eq!(restored.endpoint, original.endpoint);
+            assert_eq!(restored.outcome, Outcome::Unknown);
+            assert_eq!(
+                restored.generation,
+                if stage == WriteStage::DirectorySync {
+                    2
+                } else {
+                    1
+                }
+            );
+            assert_eq!(std::fs::read_dir(parent).unwrap().count(), 2); // state+lease, no temp residue
+        }
+    }
+    struct FailingPublish<'a> {
+        store: &'a PrivateRetryStore,
+        stage: WriteStage,
+    }
+    impl RetryStore for FailingPublish<'_> {
+        fn publish(&self, record: &RetryRecord) -> Result<(), ClientError> {
+            self.store.publish_checked(record, |at| {
+                if at == self.stage {
+                    Err(ClientError::PrivateState)
+                } else {
+                    Ok(())
+                }
+            })
+        }
+        fn load(&self) -> Result<RetryRecord, ClientError> {
+            self.store.load()
+        }
+        fn complete(
+            &self,
+            g: u64,
+            result: Result<CallReply, WorkbenchFault>,
+        ) -> Result<(), ClientError> {
+            self.store.complete(g, result)
+        }
+    }
+    #[tokio::test]
+    async fn initial_sync_rename_failures_never_reach_owned_http_command_transport() {
+        use crate::{
+            application::call::{execute, publish_attempt},
+            infrastructure::http::HttpConnection,
+            ports::CallTransport,
+        };
+        for stage in [
+            WriteStage::FileSync,
+            WriteStage::Rename,
+            WriteStage::DirectorySync,
+        ] {
+            let mut peer = crate::fixture::Peer::spawn(vec![], true).await;
+            let root = tempfile::tempdir().unwrap();
+            let parent = root.path().canonicalize().unwrap();
+            std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+            let path = parent.join("attempt.json");
+            let store = PrivateRetryStore::open(&path, Limits::default()).unwrap();
+            let mut transport = HttpConnection::connect(peer.endpoint.clone(), Limits::default())
+                .await
+                .unwrap();
+            let record = RetryRecord {
+                request: CallRequest::command(
+                    workbench_protocol::OperationId::ProjectCreate,
+                    serde_json::json!({"name":"private","workingDirectory":"/private/tmp"}),
+                ),
+                endpoint: transport.identity().clone(),
+                generation: 1,
+                outcome: Outcome::Unknown,
+                result: None,
+            };
+            let prepared = publish_attempt(
+                &FailingPublish {
+                    store: &store,
+                    stage,
+                },
+                &record,
+            );
+            let failed = prepared.is_err();
+            if let Ok(mut attempt) = prepared {
+                let _ = execute(&mut transport, &mut attempt).await;
+            }
+            transport.close().await.unwrap();
+            peer.settled().await;
+            assert!(failed);
+            assert_eq!(peer.requests.lock().unwrap().len(), 2); // identity+handshake, calls0
+            assert_eq!(peer.effects.lock().unwrap().len(), 0);
+            if stage == WriteStage::DirectorySync {
+                let restored = store.load().unwrap();
+                assert_eq!(restored.request, record.request);
+                assert_eq!(restored.endpoint, record.endpoint);
+                assert_eq!(restored.outcome, Outcome::Unknown);
+            } else {
+                assert!(!path.exists());
+            }
+        }
+    }
+    #[test]
+    fn ending_store_ownership_releases_lease_even_when_a_duplicate_fd_is_still_open() {
+        let root = tempfile::tempdir().unwrap();
+        let parent = root.path().canonicalize().unwrap();
+        std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let path = parent.join("attempt.json");
+        let store = PrivateRetryStore::open(&path, Limits::default()).unwrap();
+        let duplicate = store.lock.try_clone().unwrap();
+        drop(store);
+        let reopened = PrivateRetryStore::open(&path, Limits::default()).unwrap();
+        drop(duplicate);
+        assert!(PrivateRetryStore::open(&path, Limits::default()).is_err());
+        drop(reopened);
     }
 }

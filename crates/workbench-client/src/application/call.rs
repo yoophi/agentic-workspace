@@ -2,7 +2,7 @@
 use crate::{
     application::admission::{admit, CallerProfile},
     domain::attempt::Attempt,
-    ports::{CallTransport, ClientError},
+    ports::{CallTransport, ClientError, RetryRecord, RetryStore},
 };
 use serde::de::DeserializeOwned;
 use workbench_protocol::{
@@ -97,4 +97,23 @@ pub async fn execute(
         }
         Err(error) => Err(error),
     }
+}
+
+/// A first mutation becomes eligible for submission only after durable publication.
+/// On a store failure no Prepared attempt escapes to the caller's send path.
+pub fn publish_attempt(
+    store: &dyn RetryStore,
+    record: &RetryRecord,
+) -> Result<Attempt, ClientError> {
+    validate_request(&record.request)?;
+    if record.generation != 1
+        || record.outcome != workbench_protocol::Outcome::Unknown
+        || record.result.is_some()
+    {
+        return Err(ClientError::PrivateState);
+    }
+    let attempt = Attempt::new(record.request.clone(), record.endpoint.clone())
+        .map_err(|_| ClientError::InvalidInput)?;
+    store.publish(record)?;
+    Ok(attempt)
 }
