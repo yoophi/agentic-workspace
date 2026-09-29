@@ -291,3 +291,23 @@ be82f56f9d6386b53d8072c7d7e5168e6684bc20 고정 root8는 all exit0: workspace120
 - 동일 exact baseline/env, `AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-snapshot-backoff-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture` exit0 1passed(4.12s), `snapshot-backoff-actual.log`. exact20fcd5f serverSHA3fcb07ef…b425e9d, CLI SHA62ac18eaa1e0df200ac55169435c01421a8a932bce01b4da8611bde76806e1c8, serverPID78584reaped/child0, bootstrap1/0→2/1→3/1 ACK3/snapshot1 및 positive private sentinel/negative home/fork fixture 대조.045 production proof로 확대하지 않는다.
 
 새 수정 HEAD의 root8/OCR→Codex6 승인 전이며 PR/merge/인계는 미실행이다. T041–T044 미체크/production gates 및 최신047 중지범위 유지다.
+
+
+## 최종 구현 source gate: f8df5dc (PR 전)
+
+고정 source HEAD `f8df5dc4929c637c3799ac488849736fce76e890`에서 아래 root package.json 8개 명령을 모두 실제 실행했다. 환경은 위 CARGO_* DEBUG0/jobs2/incremental0이다. 로그 및 exact HEAD manifest는 `implementation-round6/frozen-root-*`에 보존한다.
+
+| 명령 | 실제 결과 |
+|---|---|
+| `cargo test --workspace --all-targets` | exit0,120suites/1234passed/failed0/ignored8 |
+| `cargo clippy --workspace --all-targets -- -D warnings` | exit0 |
+| `cargo fmt --all -- --check` | exit0 |
+| `pnpm check-types` | exit0,13tasks(캐시 포함) |
+| `pnpm test` | exit0,12tasks(캐시 포함) |
+| `pnpm build` | exit0,5tasks(캐시 포함) |
+| `pnpm --filter @yoophi/workbench-client test:integration` | exit0,3files/7tests |
+| `pnpm --filter @yoophi/agentic-workbench test:integration` | exit0,3files/14tests |
+
+OCR host73/73/skipped0 후 Codex6 thread01a0ed67-c568-7ad2-b033-ebda44f85646 /exec91224 actualexit0, verdict approve/no material findings. 리뷰어는 read-only이며 시험을 실행했다고 주장하지 않았다. 기본215passed 및 actual baseline 별도1passed 및 앞선 근거는 위 checkpoint를 따른다. T016은 최신 사용자 scoped reachable 계약/닫힌 exit6 이연 및 parity 검토 완료로 체크하며 production exit6 실제 pass를 뜻하지 않는다.
+
+이 최종 결과 기록은 source 검증 이후 문서만 갱신한다. 실행 소스/Cargo/lock/test/script bytes는 f8df5dc와 동일하게 보존하며 추가 문서 commit을 f8df5dc에서 직접 실행한8gate HEAD라고 위장하지 않는다. PR 최종 HEAD의 원격CI는 별도 수집한다. T043 최종 인계 연결/T044 실제PR·CI·merge/main sync/기록은 아직 미완료다. 045/046/TUI/MCP/배포/fallback 미실행·gate 유지다.

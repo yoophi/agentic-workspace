@@ -32,7 +32,7 @@
 
 독립 검증: CLI subprocess stdout/stderr/exit golden, private retry file crash/reopen/CAS 및 no raw payload diagnostics.
 
-- [ ] T016 [P] [US2] `apps/aw-cli/tests/finite.rs`에 finite result/error envelope, 현재 production gate에서 도달 가능한 exit family, stdin limits/UTF8/schema, secret sentinel, command alias parity golden을 먼저 작성한다. RunCancel prerequisite로 도달 불가한 cancel-rejected exit6은 미검증/이연으로 명시하여 최종 리뷰받고 explicit/generic gate parity를 유지한다. gate를 해제하거나 production proof로 계산하지 않는다.
+- [X] T016 [P] [US2] `apps/aw-cli/tests/finite.rs`에 finite result/error envelope, 현재 production gate에서 도달 가능한 exit family, stdin limits/UTF8/schema, secret sentinel, command alias parity golden을 먼저 작성한다. RunCancel prerequisite로 도달 불가한 cancel-rejected exit6은 미검증/이연으로 명시하여 최종 리뷰받고 explicit/generic gate parity를 유지한다. gate를 해제하거나 production proof로 계산하지 않는다.
 - [x] T017 [P] [US2] `crates/workbench-client/tests/retry_store.rs`에 pre-send persistence failure=request0, fsync/crash-before-output/reopen, no-follow/owner/mode/size, cross-process CAS/active attempt 경쟁 fixtures를 먼저 작성한다.
 - [x] T018 [US2] `crates/workbench-client/src/infrastructure/retry_store.rs`에 caller runtime-control 전용 private retry state, immutable input/key/operation/protocol/instance/epoch와 durable atomic publish/CAS를 구현한다. server user-data store와 분리한다.
 - [x] T019 [US2] `apps/aw-cli/src/inbound.rs`에 operations/project list/run start/watch/cancel/server status/call/events watch parsing 및 bounded stdin을 구현한다. token/prompt/goal argv를 받지 않는다.
@@ -65,8 +65,8 @@
 - [x] T038 `apps/aw-cli/tests/actual_server.rs`에 실제 events watch subprocess로 반환 eventStreamId/epoch/cursor0을 보내 bootstrap JSONL 뒤 empty recover를1회 실행한다. D-C2/D-C3/D-C4의 두 exact event ACK, HTTP reply, 최종 snapshot r+1 및 agent/child launch0·user root 접근0·server/CLI 잔존0 증거를 수집한다.
 - [x] T039 `docs/workbench-rust-client-cli.md`에 명령/오류/retry/recovery/권한/지원 범위와 pending gate를 한국어 및 Mermaid로 문서화하고 `specs/047-rust-client-cli/quickstart.md`를 실제 명령으로 갱신한다.
 - [x] T040 `specs/047-rust-client-cli/validation.md`에 client/CLI tests와 strict clippy, affected protocol/host/server/AW Rust checks 및 TS consumer 회귀의 실제 명령/exit/test 수를 기록한다. 변경 없는 경로는 검증 N/A 근거를 명시한다.
-- [ ] T041 `specs/047-rust-client-cli/review-ledger.md`에 구현 전체 diff OCR delegate→Codex adversarial --wait 순차 리뷰와 valid findings 수정/재검증을 기록한다.
-- [ ] T042 `specs/047-rust-client-cli/validation.md`에 최종 root package.json 8단계 gate와 exact HEAD를 기록한다. 실행하지 않은 macOS14+/signed bundle/desktop-CLI-TUI matrix를 PASS로 표시하지 않는다.
+- [X] T041 `specs/047-rust-client-cli/review-ledger.md`에 구현 전체 diff OCR delegate→Codex adversarial --wait 순차 리뷰와 valid findings 수정/재검증을 기록한다.
+- [X] T042 `specs/047-rust-client-cli/validation.md`에 최종 root package.json 8단계 gate와 exact HEAD를 기록한다. 실행하지 않은 macOS14+/signed bundle/desktop-CLI-TUI matrix를 PASS로 표시하지 않는다.
 - [ ] T043 `specs/047-rust-client-cli/validation.md`에 FR019/020·SC006의 045/046 prerequisites, 실제 desktop 종료 후 run 관찰/취소, TUI/MCP, signed CALVER packaging/update와 desktop business fallback 제거의 미완료 사실·미실행 검증·production gate·재개 조건을 명시하고 인계 문서에 연결한다. 원 전체 roadmap 구현 완료는 최신 047 종료 전제가 아니다. 가능한 047 검증/actual server 시험은 생략하지 않으며 전체 전환 완료로 선언하지 않는다.
 - [ ] T044 `specs/047-rust-client-cli/review-ledger.md`에 047 최종 PR/CI, origin/main squash merge, main checkout 및 pull 증거를 남긴다. 이후 `docs/047-completion-handoff.md`에 완료범위/commit·PR/검증근거/미완료 선행조건/후속작업/재개방법을 기록하고 중지한다. 전체 전환 완료나 후속 prerequisites 충족으로 확대하지 않는다.
 
@@ -138,3 +138,8 @@ Codex4 I-C5와 사용자 raw/normalized/wrapper 보완을 반영해 Body8MiB·WS
 ### snapshot backoff 최신 checkpoint
 
 Codex5 I-C6 Evicted 및 사용자 listener 직접 snapshot 경로의 transient burst를 수정했다. owned delay·actor 취소/새 generation stale 격리·동일cursor·정확attempt상한을 model 가상시간과 actual verified WS 성공/소진/취소 matrix로 검증했다. 기본215passed/actual 별도1passed/strictClippy exit0이며 실제 명령과 초기tick failure/red검출은 validation에 기록했다. 최종 수정 HEAD의 root8/순차 approve 및 PR/merge/main sync/인계 전 T041–T044는 미체크다.
+
+
+### 최종 source 검증/리뷰 완료
+
+f8df5dc root8 all exit0/workspace1234passed·ignored8 및 OCR73/73(skipped0)→Codex6 actualexit0/approve를 validation/review-ledger에 기록했다. T016 체크는 reachable 계약/명시 exit6 이연과 현재 gate parity의 최신 scoped 완료이며 production cancel-rejected6 pass가 아니다. T041/T042 source 검증/순차 승인 완료, T043 최종인계연결/T044 PR/CI·merge/main sync·인계/중지는 미완료다. 이 기록 commit은 실행 source를 변경하지 않는다.

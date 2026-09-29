@@ -93,3 +93,10 @@ actual aw exact8MiB HTTP snapshot reset→live6/ACK6·SIGINT130/EOF/reap, raw ex
 be82f56 OCR73/73(skipped0)→Codex thread01a0ed5f-713a-7611-8492-1a250e4f0332 /exec20855 actualexit0, verdict needs-attention Medium1. Evicted terminal snapshot transient retries bypass backoff는 유효하며 사용자 후속대로 listener 직접 load도 수정했다. 원 artifacts `implementation-round5/` 및 be82 root8 all exit0/workspace1231passed는 보존한다.
 
 LoadRequest의 후속 직접 시도 delay를 owned snapshot task 안에서 기다려 actor가 frame/gap/stop을 계속 처리하고 새 generation abort+join과 owner-first stale validation을 유지한다. 첫 load0delay, exact attempt cap/동일cursor, live-first Connect의 중복 snapshot delay0을 유지했다. 가상시간 model29/actual proof WS6matrix·취소/성공/소진/EOF, old delayed completion 새 Live 영향0, red no-sleep101 및 기본215passed/actual 별도1passed/strictClippy0. 상세 실제 명령·초안 tick rounding failure는 validation에 기록한다. 새 고정 HEAD root8/OCR→Codex6 전이며 최종 approve/PR/merge는 아직 없다.
+
+
+### 구현 Codex6 최종 approve / source f8df5dc
+
+고정 source `f8df5dc4929c637c3799ac488849736fce76e890`, base20fcd5f. OCR deterministic preview73(자동60/수동excluded13), host actual reviewed73/skipped0: 이번10개 변경 파일은 전체 읽고 검토했으며 이전에 전체 읽었던63개는 SHA 동일성을 확인했다. rules4group 동일, 별도 사용자 파일 제외. 이후 Codex adversarial `--wait --model gpt-6-sol --base 20fcd5f --scope branch`를 순차 실행했다. thread01a0ed67-c568-7ad2-b033-ebda44f85646, turn01a0ed67-c87a-7332-bbb4-1dc487d38da5, 실제 exec91224/exit0/완료, verdict **approve**, no material findings. 모든 이전 needs-attention 원본은 round1–5에 보존하고 유효 I-O1/O2 및 I-C1–C6 수정/회귀를 기록했다.
+
+리뷰어는 read-only/시험 미실행이며 host가 같은 고정source의 root8 all exit0(workspace1234passed/ignored8)와 actual exactbaseline1passed를 수집했다. artifacts `implementation-round6/`에 OCR preview/rules/host report·73sourceSHAmanifest·focus·실제Codexreview/exit·frozenroot8manifest/log를 보존한다. T016 이연/gate 유지 및 최신047 한정종료 범위를 승인받았으며 전체roadmap 완료로 확대하지 않는다. 이 승인 뒤 추가 변경은 검증/리뷰 완료를 기록하는 문서뿐이며 코드 byte identity를 확인한다. PR/CI·squash/main sync·인계 및 중지는 다음 단계다.
