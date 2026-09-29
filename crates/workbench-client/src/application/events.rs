@@ -217,6 +217,15 @@ impl EventRecovery {
             gap.reason,
             GapReason::SubscriberLagged | GapReason::Shutdown
         ) {
+            if self.reducer.snapshot_on_reconnect() {
+                // Notification subscriptions are live-only. A reconnect cannot replay
+                // the lost signals; obtain fresh state after hello and reset consumers.
+                let boundary = StreamCursor {
+                    after_sequence: gap.last_sequence.unwrap_or(0).max(self.reducer.received()),
+                    ..self.cursor()
+                };
+                return self.begin_round(boundary, false);
+            }
             return Ok(RecoveryAction::Connect(self.reconnect_cursor()));
         }
         let after = match gap.reason {
@@ -326,6 +335,12 @@ impl EventRecovery {
         self.reducer.receive(event)
     }
     pub fn next(&mut self, id: ConsumerId) -> Result<Option<Delivery>, ClientError> {
+        if self.reducer.snapshot_on_reconnect() && self.round.is_some() {
+            // For live-only streams, every reset must complete before delivery resumes.
+            // Retained streams keep their independent consumer replay/reset behavior.
+            self.reducer.consumer_cursor(id)?;
+            return Ok(None);
+        }
         self.reducer.next(id)
     }
     pub fn ack(&mut self, delivery: Delivery) -> Result<(), ClientError> {

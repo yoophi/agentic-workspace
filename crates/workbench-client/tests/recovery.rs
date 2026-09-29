@@ -835,3 +835,87 @@ async fn owned_snapshot_deadline_is_failed_recovery_not_hello_success() {
     assert_eq!(r.cursor(), cursor(0));
     assert!(!r.is_live());
 }
+
+#[test]
+fn same_epoch_notification_lag_and_shutdown_require_snapshot_and_all_resets_retained_replays() {
+    for reason in [GapReason::SubscriberLagged, GapReason::Shutdown] {
+        let initial = StreamCursor {
+            stream_id: "bench:existing".into(),
+            ..cursor(0)
+        };
+        let mut r = EventRecovery::new(initial.clone(), Limits::default()).unwrap();
+        let a = r.register(0).unwrap();
+        let b = r.register(0).unwrap();
+        r.hello(1, "e").unwrap();
+        let mut first = event(1);
+        first.stream_id = initial.stream_id.clone();
+        first.schema = "bench.titleRequested.v1".into();
+        r.receive(first).unwrap();
+        for id in [a, b] {
+            let d = r.next(id).unwrap().unwrap();
+            r.ack(d).unwrap();
+        }
+        let notice = GapNotice {
+            stream_id: initial.stream_id.clone(),
+            epoch: "e".into(),
+            reason,
+            first_sequence: Some(2),
+            last_sequence: Some(2),
+        };
+        assert!(
+            matches!(r.start_gap(notice.clone()).unwrap(), RecoveryAction::Connect(c) if c.after_sequence == 2)
+        );
+        let load = r
+            .hello(1, "e")
+            .unwrap()
+            .expect("notification gap must snapshot after live hello");
+        assert_eq!(load.applied_cursor().after_sequence, 1);
+        assert_eq!(load.live_cursor().after_sequence, 2);
+        // Replacement subscription is live-only: lost notification2 is never replayed.
+        let mut live = event(3);
+        live.stream_id = initial.stream_id.clone();
+        live.schema = "bench.titleRequested.v1".into();
+        r.receive(live).unwrap();
+        for id in [a, b] {
+            assert!(r.next(id).unwrap().is_none());
+        }
+        assert_eq!(r.cursor().after_sequence, 1);
+        let mut state = snapshot(2);
+        state.cursor.stream_id = initial.stream_id.clone();
+        let mut work = r.snapshot_loaded(load, state).unwrap();
+        assert_eq!(work.len(), 2);
+        r.reset_applied(work.pop().unwrap()).unwrap();
+        // One successful reset is insufficient for non-retaining stream delivery.
+        for id in [a, b] {
+            assert!(r.next(id).unwrap().is_none());
+        }
+        assert_eq!(r.cursor().after_sequence, 1);
+        r.reset_applied(work.pop().unwrap()).unwrap();
+        assert!(r.is_live());
+        assert_eq!(r.cursor().after_sequence, 2);
+        for id in [a, b] {
+            let d = r.next(id).unwrap().unwrap();
+            assert_eq!(d.event.sequence, 3);
+            r.ack(d).unwrap();
+        }
+        assert_eq!(r.cursor().after_sequence, 3);
+        let mut retained = recovery();
+        let id = retained.register(0).unwrap();
+        retained.hello(1, "e").unwrap();
+        retained.receive(event(1)).unwrap();
+        let d = retained.next(id).unwrap().unwrap();
+        retained.ack(d).unwrap();
+        let retained_notice = GapNotice {
+            stream_id: cursor(0).stream_id,
+            ..notice
+        };
+        assert!(
+            matches!(retained.start_gap(retained_notice).unwrap(),RecoveryAction::Connect(c) if c==cursor(1))
+        );
+        assert!(retained.hello(1, "e").unwrap().is_none());
+        retained.receive(event(2)).unwrap();
+        let d = retained.next(id).unwrap().unwrap();
+        retained.ack(d).unwrap();
+        assert_eq!(retained.cursor(), cursor(2));
+    }
+}

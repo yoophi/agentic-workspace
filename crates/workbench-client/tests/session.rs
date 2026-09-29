@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+#[path = "support/harness.rs"]
+mod harness;
 mod support;
 use async_trait::async_trait;
 use serde_json::json;
@@ -1289,16 +1292,48 @@ fn notification(sequence: u64) -> Message {
 #[tokio::test]
 async fn notification_disconnect_opens_live_socket_before_snapshot_and_resets_before_buffered_delivery(
 ) {
+    notification_recovery_live_first(None).await;
+}
+#[tokio::test]
+async fn notification_lag_and_shutdown_live_only_reconnect_snapshot_before_delivery() {
+    for reason in ["subscriberLagged", "shutdown"] {
+        notification_recovery_live_first(Some(reason)).await;
+    }
+}
+struct GatedNotificationConsumer {
+    inner: Box<dyn EventConsumer>,
+    entered: Arc<Notify>,
+    release: Arc<Notify>,
+}
+#[async_trait]
+impl EventConsumer for GatedNotificationConsumer {
+    async fn opened(&mut self, cursor: &StreamCursor) -> Result<(), ClientError> {
+        self.inner.opened(cursor).await
+    }
+    async fn consume(&mut self, event: &EventEnvelope) -> Result<(), ClientError> {
+        self.inner.consume(event).await
+    }
+    async fn reset(&mut self, snapshot: &Snapshot) -> Result<(), ClientError> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        self.inner.reset(snapshot).await
+    }
+}
+async fn notification_recovery_live_first(reason: Option<&str>) {
     let close = Arc::new(Notify::new());
     let mut peer = Peer::spawn_multi(vec![
         ticket(),
         Action::WebSocketGate {
             before: vec![hello(), notification(1)],
             gate: close.clone(),
-            after: vec![Message::Close(None)],
+            after: vec![match reason {
+            Some(reason) => Message::Text(json!({"type":"gap","streamId":"bench:existing","epoch":"e","reason":reason,"firstSequence":2,"lastSequence":2}).to_string()),
+            None => Message::Close(None),
+        }],
         },
         ticket(),
-        Action::WebSocket(vec![hello(), notification(2), notification(3)]),
+        // Non-retaining replacement is live-only: lost notification2 is not replayed.
+        Action::WebSocket(vec![hello(), notification(3)]),
     ])
     .await;
     let loaded = Arc::new(Notify::new());
@@ -1317,72 +1352,108 @@ async fn notification_disconnect_opens_live_socket_before_snapshot_and_resets_be
     let state = Arc::new(Mutex::new(State::default()));
     let observed = Arc::new(Notify::new());
     let mut session = EventSession::new(initial.clone(), source, config).unwrap();
+    let reset_entered = Arc::new(Notify::new());
+    let reset_release = Arc::new(Notify::new());
     session
-        .subscribe(0, ready_consumer(state.clone(), observed.clone()))
+        .subscribe(
+            0,
+            Box::new(GatedNotificationConsumer {
+                inner: ready_consumer(state.clone(), observed.clone()),
+                entered: reset_entered.clone(),
+                release: reset_release.clone(),
+            }),
+        )
         .unwrap();
     let progress = session.progress();
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let job = tokio::spawn(session.run(async {
+    let mut job = harness::OwnedTask::default();
+    job.start(session.run(async {
         let _ = stop_rx.await;
     }));
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while progress.cursor().unwrap().after_sequence != 1 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    close.notify_one();
-    notified(&loaded).await;
-    // Snapshot is invoked only after the replacement connection's verified hello.
-    assert_eq!(
-        peer.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.0.starts_with("/v1/events?"))
-            .count(),
-        2
-    );
-    assert_eq!(state.lock().unwrap().events, vec![1]);
-    assert!(state.lock().unwrap().resets.is_empty());
-    assert_eq!(progress.cursor().unwrap().after_sequence, 1);
-    release.notify_one();
-    tokio::time::timeout(Duration::from_secs(1), async {
-        while progress.cursor().unwrap().after_sequence != 3 {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .unwrap();
-    assert_eq!(state.lock().unwrap().resets, vec![2]);
-    assert_eq!(state.lock().unwrap().events, vec![1, 3]);
-    stop_tx.send(()).unwrap();
-    let result = tokio::time::timeout(Duration::from_secs(1), job)
+    use futures_util::FutureExt;
+    let outcome = tokio::time::timeout(
+        Duration::from_secs(3),
+        std::panic::AssertUnwindSafe(async {
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while progress.cursor().unwrap().after_sequence != 1 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            close.notify_one();
+            notified(&loaded).await;
+            // Snapshot is invoked only after the replacement connection's verified hello.
+            assert_eq!(
+                peer.requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.0.starts_with("/v1/events?"))
+                    .count(),
+                2
+            );
+            // The sole live-only event3 is actually held in the aggregate queue.
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while progress.queue_usage().unwrap().0 == 0 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(state.lock().unwrap().events, vec![1]);
+            assert!(state.lock().unwrap().resets.is_empty());
+            assert_eq!(progress.cursor().unwrap().after_sequence, 1);
+            release.notify_one();
+            notified(&reset_entered).await;
+            assert_eq!(state.lock().unwrap().events, vec![1]);
+            assert!(state.lock().unwrap().resets.is_empty());
+            assert_eq!(progress.cursor().unwrap().after_sequence, 1);
+            reset_release.notify_one();
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while progress.cursor().unwrap().after_sequence != 3 {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert_eq!(state.lock().unwrap().resets, vec![2]);
+            assert_eq!(state.lock().unwrap().events, vec![1, 3]);
+            stop_tx.send(()).unwrap();
+            let result = job.wait().await;
+            assert_eq!(
+                result.cursor,
+                StreamCursor {
+                    after_sequence: 3,
+                    ..initial
+                }
+            );
+            assert!(matches!(result.result, Err(ClientError::Cancelled)));
+            assert!(result.cleanup_error.is_none());
+            assert_eq!(progress.queue_usage().unwrap(), (0, 0));
+            assert_eq!(
+                peer.requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.0 == "/v1/event-tickets")
+                    .map(|r| r.2["cursors"][0]["afterSequence"].as_u64().unwrap())
+                    .collect::<Vec<_>>(),
+                vec![0, if reason.is_some() { 2 } else { 1 }]
+            );
+        })
+        .catch_unwind(),
+    )
+    .await;
+    job.cancel_join()
         .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        result.cursor,
-        StreamCursor {
-            after_sequence: 3,
-            ..initial
-        }
-    );
-    assert!(matches!(result.result, Err(ClientError::Cancelled)));
-    assert!(result.cleanup_error.is_none());
+        .expect("notification fixture owned cleanup");
     peer.settled().await;
-    assert_eq!(progress.queue_usage().unwrap(), (0, 0));
-    assert_eq!(
-        peer.requests
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.0 == "/v1/event-tickets")
-            .map(|r| r.2["cursors"][0]["afterSequence"].as_u64().unwrap())
-            .collect::<Vec<_>>(),
-        vec![0, 1]
-    );
+    match outcome {
+        Ok(Ok(())) => {}
+        Ok(Err(panic)) => std::panic::resume_unwind(panic),
+        Err(_) => panic!("notification recovery deadline after owned abort/join and peer EOF"),
+    }
 }
 
 struct StopAfterApplied {

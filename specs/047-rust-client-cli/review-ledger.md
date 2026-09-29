@@ -58,3 +58,11 @@ base20fcd5f/headbe9852c의 deterministic preview는73files/automatic reviewable6
 - workspace root strict lint의 large ClientError는 full WorkbenchFault를 Box로 보존해 수정했다. JSON/details/outcome/retryable/requestId를 지우거나 코드로 축약하지 않았고 root1213tests 및 최종 strict Clippy exit0이다.
 
 일반 reqwest pool/fresh TCP proof 경합, execute future Drop Unknown, Arc store CAS, retryable fault reopen, restore preflight Unknown, cancel typed 입력/gate parity, unfinished stdin barrier, 최초 publish syscall 경계, production hook 격리 panic, reducer owner/replay interleave, epoch/exhaustion stale completion, pending opened/budget/transient reconnect/full reset retry budget, stdout shared OFD/devnull/EOF, recover request 수신 이전 이벤트 fixture, sandbox probe false positive 및 owned deadline에 대한 사용자 검토 지적을 구현/회귀와 validation의 각 checkpoint에 반영했다. pending external prerequisites는 false PASS로 바꾸지 않는다.
+
+### 구현 Codex1: I-C1 High 및 Shutdown 보완
+
+headfcae18e/base20fcd5f의 OCR73/73·skipped0 후 Codex adversarial `--wait --model gpt-6-sol`을 순차 실행했다. thread01a0ed38-8e0b-7c21-aa6c-603afe6a2910, 실제 exec51744/exit0, verdict **needs-attention High1**. 원 결과는 `/private/tmp/aw-047-design/implementation-round1/implementation-codex-review.md`에 보존했다. exit0을 approve로 해석하지 않는다. reviewer는73-file diff와 원 event hub를 읽고 notification SubscriberLagged shortcut의 replay 불가로 인한 손실을 지적했다. 유효하다. 사용자 후속 지시에 따라 같은 분기의 Shutdown도 함께 수정한다.
+
+non-retaining stream은 gap last/received 경계에서 새 live-first round와 generation을 시작하며 fresh hello 이후 snapshot/reset을 수행한다. 모든 stream reset 전 delivery를 막는다. retained replay·느린 reset과 다른 consumer 독립 진행은 보존한다. regression은 과거 notification2를 실제로 재전송하지 않고 live3만 보내며 pending snapshot 및 pending reset 동안 consume/ACK0·applied1을 확인하고 reset2→live3/ACK3로 종료한다. model은 두 consumer 중 하나만 reset한 경우에도 delivery0을 확인한다. failure/panic/outer timeout 뒤 owned abort+bounded join 및 actual peer EOF를 수집한다. task guard는 기존 ordering/process guard의 test-only Harness OwnedTask를 그대로 재사용한다.
+
+수정 후 가능한 checks와 actual wire/root gates를 재검증하고 새 고정 HEAD에서 전체 OCR→Codex 순차 리뷰를 다시 실행한다. PR/merge는 그 전에 수행하지 않는다.

@@ -12,7 +12,7 @@ IP literal127.0.0.1 또는[::1] loopback만; credentials/userinfo/query/fragment
 
 ## Event
 
-POST ticket→WS(credential URL 금지; ticket secret은 redact)→hello identity/cursor 확인→event consume ACK. 최대message/frame1MiB、queue256/8MiB、recovery attempts5, backoff250ms..10s jitter. protocol 초과는 typed error+close, arbitrary truncate/drop continue 금지. non-retaining worktree signal의 reconnect snapshot과 retained run/orchestration/exchange 의미를 TS source fixtures에 대조한다. gap live 확보→hello→snapshot→consumer reset→snapshot기준 buffer filtering, hello만으로 성공 아님. all consumer applied min cursor, consumer 실패는 해당 generation reset, unregister/old promise/newepoch guards 양방향 시험. cancellation은 모든 task/socket JoinHandle settle bounded 확인.
+POST ticket→WS(credential URL 금지; ticket secret은 redact)→hello identity/cursor 확인→event consume ACK. 최대message/frame1MiB、queue256/8MiB、recovery attempts5, backoff250ms..10s jitter. protocol 초과는 typed error+close, arbitrary truncate/drop continue 금지. non-retaining notification의 disconnect 및 같은 epoch SubscriberLagged/Shutdown은 live-only 재구독 후 hello→fresh snapshot→모든 consumer reset 완료 뒤 delivery한다. 과거 notification replay를 가정하지 않는다. retained run/orchestration/exchange는 applied cursor replay와 독립 consumer reset을 유지하며 TS source fixtures에 대조한다. gap live 확보→hello→snapshot→consumer reset→snapshot기준 buffer filtering, hello만으로 성공 아님. all consumer applied min cursor, consumer 실패는 해당 generation reset, unregister/old promise/newepoch guards 양방향 시험. cancellation은 모든 task/socket JoinHandle settle bounded 확인.
 
 ## Public activation
 
