@@ -24,3 +24,15 @@ base deb3f7c→b7600d0,5Markdown은 자동reviewable0/excluded5unsupported_ext. 
 ### D-C2 수정: 후속 비동기 이벤트 계약
 
 job review-mumgf0qh-iwt7yy/thread01a0ec6c-3c0c-7ad0-b515-e4441d195d1b, base20fcd5f/head640f1e7, actual tool91577 exit0/completed, needs-attention Medium1 보존. 후속 notificationRecovery event와 HTTP reply ordering 식별 누락은 유효; 추가 저장 revision 증가 추정은 emit_runtime_update_for/get_for_bench/emit/sink/publish_state 전체 대조로 기각한다. 두 event는 r+1을 공유하며 sequence만 각각 증가한다. contracts/client.md D-C2에 bootstrap s, runtimeReconciled s+1, notificationRecovery s+2 exact 식별·ACK, 두 이벤트와 reply 완료 후 최종 snapshot r+1, barrier 양방향 ordering을 명시했다. >=/sleep/제품 코드 변경으로 보완하지 않는다. 실행 시험은 아직 없고 SC-007 미완료. 전체 함수 context를 제공한 OCR→Codex 수정 설계 리뷰 뒤 tasks로 진행한다.
+
+### D-C2 선행 OCR 및 Codex 실행 실패 (완료 verdict 아님)
+
+640f1e7→7fde8ad의5Markdown 자동 reviewable0/excluded5unsupported_ext와 host 실제5/5·skipped0·coverage100%를 분리했다. exact Git union5/중복0, 새 material0, scoped design correction만 approve. artifacts `/private/tmp/aw-047-design/ocr-sequence-{preview,host-review}.json`. runtime emit 두 함수/get_for_bench/sink.emit/hub.publish_state 전체를 추가하여 Codex 직접 source context34섹션/115880bytes를 제공했다.
+
+첫 --wait job review-mumgvmwq-bgwwu1는 actual tool32615/script exit1, verdict 없음. codex app-server startup은 ~/.codex SQLite state runtime 초기화 실패였으며 현재 managed 권한에서 해당 경로 write 불가를 관측했다. 허용된 private tmp에 mode0700 runtime state를 두고 기존 config/auth를 read-only symlink로 참조한 startup probe는 exit0. 원 설정/인증 contents 출력·수정 없음.
+
+동일 고정 tree7fde8ad 재실행 --wait job review-mumgxfqd-q6hyxj/thread01a0ec79-605f-7ed2-bee6-d33e22e2548b, actual tool51315/script exit1/failed. workspace routing discovery failed로 유효한 structured review verdict 없음. network/routing 외부 실행 조건이 해결되어야 재개 가능하며 이를 새 design finding/approve/리뷰 완료로 계산하지 않는다. artifacts `/private/tmp/aw-047-design/sequence-retry-codex-{review.md,review.exit,source-context.md,source-manifest.json,focus.txt}`. 두 exec handle 종료를 수집했고 companion running0을 확인했다(현재 ps는 Operation not permitted). tasks/구현/시험/빌드 미시작, 제품 코드 변경0. 이전 D-C2 needs-attention은 보존하고 유효 부분은 설계 반영했으며 actual wire는 SC-007 미완료다. 다음은 같은 설계 source context로 Codex --wait 유효 결과 수집→valid findings 반영→speckit-tasks→speckit-implement 순서다. 전체047/045/046 및 전체 AW 목표는 미완료, production gates 유지.
+
+### D-C3 재개: 실제 stream identity 수정
+
+사용자의 실행 위치 변경 지시에 따라 Herdr w2:p1에서 재개했다. 이전 w1:p3는 pane_not_found이며 현재 pane의 Codex와 cwd를 확인했다. binding.rs::set의 독립 UUID, delivery_sink.rs::emit의 binding_id, orchestration_stream.rs의 반환 eventStreamId 구독 및 재바인딩 사례를 직접 확인했다. 계약의 orchestration:<benchId>를 bootstrap 응답 eventStreamId(내부 suffix는 bindingId)로 수정하고 plan/quickstart/model/research에 동기화했다. 위 D-C1 기록의 benchId suffix는 당시의 잘못된 설계 기록이며 이 D-C3가 대체한다. 원 verdict와 실패 기록은 보존한다. 실제 통합 시험은 아직 수행하지 않았다.

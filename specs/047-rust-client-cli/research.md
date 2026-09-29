@@ -49,3 +49,7 @@ D-O2 Medium 유효: CLI key-only retry는 previous payload/epoch bound identity�
 ## R10 Codex Medium 판별: revision과 stream sequence
 
 review-mumgf0qh-iwt7yy의 비동기 후속 event 식별/ordering 누락은 유효하다. 다만 reviewer에게 emit_runtime_update_for body가 없어서 제시한 추가 revision 증가 가정은 원 코드와 다르다. runtime.emit_runtime_update_for는 service.get_for_bench readonly snapshot→emit_runtime_update이며 sink.emit은 payload revision을 그대로 hub.publish_state에 넘긴다. hub는 stream mutex에서 sequence만 증가시킨다. 빈 fixture에서 recover commit r+1/runtimeReconciled 이후 notificationRecovery도 r+1이며 sequence는 별개다. get_for_bench/persist_mutation/recover/spawn_notification_pass_with/두 emit/helper/sink/publish_state 전체를 후속 reviewer에 직접 제공한다. HTTP reply와 후속 event의 도착 순서 독립, 같은 revision event 보존, 두 reason exact 식별 및 ACK 후 최종 snapshot이라는 acceptance를 명시했다. 실제 wire 실행 증거는 통합 task에서 수집한다. 원 needs-attention verdict는 보존하며 source 판별을 시험 통과로 표현하지 않는다.
+
+## R11 스트림 주소의 실제 원천
+
+`application/orchestration/binding.rs::set`는 binding_id에 독립 UUID를 발급한다. `infrastructure/orchestration/delivery_sink.rs::emit`은 이 binding_id로 hub에 발행한다. `tests/orchestration_stream.rs`는 bootstrap의 eventStreamId로 구독하며 bench close 뒤 새 bench에 같은 workspace를 재개하면 새 스트림을 확인한다. 따라서 recover 입력 benchId를 stream suffix로 사용한 기존 계약은 잘못됐다. bootstrap 응답 eventStreamId를 구독과 ACK identity 전체에 사용하도록 수정한다. 이 기록은 원 소스 확인이며 새 Rust client 통합시험 통과를 뜻하지 않는다.
