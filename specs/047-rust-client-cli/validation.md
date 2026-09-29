@@ -311,3 +311,14 @@ be82f56f9d6386b53d8072c7d7e5168e6684bc20 고정 root8는 all exit0: workspace120
 OCR host73/73/skipped0 후 Codex6 thread01a0ed67-c568-7ad2-b033-ebda44f85646 /exec91224 actualexit0, verdict approve/no material findings. 리뷰어는 read-only이며 시험을 실행했다고 주장하지 않았다. 기본215passed 및 actual baseline 별도1passed 및 앞선 근거는 위 checkpoint를 따른다. T016은 최신 사용자 scoped reachable 계약/닫힌 exit6 이연 및 parity 검토 완료로 체크하며 production exit6 실제 pass를 뜻하지 않는다.
 
 이 최종 결과 기록은 source 검증 이후 문서만 갱신한다. 실행 소스/Cargo/lock/test/script bytes는 f8df5dc와 동일하게 보존하며 추가 문서 commit을 f8df5dc에서 직접 실행한8gate HEAD라고 위장하지 않는다. PR 최종 HEAD의 원격CI는 별도 수집한다. T043 최종 인계 연결/T044 실제PR·CI·merge/main sync/기록은 아직 미완료다. 045/046/TUI/MCP/배포/fallback 미실행·gate 유지다.
+
+
+## 구현 PR/CI·squash·main sync 및 인계
+
+[PR209](https://github.com/yoophi/agentic-workspace/pull/209) 최종head9947fbc38caa7fd3e9c72d778ea490239557dcc6의 [Quality run36577684368/job109437417847](https://github.com/yoophi/agentic-workspace/actions/runs/36577684368/job/109437417847) COMPLETED/SUCCESS, completedAt2026-09-29T14:01:40Z. worker connector 및 기존 gh 인증의 direct API 재검증에서 모든 step success를 확인했다. local f8df5dc root8 결과와 원격CI 최종head를 구분한다.
+
+기본 API endpoint의 반복 TLS handshake/SSL timeout, GitHub browser navigation timeout, read-only connector merge403(Resource not accessible by integration)을 관측했다. 이를 사용자 ADMIN 권한 부족으로 단정하지 않았다. HTTPS DNS 조회로 얻은 다른 endpoint를 요청에만 curl resolve로 지정하여 certificate/hostname 검증을 그대로 유지했다. 기존 gh 인증을 stdout/argv/log에 노출하지 않고 process stdin config로 사용했다. expected head9947fbc와 CI success를 다시 검증한 뒤 squash API는 merged=true/`c3973ee5534850a66673867ce629b91ab3b67f9f`를 반환했다. 시스템 DNS/auth/remote/SSL 설정 변경0이다.
+
+`git checkout main` 및 요청별 HTTPS URL rewrite/credential helper/Git curloptResolve를 사용한 `git pull --ff-only origin main` 실제exit0, fast-forward20fcd5f→c3973ee. `git rev-parse HEAD origin/main` 양쪽 c3973ee, `git diff --exit-code f8df5dc HEAD -- crates apps scripts Cargo.toml Cargo.lock` exit0/source bytes동일. 기존047 branch/044 worktree·045/046 branches 및 보호userfiles를 보존했다.
+
+[최종 인계](../../docs/047-completion-handoff.md)에047 완료범위/commit·PR/증거와045/046·TUI/MCP·macOS14+/installed desktop matrix·signing/update·fallback 미완료, production gate 및 재개 방법을 기록했다. T016 production exit6 proof는 이연이며 fixture seatbelt·fork 대조를045 production proof로 계산하지 않는다. 전체 AW 전환 완료를 선언하지 않고 후속 구현0을 유지한다. 이 이후 변경은 완료 기록 문서뿐이다.
