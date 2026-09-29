@@ -1672,3 +1672,236 @@ async fn verified_live_snapshot_terminal_errors_stop_once_and_transient_error_re
         }
     }
 }
+
+#[derive(Clone)]
+struct BackoffSource {
+    endpoint: Arc<LocatedEndpoint>,
+    limits: Limits,
+    calls: Arc<Mutex<Vec<(tokio::time::Instant, StreamCursor, StreamCursor)>>>,
+    first_entered: Arc<Notify>,
+    first_release: Arc<Notify>,
+    succeed: bool,
+}
+struct BackoffPort(BackoffSource);
+#[async_trait]
+impl SnapshotPort for BackoffPort {
+    async fn snapshot(&mut self, _: &StreamCursor) -> Result<Snapshot, ClientError> {
+        unreachable!("exact cursor pair required")
+    }
+    async fn snapshot_after(
+        &mut self,
+        applied: &StreamCursor,
+        live: &StreamCursor,
+    ) -> Result<Snapshot, ClientError> {
+        let number = {
+            let mut calls = self.0.calls.lock().unwrap();
+            calls.push((tokio::time::Instant::now(), applied.clone(), live.clone()));
+            calls.len()
+        };
+        if number == 1 {
+            self.0.first_entered.notify_one();
+            self.0.first_release.notified().await;
+        }
+        if self.0.succeed && number == 3 {
+            Ok(Snapshot {
+                cursor: cursor(5),
+                value: json!({"revision":2}),
+            })
+        } else {
+            Err(ClientError::Unavailable)
+        }
+    }
+}
+#[async_trait]
+impl EventSource for BackoffSource {
+    async fn connect(&self, cursor: &StreamCursor) -> Result<Box<dyn EventSocket>, ClientError> {
+        Ok(Box::new(
+            WebSocketConnection::connect(
+                self.endpoint.clone(),
+                self.limits.clone(),
+                vec![cursor.clone()],
+            )
+            .await?,
+        ))
+    }
+    fn snapshot_port(&self) -> Box<dyn SnapshotPort> {
+        Box::new(BackoffPort(self.clone()))
+    }
+}
+struct ResyncConsumer(Consumer);
+#[async_trait]
+impl EventConsumer for ResyncConsumer {
+    async fn opened(&mut self, cursor: &StreamCursor) -> Result<(), ClientError> {
+        self.0.opened(cursor).await
+    }
+    async fn consume(&mut self, _: &EventEnvelope) -> Result<(), ClientError> {
+        Err(ClientError::Unavailable)
+    }
+    async fn reset(&mut self, snapshot: &Snapshot) -> Result<(), ClientError> {
+        self.0.reset(snapshot).await
+    }
+}
+async fn drain_actor() {
+    for _ in 0..64 {
+        tokio::task::yield_now().await;
+    }
+}
+#[tokio::test]
+async fn actual_socket_eviction_and_listener_snapshot_backoff_success_exhaustion_and_cancel() {
+    use futures_util::FutureExt;
+    for listener in [false, true] {
+        for mode in [0, 1, 2] {
+            // success / exact exhaustion / cancellation during delay
+            let gate = Arc::new(Notify::new());
+            let mut notice = serde_json::from_str::<serde_json::Value>(&match gap(0) {
+                Message::Text(t) => t,
+                _ => unreachable!(),
+            })
+            .unwrap();
+            notice["reason"] = json!("evicted");
+            let mut peer = Peer::spawn_multi(vec![
+                ticket(),
+                Action::WebSocketGate {
+                    before: vec![hello()],
+                    gate: gate.clone(),
+                    after: vec![if listener {
+                        message(1)
+                    } else {
+                        Message::Text(notice.to_string())
+                    }],
+                },
+            ])
+            .await;
+            let config = Limits::new(LimitConfig {
+                recovery_attempts: 3,
+                backoff_min: Duration::from_millis(100),
+                backoff_max: Duration::from_millis(100),
+                ..limits().config().clone()
+            })
+            .unwrap();
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let entered = Arc::new(Notify::new());
+            let release = Arc::new(Notify::new());
+            let source = Arc::new(BackoffSource {
+                endpoint: peer.endpoint.clone(),
+                limits: config.clone(),
+                calls: calls.clone(),
+                first_entered: entered.clone(),
+                first_release: release.clone(),
+                succeed: mode == 0,
+            });
+            let state = Arc::new(Mutex::new(State::default()));
+            let mut session = EventSession::new(cursor(0), source, config).unwrap();
+            let consumer = Consumer {
+                state: state.clone(),
+                open_entered: Arc::new(Notify::new()),
+                open_release: Arc::new(Notify::new()),
+                observed: Arc::new(Notify::new()),
+                hold_open: false,
+            };
+            if listener {
+                session
+                    .subscribe(0, Box::new(ResyncConsumer(consumer)))
+                    .unwrap();
+            } else {
+                session.subscribe(0, Box::new(consumer)).unwrap();
+            }
+            let progress = session.progress();
+            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+            let mut job = harness::OwnedTask::default();
+            job.start(session.run(async {
+                let _ = stop_rx.await;
+            }));
+            let outcome = tokio::time::timeout(
+                Duration::from_secs(3),
+                std::panic::AssertUnwindSafe(async {
+                    tokio::time::timeout(Duration::from_secs(1), async {
+                        while state.lock().unwrap().opened != 1 {
+                            tokio::task::yield_now().await;
+                        }
+                    })
+                    .await
+                    .unwrap();
+                    gate.notify_one();
+                    notified(&entered).await;
+                    // IO/open readiness is proven before pausing; yield-only checks cannot auto-advance time.
+                    tokio::time::pause();
+                    release.notify_one();
+                    drain_actor().await;
+                    assert_eq!(calls.lock().unwrap().len(), 1);
+                    assert_eq!(progress.cursor().unwrap(), cursor(0));
+                    if mode != 2 {
+                        for expected in [2, 3] {
+                            tokio::time::advance(Duration::from_millis(99)).await;
+                            drain_actor().await;
+                            assert_eq!(calls.lock().unwrap().len(), expected - 1);
+                            // Tokio rounds timers to millisecond ticks; allow one extra virtual tick.
+                            tokio::time::advance(Duration::from_millis(2)).await;
+                            drain_actor().await;
+                            assert_eq!(calls.lock().unwrap().len(), expected);
+                        }
+                        if mode == 0 {
+                            assert_eq!(progress.cursor().unwrap(), cursor(5));
+                            assert_eq!(state.lock().unwrap().resets, vec![5]);
+                        }
+                    }
+                    if mode == 2 || (mode == 0 && listener) {
+                        stop_tx.send(()).unwrap();
+                    }
+                    let result = job.wait().await;
+                    tokio::time::resume();
+                    assert!(result.cleanup_error.is_none());
+                    assert_eq!(progress.queue_usage().unwrap(), (0, 0));
+                    let calls = calls.lock().unwrap();
+                    assert_eq!(calls.len(), if mode == 2 { 1 } else { 3 });
+                    for (_, applied, live) in calls.iter() {
+                        assert_eq!(applied, &cursor(0));
+                        assert_eq!(live, &cursor(0));
+                    }
+                    for pair in calls.windows(2) {
+                        assert!(pair[1].0.duration_since(pair[0].0) >= Duration::from_millis(100));
+                    }
+                    if mode == 0 {
+                        assert_eq!(result.cursor, cursor(5));
+                        if listener {
+                            assert!(matches!(result.result, Err(ClientError::Cancelled)));
+                        } else {
+                            assert!(result.result.is_ok());
+                        }
+                    } else {
+                        assert_eq!(result.cursor, cursor(0));
+                        assert!(state.lock().unwrap().resets.is_empty());
+                        assert!(
+                            matches!(result.result, Err(ClientError::Cancelled)) == (mode == 2)
+                        );
+                        if mode == 1 {
+                            assert!(matches!(result.result, Err(ClientError::Unavailable)));
+                        }
+                    }
+                })
+                .catch_unwind(),
+            )
+            .await;
+            // Resume even if a paused-clock assertion panics, then abort/join before observing EOF.
+            if !matches!(outcome, Ok(Ok(()))) {
+                let _ = std::panic::catch_unwind(tokio::time::resume);
+            }
+            job.cancel_join().await.unwrap();
+            peer.settled().await;
+            assert_eq!(
+                peer.requests
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|r| r.0 == "/v1/event-tickets")
+                    .count(),
+                1
+            );
+            match outcome {
+                Ok(Ok(())) => {}
+                Ok(Err(panic)) => std::panic::resume_unwind(panic),
+                Err(_) => panic!("owned backoff session timeout"),
+            }
+        }
+    }
+}

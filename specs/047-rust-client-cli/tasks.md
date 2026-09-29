@@ -133,3 +133,8 @@ be63aaf root8 all exit0/workspace1221passed 뒤 Codex3 needs-attention Medium I-
 ### 구현4 표현 예산 수정 checkpoint
 
 Codex4 I-C5와 사용자 raw/normalized/wrapper 보완을 반영해 Body8MiB·WS/queue를 유지하고 Snapshot192MiB/JsonlRecord256MiB를 분리했다. cursor max-u64/input 표현 예약, overflow/부족 거절 및 actual near8MiB reset/ACK6·raw exponent model·event/reset/error-end/newline/큰 metadata 회귀가 기본212passed/ignored actual1에서 통과했다. strictClippy와 actual 별도1passed. 상세 명령/exit/red는 validation에 기록하며 최종 root8/순차 승인 전 T041–T044는 계속 미체크다.
+
+
+### snapshot backoff 최신 checkpoint
+
+Codex5 I-C6 Evicted 및 사용자 listener 직접 snapshot 경로의 transient burst를 수정했다. owned delay·actor 취소/새 generation stale 격리·동일cursor·정확attempt상한을 model 가상시간과 actual verified WS 성공/소진/취소 matrix로 검증했다. 기본215passed/actual 별도1passed/strictClippy exit0이며 실제 명령과 초기tick failure/red검출은 validation에 기록했다. 최종 수정 HEAD의 root8/순차 approve 및 PR/merge/main sync/인계 전 T041–T044는 미체크다.

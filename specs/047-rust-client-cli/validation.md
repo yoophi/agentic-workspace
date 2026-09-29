@@ -274,3 +274,20 @@ I-C4는 snapshot HTTP의 Identity/Incompatible/Protocol/nonretryable Fault까지
 - 동일 exact baseline/env, `AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-jsonl-budget-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture` exit0 **1passed**(3.79s), `jsonl-budget-actual.log`. actualCLI SHA`12ea8748d0930af5f5848fe579ca48f441e36a2885ca6120c9c170d00c6b6901`, exact20fcd5f serverSHA3fcb07ef…b425e9d, serverPID87821reaped/child0. bootstrap1/0→2/1→3/1/ACK3/snapshot1 및 positive private sentinel/negative home/fork fixture 대조를 재확인했다.
 
 수정 HEAD의 root8와 OCR→Codex5 순차 재리뷰는 다음 단계이며 T041/T042·PR/merge/인계는 미완료다. 045/046/TUI/MCP/signing/update/fallback 후속 구현0·gate 유지다.
+
+
+## Codex 구현5 Evicted/listener snapshot backoff checkpoint
+
+be82f56f9d6386b53d8072c7d7e5168e6684bc20 고정 root8는 all exit0: workspace120suites/1231passed/failed0/ignored8, strictClippy/fmt, pnpm check-types/test/build 및 client integration7/AW integration14tests. 원 frozen manifest/log와 OCR73/73(skipped0)→Codex5는 `implementation-round5/`에 보존했다. Codex thread01a0ed5f-713a-7611-8492-1a250e4f0332 /exec20855 actualexit0는 needs-attention Medium1 I-C6였다. Evicted의 직접 snapshot 실패는 reconnect backoff를 지나지 않아 예산을 즉시 소진했고 listener도 같은 경로였다.
+
+두 직접 load 경로의 첫 시도는 즉시, 후속 시도는 attempt별 exponential/jitter backoff를 LoadRequest에 고정한다. sleep은 owned snapshot job 안에 있으며 actor는 계속 frame/gap/종료를 처리한다. 새 stream generation은 기존 cancel_callbacks abort+join을 사용하고 completion owner/generation/scope 검사도 유지한다. request timeout은 sleep 이후 시작하며 OwnedJob 전체 join 상한에는 delay를 포함한다. live-first Connect가 이미 backoff한 stream은 snapshot에서 중복 대기하지 않는다. attempt 수 증가/상한·동일 applied/live boundary·terminal cause 정책은 그대로다.
+
+환경은 CARGO_INCREMENTAL=0/CARGO_BUILD_JOBS=2/CARGO_PROFILE_DEV_DEBUG=0/CARGO_PROFILE_TEST_DEBUG=0이다.
+
+- `cargo test -p workbench-client --test recovery` exit0 29passed, `snapshot-backoff-model.log`. tokio test-util 가상시간으로 Evicted/listener × 성공/소진, 첫0/후속10s delay, delay−1ms 호출0, 정확히3loads/추가load0, 동일cursor, 취소중 추가call0/owned join 및 old delayed completion이 새 Live6에 영향0을 확인한다. dev-only test-util 추가이며 production trigger는 없다.
+- sleep을 제거한 동일 model regression은 exit101/no retry burst(count2≠1), `snapshot-backoff-behavior-red.log`; finally로 수정 source를 복구했다. 초기 existing recovery도 exit0 (`snapshot-backoff-initial.log`).
+- `cargo test -p workbench-client --test session actual_socket_eviction_and_listener_snapshot_backoff_success_exhaustion_and_cancel -- --nocapture` 최종exit0 1passed/6matrix, `snapshot-backoff-session-retry.log`. 실제 proof/ticket/WS/성공 opened 및 첫 port 진입 barrier 후 시간을 pause하여 Evicted/listener × 성공/3회소진/delay중취소를 검증한다. 호출 간 가상100ms 이상,99ms 시 추가call0·같은cursor0, 성공reset5, 실패/취소applied0, ticket1/재연결0·queue0·cleanupError없음, abort+bounded join 및 peer socket EOF를 확인한다. 첫 초안은 Tokio millisecond tick 반올림 때문에 정확100ms 후 count1≠2로 exit101 (`snapshot-backoff-session.log`); 실제 시간 sleep을 늘리지 않고 가상 tick1ms 여유를 추가했다. timeout/panic도 시간 resume→owned abort/join→EOF 후 재전파한다.
+- `cargo test -p workbench-client -p aw-cli` exit0 **215passed/failed0/ignored actual1**, `snapshot-backoff-tests.log`; `cargo clippy -p workbench-client -p aw-cli --all-targets -- -D warnings` exit0 (`snapshot-backoff-clippy.log`), cargo fmt exit0.
+- 동일 exact baseline/env, `AW_047_WIRE_EVIDENCE=/private/tmp/aw-047-design/actual-wire-snapshot-backoff-evidence.json cargo test -p aw-cli --test actual_server -- --ignored --nocapture` exit0 1passed(4.12s), `snapshot-backoff-actual.log`. exact20fcd5f serverSHA3fcb07ef…b425e9d, CLI SHA62ac18eaa1e0df200ac55169435c01421a8a932bce01b4da8611bde76806e1c8, serverPID78584reaped/child0, bootstrap1/0→2/1→3/1 ACK3/snapshot1 및 positive private sentinel/negative home/fork fixture 대조.045 production proof로 확대하지 않는다.
+
+새 수정 HEAD의 root8/OCR→Codex6 승인 전이며 PR/merge/인계는 미실행이다. T041–T044 미체크/production gates 및 최신047 중지범위 유지다.

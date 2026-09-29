@@ -348,6 +348,8 @@ impl EventSession {
         let source = self.source.clone();
         let deadline = self.limits.config().request_timeout;
         self.jobs.spawn(async move {
+            // Keep backoff cancellable without blocking the actor or owning a port early.
+            tokio::time::sleep(request.retry_delay()).await;
             let result = bounded_callback(
                 async {
                     let mut source = source.snapshot_port();

@@ -86,3 +86,10 @@ model26/기본207passed, current terminal 및 transient actual WS matrix, 실제
 febc326 OCR73/73(skipped0)→Codex thread01a0ed53-7f71-7b41-b2c2-344026156ee1 /exec2168 actualexit0, verdict **needs-attention Medium1**. root8 all exit0/workspace1226passed였으나 valid near8MiB snapshot에 reset cursor/wrapper/newline을 추가하면 기존 Body8MiB 출력 검사가 실패하는 유효 I-C5를 반영했다. 원 artifacts `implementation-round4/`를 보존한다. 사용자 보완에 따라 snapshot_loaded의 Body 재사용도 함께 제거했다. raw HTTP/WS/queue는 그대로이며 normalized Snapshot192MiB와 JsonlRecord256MiB를 분리하고 checked reserve·cursor max sequence width Input1MiB를 검증한다.
 
 actual aw exact8MiB HTTP snapshot reset→live6/ACK6·SIGINT130/EOF/reap, raw exponent normalized snapshot reset/ACK, large metadata 및 event/reset/error-end 전체 record/newline 비교를 확인했다. 기본212passed/ignored actual1, strictClippy/fmt exit0, exact baseline actual별도1passed. 새 고정 HEAD의 root8와 OCR→Codex5 최종 승인은 다음 단계이며 PR/merge 미실행이다.
+
+
+### 구현 Codex5: I-C6 Medium 수정
+
+be82f56 OCR73/73(skipped0)→Codex thread01a0ed5f-713a-7611-8492-1a250e4f0332 /exec20855 actualexit0, verdict needs-attention Medium1. Evicted terminal snapshot transient retries bypass backoff는 유효하며 사용자 후속대로 listener 직접 load도 수정했다. 원 artifacts `implementation-round5/` 및 be82 root8 all exit0/workspace1231passed는 보존한다.
+
+LoadRequest의 후속 직접 시도 delay를 owned snapshot task 안에서 기다려 actor가 frame/gap/stop을 계속 처리하고 새 generation abort+join과 owner-first stale validation을 유지한다. 첫 load0delay, exact attempt cap/동일cursor, live-first Connect의 중복 snapshot delay0을 유지했다. 가상시간 model29/actual proof WS6matrix·취소/성공/소진/EOF, old delayed completion 새 Live 영향0, red no-sleep101 및 기본215passed/actual 별도1passed/strictClippy0. 상세 실제 명령·초안 tick rounding failure는 validation에 기록한다. 새 고정 HEAD root8/OCR→Codex6 전이며 최종 approve/PR/merge는 아직 없다.

@@ -1118,3 +1118,224 @@ fn raw_exponent_snapshot_normalization_uses_snapshot_budget_then_ack() {
     r.ack(delivery).unwrap();
     assert_eq!(r.cursor(), cursor(7));
 }
+
+struct TimedSnapshot {
+    calls:
+        std::sync::Arc<std::sync::Mutex<Vec<(tokio::time::Instant, StreamCursor, StreamCursor)>>>,
+    fail: bool,
+}
+#[async_trait::async_trait]
+impl SnapshotPort for TimedSnapshot {
+    async fn snapshot(&mut self, _: &StreamCursor) -> Result<Snapshot, ClientError> {
+        unreachable!("snapshot_after carries both exact cursors")
+    }
+    async fn snapshot_after(
+        &mut self,
+        applied: &StreamCursor,
+        live: &StreamCursor,
+    ) -> Result<Snapshot, ClientError> {
+        self.calls.lock().unwrap().push((
+            tokio::time::Instant::now(),
+            applied.clone(),
+            live.clone(),
+        ));
+        if self.fail {
+            Err(ClientError::Unavailable)
+        } else {
+            Ok(snapshot(5))
+        }
+    }
+}
+fn timed_load(
+    r: &mut EventRecovery,
+    listener: bool,
+) -> workbench_client::application::events::LoadRequest {
+    let action = if listener {
+        r.receive(event(1)).unwrap();
+        let id = r.register(0).unwrap();
+        let delivery = r.next(id).unwrap().unwrap();
+        r.consumer_failed(delivery).unwrap()
+    } else {
+        r.register(0).unwrap();
+        let mut notice = gap(0);
+        notice.reason = GapReason::Evicted;
+        r.start_gap(notice).unwrap()
+    };
+    let RecoveryAction::Load(load) = action else {
+        panic!("direct load required")
+    };
+    load
+}
+#[tokio::test(start_paused = true)]
+async fn eviction_and_listener_snapshot_retries_wait_preserve_cursor_and_exact_attempt_cap() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    use workbench_client::application::events::{spawn_snapshot, RecoveryOutcome};
+    for listener in [false, true] {
+        for success in [false, true] {
+            let limits = Limits::new(LimitConfig {
+                recovery_attempts: 3,
+                backoff_min: Duration::from_secs(10),
+                backoff_max: Duration::from_secs(10),
+                ..Default::default()
+            })
+            .unwrap();
+            let mut r = EventRecovery::new(cursor(0), limits.clone()).unwrap();
+            let mut load = timed_load(&mut r, listener);
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            for attempt in 1..=3 {
+                assert_eq!(load.applied_cursor(), &cursor(0));
+                assert_eq!(load.live_cursor(), &cursor(0));
+                let delay = if attempt == 1 {
+                    Duration::ZERO
+                } else {
+                    Duration::from_secs(10)
+                };
+                assert_eq!(load.retry_delay(), delay);
+                let before = tokio::time::Instant::now();
+                let job = spawn_snapshot(
+                    load,
+                    Box::new(TimedSnapshot {
+                        calls: calls.clone(),
+                        fail: !success || attempt < 3,
+                    }),
+                    &limits,
+                );
+                if attempt > 1 {
+                    tokio::task::yield_now().await;
+                    tokio::time::advance(delay - Duration::from_millis(1)).await;
+                    tokio::task::yield_now().await;
+                    assert_eq!(calls.lock().unwrap().len(), attempt - 1, "no retry burst");
+                    assert_eq!(r.cursor(), cursor(0));
+                    tokio::time::advance(Duration::from_millis(1)).await;
+                }
+                let completion = job.join().await.unwrap();
+                assert_eq!(calls.lock().unwrap().len(), attempt);
+                assert!(calls.lock().unwrap().last().unwrap().0 >= before + delay);
+                match r.complete_snapshot(completion).unwrap() {
+                    RecoveryOutcome::Action(RecoveryAction::Load(next)) => load = next,
+                    RecoveryOutcome::Action(RecoveryAction::Exhausted) => {
+                        assert!(!listener && !success && attempt == 3);
+                        break;
+                    }
+                    RecoveryOutcome::Action(RecoveryAction::ListenerExhausted(_)) => {
+                        assert!(listener && !success && attempt == 3);
+                        break;
+                    }
+                    RecoveryOutcome::Reset(mut work) => {
+                        assert!(success && attempt == 3);
+                        r.reset_applied(work.pop().unwrap()).unwrap();
+                        assert_eq!(r.cursor(), cursor(5));
+                        break;
+                    }
+                    _ => panic!("unexpected reconnect"),
+                }
+            }
+            let calls = calls.lock().unwrap();
+            assert_eq!(calls.len(), 3);
+            assert!(calls
+                .iter()
+                .all(|(_, applied, live)| *applied == cursor(0) && *live == cursor(0)));
+            if !success {
+                assert_eq!(r.cursor(), cursor(0));
+            }
+        }
+    }
+}
+#[tokio::test(start_paused = true)]
+async fn delayed_snapshot_cancel_and_new_generation_cannot_apply_old_completion() {
+    use std::{
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+    use workbench_client::application::events::spawn_snapshot;
+    for listener in [false, true] {
+        let limits = Limits::new(LimitConfig {
+            backoff_min: Duration::from_secs(10),
+            backoff_max: Duration::from_secs(10),
+            ..Default::default()
+        })
+        .unwrap();
+        let mut r = EventRecovery::new(cursor(0), limits.clone()).unwrap();
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let initial = timed_load(&mut r, listener);
+        let failed = spawn_snapshot(
+            initial,
+            Box::new(TimedSnapshot {
+                calls: calls.clone(),
+                fail: true,
+            }),
+            &limits,
+        )
+        .join()
+        .await
+        .unwrap();
+        let workbench_client::application::events::RecoveryOutcome::Action(RecoveryAction::Load(
+            retry,
+        )) = r.complete_snapshot(failed).unwrap()
+        else {
+            panic!("retry")
+        };
+        let job = spawn_snapshot(
+            retry,
+            Box::new(TimedSnapshot {
+                calls: calls.clone(),
+                fail: false,
+            }),
+            &limits,
+        );
+        tokio::task::yield_now().await;
+        job.cancel().await.unwrap();
+        r.close().unwrap();
+        tokio::time::advance(Duration::from_secs(20)).await;
+        assert_eq!(calls.lock().unwrap().len(), 1);
+        assert_eq!(r.cursor(), cursor(0));
+
+        let mut r = EventRecovery::new(cursor(0), limits.clone()).unwrap();
+        let initial = timed_load(&mut r, listener);
+        let failed = spawn_snapshot(
+            initial,
+            Box::new(TimedSnapshot {
+                calls: calls.clone(),
+                fail: true,
+            }),
+            &limits,
+        )
+        .join()
+        .await
+        .unwrap();
+        let workbench_client::application::events::RecoveryOutcome::Action(RecoveryAction::Load(
+            retry,
+        )) = r.complete_snapshot(failed).unwrap()
+        else {
+            panic!("retry")
+        };
+        let old = spawn_snapshot(
+            retry,
+            Box::new(TimedSnapshot {
+                calls: calls.clone(),
+                fail: false,
+            }),
+            &limits,
+        );
+        tokio::task::yield_now().await;
+        let RecoveryAction::Connect(c) = r.start_gap(gap(6)).unwrap() else {
+            panic!("new generation")
+        };
+        assert_eq!(c, cursor(6));
+        let fresh = r.hello(1, "e").unwrap().unwrap();
+        let mut resets = r.snapshot_loaded(fresh, snapshot(6)).unwrap();
+        for work in resets.drain(..) {
+            r.reset_applied(work).unwrap();
+        }
+        tokio::time::advance(Duration::from_secs(10)).await;
+        assert!(matches!(
+            r.complete_snapshot(old.join().await.unwrap()),
+            Err(ClientError::StaleGeneration)
+        ));
+        assert_eq!(r.cursor(), cursor(6));
+        assert_eq!(r.phase(), RecoveryPhase::Live);
+    }
+}

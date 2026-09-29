@@ -44,8 +44,13 @@ pub struct LoadRequest {
     generation: u64,
     applied: StreamCursor,
     live: StreamCursor,
+    retry_delay: Duration,
 }
 impl LoadRequest {
+    /// Initial load is immediate; retries wait inside their owned task.
+    pub fn retry_delay(&self) -> Duration {
+        self.retry_delay
+    }
     pub fn live_cursor(&self) -> &StreamCursor {
         &self.live
     }
@@ -283,6 +288,12 @@ impl EventRecovery {
     }
     fn issue_load(&mut self) -> Result<LoadRequest, ClientError> {
         let applied = self.cursor();
+        // Live-first stream retries already wait on Connect; direct terminal loads do not.
+        let retry_delay = if self.round.as_ref().is_some_and(|r| r.terminal) {
+            self.snapshot_retry_delay(self.attempts)?
+        } else {
+            Duration::ZERO
+        };
         let round = self.round.as_mut().ok_or(ClientError::StaleGeneration)?;
         if round.load_issued {
             return Err(ClientError::StaleGeneration);
@@ -295,6 +306,7 @@ impl EventRecovery {
             generation: round.generation,
             live: round.boundary.clone(),
             applied,
+            retry_delay,
         })
     }
     pub fn hello(
@@ -568,6 +580,7 @@ impl EventRecovery {
             generation: self.generation,
             live: applied.clone(),
             applied,
+            retry_delay: self.snapshot_retry_delay(attempts + 1)?,
         }))
     }
     pub fn consumer_failed(&mut self, delivery: Delivery) -> Result<RecoveryAction, ClientError> {
@@ -634,6 +647,15 @@ impl EventRecovery {
             }
             Err(_) => self.consumer_failed(completion.delivery).map(Some),
         }
+    }
+    fn snapshot_retry_delay(&self, attempts: u32) -> Result<Duration, ClientError> {
+        if attempts <= 1 {
+            return Ok(Duration::ZERO);
+        }
+        let random = uuid::Uuid::new_v4();
+        let bytes = random.as_bytes();
+        let jitter = u16::from_be_bytes([bytes[14], bytes[15]]) % 1001;
+        self.backoff_for(attempts - 1, jitter)
     }
     pub fn backoff(&self, jitter: u16) -> Result<Duration, ClientError> {
         self.backoff_for(self.attempts, jitter)
@@ -741,8 +763,10 @@ pub fn spawn_snapshot(
     limits: &Limits,
 ) -> OwnedJob<SnapshotCompletion> {
     let deadline = limits.config().request_timeout;
+    let retry_delay = request.retry_delay;
     OwnedJob::spawn(
         async move {
+            tokio::time::sleep(retry_delay).await;
             let result = bounded_callback(
                 async { source.snapshot_after(&request.applied, &request.live).await },
                 deadline,
@@ -750,7 +774,7 @@ pub fn spawn_snapshot(
             .await;
             SnapshotCompletion { request, result }
         },
-        deadline.saturating_add(deadline),
+        retry_delay.saturating_add(deadline.saturating_add(deadline)),
     )
 }
 pub fn spawn_reset(

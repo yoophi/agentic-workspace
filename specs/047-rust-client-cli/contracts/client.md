@@ -46,7 +46,7 @@ mutation은 첫 submission 전에 owner-only private retry state를 저장한다
 
 retry state의 저장/읽기 상한은 HTTP raw body와 독립적이다(기본256MiB). submission 전에 현재 request/identity serialized bytes +24×최대 raw body +64KiB를 예약한다. 숫자/문자열의 parse→serialize 정규화를 포함하며 공간 부족/overflow는 전송 전에 오류다. finite JSON 숫자24bytes 이하와 문자열 escape6배 이하의 허용 형식을 전제로 한다. 완료 응답은 원 identity/outcome과 함께 저장되어 동일 요청 cache reopen이 추가 HTTP resubmit 없이 가능하다.
 
-snapshot completion은 owner/generation/scope를 오류 분류보다 먼저 검증한다. old terminal 오류도 stale이며 새 Live에 영향0이다. 현재 Identity/Incompatible/Protocol/auth 및 nonretryable fault는 원 cause를 보존하여 terminal 정리하며 추가 snapshot0이다. transient allowlist는 connect와 동일하고 applied/boundary cursor 및 bounded budget/backoff를 유지한다.
+snapshot completion은 owner/generation/scope를 오류 분류보다 먼저 검증한다. old terminal 오류도 stale이며 새 Live에 영향0이다. 현재 Identity/Incompatible/Protocol/auth 및 nonretryable fault는 원 cause를 보존하여 terminal 정리하며 추가 snapshot0이다. transient allowlist는 connect와 동일하고 applied/boundary cursor 및 bounded budget/backoff를 유지한다. Evicted terminal 및 listener의 첫 snapshot은 즉시, 이후 snapshot/reset 재시도는 동일 exponential/jitter backoff 뒤 실행한다. delay는 소유 snapshot task 안에 있어 actor의 새 gap/종료를 막지 않으며 abort+join으로 취소한다. request timeout은 delay 이후 시작한다. live-first stream은 기존 Connect backoff를 사용하고 snapshot에서 중복 대기하지 않는다.
 
 ## 직렬화 예산 비교 (I-C5)
 
