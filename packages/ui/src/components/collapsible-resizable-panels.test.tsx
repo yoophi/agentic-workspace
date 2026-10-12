@@ -128,4 +128,11 @@ describe("shared panels controller and mounted content", () => {
     act(() => { layout.sizes = { left: 80, right: 20 }; layout.emit({ ...layout.sizes }); });
     expect(ref.current!.getState()).toEqual({ collapsedPanel: "right", leftSize: 80, rightSize: 20 });
   });
+  it("recognizes resize-to-rail and guards the last open panel", () => {
+    const ref = mount();
+    act(() => { layout.collapsed.add("right"); layout.sizes.right = 4; layout.emit({ ...layout.sizes }); });
+    act(() => ref.current!.collapse("left"));
+    expect(ref.current!.getState()).toEqual({ collapsedPanel: "right", leftSize: 70, rightSize: 30 });
+    act(() => ref.current!.expand("right")); expect(layout.sizes.right).toBe(30);
+  });
 });

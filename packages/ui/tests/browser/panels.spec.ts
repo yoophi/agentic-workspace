@@ -120,3 +120,22 @@ test("collapsed chat preserves its own input undo history", async ({ page }) => 
   await expect(chat).toHaveValue("chat draft!");
   await chat.focus(); await chat.press("ControlOrMeta+z"); await expect(chat).toHaveValue("chat draft");
 });
+
+
+test("pointer resize to rail uses the same collapse protection and restore path", async ({ page }) => {
+  await openDemo(page, "persistent-panels-pixels");
+  await page.getByRole("button", { name: "Expand chat", exact: true }).click();
+  const before = await panelWidth(page, "persistent-chat");
+  const separator = page.getByRole("separator");
+  const box = (await separator.boundingBox())!;
+  const group = (await page.locator("[data-group]").boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(group.x + group.width - 5, box.y + box.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveAttribute("aria-expanded", "false");
+  await page.getByRole("button", { name: "Collapse document", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Document", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "Chat", exact: true }).click();
+  await expect.poll(() => panelWidth(page, "persistent-chat")).toBeCloseTo(before, 0);
+});

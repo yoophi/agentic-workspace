@@ -207,7 +207,15 @@ function CollapsibleResizablePanels({
     }
     const current = panelStateRef.current;
     if (current.collapsedPanel !== null) return;
-    commitState(updatePanelLayout(current, leftSize, rightSize));
+    // Pointer/keyboard resizing can reach collapsedSize without a title click.
+    // Keep that transition in the same model and retain the prior expanded width.
+    const draggedSide = leftPanelRef.current?.isCollapsed() ? "left"
+      : rightPanelRef.current?.isCollapsed() ? "right" : null;
+    if (draggedSide && isCollapsible(draggedSide)) {
+      commitState(collapsePanel(current, draggedSide, current[draggedSide].lastExpandedSize));
+    } else {
+      commitState(updatePanelLayout(current, leftSize, rightSize));
+    }
   };
 
   return (

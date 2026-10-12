@@ -51,6 +51,8 @@ GE Molecules Storybook의 `PersistentPanelsPercentage`, `PersistentPanelsPixels`
 
 ## gh-45 검증 결과 (2026-10-13)
 
-별도 `box-md-ui-panels` 브랜치에서 기존 상태 9개 + component/DOM 8개, 실제 Chromium 9개가 통과했다. UI 타입 검사, GE 타입/프로덕션 빌드, GE Storybook 빌드도 통과했다. Chromium은 기존 소비자의 기본 unmount와 `showTitle: false` 동작, 숫자/문자열 px·백분율·max 경계 초기 복원, 좁은 컨테이너 min/max, pointer/keyboard resize, 문서 및 접혔던 채팅의 undo를 포함한다.
+별도 `box-md-ui-panels` 브랜치에서 기존 상태 9개 + component/DOM 9개, 실제 Chromium 10개가 통과했다. UI 타입 검사, GE 타입/프로덕션 빌드, GE Storybook 빌드도 통과했다. Chromium은 기존 소비자의 기본 unmount와 `showTitle: false` 동작, 숫자/문자열 px·백분율·max 경계 초기 복원, 좁은 컨테이너 min/max, pointer/keyboard resize, 문서 및 접혔던 채팅의 undo를 포함한다.
 
 DOM mock 결과와 실제 브라우저 결과는 분리해서 확인했다. 사용자 AW primary checkout과 기존 `box-md-http-client` 브랜치는 변경하지 않았다.
+
+포인터로 collapsed rail까지 줄이는 경우도 동일 상태 전이를 적용한다. 이때 마지막 열린 패널 보호와 이전 expanded 폭 복원을 실제 Chromium에서 확인했다.
