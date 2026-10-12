@@ -19,6 +19,47 @@ use workbench_host::{
 
 const ORIGIN: &str = "tauri://localhost";
 
+#[test]
+fn box_dev_webview_can_connect_with_its_own_origin_bound_window_token() {
+    let server = Server::start();
+    let origin = "http://localhost:1430";
+    let (status, issued) = server.owner_call(
+        "desktop.issueWindowToken",
+        json!({
+            "label":"box-main", "incarnation":"box-inc", "origin":origin
+        }),
+    );
+    assert_eq!(status, 200, "{issued}");
+    let token = issued["output"]["token"].as_str().unwrap();
+    let (status, opened) = call(
+        &server.base_url,
+        token,
+        Some(origin),
+        "bench.open",
+        json!({"workingDirectory":server.work_dir}),
+    );
+    assert_eq!(status, 200, "{opened}");
+    assert_eq!(
+        call(
+            &server.base_url,
+            token,
+            Some("http://localhost:1420"),
+            "bench.list",
+            json!({})
+        )
+        .0,
+        401
+    );
+    let (status, _) = server.owner_call(
+        "desktop.issueWindowToken",
+        json!({
+            "label":"box-main", "incarnation":"other", "origin":"http://localhost:1430.evil.example"
+        }),
+    );
+    assert_eq!(status, 403);
+    server.stop();
+}
+
 struct Server {
     runtime: tokio::runtime::Runtime,
     host: HostAssembly,

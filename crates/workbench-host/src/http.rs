@@ -31,8 +31,9 @@ use crate::{
     mcp::capability_registry::CapabilityRegistry,
 };
 
-pub const WEBVIEW_ORIGINS: [&str; 3] = [
+pub const WEBVIEW_ORIGINS: [&str; 4] = [
     "http://localhost:1420",
+    "http://localhost:1430",
     "tauri://localhost",
     "http://tauri.localhost",
 ];
