@@ -273,8 +273,12 @@ pub fn run() {
             if mode == infrastructure::workbench_mode::WorkbenchMode::External {
                 let executable = infrastructure::server_client::discover_server_executable();
                 _app.manage(infrastructure::server_client::ExternalServer::new(
-                    app_data_dir,
-                    executable,
+                    infrastructure::server_client::DesktopConnectionConfig {
+                        data_dir: app_data_dir,
+                        executable,
+                        runtime: tauri::async_runtime::handle().inner().clone(),
+                        shutdown_limit: workbench_desktop_client::EXIT_FLUSH_LIMIT,
+                    },
                 ));
                 finish_setup(_app);
                 return Ok(());
@@ -416,9 +420,7 @@ fn exit_external(app: &tauri::AppHandle) {
         "[workbench] exit: flushing {} window retirement(s) and releasing the lease",
         server.pending_retirements()
     );
-    tauri::async_runtime::block_on(
-        server.release_for_exit(infrastructure::server_client::EXIT_FLUSH_LIMIT),
-    );
+    tauri::async_runtime::block_on(server.shutdown());
 }
 
 /// 042 T033: 종료는 받아들인 HTTP·MCP 호출이 끝날 때까지 미룬다 — 신호만 보내고 곧바로 끝내면 분리 실행한 호출의

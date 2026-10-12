@@ -101,6 +101,7 @@ dependencies = [
  "tower-http 0.5.2",
  "uuid",
  "workbench-core",
+ "workbench-desktop-client",
  "workbench-host",
  "workbench-protocol",
  "workbench-server",
@@ -5703,6 +5704,20 @@ dependencies = [
  "workbench-core",
  "workbench-protocol",
  "workbench-server",
+]
+
+[[package]]
+name = "workbench-desktop-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "workbench-core",
+ "workbench-host",
+ "workbench-protocol",
 ]
 
 [[package]]

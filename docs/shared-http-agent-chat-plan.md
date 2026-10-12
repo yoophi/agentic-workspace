@@ -78,6 +78,20 @@ Module이 bench.open과 run 소유권, run 이벤트 구독·replay snapshot·�
 - 필수 검사: AW 및 box.md의 관련 타입 검사·프런트 테스트/빌드·Rust test/check/fmt. 실제 macOS 화면·서버 프로세스 종료/유지는 직접 증거로 확인한다. 도구가 창에 연결되지 않으면 완료라고 추정하지 않고 검증 제한으로 남긴다.
 - 최종 box.md gh-3 커밋과 td 리뷰/완료 기록에는 공유 모듈 버전, 실제 서버 시험 결과, UI 검증 결과를 연결한다.
 
-## 현재 상태
+## 서브 task와 진행 상태
 
-HTTP 브랜치 push 확인과 공유 코드 조사, 이 확장 계획 작성만 완료했다. 공유 Module 추출·run.createSession·HTTP 채팅 연결은 아직 구현하지 않았다. box.md의 이전 stdio Adapter 초안은 활성 코드에서 제거했고 `gh-3`은 in_progress로 유지한다.
+부모는 box.md `gh-3`이다. 모든 서브 task는 해당 GitHub issue의 td task로 등록했다.
+
+| Task | 범위 | 선행 작업 |
+|---|---|---|
+| gh-21 | 공유 Rust 데스크톱 연결 Module 추출 및 AW 전환 | 없음 |
+| gh-22 | run.createSession 및 idle ACP launcher | 없음 |
+| gh-23 | 공유 TypeScript HTTP 채팅 클라이언트 | gh-22 |
+| gh-24 | box.md HTTP/WS 채팅 적용 | gh-21, gh-23 |
+| gh-25 | 실제 통합 검증 및 공유 버전 고정 | gh-24 |
+
+`gh-3`은 기존 `gh-2`와 최종 검증 `gh-25`에 의존한다. gh-21·gh-22는 독립적으로 착수 가능하다. gh-17의 최우측 접기·펴기 패널과 gh-20의 문서 MCP는 별도 feature로 유지한다.
+
+HTTP 브랜치 push 확인과 계획 작성은 완료했다. gh-21에서 `crates/workbench-desktop-client`로 기존 구현과 테스트를 이동하고 AW를 같은 crate의 소비자로 전환했다. 공개 연결 정보는 창 token만 포함하고 owner descriptor는 내부에 둔다. Tauri runtime handle과 종료 상한을 shell에서 주입한다. 기존 22개 회귀 시험과 동기 창 hook·다른 클라이언트 보존의 공개 Interface 시험을 수행한다. 실행 결과 및 사용 계약은 [공유 데스크톱 연결 Module](workbench-desktop-client.md)에 기록한다.
+
+run.createSession·공유 TS 채팅·box.md 연결과 통합 검증은 아직 구현하지 않았다. box.md의 이전 stdio Adapter 초안은 활성 코드에서 제거했고 `gh-3`은 in_progress로 유지한다.
