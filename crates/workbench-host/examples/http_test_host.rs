@@ -73,7 +73,11 @@ async fn main() {
         ..RunScript::default()
     }));
     let mut adapters = RuntimeAdapters::production();
-    adapters.run_engine = Some(engine);
+    // Shared agent-client integration can exercise the real ACP launcher with a fixture subprocess.
+    // Existing transport suites keep the deterministic scripted engine by default.
+    if std::env::var("HOST_USE_ACP_ENGINE").as_deref() != Ok("1") {
+        adapters.run_engine = Some(engine);
+    }
     adapters.event_limits = EventHubLimits {
         run_journal_capacity: capacity,
         exchange_journal_capacity: capacity,

@@ -16,6 +16,18 @@ function rng(seed: number) {
 }
 
 describe("event client reconnects without loss or duplication", () => {
+  it("reports a new epoch from hello when a cursor-zero stream has no gap or events", async () => {
+    const hub = new FakeEventHub();
+    const epochs: string[] = [];
+    const client = clientFor(hub, { onEpochChanged: (epoch) => epochs.push(epoch) });
+    client.subscribe("run:idle", { onEvent: () => undefined });
+    await until(() => hub.sockets.some((socket) => socket.readyState === 1));
+    hub.restart("epoch-2");
+    await until(() => epochs.length === 1, "empty stream restart observed");
+    expect(epochs).toEqual(["epoch-2"]);
+    expect(client.debugCursor("run:idle")).toBe(0);
+    client.close();
+  });
   it("survives 120 forced disconnects with slow async listeners and listener swaps", async () => {
     const hub = new FakeEventHub();
     const client = clientFor(hub, { graceMs: 60_000 });

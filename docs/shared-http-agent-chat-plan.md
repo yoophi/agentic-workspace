@@ -60,7 +60,7 @@ Module이 bench.open과 run 소유권, run 이벤트 구독·replay snapshot·�
 
 1. 새 Rust Module을 만들고 AW를 먼저 같은 Interface로 전환한다. 기존 ExternalServer 시험을 새 Module의 Interface 시험으로 옮긴다.
 2. run.createSession 계약과 공유 launcher의 idle 시작을 구현한다.
-3. 공유 TypeScript Module을 만들고 AW의 채팅 경로와 box.md `gh-3`에 적용한다.
+3. 기존 AW HTTP transport를 조립한 공유 TypeScript 채팅 Module을 만들고 box.md `gh-3`에 적용한다. AW worktree/orchestration 화면은 기존 공유 workbench-client를 소비하고 Rust 연결 Adapter를 공유한다. 단순 채팅 facade와 목표·child task·Ralph 반복 상태의 조립 범위는 [공유 채팅 클라이언트](shared-http-agent-client.md)에 기록한다.
 4. AW의 이 작업 브랜치 `box-md-http-client`를 작업별 커밋으로 작성·검증·push한다.
 5. box.md는 AW Git submodule의 검증된 커밋을 고정하고 pnpm에 공유 HTTP 패키지를 등록한다. Rust는 공유 데스크톱 연결 crate만 소비한다.
 6. box.md에는 native 연결 준비/해제 command와 UI Adapter만 둔다. 기존 로컬 문서·댓글·Git 히스토리 저장 경로는 유지한다.
@@ -94,4 +94,4 @@ Module이 bench.open과 run 소유권, run 이벤트 구독·replay snapshot·�
 
 HTTP 브랜치 push 확인과 계획 작성은 완료했다. gh-21에서 `crates/workbench-desktop-client`로 기존 구현과 테스트를 이동하고 AW를 같은 crate의 소비자로 전환했다. 공개 연결 정보는 창 token만 포함하고 owner descriptor는 내부에 둔다. Tauri runtime handle과 종료 상한을 shell에서 주입한다. 기존 22개 회귀 시험과 동기 창 hook·다른 클라이언트 보존의 공개 Interface 시험을 수행한다. 실행 결과 및 사용 계약은 [공유 데스크톱 연결 Module](workbench-desktop-client.md)에 기록한다.
 
-gh-21은 td 리뷰 후 완료했다. gh-22에서 run.createSession과 idle ACP launcher, 생성 계약 및 실제 HTTP/WS 시험을 구현했다. 상세 계약과 검증은 [초기 프롬프트 없는 세션 생성](idle-acp-session-http.md)에 기록한다. 공유 TS 채팅·box.md 연결과 최종 통합 검증은 아직 구현하지 않았다. box.md의 이전 stdio Adapter 초안은 활성 코드에서 제거했고 `gh-3`은 in_progress로 유지한다.
+gh-21은 td 리뷰 후 완료했다. gh-22에서 run.createSession과 idle ACP launcher, 생성 계약 및 실제 HTTP/WS 시험을 구현했다. 상세 계약과 검증은 [초기 프롬프트 없는 세션 생성](idle-acp-session-http.md)에 기록한다. gh-23에서 공유 TypeScript 채팅 Module과 공개 Interface·실제 HTTP/WS ACP 시험을 구현했다. 상세 계약은 [공유 채팅 클라이언트](shared-http-agent-client.md)에 기록한다. box.md 연결과 최종 통합 검증은 아직 구현하지 않았다. box.md의 이전 stdio Adapter 초안은 활성 코드에서 제거했고 `gh-3`은 in_progress로 유지한다.
