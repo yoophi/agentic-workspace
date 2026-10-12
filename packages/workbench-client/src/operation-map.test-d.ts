@@ -67,6 +67,7 @@ test("operation ids are exactly the registered operations (037 + 038 + 040 + 044
     | "bench.requestTitle"
     | "run.listToolCandidates"
     | "run.start"
+    | "run.createSession"
     | "run.sendPrompt"
     | "run.steer"
     | "run.cancelAndSend"
@@ -202,6 +203,8 @@ test("bench, run and exchange operations are typed (040)", () => {
   expectTypeOf<OperationMap["run.start"]["input"]["request"]>().toEqualTypeOf<AgentRunRequest>();
   expectTypeOf<OperationMap["exchange.send"]["output"]>().toEqualTypeOf<AgentExchange>();
   expectTypeOf<OperationMap["exchange.list"]["output"]>().toEqualTypeOf<AgentExchange[]>();
+  expectTypeOf<OperationMap["run.createSession"]["input"]>().toEqualTypeOf<OperationMap["run.start"]["input"]>();
+  expectTypeOf<OperationMap["run.createSession"]["output"]>().toEqualTypeOf<AgentRun>();
   // @ts-expect-error run.start의 output은 AgentRun이며 교환이 아니다
   const wrongRun: OperationMap["run.start"]["output"] = {} as AgentExchange;
   // @ts-expect-error exchange.list의 output은 배열이다

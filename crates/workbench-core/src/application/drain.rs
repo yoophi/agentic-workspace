@@ -126,6 +126,7 @@ pub fn drain_class(operation: OperationId) -> DrainClass {
         | OperationId::ProjectDelete
         | OperationId::ProjectUpdate
         | OperationId::RunCancelAndSend
+        | OperationId::RunCreateSession
         | OperationId::RunStart
         | OperationId::RunSteer
         | OperationId::SavedPromptCreate

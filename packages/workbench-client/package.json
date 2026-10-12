@@ -10,7 +10,7 @@
     "./test-host": "./src/test/integration/host.ts"
   },
   "scripts": {
-    "generate": "cargo run -q -p workbench-protocol --bin export_openapi > ../../crates/workbench-protocol/openapi/workbench.openapi.json && openapi-typescript ../../crates/workbench-protocol/openapi/workbench.openapi.json -o src/generated/workbench.ts",
+    "generate": "cargo run -q -p workbench-protocol --bin export_openapi > ../../crates/workbench-protocol/openapi/workbench.openapi.json && openapi-typescript ../../crates/workbench-protocol/openapi/workbench.openapi.json -o src/generated/workbench.ts && cargo run -q -p workbench-protocol --bin export_operation_kinds > src/operation-kinds.ts",
     "check-types": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:integration": "vitest run --config vitest.integration.config.ts"

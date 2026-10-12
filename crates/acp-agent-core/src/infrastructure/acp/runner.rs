@@ -36,7 +36,7 @@ use crate::{
         events::{LifecycleStatus, RalphLoopStatus, RunEvent},
         run::{
             AgentMcpServerConfig, AgentRunRequest, ContextSizePreset, PermissionMode,
-            RalphLoopRequest, ResumePolicy,
+            RalphLoopRequest, ResumePolicy, SessionLaunchIntent,
         },
     },
     infrastructure::{
@@ -64,6 +64,7 @@ use crate::{
 
 const DEFAULT_WORKDIR: &str = "~/tmp/acp-tauri-agent-workspace";
 const DEFAULT_STDIO_BUFFER_LIMIT_MB: usize = 50;
+const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub struct AcpAgentRunner<C, P>
@@ -71,6 +72,8 @@ where
     C: AgentCatalog,
     P: PermissionDecisionPort,
 {
+    launch_intent: SessionLaunchIntent,
+    session_start_timeout: Duration,
     catalog: C,
     permissions: P,
     session_store: Arc<dyn AcpSessionStore>,
@@ -86,11 +89,19 @@ where
 {
     pub fn new(catalog: C, permissions: P, session_store: Arc<dyn AcpSessionStore>) -> Self {
         Self {
+            launch_intent: SessionLaunchIntent::Prompt,
+            session_start_timeout: SESSION_START_TIMEOUT,
             catalog,
             permissions,
             session_store,
             initial_turn_guard: None,
         }
+    }
+
+    /// Idle은 설정 완료·registry attach 이후에만 SessionCreated를 발행한다.
+    pub fn with_launch_intent(mut self, intent: SessionLaunchIntent) -> Self {
+        self.launch_intent = intent;
+        self
     }
 
     /// 초기 prompt 순서(시작 목표 + Ralph 반복)가 끝나면 놓을 guard를 붙인다. 순서가 끝나면 세션이 살아 있어도
@@ -259,10 +270,12 @@ where
             create_agent_session(&peer, &workspace, &session_mcp_servers).await?
         };
         let session_id = session_setup.session_id;
-        sink.emit(
-            &run_id,
-            lifecycle(LifecycleStatus::SessionCreated, session_id.clone()),
-        );
+        if self.launch_intent == SessionLaunchIntent::Prompt {
+            sink.emit(
+                &run_id,
+                lifecycle(LifecycleStatus::SessionCreated, session_id.clone()),
+            );
+        }
         let permission_mode = request.permission_mode.unwrap_or_default();
         apply_permission_mode(
             &peer,
@@ -381,14 +394,20 @@ where
     where
         S: RunEventSink,
     {
+        let launch_intent = self.launch_intent;
+        let session_start_timeout = self.session_start_timeout;
         let initial_turn_guard = self.initial_turn_guard;
         let this = Self {
             initial_turn_guard: None,
             ..self
         };
-        let setup = this
-            .start_session(&request, run_id.clone(), sink.clone())
-            .await?;
+        let setup_future = this.start_session(&request, run_id.clone(), sink.clone());
+        let setup = match launch_intent {
+            SessionLaunchIntent::Prompt => setup_future.await?,
+            SessionLaunchIntent::Idle => timeout(session_start_timeout, setup_future)
+                .await
+                .map_err(|_| anyhow!("ACP session initialization timed out"))??,
+        };
         let AcpSessionSetup {
             session,
             child,
@@ -397,6 +416,7 @@ where
         } = setup;
 
         let commander = AcpRunCommander {
+            launch_intent,
             child,
             read_task,
             stderr_task,
@@ -419,6 +439,7 @@ struct AcpRunCommander<S>
 where
     S: RunEventSink,
 {
+    launch_intent: SessionLaunchIntent,
     child: Child,
     read_task: JoinHandle<Result<()>>,
     stderr_task: Option<JoinHandle<()>>,
@@ -437,8 +458,9 @@ where
     fn run_to_completion(self: Box<Self>) -> DriverFuture {
         Box::pin(async move {
             let Self {
+                launch_intent,
                 mut child,
-                read_task,
+                mut read_task,
                 stderr_task,
                 session,
                 sink,
@@ -448,21 +470,53 @@ where
                 initial_turn_guard,
             } = *self;
 
-            run_prompt_sequence(
-                sink.clone(),
-                &run_id,
-                initial_goal,
-                ralph_loop,
-                |sink, prompt| {
-                    let session = session.clone();
-                    async move { session.send_prompt(sink, prompt).await }
-                },
-            )
-            .await;
+            match launch_intent {
+                SessionLaunchIntent::Idle => {
+                    // The use case attached the session before polling this driver: a client may now send.
+                    if !read_task.is_finished() && child.try_wait().ok().flatten().is_none() {
+                        sink.emit(
+                            &run_id,
+                            lifecycle(LifecycleStatus::SessionCreated, session.session_id().await),
+                        );
+                    }
+                }
+                SessionLaunchIntent::Prompt => {
+                    run_prompt_sequence(
+                        sink.clone(),
+                        &run_id,
+                        initial_goal,
+                        ralph_loop,
+                        |sink, prompt| {
+                            let session = session.clone();
+                            async move { session.send_prompt(sink, prompt).await }
+                        },
+                    )
+                    .await;
+                }
+            }
             // 초기 prompt 순서가 끝났다: 세션은 살아 있어도 바쁘지 않다.
             drop(initial_turn_guard);
 
-            match child.wait().await {
+            let mut reader_joined = false;
+            let exited = if launch_intent == SessionLaunchIntent::Idle {
+                tokio::select! {
+                    status = child.wait() => status,
+                    read = &mut read_task => {
+                        reader_joined = true;
+                        let message = match read {
+                            Ok(Ok(())) => "ACP connection closed".to_owned(),
+                            Ok(Err(error)) => format!("ACP read failed: {error}"),
+                            Err(error) => format!("ACP reader stopped: {error}"),
+                        };
+                        sink.emit(&run_id, RunEvent::Error { message });
+                        let _ = child.start_kill();
+                        child.wait().await
+                    }
+                }
+            } else {
+                child.wait().await
+            };
+            match exited {
                 Ok(status) => {
                     if let Some(code) = status.code() {
                         if code != 0 {
@@ -485,8 +539,10 @@ where
                 }
             }
 
-            read_task.abort();
-            let _ = read_task.await;
+            if !reader_joined {
+                read_task.abort();
+                let _ = read_task.await;
+            }
             if let Some(task) = stderr_task {
                 task.abort();
             }
@@ -1536,6 +1592,79 @@ mod tests {
                 .unwrap()
                 .push((run_id.to_string(), event));
         }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn idle_initialization_timeout_kills_the_process_without_reporting_ready() {
+        use crate::{
+            domain::{
+                events::LifecycleStatus,
+                run::{AgentRunRequest, SessionLaunchIntent},
+            },
+            infrastructure::{
+                agent_catalog::ConfigurableAgentCatalog,
+                noop_acp_session_store::NoopAcpSessionStore, permission_broker::PermissionBroker,
+            },
+            ports::session_launcher::SessionLauncher,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("pid");
+        let script = format!("import os,sys,time; open({:?}, 'w').write(str(os.getpid())); sys.stdin.readline(); time.sleep(120)", pid_file.to_str().unwrap());
+        let command = shell_words::join(["python3", "-c", &script]);
+        let request: AgentRunRequest = serde_json::from_value(json!({
+            "goal":"not-a-prompt", "agentId":"fake-acp", "agentCommand":command, "cwd":dir.path()
+        }))
+        .unwrap();
+        let sink = CollectingSink::default();
+        let mut runner = super::AcpAgentRunner::new(
+            ConfigurableAgentCatalog::from_env(),
+            PermissionBroker::default(),
+            Arc::new(NoopAcpSessionStore),
+        )
+        .with_launch_intent(SessionLaunchIntent::Idle);
+        // PATH discovery invokes the login shell once; do it before measuring an unresponsive ACP peer.
+        crate::infrastructure::acp::util::enriched_path();
+        runner.session_start_timeout = Duration::from_secs(2);
+        let result = runner
+            .launch(request, "timeout-run".into(), sink.clone())
+            .await;
+        let error = match result {
+            Ok(_) => panic!("initialization unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        assert!(error.to_string().contains("initialization timed out"));
+        let pid = std::fs::read_to_string(&pid_file).expect("agent actually started");
+        let killed = timeout(Duration::from_secs(3), async {
+            loop {
+                if !std::process::Command::new("kill")
+                    .args(["-0", pid.trim()])
+                    .output()
+                    .unwrap()
+                    .status
+                    .success()
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            killed.is_ok(),
+            "timed out agent process survived cancellation"
+        );
+        assert!(!sink
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|(_, event)| matches!(
+                event,
+                RunEvent::Lifecycle {
+                    status: LifecycleStatus::SessionCreated | LifecycleStatus::PromptSent,
+                    ..
+                }
+            )));
     }
 
     fn ralph_loop(max_iterations: usize) -> RalphLoopRequest {
