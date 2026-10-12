@@ -2,6 +2,8 @@
 
 2026-10-13, box.md gh-20/gh-48/gh-49. 이 문서는 공용 라이브러리 확장 계획이며 구현 완료나 실제 agent 도구 사용의 증거가 아니다. 작업 브랜치는 `box-md-document-mcp`, 기반은 공유 HTTP ACP client와 UI 확장이 포함된 `8534a7b`이다.
 
+gh-49에서 공용 호스트를 구현했다. 현재 API·실제 검증 결과는 [공용 호스트 사용법](local-mcp-server.md)을 따른다. 아래는 gh-48에서 확정한 계획 기록이며 Box 문서 도구/실제 agent 검증은 후속 작업으로 남아 있다.
+
 ## 충분한 공유 기능과 부족한 기능
 
 `packages/workbench-agent-client`의 SessionOptions는 `mcpServers`를 받고 HTTP `run.createSession` 요청으로 전달한다. `crates/acp-agent-core` runner는 initialize의 HTTP MCP capability를 확인한 뒤 `session/new`에 전달한다. Box의 ACP 실행·채팅 경로는 이 공유 구현을 계속 사용한다.
