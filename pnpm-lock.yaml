@@ -691,6 +691,9 @@ importers:
 
   packages/workbench-client:
     devDependencies:
+      '@types/node':
+        specifier: ^26.0.0
+        version: 26.0.0
       openapi-typescript:
         specifier: ^7.13.0
         version: 7.13.0(typescript@5.8.3)

@@ -46,11 +46,11 @@ export class Fixture {
         output: [
           {
             id: "fake",
-            name: "Fixture Agent",
+            label: "Fixture Agent",
             command: "fake-acp",
             models: [],
-            permissionModes: [],
-            effortOptions: [],
+            
+            efforts: [],
             contextSizes: [],
           },
         ],
