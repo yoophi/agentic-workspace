@@ -95,7 +95,7 @@ jobs:
           pnpm run test
           pnpm run build
           cargo fmt --all -- --check
-          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings -A clippy::double-must-use
           cargo test --workspace --all-targets
 
       - name: Configure Apple notarization

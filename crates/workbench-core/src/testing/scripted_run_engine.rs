@@ -580,7 +580,7 @@ impl RunEngine for ScriptedRunEngine {
         let _guard = self.reserve_turn(run_id)?;
         if self
             .fail_send_and_wait
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(1)
             })
             .is_ok()

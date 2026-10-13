@@ -338,7 +338,7 @@ impl OrchestrationRuntime {
     /// 주입된 되돌리기 오류를 하나 쓴다(있으면 true).
     pub(crate) fn take_revert_fault(&self) -> bool {
         self.revert_faults
-            .fetch_update(
+            .try_update(
                 std::sync::atomic::Ordering::SeqCst,
                 std::sync::atomic::Ordering::SeqCst,
                 |left| left.checked_sub(1),

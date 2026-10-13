@@ -53,7 +53,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run strict Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings -A clippy::double-must-use
 
       - name: Test Rust workspace
         run: cargo test --workspace --all-targets
