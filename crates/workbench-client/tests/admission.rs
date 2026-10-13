@@ -7,7 +7,7 @@ use workbench_protocol::{operations::OPERATIONS, OperationId};
 fn catalog_is_closed_and_every_operation_is_classified() {
     assert_eq!(
         OPERATIONS.len(),
-        94,
+        95,
         "review new catalog entries before activation"
     );
     for spec in OPERATIONS {
