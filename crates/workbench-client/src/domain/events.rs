@@ -78,7 +78,7 @@ impl EventReducer {
         limits.check_cursor(&cursor)?;
         let received = cursor.after_sequence;
         let owner_id = NEXT_OWNER
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_add(1))
             .map_err(|_| ClientError::StaleGeneration)?;
         Ok(Self {
             owner_id,

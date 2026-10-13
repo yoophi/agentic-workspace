@@ -678,6 +678,14 @@ export interface components {
             /** @enum {string} */
             kind: "complete";
             /** @enum {string} */
+            operation: "run.createSession";
+            output: components["schemas"]["AgentRunDto"];
+            /** @description command 성공 시 새 aggregate revision. query는 없다. */
+            revision?: number;
+        } | {
+            /** @enum {string} */
+            kind: "complete";
+            /** @enum {string} */
             operation: "run.sendPrompt";
             output: null;
             /** @description command 성공 시 새 aggregate revision. query는 없다. */
@@ -1564,6 +1572,18 @@ export interface components {
             protocolVersion: number;
             /** @enum {string} */
             operation: "run.start";
+            requestId: components["schemas"]["RequestId"];
+            input: components["schemas"]["RunStartInput"];
+            idempotencyKey: components["schemas"]["IdempotencyKey"];
+            /** @description command에서만 의미. aggregate revision과 다르면 preconditionFailed. */
+            expectedRevision?: number;
+            /** @description 서버가 상한을 적용하는 상대 시간(ms). 037은 검증만 한다. */
+            timeoutMs?: number;
+        } | {
+            /** @description generic call/event wire 호환성 축. 037은 1만 지원한다. */
+            protocolVersion: number;
+            /** @enum {string} */
+            operation: "run.createSession";
             requestId: components["schemas"]["RequestId"];
             input: components["schemas"]["RunStartInput"];
             idempotencyKey: components["schemas"]["IdempotencyKey"];

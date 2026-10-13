@@ -23,7 +23,7 @@ fn operations_returns_one_catalog_json_and_no_diagnostics() {
     assert_eq!(output.stdout.iter().filter(|b| **b == b'\n').count(), 1);
     let value: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["ok"], true);
-    assert_eq!(value["data"].as_array().unwrap().len(), 94);
+    assert_eq!(value["data"].as_array().unwrap().len(), 95);
 }
 #[test]
 fn unknown_operation_and_secret_argv_are_safe_usage_errors() {

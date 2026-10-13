@@ -84,6 +84,7 @@
 | `run.sendPrompt` | command | K | `continuation.exchangeRequestId`가 호출자 작업대의 교환이고, 대상 run이 이 run, 배달 방식 `send`/`queue`, 확인 결과가 `rejected` 아님, 전달 prompt 미소비, 키가 `exchange-delivery:<id>`이면 소비 표시와 함께 1회 받는다(교환 전달). 아니면 N |
 | `run.setPermissionMode` | command | C | 권한 대기를 자동 승인·거절로 풀 수 있다(대기 해소) |
 | `run.start` | command | N | 새 작업 또는 새 데이터 변경 |
+| `run.createSession` | command | N | ACP 세션 생성은 새 실행이다. |
 | `run.steer` | command | N | 새 작업 또는 새 데이터 변경 |
 | `savedPrompt.create` | command | N | 새 작업 또는 새 데이터 변경 |
 | `savedPrompt.delete` | command | N | 새 작업 또는 새 데이터 변경 |

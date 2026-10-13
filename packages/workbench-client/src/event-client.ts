@@ -342,6 +342,14 @@ export function createEventClient(options: EventClientOptions): EventClient {
       }
       switch (frame.type) {
         case "hello":
+          // A cursor-zero subscription may have no gap/events on a restarted server. Hello still proves the new epoch,
+          // independently of whether subscription recovery succeeds; old sequences must not survive it.
+          if (frame.epoch !== this.epoch) {
+            const known = this.epoch !== "";
+            this.epoch = frame.epoch;
+            this.forgetEpochSequences();
+            if (known) options.onEpochChanged?.(frame.epoch);
+          }
           this.failures = 0;
           this.connections += 1;
           if (

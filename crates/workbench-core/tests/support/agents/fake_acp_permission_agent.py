@@ -26,6 +26,10 @@ import sys
 import time
 
 LOG = sys.argv[sys.argv.index("--log") + 1] if "--log" in sys.argv else None
+# gh-22: 초기화 대기 중 취소를 실제 프로세스로 검증하는 선택적 관측/문 파일.
+if "--pid-file" in sys.argv:
+    with open(sys.argv[sys.argv.index("--pid-file") + 1], "w") as handle:
+        handle.write(str(os.getpid()))
 # 043 앱 스모크: `--echo`면 받은 prompt 본문을 `echo:<본문>` agent 메시지로 먼저 돌려보낸다(앱이 그 출력을 받는지 확인).
 ECHO = "--echo" in sys.argv
 END_TURN_GATE = sys.argv[sys.argv.index("--end-turn-gate") + 1] if "--end-turn-gate" in sys.argv else None
@@ -113,6 +117,8 @@ for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
     if method == "initialize":
+        if "--log-session" in sys.argv:
+            log("initialize")
         respond(message["id"], {
             "protocolVersion": 1,
             "agentCapabilities": {},
@@ -120,7 +126,13 @@ for line in sys.stdin:
             "agentInfo": {"name": "fake-acp", "version": "0"},
         })
     elif method == "session/new":
+        if "--log-session" in sys.argv:
+            log("session/new")
+        if "--session-gate" in sys.argv:
+            wait_for_gate(sys.argv[sys.argv.index("--session-gate") + 1])
         respond(message["id"], {"sessionId": "fake-session"})
+        if "--close-stdout-after-session" in sys.argv:
+            os.close(sys.stdout.fileno())
     elif method == "session/prompt":
         pending_prompt = message["id"]
         log(f"prompt:{pending_prompt}")

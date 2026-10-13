@@ -31,6 +31,7 @@ use crate::{
 pub const RUNS_AGGREGATE: &str = "runs";
 
 struct StartHandler {
+    operation: OperationId,
     runner: Arc<IntentFirst>,
     coordinator: Arc<StorageCoordinator>,
     services: Arc<BenchServices>,
@@ -45,6 +46,20 @@ impl OperationHandler for StartHandler {
         input: serde_json::Value,
     ) -> Result<CallReply, WorkbenchFault> {
         let typed: RunStartInput = decode_input(&ctx.request_id, &input)?;
+        let idle = self.operation == OperationId::RunCreateSession;
+        if idle
+            && typed
+                .request
+                .ralph_loop
+                .as_ref()
+                .is_some_and(|settings| settings.enabled)
+        {
+            return Err(WorkbenchFault::invalid_argument(
+                ctx.request_id.clone(),
+                "run.createSession does not accept an enabled Ralph loop.",
+                Some("/input/request/ralphLoop"),
+            ));
+        }
         // 작업대 아래 run을 등록하므로 입장권을 잡는다(닫기와 직렬화, research R1). 입장권은 `apply` closure가
         // 소유한다: apply는 blocking task에서 돌아 호출자 future가 취소돼도 끝까지 가므로, 호출자 쪽에 두면 엔진이
         // run을 등록하는 도중 닫기가 입장 경계를 지나 닫힌 작업대에 살아 있는 run이 남을 수 있다.
@@ -73,7 +88,7 @@ impl OperationHandler for StartHandler {
         let orchestration = Arc::clone(&self.orchestration);
         let runtime = tokio::runtime::Handle::current();
         let spec = MutationSpec {
-            operation: OperationId::RunStart,
+            operation: self.operation,
             aggregate: RUNS_AGGREGATE.to_owned(),
             normalized_input: input,
             reservation,
@@ -147,7 +162,17 @@ impl OperationHandler for StartHandler {
                         format!("duplicate run id: {run_id}"),
                     )));
                 }
-                match runtime.block_on(services.engine.start(request, &bench_id, sink)) {
+                let launched = runtime.block_on(async {
+                    if idle {
+                        services
+                            .engine
+                            .create_session(request, &bench_id, sink)
+                            .await
+                    } else {
+                        services.engine.start(request, &bench_id, sink).await
+                    }
+                });
+                match launched {
                     Ok(run) => {
                         if let Some(revocation) = &mut launch_revocation {
                             revocation.disarm();
@@ -197,15 +222,18 @@ pub fn register(
             },
         ),
     );
-    registry.register(
-        OperationId::RunStart,
-        Arc::new(StartHandler {
-            runner: Arc::clone(runner),
-            coordinator: Arc::clone(coordinator),
-            services: Arc::clone(services),
-            orchestration: Arc::clone(orchestration),
-        }),
-    );
+    for operation in [OperationId::RunStart, OperationId::RunCreateSession] {
+        registry.register(
+            operation,
+            Arc::new(StartHandler {
+                operation,
+                runner: Arc::clone(runner),
+                coordinator: Arc::clone(coordinator),
+                services: Arc::clone(services),
+                orchestration: Arc::clone(orchestration),
+            }),
+        );
+    }
     for (operation, kind) in [
         (OperationId::RunSendPrompt, PromptKind::Send),
         (OperationId::RunSteer, PromptKind::Steer),

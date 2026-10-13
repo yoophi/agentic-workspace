@@ -19,7 +19,7 @@ use acp_agent_core::{
         steer_prompt::SteerPromptUseCase,
     },
     domain::events::RunEvent,
-    domain::run::{AgentRun, AgentRunRequest, PermissionMode},
+    domain::run::{AgentRun, AgentRunRequest, PermissionMode, SessionLaunchIntent},
     infrastructure::{
         acp::runner::AcpAgentRunner, agent_catalog::ConfigurableAgentCatalog,
         agent_session_registry::AppState,
@@ -63,6 +63,7 @@ impl AcpRunEngine {
         owner: &str,
         sink: WorkbenchRunSink,
         start_gate: Option<tokio::sync::oneshot::Receiver<()>>,
+        launch_intent: SessionLaunchIntent,
     ) -> Result<AgentRun, RunEngineError> {
         let mut request = request;
         // 초기 prompt 순서의 예약은 run id로 센다: id가 없으면 여기서 정한다(유스케이스의 `build_run`과 같은 uuid).
@@ -78,7 +79,8 @@ impl AcpRunEngine {
             ConfigurableAgentCatalog::from_env(),
             self.registry.permissions(),
             self.session_store.clone(),
-        );
+        )
+        .with_launch_intent(launch_intent);
         if let Some(guard) = self.reserve_turn(&run_id)? {
             runner = runner.with_initial_turn_guard(Box::new(guard));
         }
@@ -152,7 +154,18 @@ impl RunEngine for AcpRunEngine {
         owner: &str,
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError> {
-        self.start_with(request, owner, sink, None).await
+        self.start_with(request, owner, sink, None, SessionLaunchIntent::Prompt)
+            .await
+    }
+
+    async fn create_session(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.start_with(request, owner, sink, None, SessionLaunchIntent::Idle)
+            .await
     }
 
     async fn start_gated(
@@ -162,8 +175,14 @@ impl RunEngine for AcpRunEngine {
         sink: WorkbenchRunSink,
         start_gate: tokio::sync::oneshot::Receiver<()>,
     ) -> Result<AgentRun, RunEngineError> {
-        self.start_with(request, owner, sink, Some(start_gate))
-            .await
+        self.start_with(
+            request,
+            owner,
+            sink,
+            Some(start_gate),
+            SessionLaunchIntent::Prompt,
+        )
+        .await
     }
 
     async fn send_prompt(

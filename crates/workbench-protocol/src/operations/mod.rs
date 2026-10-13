@@ -73,7 +73,7 @@ const fn epoch_command(id: OperationId, scope: &'static [Scope]) -> OperationSpe
 }
 
 /// `OperationId::ALL`과 같은 순서.
-pub const OPERATIONS: [OperationSpec; 94] = [
+pub const OPERATIONS: [OperationSpec; 95] = [
     query(OperationId::ProjectList, &[Scope::ProjectRead]),
     command(OperationId::ProjectCreate, &[Scope::ProjectWrite]),
     command(OperationId::ProjectUpdate, &[Scope::ProjectWrite]),
@@ -119,6 +119,7 @@ pub const OPERATIONS: [OperationSpec; 94] = [
     epoch_command(OperationId::BenchRequestTitle, &[Scope::PresentationWrite]),
     query(OperationId::RunListToolCandidates, &[Scope::RunRead]),
     command(OperationId::RunStart, &[Scope::RunWrite]),
+    command(OperationId::RunCreateSession, &[Scope::RunWrite]),
     epoch_command(OperationId::RunSendPrompt, &[Scope::RunWrite]),
     epoch_command(OperationId::RunSteer, &[Scope::RunWrite]),
     epoch_command(OperationId::RunCancelAndSend, &[Scope::RunWrite]),
@@ -418,7 +419,9 @@ pub fn schema_for(id: OperationId) -> (serde_json::Value, serde_json::Value) {
             run::RunListToolCandidatesInput::schema(),
             run::AgentToolCandidateResponseDto::schema(),
         ),
-        OperationId::RunStart => (run::RunStartInput::schema(), run::AgentRunDto::schema()),
+        OperationId::RunStart | OperationId::RunCreateSession => {
+            (run::RunStartInput::schema(), run::AgentRunDto::schema())
+        }
         OperationId::RunSendPrompt => (run::RunPromptInput::schema(), EmptyOutput::schema()),
         OperationId::RunSteer => (run::RunPromptInput::schema(), EmptyOutput::schema()),
         OperationId::RunCancelAndSend => (run::RunPromptInput::schema(), EmptyOutput::schema()),

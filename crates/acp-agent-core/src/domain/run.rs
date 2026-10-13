@@ -1,6 +1,14 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// 서버 내부의 명시적 시작 의도. Idle은 goal을 초기 프롬프트로 전송하지 않는다.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SessionLaunchIntent {
+    #[default]
+    Prompt,
+    Idle,
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ResumePolicy {

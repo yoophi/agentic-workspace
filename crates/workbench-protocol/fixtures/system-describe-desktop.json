@@ -283,6 +283,14 @@
             "idempotencyScope": "durable"
           },
           {
+            "id": "run.createSession",
+            "kind": "command",
+            "requiredScopes": [
+              "run:write"
+            ],
+            "idempotencyScope": "durable"
+          },
+          {
             "id": "run.sendPrompt",
             "kind": "command",
             "requiredScopes": [

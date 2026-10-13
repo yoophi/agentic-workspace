@@ -61,6 +61,14 @@ pub trait RunEngine: Send + Sync {
         sink: WorkbenchRunSink,
     ) -> Result<AgentRun, RunEngineError>;
 
+    /// 세션을 준비하되 초기 prompt를 제출하지 않는다. ready 이벤트는 session attach 이후 발행한다.
+    async fn create_session(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+    ) -> Result<AgentRun, RunEngineError>;
+
     /// 044 R14 시작 장벽: `start`의 **준비**(run을 registry에 예약하고 실행 task를 spawn·attach)까지만 하고 돌아온다.
     /// 돌아올 때 run은 취소할 수 있고, `start_gate`가 열리기 전에는 실행(launcher·초기 prompt)하지 않는다. sender를 열지
     /// 않고 drop하면 실행 없이 run을 끝낸다.

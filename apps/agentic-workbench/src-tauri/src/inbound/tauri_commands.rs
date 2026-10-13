@@ -1386,14 +1386,18 @@ pub async fn get_workbench_connection(
             .ok_or_else(|| {
                 crate::infrastructure::window_principals::MESSAGE_WINDOW_NOT_REGISTERED.to_owned()
             })?;
-        let (base_url, token, expires_at) = server
-            .issue_window_token(&label, &incarnation, &origin)
+        let connection = server
+            .window_connection(crate::infrastructure::server_client::WindowIdentity {
+                label: &label,
+                incarnation: &incarnation,
+                origin: &origin,
+            })
             .await?;
         return Ok(crate::infrastructure::workbench_http::WorkbenchConnection {
-            base_url,
-            token,
-            expires_at,
-            incarnation: Some(incarnation),
+            base_url: connection.base_url,
+            token: connection.token,
+            expires_at: connection.expires_at,
+            incarnation: Some(connection.incarnation),
         });
     }
     app.state::<crate::infrastructure::workbench_http::WorkbenchHttp>()

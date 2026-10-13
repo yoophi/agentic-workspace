@@ -219,17 +219,13 @@ impl ScriptedRunEngine {
     }
 }
 
-#[async_trait]
-impl RunEngine for ScriptedRunEngine {
-    fn attach_work_gate(&self, gate: Arc<WorkGate>) {
-        let _ = self.work_gate.set(gate);
-    }
-
-    async fn start(
+impl ScriptedRunEngine {
+    async fn start_with_intent(
         &self,
         request: AgentRunRequest,
         owner: &str,
         sink: WorkbenchRunSink,
+        idle: bool,
     ) -> Result<AgentRun, RunEngineError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
         self.start_requests.lock().unwrap().push(request.clone());
@@ -255,7 +251,7 @@ impl RunEngine for ScriptedRunEngine {
                 }
             }
             let mut permissions = HashSet::new();
-            if let Some(permission) = &self.script.permission_id {
+            if let Some(permission) = self.script.permission_id.as_ref().filter(|_| !idle) {
                 permissions.insert(permission.clone());
             }
             runs.insert(
@@ -284,6 +280,20 @@ impl RunEngine for ScriptedRunEngine {
             },
         );
         self.mark_applied(format!("start:{run_id}"));
+        if idle {
+            emit_lifecycle(
+                &sink,
+                &run_id,
+                LifecycleStatus::SessionCreated,
+                "fake-session",
+            );
+            return Ok(AgentRun {
+                id: run_id,
+                goal: request.goal,
+                agent_id: request.agent_id,
+            });
+        }
+
         if self.script.prompt_lifecycle {
             emit_lifecycle(
                 &sink,
@@ -329,6 +339,31 @@ impl RunEngine for ScriptedRunEngine {
             goal: request.goal,
             agent_id: request.agent_id,
         })
+    }
+}
+
+#[async_trait]
+impl RunEngine for ScriptedRunEngine {
+    fn attach_work_gate(&self, gate: Arc<WorkGate>) {
+        let _ = self.work_gate.set(gate);
+    }
+
+    async fn start(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.start_with_intent(request, owner, sink, false).await
+    }
+
+    async fn create_session(
+        &self,
+        request: AgentRunRequest,
+        owner: &str,
+        sink: WorkbenchRunSink,
+    ) -> Result<AgentRun, RunEngineError> {
+        self.start_with_intent(request, owner, sink, true).await
     }
 
     /// 044 R14 시작 장벽: 슬롯(registry 예약)을 만들고 실행 task를 spawn한 뒤 돌아온다. 실행(launcher 표지 `launch:<run>`·
@@ -545,7 +580,7 @@ impl RunEngine for ScriptedRunEngine {
         let _guard = self.reserve_turn(run_id)?;
         if self
             .fail_send_and_wait
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
                 left.checked_sub(1)
             })
             .is_ok()

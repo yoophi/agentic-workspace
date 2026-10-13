@@ -90,6 +90,8 @@ pub enum OperationId {
     RunListToolCandidates,
     #[serde(rename = "run.start")]
     RunStart,
+    #[serde(rename = "run.createSession")]
+    RunCreateSession,
     #[serde(rename = "run.sendPrompt")]
     RunSendPrompt,
     #[serde(rename = "run.steer")]
@@ -210,7 +212,7 @@ pub enum OperationId {
 
 impl OperationId {
     /// 계약 순서. `system.describe`·OpenAPI `oneOf`가 이 순서를 따른다.
-    pub const ALL: [OperationId; 94] = [
+    pub const ALL: [OperationId; 95] = [
         OperationId::ProjectList,
         OperationId::ProjectCreate,
         OperationId::ProjectUpdate,
@@ -247,6 +249,7 @@ impl OperationId {
         OperationId::BenchRequestTitle,
         OperationId::RunListToolCandidates,
         OperationId::RunStart,
+        OperationId::RunCreateSession,
         OperationId::RunSendPrompt,
         OperationId::RunSteer,
         OperationId::RunCancelAndSend,
@@ -345,6 +348,7 @@ impl OperationId {
             OperationId::BenchRequestTitle => "bench.requestTitle",
             OperationId::RunListToolCandidates => "run.listToolCandidates",
             OperationId::RunStart => "run.start",
+            OperationId::RunCreateSession => "run.createSession",
             OperationId::RunSendPrompt => "run.sendPrompt",
             OperationId::RunSteer => "run.steer",
             OperationId::RunCancelAndSend => "run.cancelAndSend",

@@ -195,7 +195,7 @@ pub async fn ensure_external(
     }
     // 지금 붙은 서버 인스턴스(끊겼으면 다시 붙는다). 다른 인스턴스가 연 대응은 쓰지 않는다 — 서버가 다시 뜨면 작업대는
     // 사라졌다.
-    let instance = server.connect().await?.instance_id;
+    let instance = server.server_instance().await?;
     if let Some(bench) = table().external.hit(label, incarnation, &instance) {
         return Ok(bench);
     }

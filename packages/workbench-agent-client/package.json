@@ -1,0 +1,23 @@
+{
+  "name": "@yoophi/workbench-agent-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared HTTP agent sessions, conversation and permission state for desktop consumers",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "@yoophi/workbench-client": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5",
+    "vitest": "^4.1.9",
+    "@types/node": "^26.0.0"
+  }
+}
