@@ -15,7 +15,7 @@ Stable 승격 전에 다음 네 가지를 완료해야 한다.
 3. macOS에서 검증 가능한 최종 DMG와 유효한 코드 서명 흐름을 만든다.
 4. 실제 사용자 흐름과 데이터 업그레이드를 Private RC에서 검증한다.
 
-권장 버전은 문서상 기존 CALVER 결정인 `YYYY.M.N`을 따른다. 첫 후보는 `2026.8.1-rc.1`, 정식 버전은 `2026.8.1`, 원격 annotated 태그는 각각 `v2026.8.1-rc.1`, `v2026.8.1`로 한다. 이는 제안된 제품 버전 정책이며, constitution 자체의 SemVer는 거버넌스 문서 버전에만 적용된다.
+권장 버전은 문서상 기존 CALVER 결정인 `YYYY.M.PATCH`를 따른다. `PATCH`는 날짜가 아니라 해당 월의 릴리스 순번이다. 첫 후보는 `2026.8.1-rc.1`, 정식 버전은 `2026.8.1`, 원격 annotated 태그는 각각 `v2026.8.1-rc.1`, `v2026.8.1`로 한다. 이는 제안된 제품 버전 정책이며, constitution 자체의 SemVer는 거버넌스 문서 버전에만 적용된다.
 
 ```mermaid
 flowchart LR
@@ -129,7 +129,7 @@ flowchart TD
 
 1. AW 단독·Apple Silicon macOS·Private RC라는 범위를 고정한다.
 2. `release/2026.31.0`을 기준 branch로 채택·수정·폐기 중 하나로 결정한다. 어떤 선택이든 final `main` 기준에서 새 release branch를 만들고 `0.1.0-rc`는 역사적 로컬 태그로만 남긴다.
-3. 버전 규칙을 `YYYY.M.N`으로 확정하고 `2026.8.1-rc.1`의 package version, Cargo version, Tauri version, Git tag 관계를 기록한다.
+3. 버전 규칙을 `YYYY.M.PATCH`로 확정하고 `2026.8.1-rc.1`의 package version, Cargo version, Tauri version, Git tag 관계를 기록한다.
 4. signing 정책을 결정한다. Private RC는 유효한 ad-hoc signature와 설치 제한으로 운영할 수 있지만, public Stable은 Developer ID signing·notarization을 필수로 한다.
 5. #119를 이번 기준점에서 제외하고, #157을 release blocker로 지정한다.
 

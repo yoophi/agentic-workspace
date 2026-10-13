@@ -54,7 +54,7 @@ When working in this repository, read the OpenWiki quickstart first, then follow
 ## Versioning
 
 - Use calendar versioning (CALVER) for AW, MA, GE, and HL release artifacts.
-- Use the `YYYY.M.D` format for stable releases and `YYYY.M.D-rc.N` for release candidates, for example `2026.8.1-rc.1`.
+- Use the `YYYY.M.PATCH` format for stable releases and `YYYY.M.PATCH-rc.N` for release candidates, for example `2026.8.1-rc.1`. `PATCH` is the positive, monotonically increasing release number within that month, not the calendar day.
 - Apply CALVER only when producing a release build by overriding the Tauri bundle version at build time.
 - Do not change versions in `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, or any `Cargo.lock` merely to produce a CALVER build.
 - Keep all desktop application artifacts on the same CALVER during a coordinated workspace release unless the user explicitly requests independent versions.
