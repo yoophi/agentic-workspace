@@ -39,3 +39,11 @@ pnpm --filter @yoophi/agentic-workbench test src/features/agent-command-override
 실제 조회 검증에는 npm 네트워크와 로컬 Codex 인증 환경이 필요하다. 모델 목록 조회와 설정 변경 성공은 유료 추론 요청이나 모든 계정의 모델 접근 권한을 보장하지 않는다.
 
 참고: [Codex App Server](https://learn.chatgpt.com/docs/app-server), [codex-acp](https://github.com/agentclientprotocol/codex-acp), [ACP Session Config Options v1](https://agentclientprotocol.com/protocol/v1/session-config-options).
+
+## 독립 서버와 릴리스 설치
+
+AW의 기본 external 모드에서는 모델 목록과 실행 명령을 독립 Workbench 서버가 제공한다. 데스크톱 앱만 교체해도, 같은 데이터 디렉터리를 소유한 이전 서버가 살아 있으면 이전 카탈로그를 계속 사용한다. 따라서 앱의 About 버전이나 프로세스 기동만으로 설치를 검증할 수 없다.
+
+릴리스 스크립트는 `agentic-workbench-server`도 같은 소스와 CALVER로 빌드하고 Tauri `externalBin`을 통해 `Contents/MacOS`에 포함한다. 앱 및 DMG 안에 서버 실행 파일이 존재하는지, arm64인지, 서명이 유효한지 검증한다. 번들 서버의 격리된 임시 데이터 디렉터리 기동과 실제 광고 버전도 확인한다.
+
+설치 시에는 기존 서버에 `stop --data-dir <AW data dir>`를 보내 정상 종료하고 새 번들 서버로 전환한다. 기본 stop은 활동 작업이 있으면 거절하므로 강제 종료로 우회하지 않는다. 공유 서버를 쓰던 다른 클라이언트도 서버 epoch 변경 후 다시 연결한다. 설치 후에는 실제 서버의 `agent.list`에서 `codex-acp@latest` 및 새 모델 목록을 확인한다.

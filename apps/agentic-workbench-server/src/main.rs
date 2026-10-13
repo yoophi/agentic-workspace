@@ -54,7 +54,7 @@ fn main() {
             };
             serve(ServeOptions {
                 data_dir,
-                server_version: env!("CARGO_PKG_VERSION").to_owned(),
+                server_version: env!("AGENTIC_WORKBENCH_SERVER_VERSION").to_owned(),
                 idle_timeout,
                 log: flag_value(&args, "--log").map(PathBuf::from),
             })
