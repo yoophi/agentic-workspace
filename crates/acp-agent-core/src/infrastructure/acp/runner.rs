@@ -401,6 +401,17 @@ where
             initial_turn_guard: None,
             ..self
         };
+        let command = request
+            .agent_command
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_owned)
+            .or_else(|| this.catalog.command_for_agent(&request.agent_id));
+        if let Some(command) = command.filter(|command| super::codex_runtime::uses_latest(command))
+        {
+            super::codex_runtime::prepare(&command, request.agent_env.as_ref(), &run_id, &sink)
+                .await?;
+        }
         let setup_future = this.start_session(&request, run_id.clone(), sink.clone());
         let setup = match launch_intent {
             SessionLaunchIntent::Prompt => setup_future.await?,

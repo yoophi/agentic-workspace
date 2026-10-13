@@ -87,7 +87,7 @@ export function AgentCommandOverrideEditor({
         </div>
         <Input
           value={draft.globalCommand}
-          placeholder="예: npx -y @agentclientprotocol/codex-acp@1.1.5"
+          placeholder="예: npx -y @agentclientprotocol/codex-acp@latest"
           className="font-mono"
           onChange={(event) =>
             onDraftChange({ ...draft, globalCommand: event.target.value })
@@ -326,6 +326,9 @@ export function agentRuntimeVersionLabel({
     agent.id === "codex"
       ? effectiveCommand.match(/@agentclientprotocol\/codex-acp@([^\s"']+)/)
       : effectiveCommand.match(/@agentclientprotocol\/claude-agent-acp@([^\s"']+)/);
+  if (versionMatch?.[1] === "latest") {
+    return `${runtime.displayName} 최신 버전 자동 업데이트`;
+  }
   if (versionMatch?.[1]) {
     return `${runtime.displayName} v${versionMatch[1]}`;
   }

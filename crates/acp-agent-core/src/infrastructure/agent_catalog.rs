@@ -10,7 +10,7 @@ const OPENCODE_MODELS_CACHE_PATH_ENV: &str = "ACP_OPENCODE_MODELS_CACHE_PATH";
 const OPENCODE_MODELS_REFRESH_ENV: &str = "ACP_OPENCODE_MODELS_REFRESH";
 const MODELS_DEV_API_URL: &str = "https://models.dev/api.json";
 const MODELS_DEV_FETCH_TIMEOUT_SECONDS: &str = "2";
-pub const CODEX_AGENT_ACP_VERSION: &str = "1.1.5";
+pub const CODEX_AGENT_ACP_VERSION: &str = "latest";
 pub const CLAUDE_AGENT_ACP_VERSION: &str = "0.60.0";
 
 #[derive(Clone, Default)]
@@ -28,14 +28,38 @@ impl ConfigurableAgentCatalog {
     }
 }
 
-impl AgentCatalog for ConfigurableAgentCatalog {
-    fn list_agents(&self) -> Vec<AgentDescriptor> {
+impl ConfigurableAgentCatalog {
+    fn configured_agents(&self) -> Vec<AgentDescriptor> {
         self.file_path
             .as_ref()
             .and_then(|path| fs::read_to_string(path).ok())
             .and_then(|content| serde_json::from_str::<Vec<AgentDescriptor>>(&content).ok())
             .filter(|agents| !agents.is_empty())
             .unwrap_or_else(|| self.fallback.list_agents())
+    }
+}
+
+impl AgentCatalog for ConfigurableAgentCatalog {
+    fn command_for_agent(&self, agent_id: &str) -> Option<String> {
+        self.configured_agents()
+            .into_iter()
+            .find(|agent| agent.id == agent_id)
+            .map(|agent| agent.command)
+    }
+
+    fn list_agents(&self) -> Vec<AgentDescriptor> {
+        let mut agents = self.configured_agents();
+        if let Some(codex) = agents.iter_mut().find(|agent| {
+            agent.id == "codex"
+                && agent.command
+                    == format!("npx -y @agentclientprotocol/codex-acp@{CODEX_AGENT_ACP_VERSION}")
+        }) {
+            if let Some((models, efforts)) = super::codex_models::discover_models() {
+                codex.models = models;
+                codex.efforts = efforts;
+            }
+        }
+        agents
     }
 }
 
@@ -49,34 +73,11 @@ impl AgentCatalog for StaticAgentCatalog {
                 id: "codex".into(),
                 label: "Codex".into(),
                 command: format!("npx -y @agentclientprotocol/codex-acp@{CODEX_AGENT_ACP_VERSION}"),
-                runtime_version: Some(CODEX_AGENT_ACP_VERSION.into()),
-                models: options(&[
-                    ("gpt-5.6", "GPT-5.6"),
-                    ("gpt-5.6-sol", "GPT-5.6 Sol"),
-                    ("gpt-5.6-terra", "GPT-5.6 Terra"),
-                    ("gpt-5.6-luna", "GPT-5.6 Luna"),
-                    ("gpt-5.5", "GPT-5.5"),
-                    ("gpt-5.4", "GPT-5.4"),
-                    ("gpt-5.4-mini", "GPT-5.4 mini"),
-                    ("gpt-5.4-nano", "GPT-5.4 nano"),
-                    ("gpt-5.3-codex", "GPT-5.3 Codex"),
-                    ("gpt-5.3-codex-spark", "GPT-5.3 Codex Spark"),
-                    ("gpt-5.2-codex", "GPT-5.2 Codex"),
-                    ("gpt-5.1-codex", "GPT-5.1 Codex"),
-                    ("gpt-5-codex", "GPT-5 Codex"),
-                ]),
-                // Pinned Codex 0.144.6의 known ReasoningEffort ID 집합이다.
-                // 모델별 실제 지원 여부는 session configOptions로 다시 검증한다.
-                efforts: options(&[
-                    ("none", "None"),
-                    ("minimal", "Minimal"),
-                    ("low", "Low"),
-                    ("medium", "Medium"),
-                    ("high", "High"),
-                    ("xhigh", "XHigh"),
-                    ("max", "Max"),
-                    ("ultra", "Ultra"),
-                ]),
+                // 실제 버전은 ACP initialize의 agentInfo로 확인한다.
+                runtime_version: None,
+                // 모델/effort는 Codex App Server의 model/list로 조회한다.
+                models: Vec::new(),
+                efforts: Vec::new(),
                 context_sizes: options(&[
                     ("medium", "Medium"),
                     ("large", "Large"),
@@ -429,46 +430,18 @@ mod tests {
     }
 
     #[test]
-    fn codex_catalog_contains_gpt_5_6_family() {
-        let agents = StaticAgentCatalog.list_agents();
-        let codex = agents
-            .iter()
+    fn codex_uses_latest_and_discovers_models_instead_of_a_snapshot() {
+        let codex = StaticAgentCatalog
+            .list_agents()
+            .into_iter()
             .find(|agent| agent.id == "codex")
-            .expect("Codex agent");
-
+            .unwrap();
         assert_eq!(
             codex.command,
-            format!("npx -y @agentclientprotocol/codex-acp@{CODEX_AGENT_ACP_VERSION}")
+            "npx -y @agentclientprotocol/codex-acp@latest"
         );
-        assert_eq!(
-            codex.runtime_version.as_deref(),
-            Some(CODEX_AGENT_ACP_VERSION)
-        );
-
-        for model_id in ["gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
-            assert!(
-                codex.models.iter().any(|model| model.id == model_id),
-                "missing Codex model {model_id}"
-            );
-        }
-
-        assert_eq!(
-            codex
-                .efforts
-                .iter()
-                .map(|effort| (effort.id.as_str(), effort.label.as_str()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("none", "None"),
-                ("minimal", "Minimal"),
-                ("low", "Low"),
-                ("medium", "Medium"),
-                ("high", "High"),
-                ("xhigh", "XHigh"),
-                ("max", "Max"),
-                ("ultra", "Ultra"),
-            ]
-        );
+        assert!(codex.runtime_version.is_none());
+        assert!(codex.models.is_empty());
     }
 
     #[test]

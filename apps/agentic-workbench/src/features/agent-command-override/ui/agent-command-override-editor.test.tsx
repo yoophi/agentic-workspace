@@ -23,6 +23,13 @@ const claudeAgent: AgentDescriptor = {
 };
 
 describe("agentRuntimeVersionLabel", () => {
+  it("labels latest as automatic updates instead of a concrete version", () => {
+    expect(agentRuntimeVersionLabel({
+      agent: { ...codexAgent, command: "npx -y @agentclientprotocol/codex-acp@latest", runtimeVersion: undefined },
+      profileCommand: "", globalCommand: "",
+    })).toBe("Codex ACP 최신 버전 자동 업데이트");
+  });
+
   it("renders the effective version in the settings profile card", () => {
     const html = renderToStaticMarkup(
       <AgentCommandOverrideEditor
