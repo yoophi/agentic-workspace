@@ -41,7 +41,7 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if [[ ! "$version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.([1-9]|[12][0-9]|3[01])(-rc\.[1-9][0-9]*)?$ ]]; then
+          if [[ ! "$version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.[1-9][0-9]*(-rc\.[1-9][0-9]*)?$ ]]; then
             echo "Invalid Agentic Workbench release tag: $GITHUB_REF_NAME" >&2
             exit 1
           fi

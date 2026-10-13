@@ -624,7 +624,7 @@ system-wide desktop 설치에서도 daemon, data, descriptor, credential은 OS u
 | storage schema | 정수 migration version | 데이터 파일의 전·후방 호환성 |
 | MCP revision | `2025-11-25`, `2026-07-28` | 외부 agent host와의 별도 협상 |
 
-AW의 `YYYY.M.D`와 `YYYY.M.D-rc.N` CALVER는 Tauri updater가 요구하는 SemVer 문법으로 표현할 수 있지만, 숫자가 크다는 사실이 wire/storage 호환성을 뜻하지는 않는다. updater metadata의 version 비교와 handshake의 protocol/storage 판정을 분리한다. [Tauri updater version 형식](https://v2.tauri.app/plugin/updater/#static-json-file)
+AW의 `YYYY.M.PATCH`와 `YYYY.M.PATCH-rc.N` CALVER에서 `PATCH`는 날짜가 아니라 해당 월의 릴리스 순번이다. 이 형식은 Tauri updater가 요구하는 SemVer 문법으로 표현할 수 있지만, 숫자가 크다는 사실이 wire/storage 호환성을 뜻하지는 않는다. updater metadata의 version 비교와 handshake의 protocol/storage 판정을 분리한다. [Tauri updater version 형식](https://v2.tauri.app/plugin/updater/#static-json-file)
 
 새 desktop이 이미 실행 중인 이전 server를 발견하면 우선 handshake로 호환성을 판정한다. compatible하면 기존 server를 사용하고, incompatible하더라도 active run이 있으면 두 번째 writer를 시작하거나 강제 종료하지 않는다. update-required 상태와 가능한 조치만 반환한다. active run이 없을 때만 `stop accepting mutations → child/run drain 또는 명시적 보존 → repository flush → server exit → bundle update → 새 server readiness` 순으로 교체한다.
 

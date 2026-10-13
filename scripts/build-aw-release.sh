@@ -7,12 +7,12 @@ if [[ "${1:-}" == "--" ]]; then
 fi
 
 if [[ $# -ne 1 ]]; then
-  echo "usage: pnpm release:build:workbench -- <YYYY.M.D[-rc.N]>" >&2
+  echo "usage: pnpm release:build:workbench -- <YYYY.M.PATCH[-rc.N]>" >&2
   exit 2
 fi
 
 release_version="$1"
-if [[ ! "$release_version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.([1-9]|[12][0-9]|3[01])(-rc\.[1-9][0-9]*)?$ ]]; then
+if [[ ! "$release_version" =~ ^[0-9]{4}\.(1[0-2]|[1-9])\.[1-9][0-9]*(-rc\.[1-9][0-9]*)?$ ]]; then
   echo "invalid CALVER release version: $release_version" >&2
   exit 2
 fi

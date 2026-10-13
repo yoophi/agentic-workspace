@@ -127,7 +127,9 @@ the application bundle with the previous verified release.
 
 ## Release builds
 
-Release versions use `YYYY.M.D` and `YYYY.M.D-rc.N`. Source manifests stay at
+Release versions use `YYYY.M.PATCH` and `YYYY.M.PATCH-rc.N`. `PATCH` is the
+positive, monotonically increasing release number within the month, not the
+calendar day. Source manifests stay at
 their development baseline; the release version is injected into the Tauri
 bundle and About metadata at build time. From a clean, annotated release tag:
 
