@@ -67,7 +67,18 @@ export COMMIT_SHA="$head_commit"
 export GITHUB_REF_TYPE="tag"
 export GITHUB_REF_NAME="$release_tag"
 
-tauri_override="{\"version\":\"$release_version\"}"
+# 외부 서버 모드가 사용하는 서버도 같은 소스·CALVER로 빌드해 앱 안에 포함한다.
+cargo build --locked --release --target aarch64-apple-darwin -p agentic-workbench-server
+sidecar_directory="$repository_root/target/release-sidecars"
+mkdir -p "$sidecar_directory"
+cp "$repository_root/target/aarch64-apple-darwin/release/agentic-workbench-server" \
+  "$sidecar_directory/agentic-workbench-server-aarch64-apple-darwin"
+# JSON escaping은 경로의 공백/따옴표까지 처리한다.
+tauri_override="$(python3 - "$release_version" "$sidecar_directory/agentic-workbench-server" <<'PYCONFIG'
+import json, sys
+print(json.dumps({"version": sys.argv[1], "bundle": {"externalBin": [sys.argv[2]]}}))
+PYCONFIG
+)"
 pnpm --filter @yoophi/agentic-workbench exec tauri build \
   --target aarch64-apple-darwin \
   --bundles app,dmg \
@@ -98,7 +109,28 @@ if [[ "$app_version" != "$release_version" ]]; then
   exit 1
 fi
 
+test -x "$app_path/Contents/MacOS/agentic-workbench-server"
+file "$app_path/Contents/MacOS/agentic-workbench-server" | grep -q 'arm64'
+codesign --verify --strict --verbose=2 "$app_path/Contents/MacOS/agentic-workbench-server"
 codesign --verify --deep --strict --verbose=2 "$app_path"
+# 데스크톱 기동만으로는 살아 있는 옛 공유 서버 연결을 잡아낼 수 없다.
+# 격리된 데이터 경로에서 번들 서버의 실제 광고 버전을 확인한다.
+python3 - "$app_path/Contents/MacOS/agentic-workbench-server" "$release_version" <<'PYSERVER'
+import json, subprocess, sys, tempfile
+with tempfile.TemporaryDirectory(prefix="aw-release-server-") as data_dir:
+    server, version = sys.argv[1:]
+    try:
+        result = subprocess.run([server, "ensure", "--data-dir", data_dir],
+                                check=True, capture_output=True, text=True, timeout=30)
+        descriptor = json.loads(result.stdout)
+        if descriptor["serverVersion"] != version:
+            raise RuntimeError("bundled server CALVER does not match the app")
+        print("bundled server version:", descriptor["serverVersion"])
+    finally:
+        subprocess.run([server, "stop", "--data-dir", data_dir],
+                       check=True, capture_output=True, timeout=30)
+PYSERVER
+
 file "$app_path/Contents/MacOS/agentic-workbench" | grep -q 'arm64'
 hdiutil verify "$dmg_path"
 
@@ -115,6 +147,9 @@ trap cleanup EXIT
 hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_directory" >/dev/null
 mounted=1
 packaged_app="$mount_directory/Agentic Workbench.app"
+test -x "$packaged_app/Contents/MacOS/agentic-workbench-server"
+file "$packaged_app/Contents/MacOS/agentic-workbench-server" | grep -q 'arm64'
+codesign --verify --strict --verbose=2 "$packaged_app/Contents/MacOS/agentic-workbench-server"
 codesign --verify --deep --strict --verbose=2 "$packaged_app"
 file "$packaged_app/Contents/MacOS/agentic-workbench" | grep -q 'arm64'
 packaged_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$packaged_app/Contents/Info.plist")"
