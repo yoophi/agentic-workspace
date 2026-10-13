@@ -226,8 +226,8 @@ export const AgentCommandOverrideSettings: Story = {
       {
         id: "codex",
         label: "Codex",
-        command: "npx -y @agentclientprotocol/codex-acp@1.1.5",
-        runtimeVersion: "1.1.5",
+        command: "npx -y @agentclientprotocol/codex-acp@latest",
+        runtimeVersion: undefined,
       },
       {
         id: "claude-code",
@@ -284,8 +284,8 @@ export const AgentProfileEditorLastActiveGuard: Story = {
       {
         id: "codex",
         label: "Codex",
-        command: "npx -y @agentclientprotocol/codex-acp@1.1.5",
-        runtimeVersion: "1.1.5",
+        command: "npx -y @agentclientprotocol/codex-acp@latest",
+        runtimeVersion: undefined,
       },
       {
         id: "claude-code",

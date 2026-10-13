@@ -2619,6 +2619,14 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           {scrollHeader}
 
           <div className="m-4 flex flex-col gap-4">
+            {agentsQuery.isFetching && (
+              <SystemMessage variant="action">
+                <span role="status" aria-live="polite">
+                  에이전트 모델 목록을 확인하고 있습니다. Codex ACP 업데이트가 필요하면 자동 설치합니다.
+                </span>
+              </SystemMessage>
+            )}
+
             {!isRunning && (
               <div>
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
