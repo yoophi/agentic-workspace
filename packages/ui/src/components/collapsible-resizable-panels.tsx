@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useId, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from "react";
 import type { Layout, PanelImperativeHandle } from "react-resizable-panels";
 
 import { cn } from "@yoophi/ui/lib/utils";
@@ -30,6 +30,8 @@ export interface CollapsiblePanelDefinition {
   title: ReactNode;
   content: ReactNode;
   collapsible?: boolean;
+  /** Preserve content identity and local state while hidden and inert. */
+  keepMounted?: boolean;
   contentClassName?: string;
   showTitle?: boolean;
   defaultSize?: PanelSize;
@@ -39,11 +41,20 @@ export interface CollapsiblePanelDefinition {
 
 export type CollapsibleResizablePanelsState = PanelPairPublicState;
 
+export interface CollapsibleResizablePanelsHandle {
+  collapse: (side: PanelSide) => void;
+  expand: (side: PanelSide) => void;
+  toggle: (side: PanelSide) => void;
+  getState: () => CollapsibleResizablePanelsState;
+}
+
 export interface CollapsibleResizablePanelsProps {
   leftPanel: CollapsiblePanelDefinition;
   rightPanel: CollapsiblePanelDefinition;
   collapsedSize?: PanelSize;
   className?: string;
+  defaultCollapsedPanel?: PanelSide | null;
+  controllerRef?: Ref<CollapsibleResizablePanelsHandle>;
   onStateChange?: (state: CollapsibleResizablePanelsState) => void;
 }
 
@@ -62,56 +73,39 @@ function PanelContents({
   panel: CollapsiblePanelDefinition;
   side: PanelSide;
 }) {
-  if (collapsed) {
-    return (
-      <div
-        className="h-full w-full min-w-0 overflow-hidden"
-        data-panel-side={side}
-      >
+  return (
+    <div
+      className={cn("h-full min-h-0 min-w-0 overflow-hidden", !collapsed && "flex flex-col")}
+      data-panel-side={side}
+    >
+      {panel.showTitle !== false && (
         <button
           aria-controls={contentId}
-          aria-expanded={false}
-          className="relative h-full w-full min-w-0 cursor-pointer overflow-hidden rounded-sm bg-background px-2 py-2 font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+          aria-expanded={!collapsed}
+          className={collapsed
+            ? "relative h-full w-full min-w-0 cursor-pointer overflow-hidden rounded-sm bg-background px-2 py-2 font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
+            : "shrink-0 truncate border-b bg-background px-3 py-2 text-left font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none disabled:cursor-default disabled:text-muted-foreground"}
+          disabled={!collapsed && (disableCollapse || panel.collapsible === false)}
           onClick={onTitleActivate}
           type="button"
         >
-          <span className="absolute top-2 right-8 origin-top-right -rotate-90 whitespace-nowrap">
+          <span className={collapsed ? "absolute top-2 right-8 origin-top-right -rotate-90 whitespace-nowrap" : undefined}>
             {panel.title}
           </span>
         </button>
-      </div>
-    );
-  }
-
-  if (panel.showTitle === false) {
-    return (
-      <div
-        className={cn("h-full min-h-0 overflow-auto p-3", panel.contentClassName)}
-        id={contentId}
-      >
-        {panel.content}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex h-full min-h-0 flex-col" data-panel-side={side}>
-      <button
-        aria-controls={contentId}
-        aria-expanded={true}
-        className="shrink-0 truncate border-b bg-background px-3 py-2 text-left font-medium text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none disabled:cursor-default disabled:text-muted-foreground"
-        disabled={disableCollapse || panel.collapsible === false}
-        onClick={onTitleActivate}
-        type="button"
-      >
-        {panel.title}
-      </button>
-      <div
-        className={cn("min-h-0 flex-1 overflow-auto p-3", panel.contentClassName)}
-        id={contentId}
-      >
-        {panel.content}
-      </div>
+      )}
+      {(panel.keepMounted || !collapsed) && (
+        <div
+          className={cn("min-h-0 flex-1 overflow-auto p-3", panel.contentClassName)}
+          hidden={collapsed}
+          inert={collapsed || undefined}
+          // Inline display keeps hidden effective even when contentClassName uses flex/grid.
+          style={collapsed ? { display: "none" } : undefined}
+          id={contentId}
+        >
+          {panel.content}
+        </div>
+      )}
     </div>
   );
 }
@@ -119,6 +113,8 @@ function PanelContents({
 function CollapsibleResizablePanels({
   className,
   collapsedSize = "40px",
+  controllerRef,
+  defaultCollapsedPanel = null,
   leftPanel,
   onStateChange,
   rightPanel,
@@ -141,52 +137,85 @@ function CollapsibleResizablePanels({
   const panelStateRef = useRef(panelState);
   const leftPanelRef = useRef<PanelImperativeHandle | null>(null);
   const rightPanelRef = useRef<PanelImperativeHandle | null>(null);
+  const initialCollapseRef = useRef(defaultCollapsedPanel);
+  const measuredRef = useRef(false);
   const contentIdPrefix = useId();
   const leftContentId = `${contentIdPrefix}-${leftPanel.id}-content`;
   const rightContentId = `${contentIdPrefix}-${rightPanel.id}-content`;
 
-  useEffect(() => {
-    if (panelState.left.collapsed) {
-      leftPanelRef.current?.collapse();
-    } else if (panelState.right.collapsed) {
-      rightPanelRef.current?.collapse();
-    }
-  }, [panelState.left.collapsed, panelState.right.collapsed]);
-
   const commitState = (nextState: PanelPairState) => {
+    if (nextState === panelStateRef.current) return;
     panelStateRef.current = nextState;
     setPanelState(nextState);
     onStateChange?.(toPanelPairPublicState(nextState));
   };
 
+  const definitionFor = (side: PanelSide) => side === "left" ? leftPanel : rightPanel;
+  const refFor = (side: PanelSide) => side === "left" ? leftPanelRef.current : rightPanelRef.current;
+  const isCollapsible = (side: PanelSide) => {
+    const panel = definitionFor(side);
+    return panel.collapsible !== false && panel.showTitle !== false;
+  };
+
+  const collapse = (side: PanelSide) => {
+    const current = panelStateRef.current;
+    const ref = refFor(side);
+    if (!measuredRef.current || !ref || !isCollapsible(side) || !canCollapsePanel(current, side)) return;
+    // Commit first: synchronous layout callbacks must not overwrite the remembered width.
+    commitState(collapsePanel(current, side, ref.getSize().asPercentage));
+    ref.collapse();
+  };
+
+  const expand = (side: PanelSide) => {
+    const current = panelStateRef.current;
+    const ref = refFor(side);
+    if (!ref || !current[side].collapsed) return;
+    const next = expandPanel(current, side);
+    const restoreSize = getPanelRestoreSize(next, side);
+    commitState(next);
+    // The primitive applies the current pixel/percentage min/max constraints.
+    ref.expand();
+    ref.resize(`${restoreSize}%`);
+  };
+
+  const toggle = (side: PanelSide) => {
+    if (panelStateRef.current[side].collapsed) expand(side);
+    else collapse(side);
+  };
+
+  useImperativeHandle(controllerRef, () => ({
+    collapse,
+    expand,
+    toggle,
+    getState: () => toPanelPairPublicState(panelStateRef.current),
+  }));
+
   const handleLayoutChanged = (layout: Layout) => {
     const leftSize = layout[leftPanel.id];
     const rightSize = layout[rightPanel.id];
-    if (leftSize === undefined || rightSize === undefined) {
+    if (leftSize === undefined || rightSize === undefined) return;
+    if (!measuredRef.current) {
+      // A hidden/zero-width group has not measured its px defaults yet.
+      if (!leftPanelRef.current || !rightPanelRef.current ||
+          leftPanelRef.current.getSize().inPixels + rightPanelRef.current.getSize().inPixels <= 0) return;
+      measuredRef.current = true;
+      commitState(updatePanelLayout(panelStateRef.current, leftSize, rightSize));
+      const initialSide = initialCollapseRef.current;
+      initialCollapseRef.current = null;
+      if (initialSide) collapse(initialSide);
       return;
     }
-    commitState(updatePanelLayout(panelStateRef.current, leftSize, rightSize));
-  };
-
-  const activatePanelTitle = (side: PanelSide) => {
-    const currentState = panelStateRef.current;
-    const panelRef = side === "left" ? leftPanelRef.current : rightPanelRef.current;
-
-    if (currentState[side].collapsed) {
-      const nextState = expandPanel(currentState, side);
-      panelRef?.expand();
-      panelRef?.resize(`${getPanelRestoreSize(nextState, side)}%`);
-      commitState(nextState);
-      return;
+    const current = panelStateRef.current;
+    if (current.collapsedPanel !== null) return;
+    // Pointer/keyboard resizing can reach collapsedSize without a title click.
+    // Keep that transition in the same model and retain the prior expanded width.
+    const draggedSide = leftPanelRef.current?.isCollapsed() ? "left"
+      : rightPanelRef.current?.isCollapsed() ? "right" : null;
+    if (draggedSide && isCollapsible(draggedSide)) {
+      commitState(collapsePanel(current, draggedSide, current[draggedSide].lastExpandedSize));
+    } else {
+      commitState(updatePanelLayout(current, leftSize, rightSize));
     }
-    if (!canCollapsePanel(currentState, side)) {
-      return;
-    }
-
-    const currentSize = panelRef?.getSize().asPercentage ?? currentState[side].lastExpandedSize;
-    const nextState = collapsePanel(currentState, side, currentSize);
-    panelRef?.collapse();
-    commitState(nextState);
   };
 
   return (
@@ -210,7 +239,7 @@ function CollapsibleResizablePanels({
           collapsed={panelState.left.collapsed}
           contentId={leftContentId}
           disableCollapse={!canCollapsePanel(panelState, "left")}
-          onTitleActivate={() => activatePanelTitle("left")}
+          onTitleActivate={() => toggle("left")}
           panel={leftPanel}
           side="left"
         />
@@ -234,7 +263,7 @@ function CollapsibleResizablePanels({
           collapsed={panelState.right.collapsed}
           contentId={rightContentId}
           disableCollapse={!canCollapsePanel(panelState, "right")}
-          onTitleActivate={() => activatePanelTitle("right")}
+          onTitleActivate={() => toggle("right")}
           panel={rightPanel}
           side="right"
         />

@@ -1,7 +1,8 @@
+import { useEffect, useRef, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
 
-import { CollapsibleResizablePanels } from "@yoophi/ui/components/collapsible-resizable-panels";
+import { CollapsibleResizablePanels, type CollapsibleResizablePanelsHandle, type CollapsibleResizablePanelsState } from "@yoophi/ui/components/collapsible-resizable-panels";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -553,3 +554,59 @@ export const CollapsibleResizablePanelsOverflowingContent: Story = {
     </div>
   ),
 };
+
+
+function PanelDraft({ label }: { label: string }) {
+  const [draft, setDraft] = useState("");
+  const [mounts, setMounts] = useState(0);
+  useEffect(() => { setMounts((count) => count + 1); }, []);
+  return (
+    <div className="grid gap-2">
+      <label>{label}<textarea aria-label={label} className="border p-2" value={draft} onChange={(event) => setDraft(event.target.value)} /></label>
+      <output aria-label={`${label} mounts`}>{mounts}</output>
+    </div>
+  );
+}
+
+function PersistentPanelsDemo({ defaultSize = "32%", constrained = false }: {
+  defaultSize?: string | number;
+  constrained?: boolean;
+}) {
+  const controller = useRef<CollapsibleResizablePanelsHandle>(null);
+  const [state, setState] = useState<CollapsibleResizablePanelsState | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  const [locked, setLocked] = useState(false);
+  return (
+    <div className="grid gap-3">
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => controller.current?.toggle("right")}>Toggle chat</button>
+        <button onClick={() => controller.current?.collapse("left")}>Collapse document</button>
+        <button onClick={() => controller.current?.expand("right")}>Expand chat</button>
+        <button onClick={() => setNarrow((value) => !value)}>Resize container</button>
+        <button onClick={() => setLocked((value) => !value)}>Lock document</button>
+      </div>
+      <output aria-label="Panel state">{JSON.stringify(state)}</output>
+      <div className="h-96 max-w-full border" style={{ width: narrow ? 480 : 1000 }}>
+        <CollapsibleResizablePanels
+          controllerRef={controller}
+          defaultCollapsedPanel="right"
+          onStateChange={setState}
+          leftPanel={{
+            id: "persistent-document", title: "Document", content: <PanelDraft label="Document draft" />,
+            keepMounted: true, collapsible: !locked, minSize: constrained ? "180px" : "20%",
+          }}
+          rightPanel={{
+            id: "persistent-chat", title: "Chat", content: <PanelDraft label="Chat draft" />,
+            keepMounted: true, defaultSize, minSize: constrained ? "160px" : "15%",
+            maxSize: constrained ? "420px" : "75%",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export const PersistentPanelsPercentage: Story = { render: () => <PersistentPanelsDemo /> };
+export const PersistentPanelsPixels: Story = { render: () => <PersistentPanelsDemo defaultSize="320px" constrained /> };
+export const PersistentPanelsNumericPixels: Story = { render: () => <PersistentPanelsDemo defaultSize={320} constrained /> };
+export const PersistentPanelsConstrained: Story = { render: () => <PersistentPanelsDemo defaultSize="600px" constrained /> };
