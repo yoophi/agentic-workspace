@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use std::{
     fs,
     future::Future,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     process::Stdio,
     sync::{
@@ -66,6 +67,71 @@ const DEFAULT_WORKDIR: &str = "~/tmp/acp-tauri-agent-workspace";
 const DEFAULT_STDIO_BUFFER_LIMIT_MB: usize = 50;
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(30);
 const PROMPT_CANCEL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Owns the entire command tree behind an ACP adapter.
+///
+/// Package runners such as `npx` spawn the actual adapter as a child. Killing
+/// only the wrapper leaves that adapter orphaned, so Unix launches get their
+/// own process group and every teardown path kills that group.
+struct AgentProcess {
+    child: Child,
+    #[cfg(unix)]
+    process_group: Option<libc::pid_t>,
+}
+
+impl AgentProcess {
+    fn spawn(command: &mut Command) -> std::io::Result<Self> {
+        #[cfg(unix)]
+        command.process_group(0);
+        let child = command.spawn()?;
+        #[cfg(unix)]
+        let process_group = child.id().map(|pid| pid as libc::pid_t);
+        Ok(Self {
+            child,
+            #[cfg(unix)]
+            process_group,
+        })
+    }
+
+    fn start_kill(&mut self) -> std::io::Result<()> {
+        self.kill_process_group();
+        self.child.start_kill()
+    }
+
+    #[cfg(unix)]
+    fn kill_process_group(&self) {
+        if let Some(group) = self.process_group {
+            // SAFETY: the child is launched into a new group whose id is its
+            // pid. A negative pid targets only that owned process group.
+            unsafe {
+                libc::kill(-group, libc::SIGKILL);
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn kill_process_group(&self) {}
+}
+
+impl Deref for AgentProcess {
+    type Target = Child;
+
+    fn deref(&self) -> &Self::Target {
+        &self.child
+    }
+}
+
+impl DerefMut for AgentProcess {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.child
+    }
+}
+
+impl Drop for AgentProcess {
+    fn drop(&mut self) {
+        self.kill_process_group();
+    }
+}
 
 pub struct AcpAgentRunner<C, P>
 where
@@ -158,7 +224,8 @@ where
         // GUI 앱의 제한된 PATH로는 npx/node 등을 찾지 못하므로, 로그인 셸에서
         // 보강한 PATH로 프로그램을 절대경로로 resolve하고 자식 환경에도 주입한다.
         let program = resolve_program(&agent_argv[0]);
-        let mut child = Command::new(&program)
+        let mut command = Command::new(&program);
+        command
             .args(&agent_argv[1..])
             .current_dir(&workspace)
             // 프로필/global env(specs/008)와 보강 PATH를 함께 주입한다. env value는
@@ -167,8 +234,8 @@ where
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
+            .kill_on_drop(true);
+        let mut child = AgentProcess::spawn(&mut command)
             .with_context(|| spawn_agent_error_context(&agent_command, &agent_argv[0]))?;
 
         let stdin = child
@@ -373,7 +440,7 @@ fn spawn_agent_error_context(agent_command: &str, program: &str) -> String {
 
 pub struct AcpSessionSetup {
     pub session: Arc<AcpSession>,
-    pub child: Child,
+    child: AgentProcess,
     pub read_task: JoinHandle<Result<()>>,
     pub stderr_task: Option<JoinHandle<()>>,
 }
@@ -451,7 +518,7 @@ where
     S: RunEventSink,
 {
     launch_intent: SessionLaunchIntent,
-    child: Child,
+    child: AgentProcess,
     read_task: JoinHandle<Result<()>>,
     stderr_task: Option<JoinHandle<()>>,
     session: Arc<AcpSession>,
@@ -1565,7 +1632,7 @@ mod tests {
         load_session_params, new_session_params, refresh_advertised_configuration,
         resume_session_id, run_prompt_sequence, session_config_option_value,
         should_reissue_missing_session, spawn_agent_error_context, spawn_env_vars,
-        with_cli_run_options, RunConfigurationSelection,
+        with_cli_run_options, AgentProcess, RunConfigurationSelection,
     };
     use crate::infrastructure::acp::{transport::RpcPeer, util::RpcError};
     use crate::{
@@ -1603,6 +1670,55 @@ mod tests {
                 .unwrap()
                 .push((run_id.to_string(), event));
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_a_package_wrapper_kills_its_spawned_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("adapter.pid");
+        let script = format!(
+            "sleep 120 & echo $! > {}; wait",
+            shell_words::quote(&pid_file.to_string_lossy())
+        );
+        let mut command = Command::new("/bin/sh");
+        command
+            .args(["-c", &script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        let process = AgentProcess::spawn(&mut command).unwrap();
+
+        timeout(Duration::from_secs(3), async {
+            while !pid_file.exists() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("wrapper spawned its adapter");
+        let adapter_pid = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse::<libc::pid_t>()
+            .unwrap();
+
+        // `run.cancel` aborts the driver task, which drops its commander and
+        // therefore this process owner instead of awaiting an explicit kill.
+        drop(process);
+
+        timeout(Duration::from_secs(3), async {
+            loop {
+                // SAFETY: signal 0 only checks whether the recorded test pid exists.
+                let exists = unsafe { libc::kill(adapter_pid, 0) } == 0;
+                if !exists {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("adapter child survived wrapper cancellation");
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
