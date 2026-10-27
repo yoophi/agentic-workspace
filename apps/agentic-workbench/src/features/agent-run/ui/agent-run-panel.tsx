@@ -4,7 +4,6 @@ import {
 } from "@/features/agent-run/model/exchange-reconciler";
 import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DiffViewer } from "@yoophi/git-ui";
 import {
@@ -47,19 +46,11 @@ import {
 } from "@/entities/agent-run/api/agent-run-repository";
 import { discardAgentExchangeDelivery } from "@/entities/agent-run/api/agent-exchange-repository";
 import { unsettledCall } from "@/shared/api/transport";
-import {
-  clearGoal,
-  createGoal,
-  getGoal,
-  recordGoalProgress,
-  updateGoal,
-} from "@/entities/agent-run/api/goal-repository";
 import { agentRunQueryKeys } from "@/entities/agent-run/api/query-keys";
 import {
   agentCatalogQueryOptions,
   agentRunSettingsQueryOptions,
   agentToolCommandCandidateQueryOptions,
-  goalQueryOptions,
 } from "@/entities/agent-run/api/query-options";
 import {
   appendOneTimelineItem,
@@ -92,11 +83,9 @@ import type {
   AgentRunSettings,
   AgentToolCommandCandidate,
   AvailableCommandMetadata,
-  GoalStatus,
   PermissionMode,
   ProviderSession,
   RunEvent,
-  ThreadGoal,
   TimelineItem,
   ToolFileChange,
 } from "@/entities/agent-run/model";
@@ -110,10 +99,6 @@ import {
   type PendingSeek,
   type TimelineLayoutSnapshot,
 } from "@/features/agent-run/model/agent-run-minimap";
-import {
-  buildGoalContinuationPrompt,
-  shouldStartGoalContinuation,
-} from "@/features/agent-run/model/goal-continuation";
 import type {
   AgentPanelRunState,
   AgentPromptRequest,
@@ -230,8 +215,6 @@ type AgentRunPanelProps = {
   timelineItems?: TimelineItem[];
   replayedEvents?: unknown[];
   initialMinimapVisible?: boolean;
-  showPromptComposer?: boolean;
-  runConfigurationPortal?: HTMLElement | null;
   worktreeRunConfiguration?: WorktreeRunConfiguration | null;
   onWorktreeRunConfigurationChange?: (configuration: WorktreeRunConfiguration) => void;
   existingRunId?: string | null;
@@ -254,7 +237,6 @@ const defaultPrompt = "";
 const RALPH_MAX_ITERATIONS = 100;
 const RALPH_DEFAULT_PROMPT =
   "이전 결과를 바탕으로 목표를 계속 진행하세요. 목표를 모두 달성했다면 더 진행하지 말고 완료를 알려주세요.";
-const GOAL_CONTINUATION_DELAY_MS = 800;
 const TIMELINE_ESTIMATED_ITEM_HEIGHT = 96;
 const TIMELINE_ITEM_GAP = 12;
 const TIMELINE_OVERSCAN = 6;
@@ -391,8 +373,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   timelineItems,
   replayedEvents = [],
   initialMinimapVisible = true,
-  showPromptComposer = true,
-  runConfigurationPortal = null,
   worktreeRunConfiguration = null,
   onWorktreeRunConfigurationChange,
   existingRunId,
@@ -400,7 +380,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   runtimeHydrated = true,
   initialPermissionMode = "default",
 }: AgentRunPanelProps) {
-  const enableGoalContinuation = variant === "main";
   const persistSettings = variant === "main";
   const queryClient = useQueryClient();
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
@@ -471,10 +450,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   );
   const [error, setError] = useState<string | null>(null);
   const [isRunSettingsDialogOpen, setIsRunSettingsDialogOpen] = useState(false);
-  const [isGoalDialogOpen, setIsGoalDialogOpen] = useState(false);
   const [isRalphSettingsDialogOpen, setIsRalphSettingsDialogOpen] = useState(false);
-  const [goalDraft, setGoalDraft] = useState("");
-  const [goalTokenBudget, setGoalTokenBudget] = useState("");
   const [editingPrompt, setEditingPrompt] = useState<QueuedPrompt | null>(null);
   const [editingPromptText, setEditingPromptText] = useState("");
   const [usageContext, setUsageContext] = useState<UsageContext | null>(null);
@@ -482,7 +458,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   const activeRunIdRef = useRef<string | null>(null);
   const agentThreadStatusRef = useRef<AgentThreadStatus>({ type: "unknown" });
   const onRunStateChangeRef = useRef(onRunStateChange);
-  const activeGoalRef = useRef<ThreadGoal | null>(null);
   const activePromptSentRef = useRef(false);
   const queuedPromptsRef = useRef<QueuedPrompt[]>([]);
   const pendingSteersRef = useRef<SteerInput[]>([]);
@@ -501,9 +476,7 @@ export const AgentRunPanel = memo(function AgentRunPanel({
    *  이벤트를 먼저 보내고 답한다). 결과를 받은 쪽이 이 기록으로 run이 이미 끝났는지 본다. */
   const lastRunEndRef = useRef<{ runId: string; status: string } | null>(null);
   const steerSequenceRef = useRef(0);
-  const runStartedAtRef = useRef<number | null>(null);
   const usageContextRef = useRef<UsageContext | null>(null);
-  const goalContinuationPendingRef = useRef(false);
   const settingsHydratedRef = useRef(false);
   const timelineScrollRef = useRef<HTMLDivElement | null>(null);
   const promptTextareaElementRef = useRef<HTMLTextAreaElement | null>(null);
@@ -587,65 +560,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     },
   });
   const saveRunSettings = saveSettingsMutation.mutate;
-
-  const goalQueryKey = agentRunQueryKeys.goal(workingDirectory);
-  const goalQuery = useQuery({
-    queryKey: goalQueryKey,
-    queryFn: () => getGoal(workingDirectory),
-    enabled: enableGoalContinuation,
-    ...goalQueryOptions,
-  });
-  const activeGoal = goalQuery.data ?? null;
-
-  const createGoalMutation = useMutation({
-    mutationFn: createGoal,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
-    },
-  });
-
-  const updateGoalMutation = useMutation({
-    mutationFn: (input: Parameters<typeof updateGoal>[1]) =>
-      updateGoal(workingDirectory, input),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
-    },
-  });
-
-  const clearGoalMutation = useMutation({
-    mutationFn: () => clearGoal(workingDirectory),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
-    },
-  });
-
-  const recordRunGoalProgress = useCallback(async () => {
-    if (!enableGoalContinuation) {
-      runStartedAtRef.current = null;
-      return;
-    }
-    const goal = activeGoalRef.current;
-    if (!goal || !["active", "budgetLimited"].includes(goal.status)) {
-      return;
-    }
-
-    const elapsedSeconds = runStartedAtRef.current
-      ? Math.max(0, Math.round((Date.now() - runStartedAtRef.current) / 1000))
-      : 0;
-    const tokensUsed = usageContextRef.current?.used ?? goal.tokensUsed;
-
-    try {
-      await recordGoalProgress(workingDirectory, {
-        tokensUsed,
-        timeUsedSeconds: elapsedSeconds,
-      });
-      await queryClient.invalidateQueries({ queryKey: goalQueryKey });
-    } catch (caughtError) {
-      setError(String(caughtError));
-    } finally {
-      runStartedAtRef.current = null;
-    }
-  }, [enableGoalContinuation, goalQueryKey, queryClient, workingDirectory]);
 
   const sessionsQuery = useQuery({
     queryKey: agentRunQueryKeys.sessions(providerAgentId, workingDirectory),
@@ -892,10 +806,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
   }, [rejectedSteers]);
 
   useEffect(() => {
-    activeGoalRef.current = activeGoal;
-  }, [activeGoal]);
-
-  useEffect(() => {
     usageContextRef.current = usageContext;
   }, [usageContext]);
 
@@ -995,7 +905,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         activeRunIdRef.current = null;
         setActiveRunId(null);
         onRunSettled?.();
-        void recordRunGoalProgress();
         return;
       }
 
@@ -1072,7 +981,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           activeRunIdRef.current = null;
           setActiveRunId(null);
           onRunSettled?.();
-          void recordRunGoalProgress();
           lastRunEndRef.current = { runId: envelope.runId, status: timelineEvent.status };
           const unsettledRestart = unsettledRestartRef.current;
           if (unsettledRestart?.runId === envelope.runId) {
@@ -1093,7 +1001,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     existingRunId,
     onRunSettled,
     providerAgentId,
-    recordRunGoalProgress,
     workingDirectory,
   ]);
 
@@ -1169,69 +1076,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     isRunning,
     pendingSteers,
     queuedPrompts,
-  ]);
-
-  useEffect(() => {
-    if (!enableGoalContinuation) {
-      goalContinuationPendingRef.current = false;
-      return;
-    }
-    const sessionReady = sessionMode === "new" || Boolean(selectedSessionId);
-    if (
-      !shouldStartGoalContinuation({
-        goal: activeGoal,
-        selectedAgentId,
-        isRunning,
-        hasQueuedPrompt: queuedPrompts.length > 0,
-        promptText: prompt,
-        sessionReady,
-      })
-    ) {
-      goalContinuationPendingRef.current = false;
-      return;
-    }
-    if (!activeGoal || goalContinuationPendingRef.current) {
-      return;
-    }
-
-    goalContinuationPendingRef.current = true;
-    const timeoutId = window.setTimeout(() => {
-      goalContinuationPendingRef.current = false;
-      const goal = activeGoalRef.current;
-      if (!goal) {
-        return;
-      }
-
-      const stillReady = sessionMode === "new" || Boolean(selectedSessionId);
-      if (
-        !shouldStartGoalContinuation({
-          goal,
-          selectedAgentId,
-          isRunning: activeRunIdRef.current !== null,
-          hasQueuedPrompt: queuedPrompts.length > 0,
-          promptText: prompt,
-          sessionReady: stillReady,
-        })
-      ) {
-        return;
-      }
-
-      void startRun(buildGoalContinuationPrompt(goal));
-    }, GOAL_CONTINUATION_DELAY_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-      goalContinuationPendingRef.current = false;
-    };
-  }, [
-    activeGoal,
-    isRunning,
-    prompt,
-    queuedPrompts.length,
-    selectedAgentId,
-    selectedSessionId,
-    sessionMode,
-    enableGoalContinuation,
   ]);
 
   const selectedAgent = agents.find((agent) => agent.id === providerAgentId);
@@ -1644,7 +1488,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     setRejectedSteers([]);
     setUsageContext(null);
     usageContextRef.current = null;
-    runStartedAtRef.current = Date.now();
     setItems((currentItems) =>
       appendSessionLifecycleStatusMessage(
         currentItems,
@@ -1718,7 +1561,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
       setIsRunning(false);
       activePromptSentRef.current = false;
       activeRunIdRef.current = null;
-      runStartedAtRef.current = null;
       setActiveRunId(null);
       return false;
     }
@@ -2045,7 +1887,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     // 취소로 버리는 대기열의 교환 항목은 서버에서도 끝낸다 — 서버가 거절해 run이 살아 있으면 확인된 미소비 교환이 남아
     // wait-stop을 막는다(Codex r7). 대기열은 답을 받은 지금의 것이다(기다리는 동안 들어온 교환 포함, Codex r9).
     const droppedExchanges = exchangeRequestIdsOf(queueOfRun(runIdToCancel));
-    await recordRunGoalProgress();
     queuedPromptsRef.current = [];
     setQueuedPrompts([]);
     void discardExchangeDeliveries(droppedExchanges);
@@ -2501,56 +2342,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     }
   }
 
-  function openGoalDialog(goal: ThreadGoal | null) {
-    setGoalDraft(goal?.objective ?? "");
-    setGoalTokenBudget(goal?.tokenBudget ? String(goal.tokenBudget) : "");
-    setIsGoalDialogOpen(true);
-  }
-
-  async function saveGoal() {
-    const objective = goalDraft.trim();
-    if (!objective) {
-      return;
-    }
-
-    const tokenBudget = parseOptionalPositiveInteger(goalTokenBudget);
-
-    try {
-      if (activeGoal) {
-        await updateGoalMutation.mutateAsync({
-          objective,
-          tokenBudget,
-          ...(activeGoal.status === "complete" ? { status: "active" as GoalStatus } : {}),
-        });
-      } else {
-        await createGoalMutation.mutateAsync({
-          workingDirectory,
-          objective,
-          tokenBudget,
-        });
-      }
-      setIsGoalDialogOpen(false);
-    } catch (caughtError) {
-      setError(String(caughtError));
-    }
-  }
-
-  async function setGoalStatus(status: GoalStatus) {
-    try {
-      await updateGoalMutation.mutateAsync({ status });
-    } catch (caughtError) {
-      setError(String(caughtError));
-    }
-  }
-
-  async function clearCurrentGoal() {
-    try {
-      await clearGoalMutation.mutateAsync();
-    } catch (caughtError) {
-      setError(String(caughtError));
-    }
-  }
-
   const compactRunConfigurationControls = (supportsModelSelection ||
     supportsEffortSelection) && (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
@@ -2605,9 +2396,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
 
   return (
     <div className="h-full min-h-0">
-      {!showPromptComposer && runConfigurationPortal && compactRunConfigurationControls
-        ? createPortal(compactRunConfigurationControls, runConfigurationPortal)
-        : null}
       <ResizablePanelGroup
         orientation="vertical"
         className="flex h-full min-h-0 w-full flex-col"
@@ -2749,24 +2537,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
                 </SystemMessage>
               )}
 
-              {enableGoalContinuation && (
-                <GoalStatusPanel
-                  goal={activeGoal}
-                  isLoading={goalQuery.isLoading}
-                  isMutating={
-                    createGoalMutation.isPending ||
-                    updateGoalMutation.isPending ||
-                    clearGoalMutation.isPending
-                  }
-                  onCreate={() => openGoalDialog(null)}
-                  onEdit={() => openGoalDialog(activeGoal)}
-                  onPause={() => void setGoalStatus("paused")}
-                  onResume={() => void setGoalStatus("active")}
-                  onComplete={() => void setGoalStatus("complete")}
-                  onClear={() => void clearCurrentGoal()}
-                />
-              )}
-
               <div className="flex flex-col">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
                   <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="ACP event filter">
@@ -2902,8 +2672,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </div>
         </ResizablePanel>
 
-        {showPromptComposer && (
-          <>
         <ResizableHandle
           aria-label="프롬프트 영역 크기 조정"
           className="relative flex h-2 shrink-0 cursor-ns-resize items-center justify-center bg-transparent transition-colors after:absolute after:left-0 after:right-0 after:h-px after:bg-border hover:after:bg-muted-foreground/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -3244,8 +3012,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
           </div>
         </PromptInput>
         </ResizablePanel>
-          </>
-        )}
       </ResizablePanelGroup>
 
       <Dialog
@@ -3510,56 +3276,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={isGoalDialogOpen} onOpenChange={setIsGoalDialogOpen}>
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{activeGoal ? "Goal 편집" : "Goal 생성"}</DialogTitle>
-            <DialogDescription>
-              현재 worktree에 저장할 장기 목표를 설정합니다.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Objective</span>
-              <Textarea
-                value={goalDraft}
-                onChange={(event) => setGoalDraft(event.target.value)}
-                className="min-h-36 resize-y"
-                placeholder="완료 또는 차단될 때까지 이어갈 목표를 입력하세요."
-                autoFocus
-              />
-            </div>
-            <div className="flex flex-col gap-2">
-              <span className="text-sm font-medium">Token budget</span>
-              <Input
-                value={goalTokenBudget}
-                onChange={(event) => setGoalTokenBudget(event.target.value)}
-                inputMode="numeric"
-                placeholder="Optional"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <DialogClose asChild>
-              <Button type="button" variant="outline">
-                취소
-              </Button>
-            </DialogClose>
-            <Button
-              type="button"
-              disabled={
-                !goalDraft.trim() ||
-                createGoalMutation.isPending ||
-                updateGoalMutation.isPending
-              }
-              onClick={() => void saveGoal()}
-            >
-              저장
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <PermissionRequestDialog
         permission={pendingPermission}
         onSelect={respondToPermission}
@@ -3567,114 +3283,6 @@ export const AgentRunPanel = memo(function AgentRunPanel({
     </div>
   );
 });
-
-type GoalStatusPanelProps = {
-  goal: ThreadGoal | null;
-  isLoading: boolean;
-  isMutating: boolean;
-  onCreate: () => void;
-  onEdit: () => void;
-  onPause: () => void;
-  onResume: () => void;
-  onComplete: () => void;
-  onClear: () => void;
-};
-
-function GoalStatusPanel({
-  goal,
-  isLoading,
-  isMutating,
-  onCreate,
-  onEdit,
-  onPause,
-  onResume,
-  onComplete,
-  onClear,
-}: GoalStatusPanelProps) {
-  if (isLoading) {
-    return (
-      <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-        <Loader2Icon className="size-4 animate-spin" />
-        Goal 불러오는 중
-      </div>
-    );
-  }
-
-  if (!goal) {
-    return (
-      <div className="flex flex-col gap-2 rounded-md border bg-muted/30 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
-        <span className="text-sm text-muted-foreground">
-          이 worktree에 설정된 goal이 없습니다.
-        </span>
-        <Button type="button" size="sm" onClick={onCreate} disabled={isMutating}>
-          <PlayIcon data-icon="inline-start" />
-          Goal 생성
-        </Button>
-      </div>
-    );
-  }
-
-  const canPause = goal.status === "active";
-  const canResume = goal.status === "paused" || goal.status === "blocked";
-  const canComplete = goal.status !== "complete";
-
-  return (
-    <div className="flex flex-col gap-3 rounded-md border bg-muted/30 px-3 py-2">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">Goal</span>
-            <Badge variant={goal.status === "active" ? "default" : "secondary"}>
-              {goalStatusLabel(goal.status)}
-            </Badge>
-            {goal.tokenBudget ? (
-              <span className="font-mono text-xs text-muted-foreground">
-                {goal.tokensUsed}/{goal.tokenBudget} tokens
-              </span>
-            ) : null}
-          </div>
-          <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">
-            {goal.objective}
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-1.5">
-          <Button type="button" size="sm" variant="outline" onClick={onEdit} disabled={isMutating}>
-            <PencilIcon data-icon="inline-start" />
-            Edit
-          </Button>
-          {canPause && (
-            <Button type="button" size="sm" variant="outline" onClick={onPause} disabled={isMutating}>
-              <SquareIcon data-icon="inline-start" />
-              Pause
-            </Button>
-          )}
-          {canResume && (
-            <Button type="button" size="sm" variant="outline" onClick={onResume} disabled={isMutating}>
-              <PlayIcon data-icon="inline-start" />
-              Resume
-            </Button>
-          )}
-          {canComplete && (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={onComplete}
-              disabled={isMutating}
-            >
-              <CheckCircleIcon data-icon="inline-start" />
-              Complete
-            </Button>
-          )}
-          <Button type="button" size="sm" variant="destructive" onClick={onClear} disabled={isMutating}>
-            <XIcon data-icon="inline-start" />
-            Clear
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function findPendingPermission(items: TimelineItem[]) {
   const pending = new Map<string, Extract<RunEvent, { type: "permission" }>>();
@@ -3698,33 +3306,6 @@ function isModelOptionValue(value: string) {
 
 function isContextSizePreset(value: string): value is ContextSizePreset {
   return value === "default" || value === "medium" || value === "large" || value === "xLarge";
-}
-
-function parseOptionalPositiveInteger(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const parsed = Number.parseInt(trimmed, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
-  }
-
-  return parsed;
-}
-
-function goalStatusLabel(status: GoalStatus) {
-  const labels: Record<GoalStatus, string> = {
-    active: "Active",
-    paused: "Paused",
-    blocked: "Blocked",
-    usageLimited: "Usage limited",
-    budgetLimited: "Budget limited",
-    complete: "Complete",
-  };
-
-  return labels[status];
 }
 
 function VirtualizedRunTimeline({

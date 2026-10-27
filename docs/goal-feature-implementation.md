@@ -1,7 +1,15 @@
 # Goal 기능 구현
 
+> **상태: AW 목표 UI 제거 (issue #194).**
+> 아래 내용은 제거 전 구현을 기록한 참고 문서다. worktree goal 표시·편집 UI,
+> 자동 continuation, 프론트엔드 goal API 및 `record_goal_progress` 호출을 제거했다.
+> 원격 리팩터링으로 공용화된 `workbench-core`의 목표 도메인·저장소·서비스와
+> HTTP API, Tauri 호환 command는 기존 클라이언트와의 호환성을 위해 유지한다.
+> `AgentRunRequest.goal`(run prompt 필드)과 orchestration의
+> `delegate_orchestration_goal`은 별개 개념으로 그대로 유지된다.
+
 이 문서는 `origin/main`의 commit `c2eb75b` 기준으로 goal 기능이 어떻게
-구현되어 있는지 설명한다.
+구현되어 있었는지 설명한다.
 
 이 기능은 worktree마다 하나의 장기 goal을 저장한다. goal은 agent run panel 안에
 표시되지만, 현재는 agent run request에 자동으로 연결되지는 않는다. 개별 agent

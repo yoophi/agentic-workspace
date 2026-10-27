@@ -1,6 +1,6 @@
 // ACP agent-run 통신 계약 타입은 공유 패키지 `@yoophi/agent-client`에서 가져온다.
 // 여기서는 그 계약을 re-export해 기존 소비 경로(`@/entities/agent-run/...`)를 유지하고,
-// workbench 전용 타입(Settings/Goal/Worktree/Timeline/Command candidate 등)만 로컬로 정의한다.
+// workbench 전용 타입(Settings/Worktree/Timeline/Command candidate 등)만 로컬로 정의한다.
 import type {
   AgentThreadStatus,
   ContextSizePreset,
@@ -95,31 +95,6 @@ export type AgentRunSettingsRalphLoop = {
   promptTemplate: string;
 };
 
-export type GoalStatus =
-  | "active"
-  | "paused"
-  | "blocked"
-  | "usageLimited"
-  | "budgetLimited"
-  | "complete";
-
-export type ThreadGoal = {
-  workingDirectory: string;
-  objective: string;
-  status: GoalStatus;
-  tokenBudget?: number | null;
-  tokensUsed: number;
-  timeUsedSeconds: number;
-  createdAt: string;
-  updatedAt: string;
-};
-
-export type GoalInput = {
-  workingDirectory: string;
-  objective: string;
-  tokenBudget?: number | null;
-};
-
 export type WorktreeChangeType =
   | "added"
   | "modified"
@@ -136,17 +111,6 @@ export type WorktreeChange = {
   diff: string | null;
   content: string | null;
   truncated: boolean;
-};
-
-export type GoalUpdateInput = {
-  objective?: string;
-  status?: GoalStatus;
-  tokenBudget?: number | null;
-};
-
-export type GoalProgressInput = {
-  tokensUsed: number;
-  timeUsedSeconds: number;
 };
 
 /** provider가 로컬에 남긴 네이티브 세션 한 건의 요약(백엔드 camelCase와 일치). */

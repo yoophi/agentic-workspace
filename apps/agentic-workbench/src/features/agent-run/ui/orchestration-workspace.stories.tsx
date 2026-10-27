@@ -1,16 +1,10 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 
 import { orchestrationSessionFixture } from "@/shared/storybook/agent-orchestration-sample-data";
-import {
-  addExtraPanel,
-  createInitialAgentRunAreaState,
-} from "@/features/agent-run/model/agent-run-panel-slots";
 
 import { TaskActivityRail } from "./task-activity-rail";
-import { WorkspacePromptComposer } from "./workspace-prompt-composer";
 
 function OrchestrationWorkspacePreview() {
-  const workspace = addExtraPanel(createInitialAgentRunAreaState());
   return (
     <div className="flex h-[640px] flex-col rounded-lg border">
       <div className="flex min-h-0 flex-1">
@@ -19,11 +13,6 @@ function OrchestrationWorkspacePreview() {
         </div>
         <TaskActivityRail session={orchestrationSessionFixture} />
       </div>
-      <WorkspacePromptComposer
-        slots={workspace.slots}
-        focusedPanelId={workspace.focusedPanelId}
-        onSubmit={() => undefined}
-      />
     </div>
   );
 }

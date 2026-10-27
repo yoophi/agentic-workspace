@@ -1,14 +1,12 @@
 import { createExchangeReconciler } from "@/features/agent-run/model/exchange-reconciler";
 import { useOrchestrationWorkspaceUpdates } from "@/features/agent-run/ui/use-orchestration-workspace-updates";
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangleIcon, FolderGit2Icon } from "lucide-react";
 
 import type { GitWorktree } from "@/entities/project/model/git-worktree";
 import { cancelAgentRun } from "@/entities/agent-run/api/agent-run-repository";
 import {
   bindMainCoordinatorRun,
-  delegateOrchestrationGoal,
-  dispatchOrchestrationPrompt,
   adoptManualOrchestrationChild,
   bootstrapOrchestrationWorkspace,
   getOrchestrationWorkspace,
@@ -20,13 +18,8 @@ import {
   retryOrchestrationTask,
   reassignOrchestrationTask,
   recoverOrchestrationWorkspace,
-  sendOrchestrationChildCommand,
   type AgentNode,
-  initialPromptDispatchState,
   handoffOrchestrationCoordinator,
-  promptDispatchReducer,
-  describeOrchestrationFailure,
-  parseOrchestrationError,
   type OrchestrationSession,
 } from "@/entities/agent-orchestration";
 import {
@@ -71,8 +64,6 @@ import {
 import { shouldBindMainRun } from "@/features/agent-run/model/orchestration-workspace";
 import { AgentRunControllerRegistry } from "@/features/agent-run/model/agent-run-controller";
 import { TaskActivityRail } from "@/features/agent-run/ui/task-activity-rail";
-import { WorkspacePromptComposer } from "@/features/agent-run/ui/workspace-prompt-composer";
-import { PromptDispatchStatus } from "@/features/agent-run/ui/prompt-dispatch-status";
 import { AgentRunRuntimeHost } from "@/features/agent-run/ui/agent-run-runtime-host";
 import { CoordinatorHandoffDialog } from "@/features/agent-run/ui/coordinator-handoff-dialog";
 import {
@@ -116,14 +107,8 @@ export function WorktreeAgentRunArea({
     OrchestrationSession[]
   >([]);
   const [isStartingOrchestration, setIsStartingOrchestration] = useState(true);
-  const [dispatchState, dispatchPrompt] = useReducer(
-    promptDispatchReducer,
-    initialPromptDispatchState,
-  );
   const [pendingMainHandoffRunId, setPendingMainHandoffRunId] =
     useState<string | null>(null);
-  const [runConfigurationPortal, setRunConfigurationPortal] =
-    useState<HTMLDivElement | null>(null);
   const [worktreeRunConfiguration, setWorktreeRunConfiguration] =
     useState<WorktreeRunConfiguration | null>(null);
   const pendingMainStartRef = useRef<{
@@ -135,7 +120,6 @@ export function WorktreeAgentRunArea({
   const boundMainRunIdRef = useRef<string | null>(null);
   const adoptedPanelIdsRef = useRef(new Set<string>());
   const runtimeControllerRegistryRef = useRef(new AgentRunControllerRegistry());
-  const lastDirectPromptRef = useRef<string | null>(null);
   const [, setRuntimeControllerRevision] = useState(0);
 
   useEffect(() => {
@@ -680,10 +664,6 @@ export function WorktreeAgentRunArea({
                       : undefined
                   }
                   scrollHeader={scrollHeader}
-                  showPromptComposer={false}
-                  runConfigurationPortal={
-                    slot.id === state.focusedPanelId ? runConfigurationPortal : null
-                  }
                   worktreeRunConfiguration={worktreeRunConfiguration}
                   onWorktreeRunConfigurationChange={setWorktreeRunConfiguration}
                   existingRunId={
@@ -764,146 +744,6 @@ export function WorktreeAgentRunArea({
           />
         )}
       </div>
-
-      <WorkspacePromptComposer
-        slots={state.slots}
-        focusedPanelId={state.focusedPanelId}
-        disabled={!orchestrationSession}
-        onRunConfigurationPortalChange={setRunConfigurationPortal}
-        onSubmit={async ({ requestId, message, mode, panelIds, delegate }) => {
-          lastDirectPromptRef.current = message;
-          dispatchPrompt({ type: "queued", dispatchId: requestId, panelIds });
-          if (delegate) {
-            const session = orchestrationSessionRef.current;
-            if (!session) return;
-            dispatchPrompt({ type: "sending", panelId: MAIN_AGENT_NODE_ID });
-            try {
-              await delegateOrchestrationGoal({
-                requestId,
-                goal: message,
-                expectedRevision: session.revision,
-              });
-              dispatchPrompt({ type: "succeeded", panelId: MAIN_AGENT_NODE_ID });
-            } catch (error) {
-              // Show the parsed reason instead of the raw payload, and rethrow so the
-              // Composer can restore the text and render the next action (FR-022, FR-048).
-              const guidance = describeOrchestrationFailure(parseOrchestrationError(error));
-              dispatchPrompt({
-                type: "failed",
-                panelId: MAIN_AGENT_NODE_ID,
-                error: guidance.nextAction
-                  ? `${guidance.reason} ${guidance.nextAction}`
-                  : guidance.reason,
-              });
-              throw error;
-            }
-            return;
-          }
-          const session = orchestrationSessionRef.current;
-          if (!session) return;
-          try {
-            const result = await dispatchOrchestrationPrompt({
-              requestId,
-              intent: "direct",
-              targetMode: mode,
-              message,
-              delivery: "send",
-              panelIds,
-              expectedRevision: session.revision,
-            });
-            let next = stateRef.current;
-            for (const panelId of panelIds) {
-              const node = session.nodes.find((candidate) => candidate.id === panelId);
-              const target = result.targets.find((candidate) => candidate.panelId === panelId);
-              if (node?.kind === "child") {
-                if (target?.status === "delivered") {
-                  dispatchPrompt({ type: "succeeded", panelId });
-                } else {
-                  dispatchPrompt({
-                    type: "failed",
-                    panelId,
-                    error:
-                      target?.failureReason ??
-                      "Child runtime이 명령을 수락하지 않았습니다.",
-                  });
-                }
-                continue;
-              }
-              dispatchPrompt({ type: "sending", panelId });
-              const routed = routePromptToPanel(next, panelId, {
-                id: `${requestId}:${panelId}`,
-                text: message,
-                delivery: "send",
-              });
-              if (routed.routed) {
-                next = routed.state;
-                dispatchPrompt({ type: "succeeded", panelId });
-              } else {
-                dispatchPrompt({
-                  type: "failed",
-                  panelId,
-                  error: routed.reason,
-                });
-              }
-            }
-            stateRef.current = next;
-            setState(next);
-          } catch (error) {
-            for (const panelId of panelIds) {
-              dispatchPrompt({ type: "failed", panelId, error: String(error) });
-            }
-            return;
-          }
-        }}
-      />
-      <PromptDispatchStatus
-        state={dispatchState}
-        onRetry={(panelId) => {
-          const session = orchestrationSessionRef.current;
-          const message = lastDirectPromptRef.current;
-          const node = session?.nodes.find((candidate) => candidate.id === panelId);
-          const task = node?.assignedTaskId
-            ? session?.tasks.find((candidate) => candidate.id === node.assignedTaskId)
-            : null;
-          if (!session || !message || node?.kind !== "child" || !task) {
-            dispatchPrompt({
-              type: "failed",
-              panelId,
-              error: "재시도할 Child command 정보를 찾을 수 없습니다.",
-            });
-            return;
-          }
-          dispatchPrompt({ type: "sending", panelId });
-          void sendOrchestrationChildCommand({
-            requestId: crypto.randomUUID(),
-            taskId: task.id,
-            kind: "message",
-            message,
-            delivery: "send",
-            expectedTaskRevision: task.revision,
-          })
-            .then((command) => {
-              if (command.status === "accepted") {
-                dispatchPrompt({ type: "succeeded", panelId });
-              } else {
-                dispatchPrompt({
-                  type: "failed",
-                  panelId,
-                  error:
-                    command.failure?.message ??
-                    "Child runtime이 재시도 명령을 수락하지 않았습니다.",
-                });
-              }
-            })
-            .catch((error) =>
-              dispatchPrompt({
-                type: "failed",
-                panelId,
-                error: String(error),
-              }),
-            );
-        }}
-      />
 
       <AgentPeerMessageDialog
         open={Boolean(messageSourcePanelId)}

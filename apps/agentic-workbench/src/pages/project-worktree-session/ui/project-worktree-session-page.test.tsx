@@ -16,9 +16,9 @@ describe("ProjectWorktreeSessionPage SDD prompt routing", () => {
     expect(source).toContain("delivery: request.delivery");
   });
 
-  it("keeps annotation and SDD routing in the one workspace composer owner", () => {
-    expect(agentAreaSource).toContain("<WorkspacePromptComposer");
-    expect(agentAreaSource).toContain("showPromptComposer={false}");
+  it("routes annotation and SDD prompts through the single agent area while each panel owns its prompt input", () => {
+    expect(agentAreaSource).not.toContain("WorkspacePromptComposer");
+    expect(agentAreaSource).not.toContain("showPromptComposer");
     expect(source.match(/<WorktreeAgentRunArea/g)).toHaveLength(1);
   });
 });

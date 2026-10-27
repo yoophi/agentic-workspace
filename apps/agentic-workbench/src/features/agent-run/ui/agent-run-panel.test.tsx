@@ -94,8 +94,6 @@ beforeEach(() => {
         return loadAgents();
       case "get_agent_run_settings":
         return savedRunSettings;
-      case "get_goal":
-        return null;
       case "list_agent_tool_command_candidates":
         return loadToolCommandCandidates();
       case "list_provider_sessions":
@@ -195,14 +193,10 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
     ).toContain("High");
   });
 
-  it("shows compact Codex settings in the external production composer and sends selections", async () => {
-    const runConfigurationPortal = document.createElement("div");
-    document.body.append(runConfigurationPortal);
+  it("shows compact Codex settings in the panel composer and sends selections", async () => {
     const panel = await renderAgentRunPanel({
       panelId: "main-agent-run",
       workingDirectory: "/tmp/agent-run-panel-codex-settings",
-      showPromptComposer: false,
-      runConfigurationPortal,
     });
 
     await waitForAgentRunPanel(() =>
@@ -253,14 +247,10 @@ describe.each(["compat", "http"] as const)("AgentRunPanel user boundary [%s]", (
     const onWorktreeRunConfigurationChange = vi.fn((configuration) => {
       worktreeRunConfiguration = configuration;
     });
-    const runConfigurationPortal = document.createElement("div");
-    document.body.append(runConfigurationPortal);
     const extraPanel = await renderAgentRunPanel({
       panelId: "extra-agent-run",
       workingDirectory: "/tmp/agent-run-panel-shared-settings",
       variant: "extra",
-      showPromptComposer: false,
-      runConfigurationPortal,
       worktreeRunConfiguration,
       onWorktreeRunConfigurationChange,
     });

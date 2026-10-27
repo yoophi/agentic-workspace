@@ -7,11 +7,9 @@ const SOURCE = readFileSync(
 );
 
 describe("WorktreeAgentRunArea orchestration runtime ownership", () => {
-  it("shares one controller registry and sends Child prompts through the backend command path", () => {
+  it("shares one controller registry and binds Child panels to their orchestration runs", () => {
     expect(SOURCE).toContain("new AgentRunControllerRegistry()");
     expect(SOURCE).toContain("existingRunId=");
-    expect(SOURCE).toContain("dispatchOrchestrationPrompt");
-    expect(SOURCE).toContain("sendOrchestrationChildCommand");
     expect(SOURCE).toContain("listRecoverableOrchestrationWorkspaces");
     expect(SOURCE).toContain("이전 작업 복구");
     expect(SOURCE).toContain("새로 시작");
@@ -24,5 +22,12 @@ describe("WorktreeAgentRunArea orchestration runtime ownership", () => {
     expect(SOURCE).toContain(
       "onWorktreeRunConfigurationChange={setWorktreeRunConfiguration}",
     );
+  });
+
+  it("lets every panel own its prompt input instead of a workspace-wide composer", () => {
+    expect(SOURCE).not.toContain("WorkspacePromptComposer");
+    expect(SOURCE).not.toContain("showPromptComposer");
+    expect(SOURCE).not.toContain("runConfigurationPortal");
+    expect(SOURCE).not.toContain("PromptDispatchStatus");
   });
 });

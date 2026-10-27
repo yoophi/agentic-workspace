@@ -89,6 +89,15 @@ flowchart TD
 
 ### 통합 프롬프트 작성 영역
 
+> **2026-09-16 변경 (issue #196):** 통합 작성 영역(`WorkspacePromptComposer`)은
+> 입력이 어디로 가는지 매번 확인해야 하고 패널 입력의 히스토리·큐·자동완성·Ralph
+> loop를 쓸 수 없어 제거했다. 각 Agent run 패널이 다시 자체 프롬프트 입력을 가지며,
+> 전송 대상은 항상 "지금 보고 있는 패널"이다. 아래의 대상 선택(현재·선택·전체)과
+> "Coordinator 위임" UI는 더 이상 존재하지 않는다. 백엔드 command
+> (`dispatch_orchestration_prompt`, `delegate_orchestration_goal`)와
+> `entities/agent-orchestration/model/prompt-dispatch.ts`는 재설계 시 재사용할 수
+> 있도록 남겨 두었다. 아래 내용은 원 설계 기록이다.
+
 각 패널의 프롬프트 작성 영역을 워크스페이스 하단의 하나의 작성 영역으로 통합한다.
 사용자는 다음 대상 중 하나를 선택한다.
 
