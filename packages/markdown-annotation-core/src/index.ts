@@ -8,6 +8,14 @@ export {
   type FormatAnnotationsOptions,
 } from "./format/format-annotations-for-agent";
 export {
+  buildBlockQuickPromptContext,
+  buildDocumentQuickPromptContext,
+  buildSelectionQuickPromptContext,
+  createQuickPromptActionState,
+  isQuickPromptSendable,
+} from "./quick-prompt/build-quick-prompt-context";
+export { formatQuickPromptForAgent } from "./quick-prompt/format-quick-prompt-for-agent";
+export {
   MERMAID_START_TOKENS,
   detectMermaidBlock,
   type MermaidDetectionResult,
@@ -34,4 +42,19 @@ export type {
   MarkdownDocument,
   TocEntry,
   TocLevel,
+  AgentTarget,
+  AgentTargetAvailability,
+  BlockQuickPromptInput,
+  DocumentQuickPromptInput,
+  FormatQuickPromptOptions,
+  PromptDraft,
+  QuickPromptActionState,
+  QuickPromptBuildOptions,
+  QuickPromptContext,
+  QuickPromptDraftStatus,
+  QuickPromptLengthState,
+  QuickPromptScope,
+  QuickPromptScopeKind,
+  QuickPromptSelectionOffset,
+  SelectionQuickPromptInput,
 } from "./types";

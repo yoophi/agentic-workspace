@@ -1,7 +1,7 @@
 import { Fragment, type ElementType, type MouseEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Circle, CircleCheck, MessageSquare, Pencil, StickyNote, Trash2, X } from "lucide-react";
+import { Circle, CircleCheck, MessageSquare, Pencil, StickyNote, Trash2, X, Zap } from "lucide-react";
 import type { MarkdownBlock } from "@yoophi/markdown-annotation-core/types";
 import { transformWikilinks } from "@yoophi/markdown-annotation-core";
 import { cn } from "./cn";
@@ -10,6 +10,7 @@ import { MarkdownList } from "./markdown-components";
 import { segmentTextByAnnotations } from "./segment-text";
 import type {
   MarkdownViewerBlockNote,
+  MarkdownViewerBlockQuickPromptAction,
   MarkdownViewerComponents,
   MarkdownViewerInlineAnnotation,
 } from "./types";
@@ -26,6 +27,7 @@ export type MarkdownViewerProps = {
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
   onLinkActivate?: (href: string) => void;
+  blockQuickPromptAction?: MarkdownViewerBlockQuickPromptAction;
 };
 
 const deleteAnnotationClassName =
@@ -203,6 +205,7 @@ function BlockShell({
   as: Shell = "div",
   onRequestBlockComment,
   onRequestBlockDelete,
+  blockQuickPromptAction,
 }: {
   block: MarkdownBlock;
   annotated: boolean;
@@ -213,6 +216,7 @@ function BlockShell({
   as?: ElementType;
   onRequestBlockComment?: (block: MarkdownBlock) => void;
   onRequestBlockDelete?: (block: MarkdownBlock) => void;
+  blockQuickPromptAction?: MarkdownViewerBlockQuickPromptAction;
 }) {
   const { Button, Tooltip } = components;
   const hasNotes = notes.length > 0;
@@ -285,6 +289,26 @@ function BlockShell({
         onMouseUp={handleToolbarInteraction}
         onClick={handleToolbarInteraction}
       >
+        {blockQuickPromptAction ? (
+          <Tooltip
+            content={
+              blockQuickPromptAction.disabled
+                ? blockQuickPromptAction.disabledReason ?? blockQuickPromptAction.tooltip ?? "Quick prompt unavailable"
+                : blockQuickPromptAction.tooltip ?? "Quick prompt"
+            }
+          >
+            <Button
+              aria-label={blockQuickPromptAction.accessibleName ?? "Create quick prompt from block"}
+              disabled={blockQuickPromptAction.disabled}
+              size="icon-sm"
+              type="button"
+              variant="ghost"
+              onClick={() => blockQuickPromptAction.onRequest(block)}
+            >
+              <Zap aria-hidden="true" />
+            </Button>
+          </Tooltip>
+        ) : null}
         <Tooltip content={deleted ? "Cancel delete" : "Delete block"}>
           <Button
             aria-label="Delete block"
@@ -328,6 +352,7 @@ function MarkdownBlockRenderer({
   onLinkActivate,
   nestedList,
   orderedNumber,
+  blockQuickPromptAction,
 }: {
   block: MarkdownBlock;
   annotated: boolean;
@@ -342,6 +367,7 @@ function MarkdownBlockRenderer({
   onLinkActivate?: (href: string) => void;
   nestedList?: ReactNode;
   orderedNumber?: number;
+  blockQuickPromptAction?: MarkdownViewerBlockQuickPromptAction;
 }) {
   const shellProps = {
     annotated,
@@ -349,6 +375,7 @@ function MarkdownBlockRenderer({
     components,
     deleted,
     notes,
+    blockQuickPromptAction,
     onRequestBlockComment,
     onRequestBlockDelete,
   };
@@ -556,6 +583,7 @@ export function MarkdownViewer({
   onRequestBlockComment,
   onRequestBlockDelete,
   onLinkActivate,
+  blockQuickPromptAction,
 }: MarkdownViewerProps) {
   const taskCountsByH1Chapter = countTasksByH1Chapter(blocks);
   const preambleTaskCounts = taskCountsByH1Chapter.get(-1);
@@ -580,6 +608,7 @@ export function MarkdownViewer({
       onRequestBlockComment={onRequestBlockComment}
       onRequestBlockDelete={onRequestBlockDelete}
       onLinkActivate={onLinkActivate}
+      blockQuickPromptAction={blockQuickPromptAction}
       orderedNumber={orderedNumber}
     />
   );

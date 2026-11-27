@@ -19,6 +19,7 @@ import {
   StickyNoteIcon,
   Trash2Icon,
   XIcon,
+  ZapIcon,
 } from "lucide-react";
 import {
   Group as ResizablePanelGroup,
@@ -28,6 +29,16 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { projectQueryKeys } from "@/entities/project/api/query-keys";
 import {
   getWorktreeChanges,
@@ -74,7 +85,10 @@ import {
 } from "@yoophi/git-ui";
 import {
   extractTocEntries,
+  buildBlockQuickPromptContext,
+  buildSelectionQuickPromptContext,
   formatAnnotationsForAgent,
+  formatQuickPromptForAgent,
   isFullBlockAnnotation,
   parseMarkdownToBlocks,
 } from "@yoophi/markdown-annotation-core";
@@ -83,6 +97,7 @@ import type {
   AnnotationAnchor,
   AnnotationType,
   MarkdownBlock,
+  QuickPromptContext,
 } from "@yoophi/markdown-annotation-core/types";
 import {
   AnnotationInputDialog,
@@ -130,6 +145,12 @@ import {
   useSplitPersistence,
   type SplitPersistence,
 } from "@/features/worktree-workspace/model/use-split-persistence";
+import { EllipsisPopoverText } from "@/shared/ui/ellipsis-popover-text";
+import {
+  canSendWorkbenchQuickPrompt,
+  createWorkbenchQuickPromptPayload,
+  createWorkbenchQuickPromptTarget,
+} from "@/features/worktree-workspace/model/quick-prompt-delivery";
 
 type WorktreeWorkspacePanelProps = {
   worktree: GitWorktree;
@@ -172,6 +193,8 @@ type AnnotationDraftTarget =
 
 // CommitListView 고정 row 높이(virtualization용). 두 줄 레이아웃 기준.
 const COMMIT_LIST_ROW_HEIGHT = 56;
+
+type QuickPromptDialogStatus = "editing" | "sending" | "sent" | "failed";
 
 function fullBlockAnchor(block: MarkdownBlock): AnnotationAnchor {
   return {
@@ -1226,6 +1249,10 @@ function MarkdownWorkspaceTab({
   const [annotationsVisible, setAnnotationsVisible] = useState(true);
   // markdown 필터는 백엔드(scope)에서 수행되어 전체 파일 목록을 받지 않는다.
   // 프론트 필터는 응답 검증 겸 안전망으로 유지한다(specs/007 R10).
+  const [quickPromptContext, setQuickPromptContext] = useState<QuickPromptContext | null>(null);
+  const [quickPromptText, setQuickPromptText] = useState("");
+  const [quickPromptStatus, setQuickPromptStatus] = useState<QuickPromptDialogStatus>("editing");
+  const [quickPromptError, setQuickPromptError] = useState<string | null>(null);
   const filesQuery = useQuery({
     queryKey: worktreeFileQueryKeys.listScope(worktree.path, { kind: "markdown" }),
     queryFn: () => listWorktreeFiles(worktree.path, { kind: "markdown" }),
@@ -1270,10 +1297,92 @@ function MarkdownWorkspaceTab({
     setEditingAnnotationId(null);
   }
 
+  function resetQuickPromptState() {
+    setQuickPromptContext(null);
+    setQuickPromptText("");
+    setQuickPromptStatus("editing");
+    setQuickPromptError(null);
+  }
+
   function selectMarkdownFile(path: string) {
     setSelectedFilePath(path);
     resetDraftState();
+    resetQuickPromptState();
     resetSelectionState();
+  }
+
+  function documentRevisionLabel() {
+    return `${selectedFilePath ?? "markdown"}:${previewQuery.data?.content.length ?? 0}:${blocks.length}`;
+  }
+
+  function openQuickPrompt(context: QuickPromptContext) {
+    setQuickPromptContext(context);
+    setQuickPromptText("");
+    setQuickPromptStatus("editing");
+    setQuickPromptError(null);
+  }
+
+  function requestBlockQuickPrompt(block: MarkdownBlock) {
+    if (!onSendAnnotationPrompt || !selectedFilePath) {
+      return;
+    }
+
+    const context = buildBlockQuickPromptContext({
+      sourceLabel: selectedFilePath,
+      documentPath: `${worktree.path}/${selectedFilePath}`,
+      documentRevisionLabel: `${selectedFilePath}:${previewQuery.data?.content.length ?? 0}:${blocks.length}`,
+      block,
+    });
+
+    onSendAnnotationPrompt(
+      formatQuickPromptForAgent({
+        promptText: "이 Markdown 블럭을 검토하고 필요한 작업을 제안하세요.",
+        context,
+      }),
+    );
+  }
+
+  function requestSelectionQuickPrompt() {
+    if (!selectedFilePath || selectionAnchors.length === 0) {
+      return;
+    }
+
+    const selectedText = selectionAnchors.map((anchor) => anchor.selectedText).filter(Boolean).join("\n");
+    if (!selectedText.trim()) {
+      return;
+    }
+
+    openQuickPrompt(
+      buildSelectionQuickPromptContext({
+        sourceLabel: selectedFilePath,
+        documentPath: `${worktree.path}/${selectedFilePath}`,
+        documentRevisionLabel: documentRevisionLabel(),
+        anchors: selectionAnchors,
+        selectedText,
+      }),
+    );
+    setSelectionToolbarPosition(null);
+  }
+
+  function sendQuickPrompt() {
+    if (!quickPromptContext) {
+      return;
+    }
+
+    const target = createWorkbenchQuickPromptTarget(Boolean(onSendAnnotationPrompt));
+    try {
+      setQuickPromptStatus("sending");
+      const payload = createWorkbenchQuickPromptPayload({
+        promptText: quickPromptText,
+        context: quickPromptContext,
+        target,
+      });
+      onSendAnnotationPrompt?.(payload);
+      setQuickPromptStatus("sent");
+    } catch (error) {
+      setQuickPromptStatus("failed");
+      setQuickPromptError(error instanceof Error ? error.message : "Quick prompt를 전송할 수 없습니다.");
+    }
   }
 
   const staleFileSelection = useMemo(() => {
@@ -1505,6 +1614,13 @@ function MarkdownWorkspaceTab({
     resetSelectionState();
   }
 
+  const quickPromptTarget = createWorkbenchQuickPromptTarget(Boolean(onSendAnnotationPrompt));
+  const quickPromptCanSend = canSendWorkbenchQuickPrompt({
+    promptText: quickPromptText,
+    context: quickPromptContext,
+    target: quickPromptTarget,
+  });
+
   return (
     <>
       <ResizablePanelGroup orientation="horizontal" className="h-full min-h-0" {...split.groupProps}>
@@ -1644,6 +1760,15 @@ function MarkdownWorkspaceTab({
                     onEditInlineAnnotation={editInlineAnnotation}
                     onRequestBlockComment={requestBlockComment}
                     onRequestBlockDelete={toggleBlockDelete}
+                    blockQuickPromptAction={{
+                      accessibleName: "Markdown 블럭 quick prompt",
+                      tooltip: onSendAnnotationPrompt
+                        ? "이 블럭을 agent prompt로 전송"
+                        : "연결된 agent prompt 대상이 없습니다.",
+                      disabled: !onSendAnnotationPrompt,
+                      disabledReason: "연결된 agent prompt 대상이 없습니다.",
+                      onRequest: requestBlockQuickPrompt,
+                    }}
                   />
                   {selectionHighlightRects.map((rect, index) => (
                     <div
@@ -1682,6 +1807,25 @@ function MarkdownWorkspaceTab({
                       >
                         <StickyNoteIcon />
                       </Button>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            type="button"
+                            size="icon-sm"
+                            variant="ghost"
+                            aria-label="선택 영역 quick annotate"
+                            disabled={!onSendAnnotationPrompt}
+                            onClick={requestSelectionQuickPrompt}
+                          >
+                            <ZapIcon />
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          {onSendAnnotationPrompt
+                            ? "선택 영역을 quick annotate prompt로 전송"
+                            : "연결된 agent prompt 대상이 없습니다."}
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                   ) : null}
                 </div>
@@ -1793,8 +1937,117 @@ function MarkdownWorkspaceTab({
         onSubmit={saveAnnotation}
         components={annotationDialogComponents}
       />
+      <Dialog
+        open={quickPromptContext !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetQuickPromptState();
+            resetSelectionState();
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Quick annotate</DialogTitle>
+            <DialogDescription>
+              선택한 Markdown 컨텍스트를 확인하고 agent-run에 보낼 프롬프트를 입력합니다.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4">
+            {quickPromptContext ? (
+              <section className="grid gap-2 rounded-lg border bg-muted/30 p-3" aria-label="Quick annotate context">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="secondary">{quickPromptContext.scope.label}</Badge>
+                  <Badge variant={quickPromptContext.lengthState === "complete" ? "outline" : "destructive"}>
+                    {quickPromptContext.lengthState === "complete"
+                      ? `${quickPromptContext.includedLength} chars`
+                      : `${quickPromptContext.includedLength}/${quickPromptContext.originalLength} chars`}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">{formatQuickPromptRange(quickPromptContext)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {quickPromptContext.documentPath || quickPromptContext.sourceLabel} ·{" "}
+                  {quickPromptContext.documentRevisionLabel}
+                </p>
+                {quickPromptContext.lengthState === "reduced" ? (
+                  <p className="text-xs text-destructive">{quickPromptContext.reductionReason}</p>
+                ) : null}
+                <pre className="max-h-44 overflow-auto whitespace-pre-wrap rounded-md bg-background p-3 text-xs leading-5">
+                  <code>{quickPromptContext.content}</code>
+                </pre>
+              </section>
+            ) : null}
+
+            <div className="grid gap-2">
+              <label className="text-sm font-medium" htmlFor="workbench-quick-prompt-text">
+                Prompt
+              </label>
+              <Textarea
+                id="workbench-quick-prompt-text"
+                autoFocus
+                rows={5}
+                value={quickPromptText}
+                onChange={(event) => {
+                  setQuickPromptText(event.target.value);
+                  if (quickPromptStatus !== "editing") {
+                    setQuickPromptStatus("editing");
+                    setQuickPromptError(null);
+                  }
+                }}
+                placeholder="선택 영역을 바탕으로 agent-run에 요청할 내용을 입력하세요."
+              />
+            </div>
+
+            <div className="rounded-lg border p-3 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="font-medium">Active agent-run</span>
+                <Badge variant={quickPromptTarget.available ? "default" : "destructive"}>
+                  {quickPromptTarget.available ? "available" : "unavailable"}
+                </Badge>
+              </div>
+              {!quickPromptText.trim() ? (
+                <p className="mt-2 text-xs text-muted-foreground">프롬프트 내용을 입력하세요.</p>
+              ) : !quickPromptTarget.available ? (
+                <p className="mt-2 text-xs text-muted-foreground">{quickPromptTarget.unavailableReason}</p>
+              ) : null}
+              {quickPromptStatus === "sent" ? (
+                <p className="mt-2 text-xs text-muted-foreground">agent-run에 prompt를 전송했습니다.</p>
+              ) : null}
+              {quickPromptStatus === "failed" && quickPromptError ? (
+                <p className="mt-2 text-xs text-destructive">{quickPromptError}</p>
+              ) : null}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={resetQuickPromptState}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={!quickPromptCanSend || quickPromptStatus === "sending"}
+              onClick={sendQuickPrompt}
+            >
+              {quickPromptStatus === "sending" ? "Sending" : "Send"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
+}
+
+function formatQuickPromptRange(context: QuickPromptContext) {
+  if (context.scope.startLine === undefined) {
+    return context.scope.label;
+  }
+
+  if (context.scope.endLine === undefined || context.scope.startLine === context.scope.endLine) {
+    return `${context.scope.label} · line ${context.scope.startLine}`;
+  }
+
+  return `${context.scope.label} · lines ${context.scope.startLine}-${context.scope.endLine}`;
 }
 
 function FileTreeRowButton({

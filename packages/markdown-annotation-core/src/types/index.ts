@@ -8,3 +8,21 @@ export type {
 } from "./markdown-block";
 export type { MarkdownDocument } from "./document";
 export type { TocEntry, TocLevel } from "./toc";
+export type {
+  AgentTarget,
+  AgentTargetAvailability,
+  BlockQuickPromptInput,
+  DocumentQuickPromptInput,
+  FormatQuickPromptOptions,
+  PromptDraft,
+  QuickPromptActionState,
+  QuickPromptActionSurface,
+  QuickPromptBuildOptions,
+  QuickPromptContext,
+  QuickPromptDraftStatus,
+  QuickPromptLengthState,
+  QuickPromptScope,
+  QuickPromptScopeKind,
+  QuickPromptSelectionOffset,
+  SelectionQuickPromptInput,
+} from "./quick-prompt";
