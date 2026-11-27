@@ -1,0 +1,1 @@
+{"extends":"../../tsconfig.base.json","compilerOptions":{"baseUrl":".","jsx":"react-jsx","paths":{"@yoophi/file-browser-core":["../file-browser-core/src/index.ts"],"@yoophi/file-browser-react":["./src/index.ts"]}},"include":["src"]}
